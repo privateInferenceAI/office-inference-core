@@ -94,6 +94,49 @@ see the difference.
 
 **Decision: no swarms. Revisit if a customer's job cannot be expressed as one agent with sub-tasks.**
 
+### Sub-agents are agents. The difference is ownership.
+
+A fair objection: if sub-agents exist, then a run really does involve more than one agent, so what is
+the rule? The rule is not about counting. It is about **who owns the task**.
+
+- **Sub-agent, hierarchical.** One parent owns the goal, the task state, the budget, and the final
+  answer. A child gets a narrow brief, works in its own context window, and returns a summary. The
+  child has no goal of its own, no memory of the wider task, and no authority to spawn further work.
+  Control never leaves the parent.
+- **Swarm, peer.** Several agents negotiate, hand off control, or run against a shared state with no
+  single owner. Control moves between agents, and task state becomes everyone's and no one's.
+
+Both involve multiple agent instances. Only the second makes the task's state and its failure modes
+ambiguous. That is why "no swarms" and "yes, sub-agents" are consistent statements.
+
+Industry naming is inconsistent, which is where the confusion comes from: sub-agents, child agents,
+workers, handoffs, crews. They describe the same fan-out idea and are marketed as different things.
+
+### Rules for sub-agents in this system
+
+1. **Children read, parents act.** Sub-agents gather, extract, and analyze. Any action with a side
+   effect belongs to the parent, so approvals and irreversibility have exactly one owner.
+2. **A narrower tool scope than the parent.** Never wider. A child that can do more than its parent
+   is a privilege escalation.
+3. **A structured return.** Facts with citations, not prose. The parent should not have to re-read a
+   transcript.
+4. **A budget per child**, in tokens and in wall-clock time. A runaway child is a runaway bill.
+5. **Depth limit of one** by default. A child that spawns children is where understanding a run
+   becomes hard.
+6. **One audit trail.** Every child span is recorded under the parent task id, with its brief, its
+   tools, and its result. That is what answers "what did the system do" without a swarm-style fog.
+
+### The three counts, stated once
+
+| Count | What it is | Typical number |
+|---|---|---|
+| Deployed definitions | Persistent, configured jobs that appear in the interface | 0 to 6 |
+| Concurrent runs | Instances of a definition executing at once | 1 to 5 |
+| Sub-agents | Ephemeral children spawned inside one run, then gone | 0 to 8 per run |
+
+Sub-agents do not change the deployment. They are a property of how a single run manages its
+context.
+
 ## What this means for sizing
 
 The number of definitions is not what sizes a box. These are:
