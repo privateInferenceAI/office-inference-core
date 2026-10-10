@@ -1,7 +1,7 @@
 # Capability packs
-
-What we sell, and what each pack turns on. A client buys packs; a pack expands to services and
-configuration. The Core pack is implicit in every deployment and is never sold on its own.
+#
+# What we sell, and what each pack turns on. A client buys packs; a pack expands to services and
+# configuration. The Core pack is implicit in every deployment and is never sold on its own.
 
 packs:
   - id: core

@@ -180,11 +180,118 @@ Nothing of ours is running yet, and that is correct. Phase 0 built the floor, no
 
 ---
 
-## Phase 1 — Data and gateway  *(to be written when we start it)*
+## Phase 1 — Data and gateway
 
-Components: the manifest renderer, Postgres, LiteLLM. Reasons to be recorded here as they go: why
-the gateway owns keys, spend, and audit rather than each service; why Postgres rather than SQLite or
-a managed database in the office build; why the model role indirection exists at all.
+**Goal.** Configuration rendered from the manifest, Postgres, a model server, and the gateway
+running, with one model call travelling the whole path and landing in the database as an audit row.
+
+### 1.1 Render the manifest into configuration
+
+    cd /opt/oi-core
+    python3 scripts/render_manifest.py --manifest manifests/dev-office.yaml
+    python3 scripts/render_manifest.py --manifest manifests/dev-office.yaml   # rerun on purpose
+    sed -E 's/(PASSWORD|MASTER_KEY)=.*/\1=redacted/' rendered/env
+
+Expected: the second run reports **secrets reused from the existing env file**, and `rendered/`
+holds `env` (mode 600), `litellm.yaml`, `services.txt`, and `manifest.json`.
+
+**Why:** the manifest is what a client buys, and this turns it into what the deployment reads, so
+nobody hand-edits configuration on a server. Secrets are generated once and reused, because
+regenerating the database password would lock the stack out of its own data. That is why the rerun
+is part of the step rather than an afterthought.
+
+### 1.2 Fetch the development model
+
+    mkdir -p /opt/oi-core/models
+    curl -L --fail -o /opt/oi-core/models/Qwen3-1.7B-Q4_K_M.gguf \
+      https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf
+    ls -lh /opt/oi-core/models/
+
+Expected: about 1.1 GB.
+
+**Why:** this box has no GPU, so the local lane runs a 1.7B CPU model. It exists to prove the path,
+not to be good, and every role points at it for now. When the GPU arrives, vLLM replaces llama.cpp
+and the roles point at real models. Nothing in front of it changes, because the gateway is the only
+thing that knows a model exists.
+
+### 1.3 Start the stack
+
+    cd /opt/oi-core
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env up -d
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env ps
+
+Expected: `postgres` healthy, `llamacpp` and `litellm` running. First start takes a minute or two
+while images pull, Postgres initializes, and the gateway runs its migrations.
+
+**Why these three, in this order:**
+
+- **Postgres** because the gateway needs somewhere to keep keys, spend, and the audit trail. It runs
+  as a container here and becomes RDS in the cloud build, with the same schema and the same queries.
+- **llama.cpp** because it is the only way to get a local model answering on a CPU box.
+- **LiteLLM** because it is the single control point: authentication, per-role routing, budgets,
+  spend, and logging live in one place. It is also the seam that makes a model swap a one-line
+  configuration change rather than a project.
+
+Note what is not published: no host ports at all. Everything is reachable on `ai-net` only, which is
+why the checks below run a throwaway container on that network.
+
+### 1.4 Verify the gateway and the model
+
+    docker exec litellm python -c "import litellm; print('litellm', litellm.__version__)"
+    docker run --rm --network ai-net curlimages/curl -s http://litellm:4000/health/liveliness
+    docker run --rm --network ai-net curlimages/curl -s http://llamacpp:8080/v1/models
+
+Expected: a version of **1.104.x**, `"I'm alive!"`, and one model listed by llama.cpp.
+
+**Why the version check is a step and not a nicety:** LiteLLM's CVEs are version-bound.
+CVE-2026-59822 affects everything before 1.84.0 and sits in CISA's KEV catalog. We verify the running
+version rather than trusting the pin, because a pin records intent and the version reports reality.
+
+### 1.5 Make a call through the gateway
+
+    KEY=$(grep '^LITELLM_MASTER_KEY=' rendered/env | cut -d= -f2-)
+    docker run --rm --network ai-net -e KEY="$KEY" curlimages/curl -s \
+      -X POST http://litellm:4000/v1/chat/completions \
+      -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+      -d '{"model":"analyst","messages":[{"role":"user","content":"In one sentence, what is a gateway?"}],"max_tokens":60}'
+
+Expected: JSON containing an answer. On two vCPUs, expect a few seconds.
+
+**Why:** one request exercises the entire path, client to gateway to model and back, with the
+gateway doing authentication, role routing, and logging. The model name `analyst` is a role, not a
+model, which is the indirection that lets the model tier change without touching anything upstream.
+
+### 1.6 Find the audit row
+
+    docker exec postgres psql -U oicore -d oicore -c '\dt' | tail -12
+    docker exec postgres psql -U oicore -d oicore -c 'select count(*) from "LiteLLM_SpendLogs";'
+    docker exec postgres psql -U oicore -d oicore -c \
+      'select request_id, model, total_tokens, "startTime" from "LiteLLM_SpendLogs" order by "startTime" desc limit 3;'
+
+Expected: your call, with the model, the token count, and a timestamp.
+
+**Why this matters more than it looks:** the audit trail exists from the first call, without us
+writing a line of logging code. Every model call is recorded with which key made it, which model
+answered, how many tokens it cost, and when. Phase 2 adds our own append-only sink for actions and
+approvals, but the model-call record starts here.
+
+### 1.7 Verification, which ends the phase
+
+All four of these must pass:
+
+1. `health/liveliness` returns alive.
+2. llama.cpp lists a model.
+3. A chat completion returns an answer through the gateway.
+4. That call appears in `LiteLLM_SpendLogs`.
+
+### If it breaks
+
+- **llamacpp restarting in a loop:** the file name in `rendered/env` (`MODEL_FILE`) must match what is
+  in `models/`. Check `docker logs llamacpp`.
+- **litellm unhealthy:** check that postgres is healthy first, then `docker logs litellm | tail -30`.
+  A bad password in `DATABASE_URL` shows up as an authentication error.
+- **curl cannot resolve `litellm`:** the container has to be on the same network. `--network ai-net`
+  is not optional, and omitting it is the most common version of this mistake.
 
 ## Phase 2 — Audit sink  *(outline)*
 

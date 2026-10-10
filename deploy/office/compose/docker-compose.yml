@@ -1,0 +1,87 @@
+# Office build, Phase 1: data and gateway.
+#
+# Run from the repo root on the host:
+#   docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env up -d
+#
+# Deliberately publishes NOTHING. Services are reachable only on the ai-net bridge. The
+# first security boundary is that the host has no listener to attack. Ingress arrives in a
+# later phase, and it will be the only thing that ever binds a port.
+#
+# Images are digest-pinned with the version recorded beside the pin. That habit exists
+# because an earlier stack pinned a gateway by digest with no version written down, and
+# nobody could answer the first question a security review asks.
+
+name: oi-core
+
+services:
+  postgres:
+    # Stable infrastructure: version tag, because a patch release here is a tested upgrade
+    # path and alpine keeps the image small on a 30 GB disk.
+    image: postgres:16-alpine
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - ${OI_ROOT}/data/postgres:/var/lib/postgresql/data
+      - ${OI_ROOT}/db/migrations:/docker-entrypoint-initdb.d:ro
+    networks: [ai-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  llamacpp:
+    # llama.cpp server: the CPU path. It runs the local lane with no GPU and no API key,
+    # which is what makes Phase 1 possible on a 2 vCPU box. When the GPU arrives, vLLM
+    # replaces this container and nothing else changes, because the gateway in front of it
+    # does not care which server answers.
+    image: ghcr.io/ggml-org/llama.cpp@sha256:bf3da52e92c083472b3d1c9f9da081f423ab9def95a87ec4bba51940382d75fd  # llama.cpp server, pinned 2026-10-10
+    container_name: llamacpp
+    restart: unless-stopped
+    command:
+      - "-m"
+      - "/models/${MODEL_FILE}"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8080"
+      - "-c"
+      - "${MODEL_CTX}"
+      - "-t"
+      - "${MODEL_THREADS}"
+      - "--jinja"
+    volumes:
+      - ${OI_ROOT}/models:/models:ro
+    networks: [ai-net]
+
+  litellm:
+    # LiteLLM v1.104.2, pinned 2026-10-10.
+    # Version matters: CVE-2026-59822 (MCP authentication bypass, CVSS 8.8, in CISA's KEV
+    # catalog) affects everything before 1.84.0, and CVE-2026-42271 affects 1.74.2 to 1.83.7.
+    # Model swaps, budgets, and the audit trail all live here, which is why it is the one
+    # component we never leave unpinned or unversioned.
+    image: ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500
+    container_name: litellm
+    restart: unless-stopped
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "1"]
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      LITELLM_LOG: WARNING
+    volumes:
+      - ${OI_ROOT}/rendered/litellm.yaml:/app/config.yaml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      llamacpp:
+        condition: service_started
+    networks: [ai-net]
+
+networks:
+  # Created on the host during Phase 0 and shared by every deployment on this box.
+  ai-net:
+    external: true

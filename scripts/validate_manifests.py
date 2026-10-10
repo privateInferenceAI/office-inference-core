@@ -23,12 +23,21 @@ PROFILES = ("cloud", "office", "hybrid")
 
 
 def load_catalog_packs() -> set[str]:
-    """Pull pack ids out of the catalog without a YAML dependency."""
-    packs: set[str] = set()
-    for raw in CATALOG_PATH.read_text().splitlines():
-        line = raw.rstrip()
-        if line.startswith("  - id:"):
-            packs.add(line.split(":", 1)[1].strip())
+    """Pack ids from the catalog.
+
+    Parses the file properly rather than scanning lines. An earlier version grepped for
+    "  - id:" lines, which meant a catalog that was not valid YAML still validated
+    manifests happily. The pack catalog is a contract, so it gets parsed like one.
+    """
+    import yaml  # imported here so the module still imports on a machine without it
+
+    try:
+        catalog = yaml.safe_load(CATALOG_PATH.read_text()) or {}
+    except yaml.YAMLError as exc:
+        raise SystemExit(f"{CATALOG_PATH} is not valid YAML:\n{exc}") from None
+    packs = {str(p["id"]) for p in catalog.get("packs", []) if p.get("id")}
+    if not packs:
+        raise SystemExit(f"no packs found in {CATALOG_PATH}: is the catalog valid YAML?")
     return packs
 
 

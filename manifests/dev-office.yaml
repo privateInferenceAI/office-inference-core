@@ -1,0 +1,22 @@
+# Development manifest for the Phase 1 smoke test.
+# One small CPU model serves every role, because this box has no GPU yet. Roles become
+# distinct models when the real hardware arrives; nothing else about the system changes.
+manifest_version: 1
+client:
+  name: Office Inference Dev
+  deployment_id: oi-core-dev
+profile: office
+packs: [core]
+models:
+  analyst:
+    local: qwen3-1.7b-instruct
+  front_desk:
+    local: qwen3-1.7b-instruct
+  reader:
+    local: qwen3-1.7b-instruct
+lanes:
+  frontier:
+    enabled: false
+compliance:
+  profile: none
+  audit_retention_days: 90
