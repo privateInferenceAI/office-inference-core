@@ -214,6 +214,33 @@ not to be good, and every role points at it for now. When the GPU arrives, vLLM 
 and the roles point at real models. Nothing in front of it changes, because the gateway is the only
 thing that knows a model exists.
 
+### 1.2b Know this before you start: Docker creates missing mount paths as root
+
+The Postgres service mounts `${OI_ROOT}/db/migrations`. **If that path does not exist, the Docker daemon
+creates it, owned by `root`, not by you.** In Phase 1 the repository has no `db/` directory yet (it
+arrives in Phase 2), so after the first `up -d` the directory exists and is not yours.
+
+The symptom appears later, and it looks unrelated: `git pull` in Phase 2 fails with
+`unable to create file db/migrations/002_audit_events.sql: Permission denied`.
+
+Check and fix before it bites:
+
+    ls -ld /opt/oi-core/db /opt/oi-core/db/migrations 2>/dev/null
+    sudo chown -R "$USER":"$USER" /opt/oi-core/db
+
+**Do not chown the whole tree.** `data/` and `exports/` are root-owned on purpose, because Docker made
+them for volumes.
+
+**If a pull is interrupted halfway**, git leaves what it already wrote: tracked files modified and new
+files untracked. Recover with:
+
+    rm -rf services/audit          # or whatever the pull listed as untracked
+    git checkout -- .
+    git pull
+
+Deleting those untracked files is safe: they are partial copies of what the pull is about to write
+from the same commit.
+
 ### 1.3 Start the stack
 
     cd /opt/oi-core
