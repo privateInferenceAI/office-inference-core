@@ -81,6 +81,29 @@ services:
         condition: service_started
     networks: [ai-net]
 
+  audit:
+    # The audit sink, as a tool rather than a service: it runs when called and exits. It is
+    # where every other component will record model calls, tool calls, and approvals, so the
+    # chain has one writer path instead of several. Kept out of the default profile because a
+    # resident process would add a container for something that runs for a second at a time.
+    build:
+      context: ${OI_ROOT}
+      dockerfile: services/audit/Dockerfile
+    container_name: audit
+    profiles: ["tools"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DEPLOYMENT_ID: ${DEPLOYMENT_ID}
+      MIGRATIONS_DIR: /app/migrations
+      EXPORTS_DIR: /app/exports
+    volumes:
+      - ${OI_ROOT}/db/migrations:/app/migrations:ro
+      - ${OI_ROOT}/exports:/app/exports
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [ai-net]
+
 networks:
   # Created on the host during Phase 0 and shared by every deployment on this box.
   ai-net:

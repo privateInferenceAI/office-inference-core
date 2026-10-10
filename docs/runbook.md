@@ -343,9 +343,107 @@ All four of these must pass:
 - **curl cannot resolve `litellm`:** the container has to be on the same network. `--network ai-net`
   is not optional, and omitting it is the most common version of this mistake.
 
-## Phase 2 — Audit sink  *(outline)*
+## Phase 2 — Audit sink
 
-Append-only record of every model call, action, and approval, with a signed daily export.
+**Goal.** An append-only record with a hash chain, which every later component writes to, which
+cannot be edited or deleted through the application, and which exports as a file a third party can
+verify without trusting us.
+
+**Why this is the phase that matters commercially.** A log file is a claim. A hash-chained record
+with a verifiable export is evidence. When a regulated client's examiner asks "prove that nothing
+left the building in September", the answer is an export they can check themselves.
+
+### 2.1 Apply the migration
+
+    cd /opt/oi-core
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      run --rm audit migrate
+
+Expected: `applied 002_audit_events.sql`, then a count.
+
+**Why not just let the container initialize the database:** the Postgres entrypoint only runs files
+in `docker-entrypoint-initdb.d` when the data directory is empty. Fresh installs get them for free,
+but every later change needs an ordered, recorded migration. `schema_migrations` stores each file's
+checksum, and editing an applied migration is refused rather than silently ignored.
+
+### 2.2 Record an event
+
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env run --rm audit \
+      record --type access --actor anthony --actor-role admin --data-class internal \
+      --payload '{"document":"expense-policy.pdf","pages":3}'
+
+Expected: JSON with an id, a timestamp, a `row_hash`, and a `payload_sha256`.
+
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      run --rm audit list
+
+**Why the payload is hashed and not stored by default:** the record needs to prove *what* was sent
+without becoming a second copy of the client's documents. `--store-payload` keeps the content, but
+that is a policy decision a client makes, not a default we choose for them.
+
+### 2.3 Prove it is append-only
+
+    docker exec postgres psql -U oicore -d oicore -c \
+      'update audit_events set actor = '"'"'someone else'"'"' where id = 1;'
+    docker exec postgres psql -U oicore -d oicore -c 'delete from audit_events where id = 1;'
+    docker exec postgres psql -U oicore -d oicore -c \
+      'update audit_events set actor = '"'"'maintenance'"'"' where id = 1;' --set=oi.allow_audit_maintenance=on
+
+Expected: the first two raise `audit_events is append-only`. The third is the escape hatch, and it
+demonstrates that a retention purge is possible but has to be asked for explicitly. The purge in
+Phase 9 will run inside a transaction that sets the flag, not by dropping the trigger.
+
+**Why a trigger rather than revoked privileges:** in a single-box deployment the application connects
+as the table owner, and an owner can always re-grant its own rights. A trigger stops accidents, which
+is the realistic threat. The hash chain is what stops deliberate edits from going unnoticed.
+
+### 2.4 Bring the gateway's calls into the audit record
+
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      run --rm audit backfill
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      run --rm audit list --type model_call
+
+Expected: the model call from Phase 1, now recorded in our own table with its token counts and the
+hash of the payload. Running it twice inserts nothing the second time.
+
+**Why both tables exist:** LiteLLM's spend logs are the gateway's operational record, which is what
+you want when debugging routing or cost. `audit_events` is the system-wide record: model calls beside
+tool calls and approvals, in one chain, exportable as one artifact.
+
+### 2.5 Export the day, then try to break it
+
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      run --rm audit export --date "$(date -u +%F)"
+    ls -l exports/$(date -u +%F)/
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      run --rm audit verify /app/exports/$(date -u +%F)/audit-events.jsonl
+
+Expected: `ok ... chain intact`.
+
+Now break it on purpose, because an integrity check that has never failed is not a check:
+
+    cd exports/$(date -u +%F)
+    cp audit-events.jsonl audit-events.jsonl.bak
+    sed -i 's/"actor":"anthony"/"actor":"not-anthony"/' audit-events.jsonl
+    cd /opt/oi-core
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      run --rm audit verify /app/exports/$(date -u +%F)/audit-events.jsonl
+
+Expected: `FAIL` with the line number and the reason. Restore the backup afterwards.
+
+**Why this is the whole point of the phase:** the export is what you hand over. A client, an auditor,
+or a lawyer can recompute the chain and see that nothing was altered, without trusting our database
+or our word.
+
+### 2.6 Verification, which ends the phase
+
+1. `migrate` applies the migration and refuses to run twice.
+2. An event records and appears in `list`.
+3. `update` and `delete` are refused.
+4. `backfill` brings the gateway's call in, and a second run changes nothing.
+5. `export` writes JSONL plus a manifest.
+6. `verify` passes on the untouched file and fails on the edited one.
 
 ## Phase 3 — Documents  *(outline)*
 
