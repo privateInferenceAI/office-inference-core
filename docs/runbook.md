@@ -249,19 +249,26 @@ version rather than trusting the pin, because a pin records intent and the versi
 
 **Cross-check the running digest.** This is the check that actually matters:
 
-    docker image inspect ghcr.io/berriai/litellm --format '{{index .RepoDigests 0}}'
+    docker images --digests | grep litellm
 
-Expected: `ghcr.io/berriai/litellm@sha256:3d88bd75...`, matching the pin in
-`deploy/office/compose/docker-compose.yml`.
+Expected: a line whose DIGEST column reads `sha256:3d88bd75...`, matching the pin in
+`deploy/office/compose/docker-compose.yml`. The TAG column will say `<none>`, and that is correct:
+we pulled by digest, so no tag was ever stored.
 
-Two things the first run taught us:
+Three things the first run taught us, all worth knowing because each one is a command that looks
+right and fails:
 
-- `docker inspect litellm` inspects the **container**, not the image, and a container has no
-  `RepoDigests` field. Ask for the image explicitly with `docker image inspect`, and it works whether
-  or not the name is also a container name.
-- This image ships **no `org.opencontainers.image.version` label**, so a label check returns empty.
-  Not every publisher sets it, which is why the digest is the reliable comparison and the label is a
-  convenience when it exists.
+- **`docker inspect litellm` inspects the container, not the image.** Containers have no
+  `RepoDigests` field, so the request errored even though the image was fine.
+- **`docker image inspect ghcr.io/berriai/litellm` fails with "No such image: ...:latest".** Omitting a
+  tag makes Docker assume `latest`, and a digest pull stores no tag. To inspect by name you must give
+  the digest: `docker image inspect ghcr.io/berriai/litellm@sha256:3d88bd75...`, or inspect by ID:
+  `docker image inspect $(docker inspect --format '{{.Image}}' litellm)`.
+- **This image ships no `org.opencontainers.image.version` label**, so a label check returns empty. Not
+  every publisher sets one, which is why the digest is the comparison that counts.
+
+`docker images --digests` sidesteps all three: it lists what is on disk with the digest Docker
+recorded when it pulled, and it needs neither a tag nor a container.
 
 **Why `importlib.metadata` instead of `litellm.__version__`:** LiteLLM 1.104 loads attributes lazily and
 does not export `__version__`, so the obvious command raises `AttributeError`. The package metadata is
