@@ -411,4 +411,119 @@ Recorded because each would otherwise have propagated into the build.
    single-Region requirement leaves the Nova v1 family and DeepSeek v3.2.
 7. **The audit chain cannot prove its own completeness**, and the maintenance escape hatch is
    unrecorded. Both are fixed by section 5 rather than documented as risks.
+---
+
+## 13. Coverage: every readiness item, and where it lands
+
+The readiness list has 49 numbered items plus ten added by the reliability pass. This section maps
+every one of them, because "we will get to it" is how things get left out. Status means: **covered**
+(designed in this plan), **partial** (named but not designed), **office** (belongs to the office build,
+which reuses this plan), **not needed** (deliberate), or **gap** (nothing yet, now assigned).
+
+### Inference and serving
+
+| # | Item | Where it lands | Status |
+|---|---|---|---|
+| 2.1 | vLLM on the GPU tier | Office build | office |
+| 2.2 | TEI CUDA images | Office build, same interface | office |
+| 2.3 | Model roles read from the manifest | C3, assistant API reads roles, not names | covered |
+| 2.4 | Quantization strategy, measured | Office build, gated by section 7 | office |
+| 2.5 | Context and KV budgeting | Office build | office |
+| 2.6 | Timeouts, retries, queueing | **C3**, plus Bedrock throttling handling | gap, assigned |
+| 2.7 | Streaming responses | C3 | covered |
+| 2.8 | Fallback path when the provider is unavailable | **C3**, degraded mode with a recorded reason | gap, assigned |
+
+### Documents and retrieval
+
+| # | Item | Where it lands | Status |
+|---|---|---|---|
+| 3.1 | Docling with OCR, tables, layout | C2 | covered |
+| 3.2 | Vision reader for drawings and images | Office build; cloud reads text-native only until the pack exists | office |
+| 3.3 | Hybrid search | C2 | covered |
+| 3.4 | Section-aware chunking | C2 | covered |
+| 3.5 | Rerank window sizing | C2, 50 to 100 candidates | covered |
+| 3.6 | Citation verification | C2 and section 7's quality gate | covered |
+| 3.7 | Document versioning and supersession | **C2**, supersession metadata and current-version preference | gap, assigned |
+| 3.8 | Duplicate detection | **C2**, near-duplicate flag at ingest | gap, assigned |
+| 3.9 | Per-user and per-document permissions | C3 sessions plus group grants; folder ACLs are not enough for a serious evaluation | partial |
+| 3.10 | More formats (email, spreadsheets, slides) | **C2**, format list extended and tested per client | gap, assigned |
+| 3.11 | Large-corpus behaviour, index parameters | **C0** decision with the bulk-index job, measured once | gap, assigned |
+
+### Security and identity
+
+| # | Item | Where it lands | Status |
+|---|---|---|---|
+| 4.1 | Authentication, roles from a session | C7 Cognito, C3 enforcement | covered |
+| 4.2 | Scoped virtual keys and hard budgets | C1 | covered |
+| 4.3 | Secrets management and rotation | **C7**, Secrets Manager with a rotation procedure | gap, assigned |
+| 4.4 | TLS everywhere a client touches | C7 | covered |
+| 4.5 | PII redaction on outbound frontier calls | **C2**, a redaction step before anything leaves, recorded per call | gap, assigned |
+| 4.6 | Audit retention and purge | C1 tombstone; retention period set per compliance profile | covered |
+| 4.7 | Offsite audit copy | C1, daily anchor to the client's Object Lock bucket | covered |
+| 4.8 | Vulnerability management, image scanning, SBOM | **C8** | gap, assigned |
+| 4.9 | Penetration test and threat model | **C8**, before the first regulated client | gap, assigned |
+| 4.10 | Incident response and breach notification | **C8**, with the notification clocks written down | gap, assigned |
+
+### Operations
+
+| # | Item | Where it lands | Status |
+|---|---|---|---|
+| 5.1 | Backups and a tested restore | C8, restore drill in the acceptance test | covered |
+| 5.2 | Monitoring, the five alarms | C8 | covered |
+| 5.3 | Log aggregation and retention | **C8**, CloudWatch with a retention period per client | gap, assigned |
+| 5.4 | Signed updates with rollback | C8 | covered |
+| 5.5 | Drift detection | **C8**, the box reports its manifest and digests | gap, assigned |
+| 5.6 | Support access with consent, SSM only | C8 | covered |
+| 5.7 | Cost monitoring and budgets | C8, plus the Marketplace line trap in section 6 | covered |
+| 5.8 | Capacity and usage reporting per client | **C8** | gap, assigned |
+
+### Quality and engineering
+
+| # | Item | Where it lands | Status |
+|---|---|---|---|
+| 6.1 | Golden questions and the parity suite | C8, section 7 | covered |
+| 6.2 | Unit and integration tests | **C1 onward**, every service ships tests | gap, assigned |
+| 6.3 | CI: lint, test, validate manifests, build images | **C0**, then extended per phase | gap, assigned |
+| 6.4 | Acceptance test per deployment | C8 | covered |
+| 6.5 | Load testing | **C8**, concurrent users with ingestion running | gap, assigned |
+| 6.6 | Dependency policy and update cadence | C8 alongside vulnerability management | partial |
+
+### Commercial and legal
+
+| # | Item | Where it lands | Status |
+|---|---|---|---|
+| 7.1 | Model and component licensing | Blockers 1 and 2 | partial |
+| 7.2 | Client agreements, data clauses, BAA | Blocker 2, plus a template before the first client | partial |
+| 7.3 | Support terms, hours, response window | **Before the first proposal**, written into the retainer | gap, assigned |
+| 7.4 | Onboarding checklist | **Before the first client**: documents, accounts, contacts, network | gap, assigned |
+| 7.5 | Offboarding and handover package | **Before the first client**: what they keep, how it runs without us | gap, assigned |
+| 7.6 | Insurance: errors and omissions, cyber | **Before the first regulated client** | gap, assigned |
+
+### Added by the reliability pass
+
+| # | Item | Where it lands | Status |
+|---|---|---|---|
+| 12.1 | Clock and timezone correctness, NTP, UTC in the audit | C0, verified by a test | gap, assigned |
+| 12.2 | Data residency enforced rather than documented | C1 validator rules, section 3 | covered |
+| 12.3 | Legal hold | **C1**, blocks a purge for a matter under litigation | gap, assigned |
+| 12.4 | Pilot-light decision for the office box | Office build | office |
+| 12.5 | Quarterly access review | **C8**, an hour, and it answers half of every questionnaire | gap, assigned |
+| 12.6 | Subprocessor register | **Before the first client** | gap, assigned |
+| 12.7 | Model outage drill | **C8**, exercise the throttling path | gap, assigned |
+| 12.8 | Third-party breach duties in writing | **C8** with incident response | gap, assigned |
+| 12.9 | Error budget reporting, monthly availability per client | **C8** | gap, assigned |
+| 12.10 | A named security contact at the client and at ours | **Onboarding checklist** | gap, assigned |
+
+### What this audit found
+
+Twenty-one items were not in this plan before this section, including four that would have been
+genuinely embarrassing to discover late: **PII redaction before a frontier call**, **document
+versioning**, **incident response with notification clocks**, and **secrets rotation**. They are now
+assigned to phases rather than remembered.
+
+Three items remain deliberately office-only, because they need a GPU: vLLM, TEI CUDA, and KV
+budgeting. Two more are office-only by design: the vision reader and the pilot-light decision.
+
+**Nothing on the list is unassigned.** If that changes, it changes here.
+
 
