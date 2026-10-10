@@ -247,13 +247,21 @@ Expected: a version of **1.104.x**, `"I'm alive!"`, and one model listed by llam
 CVE-2026-59822 affects everything before 1.84.0 and sits in CISA's KEV catalog. We verify the running
 version rather than trusting the pin, because a pin records intent and the version reports reality.
 
-**Two cross-checks, in case the first line ever stops working:**
+**Cross-check the running digest.** This is the check that actually matters:
 
-    docker inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' litellm
-    docker inspect --format '{{index .RepoDigests 0}}' litellm
+    docker image inspect ghcr.io/berriai/litellm --format '{{index .RepoDigests 0}}'
 
-The first reads the version baked into the image. The second prints the digest actually running, which
-must match the pin in `deploy/office/compose/docker-compose.yml`: `sha256:3d88bd75...`.
+Expected: `ghcr.io/berriai/litellm@sha256:3d88bd75...`, matching the pin in
+`deploy/office/compose/docker-compose.yml`.
+
+Two things the first run taught us:
+
+- `docker inspect litellm` inspects the **container**, not the image, and a container has no
+  `RepoDigests` field. Ask for the image explicitly with `docker image inspect`, and it works whether
+  or not the name is also a container name.
+- This image ships **no `org.opencontainers.image.version` label**, so a label check returns empty.
+  Not every publisher sets it, which is why the digest is the reliable comparison and the label is a
+  convenience when it exists.
 
 **Why `importlib.metadata` instead of `litellm.__version__`:** LiteLLM 1.104 loads attributes lazily and
 does not export `__version__`, so the obvious command raises `AttributeError`. The package metadata is
