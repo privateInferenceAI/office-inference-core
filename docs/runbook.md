@@ -289,6 +289,28 @@ Expected: JSON containing an answer. On two vCPUs, expect a few seconds.
 gateway doing authentication, role routing, and logging. The model name `analyst` is a role, not a
 model, which is the indirection that lets the model tier change without touching anything upstream.
 
+**What a good response looks like, and the thinking-token trap.** The first successful call may come
+back with an **empty `content`**, a populated `reasoning_content`, and `"finish_reason": "length"`.
+That is not a failure. Qwen3 is a reasoning model: it spends tokens thinking before it answers, and a
+60-token budget gets consumed entirely by the thinking phase.
+
+Two ways to see an actual answer:
+
+    # give it room: thinking still happens, but there is budget left to answer
+    #   ... "max_tokens": 400 ...
+
+    # or turn thinking off for this request, which llama.cpp honours per request
+    #   ... "chat_template_kwargs": {"enable_thinking": false} ...
+
+Why this matters beyond a smoke test: **thinking tokens are billed tokens and they are slow tokens.**
+A front desk answering "when are you open" should not spend 300 tokens reasoning first. That is the
+argument for the role indirection doing real work: a small non-thinking model serves the front desk
+while the analyst keeps its reasoning, and both run through the same gateway.
+
+**Measured on 2026-10-10, for the record:** 1.7B Q4 on 2 vCPU gave 7.2 predicted tokens per second and
+21 tokens per second of prompt processing. A 500-token answer would take about 70 seconds. Fine for
+proving a path; unusable for a client, and the clearest possible argument for the GPU.
+
 ### 1.6 Find the audit row
 
     docker exec postgres psql -U oicore -d oicore -c '\dt' | tail -12
