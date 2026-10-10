@@ -237,7 +237,7 @@ why the checks below run a throwaway container on that network.
 
 ### 1.4 Verify the gateway and the model
 
-    docker exec litellm python -c "import litellm; print('litellm', litellm.__version__)"
+    docker exec litellm python -c "from importlib.metadata import version; print('litellm', version('litellm'))"
     docker run --rm --network ai-net curlimages/curl -s http://litellm:4000/health/liveliness
     docker run --rm --network ai-net curlimages/curl -s http://llamacpp:8080/v1/models
 
@@ -246,6 +246,34 @@ Expected: a version of **1.104.x**, `"I'm alive!"`, and one model listed by llam
 **Why the version check is a step and not a nicety:** LiteLLM's CVEs are version-bound.
 CVE-2026-59822 affects everything before 1.84.0 and sits in CISA's KEV catalog. We verify the running
 version rather than trusting the pin, because a pin records intent and the version reports reality.
+
+**Cross-check the running digest.** This is the check that actually matters:
+
+    docker images --digests | grep litellm
+
+Expected: a line whose DIGEST column reads `sha256:3d88bd75...`, matching the pin in
+`deploy/office/compose/docker-compose.yml`. The TAG column will say `<none>`, and that is correct:
+we pulled by digest, so no tag was ever stored.
+
+Three things the first run taught us, all worth knowing because each one is a command that looks
+right and fails:
+
+- **`docker inspect litellm` inspects the container, not the image.** Containers have no
+  `RepoDigests` field, so the request errored even though the image was fine.
+- **`docker image inspect ghcr.io/berriai/litellm` fails with "No such image: ...:latest".** Omitting a
+  tag makes Docker assume `latest`, and a digest pull stores no tag. To inspect by name you must give
+  the digest: `docker image inspect ghcr.io/berriai/litellm@sha256:3d88bd75...`, or inspect by ID:
+  `docker image inspect $(docker inspect --format '{{.Image}}' litellm)`.
+- **This image ships no `org.opencontainers.image.version` label**, so a label check returns empty. Not
+  every publisher sets one, which is why the digest is the comparison that counts.
+
+`docker images --digests` sidesteps all three: it lists what is on disk with the digest Docker
+recorded when it pulled, and it needs neither a tag nor a container.
+
+**Why `importlib.metadata` instead of `litellm.__version__`:** LiteLLM 1.104 loads attributes lazily and
+does not export `__version__`, so the obvious command raises `AttributeError`. The package metadata is
+the reliable source, and the digest comparison is what actually proves the running build is the one we
+pinned.
 
 ### 1.5 Make a call through the gateway
 
