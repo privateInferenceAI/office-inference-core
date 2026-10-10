@@ -82,6 +82,54 @@ request to a frontier model, and neither needs a GPU. See the Lanes section in `
 None of these are requirements. All of them are reasons a cloud quote might include a small GPU, and
 saying so up front is better than discovering it mid-project.
 
+### Voice: what it needs, by profile
+
+Voice is a cascade of three stages: speech to text, then the model, then text to speech. Each stage
+can run on hardware the client controls or as a provider service, and that choice is the whole
+question.
+
+| Stage | Office build, local | Cloud build, provider | Cloud build, local audio |
+|---|---|---|---|
+| Speech to text | Whisper-class on the GPU | Transcribe, or the provider's equivalent | Whisper-class on a GPU |
+| The reply | Local 8B-class model on the GPU | Bedrock, cheap model for the front desk | Bedrock |
+| Text to speech | Piper or Kokoro, CPU is fine | Polly, or the provider's equivalent | Local, CPU is fine |
+
+**"Local audio" means the speech stages run on the client's hardware, so the audio never leaves.**
+That is a boundary choice, the same one the text has. In a cloud deployment, sending audio to
+Transcribe crosses no boundary that the text has not already crossed, in the same account under the
+same agreement.
+
+**Yes, conversational voice needs a GPU, but only on the office build.** The reason is latency, and
+the budget is unforgiving:
+
+| Figure | Conversational | Noticeable | Broken |
+|---|---|---|---|
+| Time to first spoken reply | under 1 second | 1 to 2 seconds | over 2.5 seconds |
+
+What that means in practice, as typical figures rather than measured ones:
+
+- **Speech to text.** Whisper-class on a GPU transcribes a five-second utterance in a few hundred
+  milliseconds. The same model on eight vCPUs runs at roughly real time or worse, so a five-second
+  question takes seconds to become text.
+- **The reply.** A local 8B model on a 48 GB card generates a short spoken answer in a few hundred
+  milliseconds. The same model on CPU runs at single-digit tokens per second, so a thirty-token reply
+  takes four to six seconds. That alone ends the conversation.
+- **A Bedrock cheap model** answers in a few hundred milliseconds, which is why the cloud build has
+  conversational voice without any card at all.
+- **Text to speech.** Piper and Kokoro are built for CPU and start speaking in tens of milliseconds.
+  Premium cloud voices sound better and cost per character.
+
+**On one 48 GB card, the whole voice stack fits comfortably:** an 8B front-desk model at FP8 around
+8 GB, Whisper-class speech recognition around 3 GB, and local speech synthesis around 1 to 2 GB. Voice
+is not the reason to buy a bigger card. It is the reason the front-desk model has to stay **resident**
+rather than being swapped in on demand, because a cold load is several seconds of silence.
+
+**What actually makes conversation feel good is software, not VRAM.** Streaming at every stage, so
+partial speech becomes an early reply instead of waiting for the full sentence. Endpointing, so the
+system knows when somebody stopped talking. Barge-in, so a person can interrupt. Products in this
+space fail on endpointing far more often than on model quality. Streaming is currently item 2.7 on
+this list and is not built.
+
 ---
 
 ## 2. Inference and serving
