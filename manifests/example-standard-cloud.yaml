@@ -11,13 +11,13 @@ packs: [document-chat, workflow-automation]
 models:
   analyst:
     local: ""
-    frontier: bedrock/anthropic.claude-sonnet
+    frontier: bedrock/us.anthropic.claude-sonnet-5
   front_desk:
     local: ""
-    frontier: bedrock/anthropic.claude-haiku
+    frontier: bedrock/us.anthropic.claude-haiku-5-5
   reader:
     local: ""
-    frontier: bedrock/anthropic.claude-haiku
+    frontier: bedrock/us.anthropic.claude-haiku-5-5
 lanes:
   frontier:
     enabled: true

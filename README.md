@@ -18,7 +18,8 @@ turned on) applied to a **profile** (where things run).
 |---|---|
 | `docs/architecture.md` | The layered model: system versus substrate, profiles, and lanes |
 | `docs/service-inventory.md` | Every service, tagged office, cloud, or either |
-| `docs/manifest.md` | How a client's configuration is described |
+| `schemas/manifest.schema.json` | How a client's configuration is described, as the machine-readable contract |
+| `docs/build-plan.md` | The system we sell and how to build it, including the coverage matrix in section 13 |
 | `schemas/manifest.schema.json` | The machine-readable contract for a manifest |
 | `packs/catalog.yaml` | Capability packs: what we sell, and what each one turns on |
 | `profiles/` | Where things run: cloud, office, hybrid |

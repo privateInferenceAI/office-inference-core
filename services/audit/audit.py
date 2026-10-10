@@ -242,6 +242,36 @@ def cmd_export(args) -> int:
 
 # --------------------------------------------------------------------------- verify
 
+def cmd_anchor(args) -> int:
+    """Write the current chain head to a file intended to leave this machine.
+
+    This is the only artifact that can later prove rows were not deleted from the end of the chain.
+    Ship it somewhere the database owner cannot rewrite: the client's S3 bucket under Object Lock,
+    or any second channel. An anchor kept beside the database it describes proves nothing.
+    """
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute("select id, row_hash, occurred_at from audit_events order by id desc limit 1")
+        last = cur.fetchone()
+        cur.execute("select count(*) from audit_events")
+        count = cur.fetchone()[0]
+    anchor = {
+        "deployment_id": DEPLOYMENT_ID,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "event_count": count,
+        "last_id": last[0] if last else None,
+        "last_row_hash": last[1] if last else None,
+        "last_occurred_at": last[2].isoformat() if last else None,
+    }
+    name = out_dir / f"anchor-{anchor['created_at'][:10]}-{count:08d}.json"
+    name.write_text(json.dumps(anchor, indent=2) + "\n")
+    print(f"anchored {count} event(s), head {anchor['last_row_hash']}")
+    print(f"  {name}")
+    print("  Ship this file off this machine. Kept here, it proves nothing.")
+    return 0
+
+
 def cmd_verify(args) -> int:
     path = Path(args.file)
     if not path.exists():
@@ -264,26 +294,60 @@ def cmd_verify(args) -> int:
 
     manifest_path = path.parent / "manifest.json"
     manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else None
-    anchor = manifest.get("first_prev_hash") if manifest and "first_prev_hash" in manifest else None
-    has_anchor = bool(manifest and "first_prev_hash" in manifest)
+
+    # The manifest records where this export starts. Checking line 1 against it proves continuity,
+    # not completeness, because both came from the same export. That check was described as an
+    # anchor, and it is not one. A real anchor is written earlier by the anchor job and passed in.
+    has_manifest_start = bool(manifest and "first_prev_hash" in manifest)
+    manifest_start = manifest.get("first_prev_hash") if has_manifest_start else None
 
     for index, row in enumerate(lines, start=1):
         if index == 1:
-            # The first row chains to something outside this file unless the export starts at the
-            # beginning of the chain, so it is checked against the manifest's anchor instead.
-            if has_anchor:
-                if row.get("prev_hash") != anchor:
-                    problems.append("line 1: prev_hash does not match the anchor in the manifest")
+            if has_manifest_start:
+                if row.get("prev_hash") != manifest_start:
+                    problems.append("line 1: prev_hash does not match the manifest")
             elif row.get("prev_hash") is not None:
-                # No anchor to check against. That is a gap in the evidence, not a failure: the file
-                # may be perfectly intact and simply unable to prove where it starts.
-                notes.append("line 1 chains to a row outside this file and there is no anchor to "
-                             "check it against, so where this export starts cannot be proven")
+                notes.append("line 1 chains to a row outside this file and the manifest carries no "
+                             "starting hash, so where this export starts cannot be shown")
         elif row.get("prev_hash") != previous_hash:
             problems.append(f"line {index}: prev_hash does not match the previous row")
         if sha256_hex(row_canonical(row)) != row["row_hash"]:
             problems.append(f"line {index}: row_hash does not match the row contents")
+
+        # The payload sits inside the row, so when it is stored it must hash to payload_sha256.
+        # Without this check, stored content can be rewritten while every hash still verifies,
+        # which would make a retained payload worthless as evidence.
+        payload = row.get("payload")
+        if payload is not None and sha256_hex(canonical_json(payload)) != row.get("payload_sha256"):
+            problems.append(f"line {index}: the stored payload does not match payload_sha256")
         previous_hash = row["row_hash"]
+
+    # The only check that can catch a deleted tail, because it compares this export against a hash
+    # published earlier, somewhere the database owner does not control.
+    if args.anchor:
+        anchor_path = Path(args.anchor)
+        if not anchor_path.exists():
+            die(f"no such anchor file: {anchor_path}")
+        anchor = json.loads(anchor_path.read_text())
+        anchored_hash = anchor.get("last_row_hash")
+        anchored_count = anchor.get("event_count")
+        if not anchored_hash:
+            problems.append(f"the anchor {anchor_path.name} carries no last_row_hash, so it cannot "
+                            "prove anything")
+        elif not any(row.get("row_hash") == anchored_hash for row in lines):
+            problems.append(f"the anchored row {anchored_hash[:12]}... from {anchor_path.name} is "
+                            "missing from this export, so rows that existed when the anchor was "
+                            "written are gone")
+        elif anchored_count is not None and len(lines) < anchored_count:
+            problems.append(f"this export holds {len(lines)} rows and the anchor records "
+                            f"{anchored_count}: the chain is shorter than it was")
+        else:
+            notes.append(f"matches the anchor written {anchor.get('created_at', 'at an unknown time')} "
+                         f"({anchored_hash[:12]}..., {anchored_count} rows)")
+    else:
+        notes.append("no external anchor was supplied, so completeness cannot be shown: deleting "
+                     "rows from the end and re-exporting would still verify. Pass --anchor with the "
+                     "file written by the anchor job")
 
     if manifest:
         if manifest.get("file_sha256") != sha256_hex(path.read_text()):
@@ -292,12 +356,12 @@ def cmd_verify(args) -> int:
             problems.append("the final row hash does not match the manifest")
         if manifest.get("event_count") != len(lines):
             problems.append("the event count does not match the manifest")
-        if not has_anchor:
-            notes.append("the manifest carries no chain anchor (written by an older version); "
-                         "this file cannot prove where in the chain it starts")
-        elif anchor is not None:
+        if not has_manifest_start:
+            notes.append("the manifest carries no starting hash, so this file cannot show where in "
+                         "the chain it begins")
+        elif manifest_start is not None:
             notes.append(f"chained from row {manifest.get('first_id') - 1} "
-                         f"(anchor {anchor[:12]}...), which is not in this file")
+                         f"({manifest_start[:12]}...), which is not in this file")
     else:
         notes.append("no manifest found next to the file; only internal continuity was checked")
 
@@ -353,7 +417,13 @@ def main() -> int:
 
     verify = sub.add_parser("verify")
     verify.add_argument("file")
+    verify.add_argument("--anchor", help="anchor file written earlier by the anchor command; "
+                                         "without it, completeness cannot be shown")
     verify.set_defaults(func=cmd_verify)
+
+    anchor = sub.add_parser("anchor")
+    anchor.add_argument("--out", default="anchors", help="directory to write the anchor into")
+    anchor.set_defaults(func=cmd_anchor)
 
     args = parser.parse_args()
     return args.func(args)

@@ -95,6 +95,34 @@ def check(manifest: dict, packs: set[str], path: Path) -> list[str]:
         if profile == "cloud" and frontier.get("redaction") is False and "regulated" in allowed:
             problems.append("regulated data allowed through the frontier lane without redaction")
 
+    # Residency. Nearly every frontier model on Bedrock is inference-profile only, and a global
+    # profile can route a prompt anywhere AWS operates. The schema carried data_residency and
+    # nothing read it; these rules read it.
+    unrestricted = ("none", "contractual")
+    compliance_for_residency = (manifest.get("compliance") or {}).get("profile", "none")
+    for role, entry in (manifest.get("models") or {}).items():
+        frontier = ((entry or {}).get("frontier") or "")
+        if not frontier.startswith("bedrock/"):
+            continue
+        model_id = frontier.split("/", 1)[1]
+        if model_id.startswith("global.") and compliance_for_residency not in unrestricted:
+            problems.append(
+                f"models.{role}: a global inference profile ({model_id}) can route a prompt to any "
+                f"Region, which is not acceptable with compliance profile "
+                f"{compliance_for_residency!r}. Use a geographic profile such as us.")
+        if model_id.startswith("anthropic.claude-fable"):
+            problems.append(
+                f"models.{role}: Fable models permit only aws_review or provider_data_share retention, "
+                "which means instructing AWS to retain inputs and outputs for human review")
+    # Only where inference is remote. An office build's residency is the client's building, and
+    # demanding a Region there is noise.
+    if compliance_for_residency not in unrestricted and manifest.get("profile") in ("cloud", "hybrid"):
+        residency = (manifest.get("compliance") or {}).get("data_residency") or []
+        if not residency:
+            problems.append(
+                f"compliance profile {compliance_for_residency!r} on a remote-inference profile should "
+                "name its data residency, because it decides which model forms are allowed")
+
     compliance = manifest.get("compliance") or {}
     cprofile = compliance.get("profile", "none")
     if cprofile not in ("none", "contractual", "hipaa", "glba", "sec-17a4", "itar-cui", "ferpa", "pci"):
@@ -102,8 +130,13 @@ def check(manifest: dict, packs: set[str], path: Path) -> list[str]:
     if cprofile not in ("none", "contractual"):
         if not compliance.get("baa_with_office_inference") and profile != "cloud":
             problems.append(f"compliance profile {cprofile!r} on a hardware build requires a signed agreement with us")
-        if compliance.get("audit_retention_days", 0) < 365:
-            problems.append(f"compliance profile {cprofile!r} should retain audit records at least 365 days")
+        # 17 CFR 240.17a-4(a) requires six years, the first two readily accessible. A one-year floor
+        # was six times too short for a broker-dealer, and that is the kind of gap an examiner finds
+        # rather than a client.
+        floor = 365 * 6 if cprofile == "sec-17a4" else 365
+        if compliance.get("audit_retention_days", 0) < floor:
+            problems.append(f"compliance profile {cprofile!r} should retain audit records at least "
+                            f"{floor} days (currently {compliance.get('audit_retention_days', 0)})")
     if cprofile == "itar-cui" and profile != "office":
         problems.append("itar-cui requires the office profile: no third-party access is allowed")
 
