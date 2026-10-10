@@ -237,7 +237,7 @@ why the checks below run a throwaway container on that network.
 
 ### 1.4 Verify the gateway and the model
 
-    docker exec litellm python -c "import litellm; print('litellm', litellm.__version__)"
+    docker exec litellm python -c "from importlib.metadata import version; print('litellm', version('litellm'))"
     docker run --rm --network ai-net curlimages/curl -s http://litellm:4000/health/liveliness
     docker run --rm --network ai-net curlimages/curl -s http://llamacpp:8080/v1/models
 
@@ -246,6 +246,19 @@ Expected: a version of **1.104.x**, `"I'm alive!"`, and one model listed by llam
 **Why the version check is a step and not a nicety:** LiteLLM's CVEs are version-bound.
 CVE-2026-59822 affects everything before 1.84.0 and sits in CISA's KEV catalog. We verify the running
 version rather than trusting the pin, because a pin records intent and the version reports reality.
+
+**Two cross-checks, in case the first line ever stops working:**
+
+    docker inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' litellm
+    docker inspect --format '{{index .RepoDigests 0}}' litellm
+
+The first reads the version baked into the image. The second prints the digest actually running, which
+must match the pin in `deploy/office/compose/docker-compose.yml`: `sha256:3d88bd75...`.
+
+**Why `importlib.metadata` instead of `litellm.__version__`:** LiteLLM 1.104 loads attributes lazily and
+does not export `__version__`, so the obvious command raises `AttributeError`. The package metadata is
+the reliable source, and the digest comparison is what actually proves the running build is the one we
+pinned.
 
 ### 1.5 Make a call through the gateway
 
