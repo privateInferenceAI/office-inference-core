@@ -145,8 +145,17 @@ DeepSeek v3.2 support `ON_DEMAND` among those checked.
    used from us-east-1 can route across us-east-1, us-east-2, and us-west-2. That is three states.
    Acceptable for most compliance work, and not acceptable for a client with a state-specific
    commitment, so it belongs in the service agreement in plain words rather than in a footnote.
-2. **A client requiring single-Region processing disqualifies every inference-profile-only model.** The
-   lineup becomes the Nova family and DeepSeek. That is a capability trade, and the client sees it.
+2. **A client requiring single-Region processing disqualifies every inference-profile-only model**,
+   which removes Claude, GPT, Grok, and Kimi K3. It does not empty the shelf. A live
+   `ListFoundationModels` in us-east-1 returns **58 ON_DEMAND models**, among them
+   `mistral.mistral-large-3-675b-instruct`, `qwen.qwen3-vl-235b-a22b`, `nvidia.nemotron-super-3-120b`,
+   `openai.gpt-oss-120b-1:0`, `moonshotai.kimi-k2.5`, and `zai.glm-5`, plus ON_DEMAND embeddings
+   (`cohere.embed-v4:0`, `amazon.titan-embed-text-v2:0`) and a reranker (`cohere.rerank-v3-5:0`).
+
+   **An earlier version of this plan said the lineup "becomes the Nova family and DeepSeek", which was
+   wrong.** It came from checking a handful of ids and generalising to the catalog, the exact mistake
+   this document exists to prevent. Residency costs some capability rather than most of it, and a
+   client asking for single-Region processing should be told what they keep.
 3. **Cross-check the `model_form` field against `compliance.data_residency`.** The schema already
    carries `data_residency` and nothing reads it. Now something does.
 
@@ -163,12 +172,14 @@ stronger model. **Nothing about a model's own judgement may move content between
 draft of this plan let the cheap tier escalate itself "for lack of evidence", which hands the data
 boundary to a model's discretion. Every escalation writes an audit event with its trigger.
 
-**The cheap tier is a latency and consistency decision, not a savings one.** Once Haiku 5.5 sits at
-0.11 and 0.10 per million input, the arithmetic collapses: on a 24,000-request profile, Nova Micro for
-light queries plus Sonnet 5 for hard ones costs about 45 a month, and sending everything to Haiku 5.5
-costs about 50. Six dollars apart. Keep the cheap tier because a small model answers in a fraction of
-the time, which matters for voice and for the front desk, and because consistency of behaviour is
-easier to reason about than consistency of price. **There is no batch discount** on Sonnet 5, Sonnet
+**The cheap tier is a cost decision and a latency decision.** Nova Micro runs at 0.035 and 0.14 per
+million tokens. Haiku 5.5 runs at 1.00 and 5.00. That is about thirty times the input price and
+thirty-five times the output price, so routing light work to the cheap tier saves real money, and it
+also answers faster, which matters for voice and the front desk.
+
+An earlier version of this section quoted Haiku 5.5 at 0.11 and 0.10 per million and concluded the
+cheap tier was "not a savings one". The price was wrong by roughly nine times and the conclusion
+followed from it. **There is no batch discount** on Sonnet 5, Sonnet
 5.5, Haiku 5.5, or Opus 5.5, so batch work cannot be assumed cheaper either.
 
 **Tokens are not the cost, the instance is.** A 20-person firm pays roughly 26 USD a month for routed
@@ -426,8 +437,20 @@ Recorded because each would otherwise have propagated into the build.
    no longer primarily a cost decision.
 6. **The cheap in-Region option is narrower than it looks.** Nova 2 Lite is inference-profile only, so a
    single-Region requirement leaves the Nova v1 family and DeepSeek v3.2.
-7. **The audit chain cannot prove its own completeness**, and the maintenance escape hatch is
-   unrecorded. Both are fixed by section 5 rather than documented as risks.
+7. **The audit chain could not prove its own completeness**, and the maintenance escape hatch was
+   unrecorded. Fixed in section 5 and in code.
+8. **The verifier had three defects, found by an audit that broke it four ways.** It never checked a
+   stored payload against its own hash, so content could be rewritten while every hash still verified.
+   Its "anchor" check compared the manifest against the very row the manifest was written from, so it
+   could never fail. And an empty export verified as intact. All three are fixed, with a regression
+   test at `tests/test_audit_verify.py` that replays the four attacks.
+9. **The single-Region claim was wrong** and was costing capability. Corrected in section 3 against the
+   live catalog.
+10. **Haiku 5.5's price was wrong by nine times**, and it carried a conclusion about the cheap tier.
+    Corrected in section 3.
+11. **The SEC retention floor was one year.** 17 CFR 240.17a-4(a) requires six. The validator now
+    enforces 2,190 days for a broker-dealer profile.
+12. **Twenty-one was the wrong count** of unassigned items. It was twenty-nine rows.
 ---
 
 ## 13. Coverage: every readiness item, and where it lands
@@ -533,8 +556,8 @@ which reuses this plan), **not needed** (deliberate), or **gap** (nothing yet, n
 
 ### What this audit found
 
-Twenty-one items were not in this plan before this section, including four that would have been
-genuinely embarrassing to discover late: **PII redaction before a frontier call**, **document
+Twenty-nine rows were unassigned before this section. The original text said twenty-one, and the
+count was wrong. Four of them would have been genuinely embarrassing to discover late: **PII redaction before a frontier call**, **document
 versioning**, **incident response with notification clocks**, and **secrets rotation**. They are now
 assigned to phases rather than remembered.
 

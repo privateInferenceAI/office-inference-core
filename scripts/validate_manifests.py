@@ -130,8 +130,13 @@ def check(manifest: dict, packs: set[str], path: Path) -> list[str]:
     if cprofile not in ("none", "contractual"):
         if not compliance.get("baa_with_office_inference") and profile != "cloud":
             problems.append(f"compliance profile {cprofile!r} on a hardware build requires a signed agreement with us")
-        if compliance.get("audit_retention_days", 0) < 365:
-            problems.append(f"compliance profile {cprofile!r} should retain audit records at least 365 days")
+        # 17 CFR 240.17a-4(a) requires six years, the first two readily accessible. A one-year floor
+        # was six times too short for a broker-dealer, and that is the kind of gap an examiner finds
+        # rather than a client.
+        floor = 365 * 6 if cprofile == "sec-17a4" else 365
+        if compliance.get("audit_retention_days", 0) < floor:
+            problems.append(f"compliance profile {cprofile!r} should retain audit records at least "
+                            f"{floor} days (currently {compliance.get('audit_retention_days', 0)})")
     if cprofile == "itar-cui" and profile != "office":
         problems.append("itar-cui requires the office profile: no third-party access is allowed")
 
