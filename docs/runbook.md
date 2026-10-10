@@ -620,11 +620,43 @@ Expected: an `access` event with outcome `denied`.
 **Why this matters more than the answer:** the restricted document was never retrieved, so it never
 reached a model. The denial is a filter that ran, not an apology printed afterwards.
 
+### 3.7b See the gap: a document we cannot read yet
+
+    python3 tests/fixtures/make_scanned_pdf.py > documents/company/scanned-contract.pdf
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env run --rm docs ingest.py
+
+Expected:
+
+    FAIL company/scanned-contract.pdf: no extractable text; likely a scan or an image-only PDF,
+    which needs OCR (not enabled yet)
+    added 0, changed 0, removed 0, skipped 4, failed 1
+
+The command exits non-zero, and the failure is written to the audit log as an `error`.
+
+**Why this test exists.** Everything else in this phase reads text-native documents, so it would pass
+whether or not we could handle a scan. A document the system silently ignores is indistinguishable
+from a document it has never been told about, and that is how a client stops trusting an answer. The
+fixture stays in the repository as the regression test for the day OCR arrives.
+
+**What we gave up by not using Docling, stated plainly:**
+
+| Capability | Now | Consequence |
+|---|---|---|
+| OCR for scans | Nothing; fails loudly | Scanned contracts and faxes are not searchable until OCR is added |
+| Table structure | Text with no rows or columns | A fee schedule or statement becomes a jumble of numbers, which can produce a confidently cited wrong answer. The most dangerous of the three |
+| Reading order and layout | The PDF's internal order | Two-column documents can interleave, so a citation is garbled |
+
+The cheap middle path, when we need it: `pdfplumber` (pure Python, no torch) recovers word
+coordinates and tables, and `tesseract` through `pytesseract` adds OCR for roughly 50 MB instead of
+2 GB. Full Docling remains the target on the GPU box, and the vision reader role in the manifest is
+the intended tool for drawings and images.
+
 ### 3.8 Verification, which ends the phase
 
 1. A question returns an answer with a document and page citation.
 2. The cited page actually contains the fact (open the PDF and look).
 3. A document outside the role is refused, and the refusal appears in the audit log.
+4. A scanned document fails loudly with a reason rather than being skipped in silence.
 4. Re-running ingestion changes nothing.
 5. Deleting a document removes its points on the next run.
 

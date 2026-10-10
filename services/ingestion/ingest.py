@@ -93,11 +93,24 @@ def main() -> int:
             failed += 1
             continue
 
+        # A scanned document extracts as nothing. That is a gap in capability, not an empty file, and
+        # it must be loud: a document the system quietly ignores looks exactly like a document it has
+        # never been told about, which is how somebody loses trust in an answer.
+        empty_pages = [number for number, page in enumerate(pages, start=1) if not page.strip()]
         chunks = chunk_pages(pages)
         if not chunks:
-            print(f"  SKIP {doc_id}: no extractable text")
-            skipped += 1
+            reason = ("no extractable text; likely a scan or an image-only PDF, which needs OCR "
+                      "(not enabled yet)")
+            print(f"  FAIL {doc_id}: {reason}")
+            if not args.dry_run:
+                record_event("config_change", actor="ingestion", actor_role="system",
+                             outcome="error", tool="ingest",
+                             payload={"doc_id": doc_id, "reason": reason, "pages": len(pages),
+                                      "acl": acl, "sha256": digest})
+            failed += 1
             continue
+        if empty_pages:
+            print(f"  NOTE {doc_id}: pages {empty_pages} of {len(pages)} have no extractable text")
 
         if args.dry_run:
             print(f"  would {action} {doc_id}: {len(pages)} page(s), {len(chunks)} chunk(s), acl={acl}")
@@ -110,7 +123,8 @@ def main() -> int:
         record_event("config_change", actor="ingestion", actor_role="system", tool="ingest",
                      data_class="internal" if acl == "company" else "confidential",
                      payload={"doc_id": doc_id, "action": action, "pages": len(pages),
-                              "chunks": len(chunks), "acl": acl, "sha256": digest})
+                              "chunks": len(chunks), "acl": acl, "sha256": digest,
+                              "pages_without_text": empty_pages})
         print(f"  {action:>6} {doc_id}: {len(pages)} page(s), {len(chunks)} chunk(s), acl={acl}")
         if action == "add":
             added += 1
