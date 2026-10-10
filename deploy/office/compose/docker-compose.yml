@@ -91,6 +91,10 @@ services:
       dockerfile: services/audit/Dockerfile
     container_name: audit
     profiles: ["tools"]
+    # Run as the host operator, not root: exports are evidence a human has to read, copy, and hand
+    # over, and they should not be root-owned. This is also why the runbook creates the exports
+    # directory as the operator before the first export.
+    user: "${HOST_UID}:${HOST_GID}"
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       DEPLOYMENT_ID: ${DEPLOYMENT_ID}
