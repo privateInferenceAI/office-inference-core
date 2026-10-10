@@ -56,6 +56,11 @@ This looks inconsistent until you name which product is being demonstrated.
   mentioning out loud, because "we are demonstrating this on a machine that does not need a GPU" is a
   stronger statement than any slide.
 
+**Which lanes exist per profile** is a design question rather than a hardware one, and the matrix is
+in `docs/architecture.md`, under Lanes. The short version: office and hybrid deployments can run both
+lanes, a pure cloud deployment runs the frontier lane only, and adding an office box to a cloud client
+produces the hybrid configuration in the same account with nothing to migrate.
+
 **No GPU does not mean a small instance.** Ingestion, the vector store, and the database are real CPU
 and RAM work in both tiers. A cloud deployment still wants 8 to 16 vCPU and 32 to 64 GB of RAM for
 Docling, Qdrant, Postgres, and the application. What it does not want is a card.

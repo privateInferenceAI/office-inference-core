@@ -38,14 +38,32 @@ Hybrid is composed, not separate. `deploy/office/install.sh --cloud-leg` applies
 
 ## Lanes
 
-Every deployment has lanes. Which ones exist depends on the manifest.
+Every deployment runs the same lane machinery. What differs is **which lanes can exist**, because a
+lane needs hardware to run on.
 
-- **Local lane.** Always present. Documents, records, retrieval, drafting. This is where client
-  content lives, and in the office build it does not leave the building.
-- **Frontier lane.** Optional. Heavy reasoning, agentic chains, code. It receives instructions
-  and only the context the user or the policy explicitly releases.
-- **Office services lane.** In hybrid and cloud builds, the office box may also call shared
-  services (update distribution, monitoring, backup target).
+| Profile | Local lane | Frontier lane | What that means |
+|---|---|---|---|
+| **Cloud** | No, unless a GPU is added | Yes, always | Inference is a provider model in the client's own account. There is no local model because there is no local hardware |
+| **Office** | Yes | Off by default, switchable on | Turning the frontier lane on is the hybrid configuration. One flag, no new deployment |
+| **Hybrid** | Yes | Yes | The office build plus a cloud leg in the same account. Documents stay local; released context can leave |
+
+- **Local lane.** Inference on hardware the client controls. Documents, records, retrieval, and
+  drafting never leave the building. Requires a GPU, which is why the cloud profile does not have it.
+- **Frontier lane.** Inference through a provider: Bedrock in the client's account under their
+  agreement, or an API. It receives instructions and only the context the user or the policy
+  explicitly releases. Every call is recorded with its payload hash.
+- **Office services lane.** Distribution, monitoring, and backup. Present where an office box exists.
+
+**Feature parity is not capability parity.** All three profiles have the same interface, workflows,
+and audit, and the same lane policy engine. They do not produce the same answers: a 32B local model
+is not a frontier model, which is precisely why the office build can switch the frontier lane on. Say
+it that way to a client and the tier line makes sense; imply the answers are identical and the first
+hard question proves otherwise.
+
+**Moving between profiles is a deployment change.** A cloud client who later installs an office box
+ends up in exactly the hybrid configuration, in the same account, under the same agreements, with
+nothing to migrate. That is the "start where you are, move when the rules change" promise, and it
+only holds because the lanes are configuration rather than separate products.
 
 **Routing is by data class, not by task difficulty.** A request carries a classification from
 its source, and the classification decides the lane. The gateway enforces it, and every frontier
