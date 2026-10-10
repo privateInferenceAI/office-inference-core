@@ -1,0 +1,284 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://officeinference.com/schemas/manifest.schema.json",
+  "title": "Office Inference client manifest",
+  "description": "The single source of truth for what a client has turned on and where it runs.",
+  "type": "object",
+  "required": [
+    "manifest_version",
+    "client",
+    "profile",
+    "packs",
+    "models"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "manifest_version": {
+      "const": 1
+    },
+    "client": {
+      "type": "object",
+      "required": [
+        "name",
+        "deployment_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "deployment_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{2,40}$"
+        },
+        "contacts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "role",
+              "email"
+            ],
+            "properties": {
+              "role": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string",
+                "format": "email"
+              }
+            }
+          }
+        }
+      }
+    },
+    "profile": {
+      "enum": [
+        "cloud",
+        "office",
+        "hybrid"
+      ]
+    },
+    "packs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      },
+      "description": "Pack ids from packs/catalog.yaml. The Core pack is implicit."
+    },
+    "models": {
+      "type": "object",
+      "description": "Roles, never model names, in the interface. Each role resolves to a concrete model per lane.",
+      "required": [
+        "analyst",
+        "front_desk",
+        "reader"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "analyst": {
+          "$ref": "#/$defs/modelRole"
+        },
+        "front_desk": {
+          "$ref": "#/$defs/modelRole"
+        },
+        "reader": {
+          "$ref": "#/$defs/modelRole"
+        },
+        "coder": {
+          "$ref": "#/$defs/modelRole"
+        }
+      }
+    },
+    "lanes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "local": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "const": true
+            }
+          }
+        },
+        "frontier": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "provider": {
+              "enum": [
+                "bedrock",
+                "api"
+              ]
+            },
+            "account_owner": {
+              "enum": [
+                "client",
+                "office_inference"
+              ],
+              "default": "client"
+            },
+            "data_classes_allowed": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "public",
+                  "internal",
+                  "confidential",
+                  "regulated"
+                ]
+              }
+            },
+            "requires_approval": {
+              "type": "boolean",
+              "default": true
+            },
+            "redaction": {
+              "type": "boolean",
+              "default": true
+            }
+          }
+        }
+      }
+    },
+    "compliance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "profile": {
+          "enum": [
+            "none",
+            "contractual",
+            "hipaa",
+            "glba",
+            "sec-17a4",
+            "itar-cui",
+            "ferpa",
+            "pci"
+          ]
+        },
+        "baa_with_provider": {
+          "type": "boolean"
+        },
+        "baa_with_office_inference": {
+          "type": "boolean"
+        },
+        "worm_storage": {
+          "type": "boolean"
+        },
+        "data_residency": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "audit_retention_days": {
+          "type": "integer",
+          "minimum": 30
+        }
+      }
+    },
+    "integrations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "interface": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "branding": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "display_name": {
+              "type": "string"
+            },
+            "accent": {
+              "type": "string"
+            },
+            "logo": {
+              "type": "string"
+            }
+          }
+        },
+        "show_lane_indicator": {
+          "type": "boolean",
+          "default": true
+        },
+        "features": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "support": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "remote_access": {
+          "type": "boolean",
+          "default": true
+        },
+        "response_window": {
+          "type": "string"
+        },
+        "drift_reporting": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    }
+  },
+  "$defs": {
+    "modelRole": {
+      "type": "object",
+      "required": [
+        "local"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "local": {
+          "type": "string",
+          "description": "Model id served on the office box."
+        },
+        "frontier": {
+          "type": "string",
+          "description": "Model id used when the frontier lane is on."
+        },
+        "fallback": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

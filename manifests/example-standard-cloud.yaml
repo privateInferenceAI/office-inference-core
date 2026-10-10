@@ -1,0 +1,40 @@
+# Example: standard cloud. Frontier models, no compliance claim.
+manifest_version: 1
+client:
+  name: Example Company
+  deployment_id: example-standard-cloud
+  contacts:
+    - role: owner
+      email: owner@example.com
+profile: cloud
+packs: [document-chat, workflow-automation]
+models:
+  analyst:
+    local: ""
+    frontier: bedrock/anthropic.claude-sonnet
+  front_desk:
+    local: ""
+    frontier: bedrock/anthropic.claude-haiku
+  reader:
+    local: ""
+    frontier: bedrock/anthropic.claude-haiku
+lanes:
+  frontier:
+    enabled: true
+    provider: bedrock
+    account_owner: client
+    data_classes_allowed: [public, internal, confidential]
+    requires_approval: false
+    redaction: false
+compliance:
+  profile: none
+  audit_retention_days: 90
+integrations:
+  - id: google-workspace
+    scopes: [calendar.readonly, gmail.compose]
+interface:
+  branding:
+    display_name: Example Company Assistant
+  show_lane_indicator: true
+support:
+  response_window: business hours, 4 hours

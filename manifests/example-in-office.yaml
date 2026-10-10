@@ -1,0 +1,35 @@
+# Example: in-office. Everything local, frontier lane installed but off.
+manifest_version: 1
+client:
+  name: Example Dental
+  deployment_id: example-dental-office
+profile: office
+packs: [document-chat, workflow-automation, voice]
+models:
+  analyst:
+    local: qwen3-32b-instruct
+    frontier: ""
+  front_desk:
+    local: qwen3-8b-instruct
+    frontier: ""
+  reader:
+    local: qwen3-vl-32b-instruct
+    frontier: ""
+lanes:
+  frontier:
+    enabled: false
+compliance:
+  profile: hipaa
+  baa_with_provider: false
+  baa_with_office_inference: true
+  audit_retention_days: 2190
+integrations:
+  - id: local-folder-watch
+interface:
+  branding:
+    display_name: Front Desk Assistant
+  show_lane_indicator: true
+support:
+  remote_access: true
+  response_window: business hours, next business day
+  drift_reporting: true

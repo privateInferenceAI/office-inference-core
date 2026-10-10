@@ -1,0 +1,19 @@
+# Deployment profile: cloud
+# The client's own cloud account. We never own the account or pay the bill.
+profile: cloud
+substrate:
+  compute: managed-containers        # open question: ECS, EKS, or EC2 with compose
+  ingress: alb-acm
+  database: rds-postgres
+  object_store: s3
+  secrets: secrets-manager
+  logs: cloudwatch
+  scheduling: eventbridge
+lanes:
+  local: false
+  frontier: true
+hardware: {}
+operations:
+  updater: image-rollout
+  remote_support: ssm-session-manager
+  drift_reporting: true

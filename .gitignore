@@ -1,0 +1,23 @@
+# secrets and generated config
+*.age
+*.key
+.env
+.env.*
+!env.example
+secrets/
+rendered/
+deploy/**/*.tfstate
+deploy/**/*.tfstate.*
+deploy/**/.terraform/
+*.tfvars
+!*.tfvars.example
+
+# runtime data
+data/
+backups/
+logs/
+
+# python
+__pycache__/
+*.pyc
+.venv/

@@ -1,0 +1,22 @@
+# Deployment profile: office
+# Hardware in the client's building. Documents and inference stay put.
+profile: office
+substrate:
+  compute: single-gpu-host
+  orchestrator: docker-compose      # open question: compose or k3s
+  ingress: caddy
+  database: postgres-container
+  object_store: local-disk
+  secrets: sops-age
+  logs: local
+  scheduling: systemd-timers
+lanes:
+  local: true
+  frontier: false                   # turned on per manifest, requires the cloud leg
+hardware:
+  gpu_memory_warning_mib: null      # set per model tier at install time
+  disk_warning_gb: 200
+operations:
+  updater: signed-pull
+  remote_support: consented-tunnel
+  drift_reporting: true

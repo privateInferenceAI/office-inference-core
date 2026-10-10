@@ -1,0 +1,38 @@
+# Example: compliant cloud. Client's account, compliance-grade services and agreements.
+manifest_version: 1
+client:
+  name: Example Medical Group
+  deployment_id: example-medical-compliant
+profile: cloud
+packs: [document-chat, agentic-desk, compliance-pack]
+models:
+  analyst:
+    local: ""
+    frontier: bedrock/anthropic.claude-sonnet
+  front_desk:
+    local: ""
+    frontier: bedrock/anthropic.claude-haiku
+  reader:
+    local: ""
+    frontier: bedrock/anthropic.claude-sonnet
+lanes:
+  frontier:
+    enabled: true
+    provider: bedrock
+    account_owner: client
+    data_classes_allowed: [public, internal, confidential, regulated]
+    requires_approval: false
+    redaction: true
+compliance:
+  profile: hipaa
+  baa_with_provider: true
+  baa_with_office_inference: true
+  worm_storage: false
+  audit_retention_days: 2190
+integrations:
+  - id: microsoft-365
+    scopes: [mail.send, files.read]
+interface:
+  show_lane_indicator: true
+support:
+  response_window: business hours, 4 hours

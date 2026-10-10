@@ -1,0 +1,45 @@
+# Example: hybrid. Office build, documents stay, frontier lane on for code and long chains.
+manifest_version: 1
+client:
+  name: Example Accounting
+  deployment_id: example-accounting-hybrid
+profile: hybrid
+packs: [document-chat, workflow-automation, agentic-desk, frontier-lane]
+models:
+  analyst:
+    local: qwen3-32b-instruct
+    frontier: bedrock/anthropic.claude-opus
+  front_desk:
+    local: qwen3-8b-instruct
+    frontier: bedrock/anthropic.claude-haiku
+  reader:
+    local: qwen3-vl-32b-instruct
+    frontier: bedrock/anthropic.claude-sonnet
+  coder:
+    local: ""
+    frontier: bedrock/anthropic.claude-sonnet
+lanes:
+  local: {enabled: true}
+  frontier:
+    enabled: true
+    provider: bedrock
+    account_owner: client
+    data_classes_allowed: [public, internal]
+    requires_approval: true
+    redaction: true
+compliance:
+  profile: contractual
+  baa_with_office_inference: false
+  audit_retention_days: 365
+integrations:
+  - id: quickbooks
+    scopes: [read]
+  - id: microsoft-365
+    scopes: [mail.send, files.read]
+interface:
+  branding:
+    display_name: Firm Assistant
+  show_lane_indicator: true
+support:
+  remote_access: true
+  response_window: business hours, 4 hours

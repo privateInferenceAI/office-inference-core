@@ -1,0 +1,95 @@
+# Capability packs
+
+What we sell, and what each pack turns on. A client buys packs; a pack expands to services and
+configuration. The Core pack is implicit in every deployment and is never sold on its own.
+
+packs:
+  - id: core
+    name: Core System
+    sold: false
+    description: The system itself. Gateway, interface, database, object store, secrets, ingress, audit sink, observability, backup, and the office operational services on the office build.
+    services:
+      - gateway
+      - interface
+      - database
+      - object-store
+      - secrets
+      - ingress
+      - audit-sink
+      - observability
+      - backup
+      - updater          # office only
+      - remote-support   # office only
+      - drift-reporter   # office only
+
+  - id: document-chat
+    name: Document Chat
+    sold: true
+    description: Ask questions across the client's own documents, with citations and per-role access.
+    services:
+      - ingestion
+      - vector
+      - embeddings
+      - reranker
+    requires: [core]
+
+  - id: workflow-automation
+    name: Workflow Automation
+    sold: true
+    description: Multi-step work with triggers, schedules, and approval gates. Deterministic, so it behaves the same on any model.
+    services:
+      - workflow
+    requires: [core]
+    open_question: n8n licence terms for a paid managed service (may require Enterprise).
+
+  - id: agentic-desk
+    name: Agentic Desk
+    sold: true
+    description: The agent loop with tools, sessions, and human approval. Delivered as a real agent only where the model tier supports it.
+    services:
+      - agent-runtime
+      - mcp-gateway
+      - connectors
+    requires: [core, document-chat]
+
+  - id: voice
+    name: Voice
+    sold: true
+    description: Talk to the system. Cascade (speech to text, then model, then text to speech) so every turn is auditable.
+    services:
+      - voice
+    requires: [core]
+    locations: [office]
+
+  - id: frontier-lane
+    name: Frontier Lane
+    sold: true
+    description: Turn on the connection to frontier models for heavy reasoning, agentic chains, and code. Off by default. Every call logged, and gated by data class.
+    services:
+      - inference-frontier
+      - model-router
+    requires: [core]
+    requires_profile: [cloud, hybrid]
+    requires_client_account: true
+
+  - id: compliance-pack
+    name: Compliance Pack
+    sold: true
+    description: The controls a regulated client needs, configured and documented, with the evidence package.
+    services:
+      - redaction
+    requires: [core]
+    open_question: Which frameworks to document first. HIPAA and GLBA appear to be the common cases.
+
+  - id: offsite-backup
+    name: Offsite Backup
+    sold: true
+    description: Encrypted backup to the client's own cloud account. They hold the key, so a backup is not a disclosure.
+    services: []
+    config:
+      backup:
+        target: s3
+        encryption: client-side
+        key_owner: client
+    requires: [core]
+    requires_client_account: true

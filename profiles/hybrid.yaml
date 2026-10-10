@@ -1,0 +1,13 @@
+# Deployment profile: hybrid
+# The office build plus a cloud leg in the same client's account.
+profile: hybrid
+composes: [office, cloud-leg]
+substrate:
+  office: office-profile
+  cloud_leg:
+    compute: minimal
+    purpose: [frontier-api-path, backup-target]
+    excludes: [document-store, interface, vector]
+lanes:
+  local: true
+  frontier: true

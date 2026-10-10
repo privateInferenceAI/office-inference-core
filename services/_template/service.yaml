@@ -1,0 +1,22 @@
+name: _template
+location: either
+image: registry.example/office-inference/_template
+packs: [core]
+depends_on: [gateway, database]
+ports:
+  internal: 8080
+healthcheck:
+  http: /health
+  interval_seconds: 30
+gpu:
+  required: false
+data_class: internal
+config_schema:
+  example_setting:
+    type: string
+    default: ""
+substrate:
+  office:
+    notes: What differs when this runs on the client's hardware.
+  cloud:
+    notes: What differs when this runs in the client's cloud account.
