@@ -37,9 +37,39 @@ the cloud tiers by an order of magnitude.
 | **Client cloud deployment** | **No GPU.** 8 to 16 vCPU, 32 to 64 GB RAM | Inference is Bedrock in their account. Add a small GPU only if they want local embeddings or local OCR |
 | **Client office deployment** | 1 x 48 GB GPU entry, 1 x 96 GB recommended, 4 x 96 GB for a 235B analyst | This is the price of the in-office promise |
 
-**Consequence for pricing.** The cloud tiers carry no GPU cost at all. Their infrastructure is a
-modest instance plus tokens. The office tier is where hardware appears in the quote, and it should be
-priced as the premium product it is.
+**Consequence for pricing.** The cloud tiers carry no GPU cost. Their infrastructure is a modest
+instance plus tokens. The office tier is where hardware appears in the quote, and it should be priced
+as the premium product it is.
+
+### Why a demo box has a GPU when the cloud product does not
+
+This looks inconsistent until you name which product is being demonstrated.
+
+- **The in-office demo needs the GPU**, because the product's entire claim is that the model runs in
+  the building. There is no way to demonstrate that claim on a machine that has to reach out for
+  inference.
+- **The cloud demo needs no GPU at all**, because inference is Bedrock in the client's account. Running
+  that demo on a cheap CPU instance is not a compromise, it is the demonstration: this is what your
+  bill looks like, and there is no hardware to buy.
+- **One GPU box can host both demos.** It runs the office configuration with local models, and it runs
+  the cloud configuration with the GPU sitting idle. During a cloud demo the idle card is worth
+  mentioning out loud, because "we are demonstrating this on a machine that does not need a GPU" is a
+  stronger statement than any slide.
+
+**No GPU does not mean a small instance.** Ingestion, the vector store, and the database are real CPU
+and RAM work in both tiers. A cloud deployment still wants 8 to 16 vCPU and 32 to 64 GB of RAM for
+Docling, Qdrant, Postgres, and the application. What it does not want is a card.
+
+### When the cloud tier does want a GPU, optionally
+
+| Situation | Why | Sold as |
+|---|---|---|
+| Heavy scanning volume | Docling's layout, table, and OCR models run far faster on a GPU. Tens of thousands of pages is a different problem from hundreds | An add-on to the build |
+| Embeddings must not go to the model provider | Bedrock embeddings keep the text inside the client's own account under their agreement, which is usually acceptable. If they refuse even that, local TEI needs a small card to be quick | An add-on to the build |
+| A local model for classification or redaction | Some clients want a cheap local model in front of the frontier call | An add-on to the build |
+
+None of these are requirements. All of them are reasons a cloud quote might include a small GPU, and
+saying so up front is better than discovering it mid-project.
 
 ---
 
