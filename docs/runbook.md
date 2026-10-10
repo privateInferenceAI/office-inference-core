@@ -450,7 +450,17 @@ the files it produces belong to you rather than to root:
     docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
       run --rm audit verify /app/exports/$(date -u +%F)/audit-events.jsonl
 
-Expected: `ok ... chain intact`.
+Expected: `ok ... chain intact`, plus a note like:
+
+    note: chained from row 12 (anchor 4f0a9c21d3b8...), which is not in this file
+
+That note is normal and important. The chain is ordered by **recording** time, not by occurrence, so a
+day's export almost always starts mid-chain. The manifest records the hash the first row chains back
+to, which is what lets a single day's file be checked on its own. Without that anchor, an honest
+export would look tampered because its first line references a row the file does not contain.
+
+To check continuity *between* exports, compare one manifest's `last_row_hash` against the next one's
+`first_prev_hash`. That is the chain of custody, and it is what an examiner actually asks for.
 
 Now break it on purpose, because an integrity check that has never failed is not a check:
 

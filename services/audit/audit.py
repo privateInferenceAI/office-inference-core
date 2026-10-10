@@ -221,6 +221,10 @@ def cmd_export(args) -> int:
         "date": day,
         "event_count": len(rows),
         "first_id": rows[0]["id"] if rows else None,
+        # The chain anchor: the hash this export's first row chains back to. Without it an export
+        # cannot be checked on its own, because a day's rows normally start mid-chain. A file whose
+        # first line references a row outside the file is not evidence of tampering; it is Tuesday.
+        "first_prev_hash": rows[0]["prev_hash"] if rows else None,
         "last_id": rows[-1]["id"] if rows else None,
         "last_row_hash": rows[-1]["row_hash"] if rows else None,
         "file": data_path.name,
@@ -240,26 +244,62 @@ def cmd_export(args) -> int:
 
 def cmd_verify(args) -> int:
     path = Path(args.file)
-    lines = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    if not path.exists():
+        die(f"no such file: {path}")
     problems: list[str] = []
+    notes: list[str] = []
     previous_hash = None
 
+    # A corrupt file is one of the things a verifier exists to detect, so it has to be reported
+    # rather than thrown as a traceback. Parse first, keep whatever is readable, and say plainly
+    # which lines could not be read.
+    lines: list[dict] = []
+    for number, raw in enumerate(path.read_text().splitlines(), start=1):
+        if not raw.strip():
+            continue
+        try:
+            lines.append(json.loads(raw))
+        except json.JSONDecodeError as exc:
+            problems.append(f"line {number}: not valid JSON ({exc.msg} at column {exc.colno})")
+
+    manifest_path = path.parent / "manifest.json"
+    manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else None
+    anchor = manifest.get("first_prev_hash") if manifest and "first_prev_hash" in manifest else None
+    has_anchor = bool(manifest and "first_prev_hash" in manifest)
+
     for index, row in enumerate(lines, start=1):
-        if row.get("prev_hash") != previous_hash:
+        if index == 1:
+            # The first row chains to something outside this file unless the export starts at the
+            # beginning of the chain, so it is checked against the manifest's anchor instead.
+            if has_anchor:
+                if row.get("prev_hash") != anchor:
+                    problems.append("line 1: prev_hash does not match the anchor in the manifest")
+            elif row.get("prev_hash") is not None:
+                # No anchor to check against. That is a gap in the evidence, not a failure: the file
+                # may be perfectly intact and simply unable to prove where it starts.
+                notes.append("line 1 chains to a row outside this file and there is no anchor to "
+                             "check it against, so where this export starts cannot be proven")
+        elif row.get("prev_hash") != previous_hash:
             problems.append(f"line {index}: prev_hash does not match the previous row")
         if sha256_hex(row_canonical(row)) != row["row_hash"]:
             problems.append(f"line {index}: row_hash does not match the row contents")
         previous_hash = row["row_hash"]
 
-    manifest_path = path.parent / "manifest.json"
-    if manifest_path.exists():
-        manifest = json.loads(manifest_path.read_text())
+    if manifest:
         if manifest.get("file_sha256") != sha256_hex(path.read_text()):
             problems.append("the file hash does not match the manifest")
         if manifest.get("last_row_hash") != previous_hash:
             problems.append("the final row hash does not match the manifest")
         if manifest.get("event_count") != len(lines):
             problems.append("the event count does not match the manifest")
+        if not has_anchor:
+            notes.append("the manifest carries no chain anchor (written by an older version); "
+                         "this file cannot prove where in the chain it starts")
+        elif anchor is not None:
+            notes.append(f"chained from row {manifest.get('first_id') - 1} "
+                         f"(anchor {anchor[:12]}...), which is not in this file")
+    else:
+        notes.append("no manifest found next to the file; only internal continuity was checked")
 
     if problems:
         print(f"FAIL {path}")
@@ -267,6 +307,8 @@ def cmd_verify(args) -> int:
             print(f"  - {problem}")
         return 1
     print(f"ok   {path}: {len(lines)} event(s), chain intact")
+    for note in notes:
+        print(f"     note: {note}")
     return 0
 
 
