@@ -109,7 +109,7 @@ compliance profile for compliance-pack; hold voice until the voice phase ships.
 
 | Thing | Value |
 |---|---|
-| Development instance | `i-0887564c9fe06b0b5`, t3.large, Ubuntu 24.04, 30 GB gp3, **currently running** |
+| Development instance | `i-0887564c9fe06b0b5`, t3.large, 2 vCPU / 8 GB, **running and to be retired**. The build moves to a fresh m7i.4xlarge (section 4) |
 | Address | Elastic IP `52.204.202.66` (`eipalloc-0f0560d02bcb32517`) |
 | Account | **878451098165 (Office Inference)**, holds the credits. Profile `oi-credits` |
 | Credits | 5,000 USD AWS Activate, expires **2028-10-31**. October spend in that account: **0.01 USD** |
@@ -122,18 +122,49 @@ about 2 USD a day, and the elastic IP bills whether or not the instance runs.
 
 ---
 
-## 4. The target for C0
+## 4. The instance: decided, not to be re-litigated
 
-**Launch `m7i.xlarge`: 4 vCPU, 16 GB RAM, no GPU, Ubuntu 24.04, 30 GB gp3.** About 0.2016 USD an
-hour, roughly 1.61 USD for an eight-hour build day.
+**A fresh instance. Launch `m7i.4xlarge`: 16 vCPU, 64 GB RAM, 200 GB gp3, Ubuntu 24.04, no GPU.**
 
-A t3.large has 2 vCPU and 8 GB, which was enough for the gateway and the audit sink and will stall the
-moment Docling meets a two-column scanned fee schedule. If ingestion proves too slow, move to
-`m7i.4xlarge` (16 vCPU, 64 GB, about 588 USD a month), which is also the production shape for a
-10-user deployment.
+| Instance | Hourly | Monthly, running | What it is |
+|---|---|---|---|
+| m7i.xlarge | 0.2016 | 147 | 4 vCPU, 16 GB. A demo box |
+| **m7i.4xlarge** | **0.8064** | **589** | **16 vCPU, 64 GB. The reference shape. Build here** |
+| m7i.8xlarge | 1.6128 | 1,177 | 32 vCPU, 128 GB. Only if a client's corpus demands it |
 
-Everything else is identical to the office build: same compose file, same images, same manifest. The
-cloud difference is the profile, not the software.
+Prices verified from the AWS Price List API in us-east-1, on-demand Linux.
+
+**Why this size and not a small one.** This single instance runs the whole cloud stack at once:
+Postgres, LiteLLM, the router, Qdrant, two Text Embeddings Inference services, Docling ingestion, the
+assistant API, the client app, the agent runtime, the MCP gateway, workflows, and the audit sink.
+Two of those are heavy in ways a small box cannot absorb. Docling runs layout, table, and OCR models
+on CPU, which wants cores. Qdrant serves vectors from RAM, which wants memory. The architecture pass
+sized 16 vCPU and 64 GB for a 10-user, 50,000-document deployment, so building on that shape means
+the development box and the thing we sell are the same thing.
+
+**An earlier draft named m7i.xlarge and left the choice open.** That was wrong twice: 4 vCPU and 16 GB
+will stall the moment Docling meets a two-column scanned fee schedule, and an open question at the top
+of a build is a decision waiting to be made badly at 2am.
+
+**Cost, with the credits.** Running continuously, 589 a month against 5,000 of Activate credits is
+about eight months. Stopped overnight and at weekends, eight hours a day and five days a week, it is
+roughly 142 a month, which is about three years of credits. The credits expire in October 2028.
+**Stop the instance when you are not building.** That rule has already been broken once.
+
+**Disks.** 200 GB gp3, about 16 a month. Docling's image and its models are measured in gigabytes,
+bge-m3 and the reranker are 2.3 GB each, and Postgres and Qdrant both grow. A 30 GB volume fails at
+the first model download.
+
+**The old box is retired.** Terminate `i-0887564c9fe06b0b5` and release the elastic IP when the new
+instance is up. Nothing unique lives on it: the repository is on GitHub, the rendered environment file
+regenerates from the manifest, and its audit rows are demonstration data. A stopped instance still
+bills for its volume and its address, so leaving it parked costs money for nothing.
+
+**This is the cloud reference instance.** The office build's GPU work happens later, on different
+hardware, in the Novus account. No GPU here, and none planned.
+
+Everything else is identical between the two builds: same compose file, same images, same manifest.
+The cloud difference is the profile, not the software.
 
 ---
 
@@ -472,8 +503,9 @@ the build plan records why.
 ## 16. The first ten minutes of the build session
 
 1. State the account and the instance before anything else. The build happens in **878451098165**
-   (Office Inference), on a new **m7i.xlarge**.
-2. Decide whether the existing t3.large box is reused or a fresh instance is launched, and say which.
+   (Office Inference), on a fresh **m7i.4xlarge**, 16 vCPU, 64 GB, 200 GB gp3, no GPU.
+2. Launch it in a private subnet per section 5, or in a public subnet with SSH restricted to the
+   known address for the first days. The t3.large is retired, not reused.
 3. Render a manifest and prove the gateway produces a model list. That single check would have caught
    the empty-model-list defect before anything was built on top of it.
 4. Run `python3 tests/test_audit_verify.py` and `python3 scripts/validate_manifests.py`. Both must
