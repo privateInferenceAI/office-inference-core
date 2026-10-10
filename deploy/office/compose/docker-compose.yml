@@ -81,6 +81,74 @@ services:
         condition: service_started
     networks: [ai-net]
 
+  qdrant:
+    # Vector store. A version tag rather than a digest because this is stable infrastructure and a
+    # patch release here is a tested upgrade path, not a moving target. The client library in the
+    # ingestion image is pinned to the same minor version on purpose: a client newer than its server
+    # is a class of bug worth avoiding by construction.
+    image: qdrant/qdrant:v1.12.4   # digest fallback sha256:241edb9d7778327516ef218f8c74e1bd61b5ea42cd4f193cb8d0896199705636
+    container_name: qdrant
+    restart: unless-stopped
+    volumes:
+      - ${OI_ROOT}/data/qdrant:/qdrant/storage
+    networks: [ai-net]
+    # no ports: reachable only on ai-net
+
+  embeddings:
+    # bge-m3 through Text Embeddings Inference, CPU build. Multilingual, 1024 dimensions, and good
+    # enough on a 2 vCPU box for a few dozen chunks at a time. On the GPU tier this becomes the same
+    # image with a CUDA tag and the same model, so nothing upstream changes.
+    image: ghcr.io/huggingface/text-embeddings-inference@sha256:8de25e75ce39617f17f2f6c77d60a4f75b65e779ed5005420eb1400072a15c1c  # cpu-1.8, pinned 2026-10-10
+    container_name: embeddings
+    restart: unless-stopped
+    command: ["--model-id", "BAAI/bge-m3", "--port", "80", "--max-client-batch-size", "16"]
+    environment:
+      HF_HOME: /data
+    volumes:
+      - ${OI_ROOT}/data/hf:/data
+    networks: [ai-net]
+
+  reranker:
+    # bge-reranker-v2-m3. The difference between "a passage contains the words" and "a passage
+    # answers the question", which is the difference between a citation a person trusts and one
+    # they stop believing. Same image, different model.
+    image: ghcr.io/huggingface/text-embeddings-inference@sha256:8de25e75ce39617f17f2f6c77d60a4f75b65e779ed5005420eb1400072a15c1c  # cpu-1.8, pinned 2026-10-10
+    container_name: reranker
+    restart: unless-stopped
+    command: ["--model-id", "BAAI/bge-reranker-v2-m3", "--port", "80", "--max-client-batch-size", "16"]
+    environment:
+      HF_HOME: /data
+    volumes:
+      - ${OI_ROOT}/data/hf:/data
+    networks: [ai-net]
+
+  docs:
+    # Ingestion and retrieval, as a tool rather than a service: run it when there is something to do.
+    # It holds the retrieval path that the assistant API will call in Phase 4, so the logic is written
+    # once and reused rather than reimplemented behind an HTTP layer.
+    build:
+      context: ${OI_ROOT}
+      dockerfile: services/ingestion/Dockerfile
+    container_name: docs
+    profiles: ["tools"]
+    user: "${HOST_UID}:${HOST_GID}"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DEPLOYMENT_ID: ${DEPLOYMENT_ID}
+      DOCS_DIR: /app/documents
+      QDRANT_URL: http://qdrant:6333
+      EMBEDDINGS_URL: http://embeddings:80
+      RERANKER_URL: http://reranker:80
+      GATEWAY_URL: http://litellm:4000
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+    volumes:
+      - ${OI_ROOT}/documents:/app/documents:ro
+      - ${OI_ROOT}/db/migrations:/app/migrations:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [ai-net]
+
   audit:
     # The audit sink, as a tool rather than a service: it runs when called and exits. It is
     # where every other component will record model calls, tool calls, and approvals, so the

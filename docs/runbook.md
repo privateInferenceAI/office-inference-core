@@ -497,10 +497,136 @@ or our word.
 5. `export` writes JSONL plus a manifest.
 6. `verify` passes on the untouched file and fails on the edited one.
 
-## Phase 3 — Documents  *(outline)*
+## Phase 3 — Documents
 
-Docling ingestion, chunking with access labels, Qdrant, TEI embeddings and reranker. Ends with a
-cited answer and a logged refusal.
+**Goal.** Ask a question across files and get an answer with a citation you can check: document, page,
+and the passage behind it. Plus a refusal that is recorded when someone asks for something they may
+not read.
+
+**Why this phase is the whole product in miniature.** Everything else is plumbing around it. If a
+citation is wrong, or if a restricted passage can reach a model, nothing built later matters.
+
+### 3.1 Start the document services
+
+    cd /opt/oi-core
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env up -d qdrant embeddings reranker
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env ps
+
+**Expect a long first start.** The two model servers download bge-m3 and bge-reranker-v2-m3, about
+4.5 GB together, into `data/hf`. Watch them:
+
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env logs -f embeddings
+
+You are waiting for a line about the model being ready and listening on port 80.
+
+**Why three services rather than embedding inside the application:**
+
+- **Qdrant** because a vector store answers "which passages are near this question", and because
+  access labels live in the payload, so the filter that enforces permissions runs in the same query
+  that finds the passages. Filtering after the search would mean retrieving a restricted passage and
+  then deciding not to show it, which is one bug away from leaking it.
+- **Embeddings, through Text Embeddings Inference**, because loading torch inside every tool that
+  needs a vector would make each tool a gigabyte and a half. TEI keeps that cost in one container, and
+  the GPU tier swaps the image tag and keeps the same HTTP interface.
+- **A reranker** because vector search finds passages that share vocabulary with the question, which
+  is not the same as passages that answer it. Reranking is what makes a citation worth clicking.
+
+**Memory, honestly:** bge-m3 and the reranker want roughly 2 GB each alongside llama.cpp, Postgres, and
+the gateway. On an 8 GB box that is tight. If something gets killed, stop llama.cpp while ingesting:
+
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env stop llamacpp
+
+### 3.2 Apply the migration
+
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env run --rm audit migrate
+
+Expected: `applied 003_ingest_manifest.sql`.
+
+**Why a table rather than a state file on disk:** a JSON file in a mounted directory ends up owned by
+whichever user the container ran as, which is the trap that broke a `git pull` earlier in this build.
+The database already exists, already has an owner, and survives container replacement.
+
+### 3.3 Put documents in place
+
+    mkdir -p documents/company documents/executive
+    python3 tests/fixtures/make_sample_pdf.py > documents/company/vendor-agreement.pdf
+    ls -R documents
+
+Expected: three markdown files already in the repo, plus a three-page PDF you just generated.
+
+**Why generate a PDF:** markdown can only ever cite page 1. The fixture has a different fact on each
+page, so a citation to page 3 is either right or it is visibly wrong.
+
+**The folder is the permission.** `documents/company/` is readable by every role and
+`documents/executive/` only by admin. Adding a restricted class of documents means creating a folder
+and adding the label to `ROLE_ACLS` in `services/ingestion/common.py`.
+
+### 3.4 Ingest
+
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env --profile tools build docs
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env run --rm docs ingest.py
+
+Expected, roughly:
+
+      add company/expense-policy.md: 1 page(s), 2 chunk(s), acl=company
+      add company/vendor-agreement.pdf: 3 page(s), 4 chunk(s), acl=company
+      ...
+    added 4, changed 0, removed 0, skipped 0, failed 0
+    points in company_docs: 8
+
+**Then run it again, which is the point:**
+
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env run --rm docs ingest.py
+
+Expected: `added 0 ... skipped 4`. A run with nothing to do costs nothing, which is what makes it safe
+to put on a timer. Delete a document and re-run, and its points are removed rather than lingering as
+an answer nobody can find the source of.
+
+### 3.5 Retrieve, without a model
+
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env run --rm docs ask.py \
+      --role staff --question "how long do we have to report a data breach?" --retrieve-only
+
+Expected: the vendor agreement, page 3, near the top. Nothing is sent to a model, so this is the step
+to debug retrieval on.
+
+### 3.6 Ask, and check the citation
+
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env run --rm docs ask.py \
+      --role staff --question "how long do we have to report a data breach?" --max-tokens 800
+
+Expected: an answer citing the passage, then a Sources list naming the document and page.
+
+**If the answer is empty**, the model spent the budget thinking. Qwen3 reasons before it answers, so
+raise `--max-tokens`. This is the same behaviour Phase 1 documented, now with a bill attached.
+
+**Why citations are structured this way:** the chunk carries its page because chunks never cross a
+page boundary, and the prompt numbers each passage so the model can point at one. A citation you can
+open and check is the difference between a tool people trust and a tool they quietly stop using.
+
+### 3.7 Ask for something you may not read
+
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env run --rm docs ask.py \
+      --role staff --question "what is the partner draw?" --doc executive/comp-memo.md
+
+Expected: `denied: executive/comp-memo.md is not readable by role 'staff'`, exit code 3.
+
+Then confirm the refusal is on the record:
+
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env run --rm audit list --limit 10
+
+Expected: an `access` event with outcome `denied`.
+
+**Why this matters more than the answer:** the restricted document was never retrieved, so it never
+reached a model. The denial is a filter that ran, not an apology printed afterwards.
+
+### 3.8 Verification, which ends the phase
+
+1. A question returns an answer with a document and page citation.
+2. The cited page actually contains the fact (open the PDF and look).
+3. A document outside the role is refused, and the refusal appears in the audit log.
+4. Re-running ingestion changes nothing.
+5. Deleting a document removes its points on the next run.
 
 ## Phase 4 — Assistant API  *(outline)*
 

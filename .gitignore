@@ -23,3 +23,6 @@ models/
 __pycache__/
 *.pyc
 .venv/
+
+# client documents dropped in for ingestion
+documents/**/*.pdf

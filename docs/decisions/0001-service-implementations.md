@@ -1,7 +1,22 @@
 # 0001. Service implementations
 
-Date: 2026-10-09
+Date: 2026-10-09, revised 2026-10-10
 Status: accepted, with named open risks
+
+## Revision, 2026-10-10: the parsing backend
+
+Docling was the original choice for document parsing. Phase 3 ships its own extractors instead
+(pypdf for PDF, python-docx for Word, a text extractor for html, markdown, text, and csv), with the
+parser behind a single interface in `services/ingestion/common.py`.
+
+The reason is the development box, not the design. Docling brings PyTorch, which is roughly 2 GB of
+image and slow enough on two vCPUs to make the phase miserable before it makes it better. The builtin
+extractors give page numbers, which is what citations need, and they run in seconds.
+
+Docling remains the target for what the builtin extractors cannot do: scanned documents, complex
+layouts, and OCR. Because parsing sits behind `PARSERS` in one dictionary, adding it is a backend and
+a setting rather than a rewrite. Revisit when the GPU box exists or when a client hands us a scanned
+document, whichever comes first.
 
 ## Context
 
