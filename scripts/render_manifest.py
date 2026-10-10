@@ -118,6 +118,10 @@ def main() -> int:
     env.setdefault("POSTGRES_PASSWORD", secrets.token_urlsafe(24))
     env.setdefault("LITELLM_MASTER_KEY", "sk-" + secrets.token_urlsafe(32))
     env.setdefault("GATEWAY_PORT", "4000")
+    # The audit tool runs as this user so exported evidence belongs to the operator rather than
+    # to root. Files a client is meant to keep should not need sudo to read or copy.
+    env.setdefault("HOST_UID", str(os.getuid()))
+    env.setdefault("HOST_GID", str(os.getgid()))
 
     local_models = [e.get("local", "") for e in (manifest.get("models") or {}).values() if e]
     primary = next((m for m in local_models if m), "")

@@ -30,6 +30,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 import psycopg
+from psycopg.types.json import Jsonb
 
 DSN = os.environ.get("DATABASE_URL")
 MIGRATIONS_DIR = Path(os.environ.get("MIGRATIONS_DIR", "/app/migrations"))
@@ -128,8 +129,9 @@ def cmd_record(args) -> int:
             values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             returning id, ts_iso, row_hash""",
             (args.type, args.actor, args.actor_role, args.deployment_id, args.data_class,
-             args.outcome, args.tool, args.model, args.request_id, approval, payload_sha,
-             payload if args.store_payload else None))
+             args.outcome, args.tool, args.model, args.request_id,
+             Jsonb(approval) if approval is not None else None, payload_sha,
+             Jsonb(payload) if (payload is not None and args.store_payload) else None))
         row = cur.fetchone()
     print(json.dumps({"id": row[0], "ts_iso": row[1], "row_hash": row[2],
                       "payload_sha256": payload_sha}, indent=2))
@@ -183,7 +185,7 @@ def cmd_backfill(args) -> int:
                   (occurred_at, event_type, actor, actor_role, deployment_id, data_class,
                    outcome, model, request_id, payload_sha256, payload)
                 values (%s,'model_call',%s,'gateway',%s,'internal','ok',%s,%s,%s,%s)""",
-                (started, actor, DEPLOYMENT_ID, model, request_id, payload_sha, payload))
+                (started, actor, DEPLOYMENT_ID, model, request_id, payload_sha, Jsonb(payload)))
             inserted += 1
     print(f"backfilled {inserted} model call(s); {len(rows) - inserted} skipped")
     return 0

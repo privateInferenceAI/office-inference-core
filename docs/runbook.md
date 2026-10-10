@@ -440,6 +440,10 @@ tool calls and approvals, in one chain, exportable as one artifact.
 
 ### 2.5 Export the day, then try to break it
 
+Create the exports directory as yourself first. The audit tool runs as your user on purpose, so that
+the files it produces belong to you rather than to root:
+
+    mkdir -p exports
     docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
       run --rm audit export --date "$(date -u +%F)"
     ls -l exports/$(date -u +%F)/
@@ -450,14 +454,25 @@ Expected: `ok ... chain intact`.
 
 Now break it on purpose, because an integrity check that has never failed is not a check:
 
-    cd exports/$(date -u +%F)
-    cp audit-events.jsonl audit-events.jsonl.bak
-    sed -i 's/"actor":"anthony"/"actor":"not-anthony"/' audit-events.jsonl
     cd /opt/oi-core
+    cp -r exports/$(date -u +%F) /tmp/tamper
+    sed -i 's/"actor":"anthony"/"actor":"not-anthony"/' /tmp/tamper/audit-events.jsonl
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      run --rm -v /tmp/tamper:/app/exports audit verify /app/exports/audit-events.jsonl
+
+Expected: `FAIL`, with `row_hash does not match the row contents` and `the file hash does not match the
+manifest`. Try deleting a line instead of editing one and it also reports `prev_hash does not match the
+previous row` and an event count mismatch.
+
+**Work on a copy, and learn from why:** an in-place `sed` on an export that is owned by root fails
+silently if you are not watching stderr, and the verification then correctly reports the *untouched*
+file as intact. That is exactly the false confidence this step exists to prevent, and it is the reason
+the audit tool runs as your user.
+
+Then confirm the real export is still intact:
+
     docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
       run --rm audit verify /app/exports/$(date -u +%F)/audit-events.jsonl
-
-Expected: `FAIL` with the line number and the reason. Restore the backup afterwards.
 
 **Why this is the whole point of the phase:** the export is what you hand over. A client, an auditor,
 or a lawyer can recompute the chain and see that nothing was altered, without trusting our database
