@@ -16,6 +16,7 @@ deploy/**/.terraform/
 data/
 backups/
 logs/
+exports/
 
 # python
 __pycache__/
