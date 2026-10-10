@@ -1,0 +1,112 @@
+# Continuous integration: lint, tests, manifest validation, and the image build.
+#
+# This is QLT-CI-001. Its verification is that a deliberately broken manifest fails CI, so one job
+# exists only to prove the validator refuses one. A check whose two sides come from a single source
+# cannot fail, and this repository has already paid for that lesson once, with an "anchor" check
+# that compared an export against itself.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-test:
+    name: lint, test, validate (python ${{ matrix.python }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.12 is what the images and Ubuntu 24.04 ship. 3.10 is the floor the scripts claim to
+        # support, and the annotation syntax in tests/ only works there because of PEP 604.
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: install test dependencies
+        run: python3 -m pip install -r requirements-dev.txt
+
+      - name: lint python
+        run: python3 -m compileall -q scripts services tests
+
+      - name: lint shell
+        run: |
+          docker run --rm -v "$PWD:/mnt" -w /mnt \
+            koalaman/shellcheck@sha256:bb596a0d169b85ddd81d8b6d3a2ff6d5baf5fca10b97f575ebc647c3dff62b3d \
+            deploy/office/install.sh
+
+      - name: unit tests
+        run: python3 -m pytest tests/ -v
+
+      - name: the audit verifier regression script, run standalone
+        run: python3 tests/test_audit_verify.py
+
+      - name: validate every manifest
+        run: python3 scripts/validate_manifests.py
+
+      - name: the requirements register is well formed
+        run: python3 scripts/check_requirements.py
+
+      - name: every manifest renders a model list
+        run: |
+          set -euo pipefail
+          for manifest in manifests/*.yaml; do
+            out="$(mktemp -d)"
+            python3 scripts/render_manifest.py --manifest "$manifest" --out "$out" >/dev/null
+            grep -q 'model_name:' "$out/litellm.yaml" || {
+              echo "::error file=$manifest::$manifest rendered an empty model list"
+              exit 1
+            }
+            rm -rf "$out"
+          done
+          echo "every manifest rendered at least one gateway entry"
+
+      - name: the compose file is valid with a rendered env file
+        run: |
+          set -euo pipefail
+          out="$(mktemp -d)"
+          python3 scripts/render_manifest.py --manifest manifests/dev-office.yaml --out "$out" >/dev/null
+          docker compose --env-file "$out/env" -f deploy/office/compose/docker-compose.yml config -q
+          echo "compose config is valid"
+
+  broken-manifest-must-fail:
+    name: the gate can fail
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: install test dependencies
+        run: python3 -m pip install -r requirements-dev.txt
+
+      - name: a deliberately broken manifest is refused
+        run: |
+          set -euo pipefail
+          if python3 scripts/validate_manifests.py tests/fixtures/broken-manifest.yaml; then
+            echo "::error::the validator accepted tests/fixtures/broken-manifest.yaml. It carries an unknown pack and a global inference profile under a regulated compliance profile, so either the rule was removed or the fixture was quietly repaired."
+            exit 1
+          fi
+          echo "the validator refused the broken manifest, as it must"
+
+  build-images:
+    name: build the audit image
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: build services/audit
+        run: docker build -f services/audit/Dockerfile -t oi-audit:ci .

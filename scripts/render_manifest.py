@@ -160,9 +160,10 @@ def main() -> int:
     env_path.write_text("".join(f"{k}={v}\n" for k, v in sorted(env.items())))
     env_path.chmod(0o600)
 
+    gateway = build_litellm_config(manifest, env)
     (out_dir / "litellm.yaml").write_text(
         "# Generated from the manifest by scripts/render_manifest.py. Do not edit by hand.\n"
-        + yaml.safe_dump(build_litellm_config(manifest, env), sort_keys=False)
+        + yaml.safe_dump(gateway, sort_keys=False)
     )
     (out_dir / "services.txt").write_text(
         "# Services declared by the chosen packs. Informational until the installer consumes it.\n"
@@ -173,7 +174,8 @@ def main() -> int:
     print(f"rendered {manifest_path.name} -> {out_dir}")
     print(f"  profile      {manifest['profile']}")
     print(f"  packs        {', '.join(manifest['packs'])}")
-    print(f"  roles        {', '.join(models) if models else '(none)'}")
+    print(f"  local models {', '.join(models) if models else '(none)'}")
+    print(f"  gateway      {len(gateway['model_list'])} model entries")
     print(f"  secrets      {'generated' if generated else 'reused from the existing env file'}")
     print(f"  env file     {env_path} (mode 600)")
     return 0
