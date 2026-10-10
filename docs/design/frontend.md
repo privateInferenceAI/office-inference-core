@@ -92,3 +92,5 @@ and it keeps our client-facing surface small enough to be excellent.
 - Keyboard-first, because front desk staff type faster than they click.
 - Large default text. Many users are over 50, and this is a workplace tool, not a toy.
 - No dark patterns, no upsells, no notifications that create anxiety.
+
+

@@ -70,3 +70,6 @@ Every row is a decision to keep watching, not a commitment.
 - **We do not adopt anything on the office box that phones home.** That check comes before
   features.
 - **We do not rewrite for a benchmark.** A better score is not a client outcome.
+
+
+
