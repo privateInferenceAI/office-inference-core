@@ -32,6 +32,10 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           cache: pip
+          # Named explicitly. The default cache key looks for requirements.txt or pyproject.toml,
+          # neither of which exists here, and setup-python fails the job rather than skipping the
+          # cache when it cannot find one.
+          cache-dependency-path: requirements-dev.txt
 
       - name: install test dependencies
         run: python3 -m pip install -r requirements-dev.txt
@@ -89,6 +93,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: requirements-dev.txt
 
       - name: install test dependencies
         run: python3 -m pip install -r requirements-dev.txt
