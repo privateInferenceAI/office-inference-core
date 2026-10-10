@@ -1,0 +1,426 @@
+# The requirements register.
+#
+# Every item that must be true before this system can be sold, deployed, and supported. The build
+# is not finished while any item is open. scripts/check_requirements.py fails the build when an item
+# has no phase, no verification, an unknown status, or a waiver without a reason.
+#
+# phase:   C0..C9 for the cloud build, OFFICE for the office build, DEPLOY for per-deployment work,
+#          BIZ for commercial and legal work, NEVER for decisions not to build something.
+# status:  open | verified | waived  (waived requires waiver_reason)
+# verify:  the test that would FAIL if the requirement were not met. If you cannot write one, the
+#          requirement is a wish and belongs in status: open with a note.
+
+items:
+  # ---------------------------------------------------------------- identity and access
+  - id: SEC-AUTH-001
+    title: Roles come from an authenticated session, never a caller-supplied parameter
+    tier: [cloud, hosted]
+    phase: C7
+    verify: with no token and with a forged role header, the API refuses; both attempts appear in audit_events
+    status: open
+  - id: SEC-AUTH-002
+    title: The audit CLI refuses a hand-typed actor outside an explicit development mode
+    tier: [cloud, office]
+    phase: C1
+    verify: running record --actor someone without the dev flag exits non-zero
+    status: open
+  - id: SEC-KEY-001
+    title: Per-role virtual keys with hard budgets, one set per deployment
+    tier: [cloud, office, hosted]
+    phase: C1
+    verify: exceeding a role budget is refused, not merely alerted, and the refusal is audited
+    status: open
+  - id: SEC-KEY-002
+    title: The LiteLLM master key is used for administration only
+    tier: [cloud, office]
+    phase: C1
+    verify: grep of every service's environment shows no master key outside the admin path
+    status: open
+  - id: SEC-LEAST-001
+    title: The role we hold in a client account is revocable and cannot read documents
+    tier: [cloud, hosted]
+    phase: C7
+    verify: assume the role and attempt to read an object in the documents bucket; access denied
+    status: open
+  - id: SEC-SECRET-001
+    title: Secrets live in Secrets Manager with a rotation procedure
+    tier: [cloud, hosted]
+    phase: C7
+    verify: rotate one secret and confirm the service picks it up without a redeploy
+    status: open
+  - id: SEC-TLS-001
+    title: TLS terminates at the edge and nothing else listens publicly
+    tier: [cloud, hosted]
+    phase: C7
+    verify: an external port scan of the instance address returns nothing, and HTTP redirects to HTTPS
+    status: open
+  - id: SEC-ACL-001
+    title: Role-based access filtering happens inside the search, before any model sees a passage
+    tier: [cloud, office]
+    phase: C2
+    verify: a staff-role query for executive content returns a denial and zero restricted passages in the trace
+    status: open
+  - id: SEC-ACL-002
+    title: Per-user and per-group document permissions beyond two folder roles
+    tier: [cloud, hosted]
+    phase: C3
+    verify: a user outside a document's group cannot retrieve it by any query
+    status: open
+  - id: SEC-REDACT-001
+    title: PII is redacted before any frontier-bound request leaves, and the redaction is recorded
+    tier: [cloud, hosted]
+    phase: C2
+    verify: a question containing an SSN reaches Bedrock with the pattern replaced, and the audit shows the data class
+    status: open
+  - id: SEC-INJECT-001
+    title: Prompt injection from document content cannot change the lane or the answer's boundary
+    tier: [cloud, office, hosted]
+    phase: C2
+    verify: a document containing an instruction to reveal other documents produces a refusal
+    status: open
+
+  # ---------------------------------------------------------------- audit and evidence
+  - id: AUD-CHAIN-001
+    title: The audit chain is append-only and every row is hash-chained
+    tier: [cloud, office, hosted]
+    phase: C1
+    verify: an UPDATE and a DELETE on audit_events both raise; tests/test_audit_verify.py passes
+    status: verified
+  - id: AUD-ANCHOR-001
+    title: The chain head is anchored off the machine on a schedule
+    tier: [cloud, office, hosted]
+    phase: C1
+    verify: verify --anchor against an anchor written before a deliberate row deletion fails
+    status: open
+  - id: AUD-PAYLOAD-001
+    title: A stored payload is verified against its own hash
+    tier: [cloud, office, hosted]
+    phase: C1
+    verify: rewriting a payload in an export makes verify fail
+    status: verified
+  - id: AUD-PURGE-001
+    title: A retention purge writes a tombstone carrying the hash before and after
+    tier: [cloud, office, hosted]
+    phase: C1
+    verify: run a purge under the maintenance setting and confirm a tombstone row with both hashes exists
+    status: open
+  - id: AUD-MODE-001
+    title: A per-data-class content mode of hash, redacted, or full, plus prompt and completion hashes
+    tier: [cloud, hosted]
+    phase: C1
+    verify: in full mode a stored prompt hash matches the recorded prompt; in hash mode no content is stored
+    status: open
+  - id: AUD-EXPORT-001
+    title: The daily export ships to the client's bucket under Object Lock
+    tier: [cloud, hosted]
+    phase: C1
+    verify: delete an exported object as root and confirm it is refused
+    status: open
+  - id: AUD-LOCK-001
+    title: The Object Lock mode and retention period are chosen deliberately and disclosed
+    tier: [cloud, hosted]
+    phase: C7
+    verify: the contract and the bucket configuration name the same mode and period
+    status: open
+  - id: AUD-RETAIN-001
+    title: Audit retention meets the compliance profile, six years for a broker-dealer
+    tier: [cloud, hosted]
+    phase: C1
+    verify: a sec-17a4 manifest with 365 days fails validation
+    status: verified
+
+  # ---------------------------------------------------------------- data lifecycle
+  - id: DATA-RETAIN-001
+    title: Retention and deletion are defined for documents and conversations, not only the audit log
+    tier: [cloud, office, hosted]
+    phase: C2
+    verify: a document past its retention is gone from Qdrant, from the object store, and from the answer
+    status: open
+  - id: DATA-PURGE-001
+    title: A client-requested purge deletes content everywhere it is stored, including the vector index
+    tier: [cloud, office, hosted]
+    phase: C2
+    verify: after a purge, the same question returns no passage from the deleted document
+    status: open
+  - id: DATA-HOLD-001
+    title: Legal hold blocks a purge
+    tier: [cloud, hosted]
+    phase: C2
+    verify: a purge on a held document is refused and the refusal is recorded
+    status: open
+  - id: DATA-EXIT-001
+    title: Termination destroys client data and produces evidence that it happened
+    tier: [cloud, hosted, office]
+    phase: DEPLOY
+    verify: a teardown run produces a signed destruction record naming every store and its state
+    status: open
+  - id: DATA-RESIDENCY-001
+    title: Residency is enforced by the validator, not documented
+    tier: [cloud, hosted]
+    phase: C1
+    verify: a global inference profile under hipaa fails validation; a remote-inference compliance manifest with no residency fails
+    status: verified
+
+  # ---------------------------------------------------------------- retrieval quality
+  - id: RET-PARSE-001
+    title: Scanned documents, tables, and reading order are handled by Docling
+    tier: [cloud, office, hosted]
+    phase: C2
+    verify: a scanned fee-schedule fixture returns correct numbers in a table, and a scanned page returns text rather than nothing
+    status: open
+  - id: RET-HYBRID-001
+    title: Hybrid search returns exact identifiers that vector search alone misses
+    tier: [cloud, office, hosted]
+    phase: C2
+    verify: a golden question containing a procedure code retrieves the right passage with hybrid on and fails with it off
+    status: open
+  - id: RET-CITE-001
+    title: Every citation is verified against the retrieved set, the page, and entailment
+    tier: [cloud, office, hosted]
+    phase: C2
+    verify: an invented citation index is rejected; an unsupported sentence is marked, not silently kept
+    status: open
+  - id: RET-VERSION-001
+    title: A superseded document is not cited while its replacement exists
+    tier: [cloud, office, hosted]
+    phase: C2
+    verify: with two versions indexed, the answer cites the current one
+    status: open
+  - id: RET-DUPE-001
+    title: Near-duplicate documents are detected at ingest
+    tier: [cloud, office, hosted]
+    phase: C2
+    verify: the same document under two filenames is flagged rather than indexed twice
+    status: open
+  - id: RET-FORMAT-001
+    title: Email, spreadsheets, and slides are ingested
+    tier: [cloud, office, hosted]
+    phase: C2
+    verify: one file of each format is ingested and answerable
+    status: open
+
+  # ---------------------------------------------------------------- inference and serving
+  - id: INF-ROLE-001
+    title: Model roles are read from the manifest, not hardcoded
+    tier: [cloud, office, hosted]
+    phase: C3
+    verify: changing the analyst role in the manifest changes the model the API calls
+    status: open
+  - id: INF-STREAM-001
+    title: Responses stream
+    tier: [cloud, hosted]
+    phase: C3
+    verify: the first token arrives before the last is generated
+    status: open
+  - id: INF-TIMEOUT-001
+    title: Timeouts, retries, and queueing are bounded, and throttling degrades rather than hanging
+    tier: [cloud, office, hosted]
+    phase: C3
+    verify: with the provider throttling, requests return a clear degraded answer within the timeout, and it is recorded
+    status: open
+  - id: INF-ROUTE-001
+    title: Routing escalates on the three mechanical triggers only
+    tier: [cloud, office, hosted]
+    phase: C3
+    verify: a question that the cheap tier answers poorly does not escalate on its own judgement
+    status: open
+  - id: INF-DEPRECATE-001
+    title: Model deprecation is owned, detected, and priced
+    tier: [cloud, office, hosted]
+    phase: C1
+    verify: a check fails when a manifest names a model past its end-of-life date
+    status: open
+
+  # ---------------------------------------------------------------- operations
+  - id: OPS-ALARM-001
+    title: The five alarms page and nothing else does
+    tier: [cloud, hosted]
+    phase: C8
+    verify: each alarm is triggered deliberately once and produces a notification
+    status: open
+  - id: OPS-BACKUP-001
+    title: Backups restore, proven by a drill
+    tier: [cloud, hosted, office]
+    phase: C8
+    verify: a restore from backup produces a working system, and the elapsed time is recorded as the RTO
+    status: open
+  - id: OPS-RTO-001
+    title: Recovery objectives are measured, not asserted
+    tier: [cloud, hosted, office]
+    phase: C8
+    verify: the RTO and RPO in the contract match the last drill's recorded numbers
+    status: open
+  - id: OPS-UPDATE-001
+    title: Releases are signed and a bad one rolls back
+    tier: [cloud, office]
+    phase: C8
+    verify: installing a previous release after a deliberate failure restores service
+    status: open
+  - id: OPS-CVE-001
+    title: Image and dependency vulnerability scanning runs on a schedule
+    tier: [cloud, office, hosted]
+    phase: C8
+    verify: a scan report exists for the current images and the LiteLLM version is recorded beside its pin
+    status: open
+  - id: OPS-DRIFT-001
+    title: A deployment reports its manifest and image digests so drift is detectable
+    tier: [cloud, office, hosted]
+    phase: C8
+    verify: changing a pin on the box makes the reported state differ from the repository
+    status: open
+  - id: OPS-SUPPORT-001
+    title: Support access is SSM only, consented, and logged
+    tier: [cloud, office, hosted]
+    phase: C8
+    verify: no SSH key exists for a client box, and an SSM session appears in the client's CloudTrail
+    status: open
+  - id: OPS-COST-001
+    title: Cost reporting reads the Marketplace provider line, not only the Bedrock service
+    tier: [cloud, hosted]
+    phase: C8
+    verify: a deployment using Claude shows a non-zero cost in the report
+    status: open
+  - id: OPS-INCIDENT-001
+    title: There is an incident response runbook with notification clocks
+    tier: [cloud, hosted, office]
+    phase: C8
+    verify: a tabletop walkthrough of a data-exposure scenario produces a timeline that meets the stated clock
+    status: open
+  - id: OPS-ONCALL-001
+    title: Someone can be reached 24x7, or the promise is reduced to what one person can keep
+    tier: [cloud, hosted]
+    phase: BIZ
+    verify: the support terms state an acknowledgement window that was tested for one week
+    status: open
+
+  # ---------------------------------------------------------------- quality and engineering
+  - id: QLT-GOLDEN-001
+    title: Sixty golden questions exist per vertical with hard-fail categories
+    tier: [cloud, office, hosted]
+    phase: C8
+    verify: the suite runs and blocks a release when a hard-fail category triggers
+    status: open
+  - id: QLT-TEST-001
+    title: Every service ships unit and integration tests that run without a database or a GPU
+    tier: [cloud, office, hosted]
+    phase: C0
+    verify: python3 -m pytest tests/ passes on a clean checkout
+    status: open
+  - id: QLT-CI-001
+    title: CI lints, tests, validates manifests, and builds images on every push
+    tier: [cloud, office, hosted]
+    phase: C0
+    verify: a deliberately broken manifest fails CI
+    status: open
+  - id: QLT-ACCEPT-001
+    title: Every new deployment runs an acceptance test
+    tier: [cloud, office, hosted]
+    phase: C8
+    verify: the acceptance script passes on a freshly created deployment
+    status: open
+  - id: QLT-LOAD-001
+    title: The system is load tested with ingestion running
+    tier: [cloud, hosted]
+    phase: C8
+    verify: a documented concurrency test completes within its latency budget
+    status: open
+
+  # ---------------------------------------------------------------- commercial and legal
+  - id: BIZ-LICENSE-001
+    title: Every component's licence permits what we sell
+    tier: [cloud, office, hosted]
+    phase: BIZ
+    verify: a written answer from n8n, or the component replaced
+    status: open
+  - id: BIZ-BAA-001
+    title: Anthropic models on Bedrock are covered by the AWS BAA for PHI, or they are not used for PHI
+    tier: [cloud]
+    phase: BIZ
+    verify: a written answer from AWS before the first medical proposal
+    status: open
+  - id: BIZ-LEGAL-001
+    title: Every regulatory citation in a client document is verified by counsel
+    tier: [cloud, hosted, office]
+    phase: BIZ
+    verify: counsel's written review of the compliance claims
+    status: open
+  - id: BIZ-CONTRACT-001
+    title: There is a service agreement covering data, residency (including cross-Region processing), support, and exit
+    tier: [cloud, hosted, office]
+    phase: BIZ
+    verify: a signed template exists and names the residency behaviour in plain words
+    status: open
+  - id: BIZ-ONBOARD-001
+    title: There is an onboarding checklist
+    tier: [cloud, hosted, office]
+    phase: BIZ
+    verify: the checklist is followed for the first client and every item is completed or explicitly waived
+    status: open
+  - id: BIZ-OFFBOARD-001
+    title: There is an offboarding and handover package, for a client and for a departing employee
+    tier: [cloud, hosted, office]
+    phase: BIZ
+    verify: a rehearsal teardown leaves the client able to run the system and the data export complete
+    status: open
+  - id: BIZ-SUBPROC-001
+    title: There is a subprocessor register
+    tier: [cloud, hosted]
+    phase: BIZ
+    verify: the register lists AWS as a subprocessor with its role and the models in use
+    status: open
+  - id: BIZ-INSURANCE-001
+    title: Errors and omissions and cyber cover are in place
+    tier: [cloud, hosted, office]
+    phase: BIZ
+    verify: a policy document exists before the first regulated client
+    status: open
+  - id: BIZ-PRICE-001
+    title: The two soft-margin offerings are repriced or narrowed
+    tier: [cloud, hosted, office]
+    phase: BIZ
+    verify: Compliant Cloud at 45,000 or one framework only; In-Office entry at 18,000 or dropped
+    status: open
+
+  # ---------------------------------------------------------------- deliberately not built
+  - id: NEVER-GPU-001
+    title: No GPU in the cloud build
+    tier: [cloud, hosted]
+    phase: NEVER
+    verify: not applicable
+    status: waived
+    waiver_reason: cost model depends on CPU only; GPUs are for local inference and local audio
+  - id: NEVER-K8S-001
+    title: No Kubernetes or managed containers
+    tier: [cloud, office, hosted]
+    phase: NEVER
+    verify: not applicable
+    status: waived
+    waiver_reason: one instance and one compose file across both builds
+  - id: NEVER-KB-001
+    title: No managed knowledge base
+    tier: [cloud, hosted]
+    phase: NEVER
+    verify: not applicable
+    status: waived
+    waiver_reason: would fork the retrieval path and put it outside the audit sink
+  - id: NEVER-TENANT-001
+    title: No multi-tenancy
+    tier: [cloud, office]
+    phase: NEVER
+    verify: not applicable
+    status: waived
+    waiver_reason: one deployment per client keeps compliance and exit simple
+  - id: NEVER-SWARM-001
+    title: No agent swarms
+    tier: [cloud, office, hosted]
+    phase: NEVER
+    verify: not applicable
+    status: waived
+    waiver_reason: one runtime, sub-agents at depth one
+  - id: NEVER-USAGE-001
+    title: No usage-based price component
+    tier: [cloud, hosted, office]
+    phase: NEVER
+    verify: not applicable
+    status: waived
+    waiver_reason: inference is 3 to 17 percent of running cost; a usage line invites the wrong audit
