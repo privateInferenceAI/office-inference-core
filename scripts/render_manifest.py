@@ -63,19 +63,40 @@ def pack_services(pack_ids: list[str]) -> list[str]:
 
 
 def build_litellm_config(manifest: dict, env: dict[str, str]) -> dict:
+    """One gateway entry per role per available lane.
+
+    A cloud manifest has no local models and a frontier lane, so the earlier version, which only
+    understood local entries, rendered an empty model list for exactly the deployment we build
+    first. Local entries point at the model server; frontier entries point at Bedrock in the
+    client's own account.
+    """
     models = []
+    frontier_enabled = bool(((manifest.get("lanes") or {}).get("frontier") or {}).get("enabled"))
+    profile = manifest.get("profile")
+
     for role, entry in (manifest.get("models") or {}).items():
-        local = (entry or {}).get("local") or ""
-        if not local:
-            continue
-        models.append({
-            "model_name": role,
-            "litellm_params": {
-                "model": f"openai/{local}",
-                "api_base": "http://llamacpp:8080/v1",
-                "api_key": "not-needed-on-a-private-network",
-            },
-        })
+        entry = entry or {}
+        local = entry.get("local") or ""
+        frontier = entry.get("frontier") or ""
+
+        if local and profile != "cloud":
+            models.append({
+                "model_name": role,
+                "litellm_params": {
+                    "model": f"openai/{local}",
+                    "api_base": "http://llamacpp:8080/v1",
+                    "api_key": "not-needed-on-a-private-network",
+                },
+                "model_info": {"lane": "local"},
+            })
+
+        if frontier and (frontier_enabled or profile == "cloud"):
+            model_id = frontier.split("/", 1)[1] if frontier.startswith("bedrock/") else frontier
+            models.append({
+                "model_name": role if not local else f"{role}-frontier",
+                "litellm_params": {"model": f"bedrock/{model_id}"},
+                "model_info": {"lane": "frontier"},
+            })
     return {
         "model_list": models,
         "litellm_settings": {"drop_params": True, "set_verbose": False},

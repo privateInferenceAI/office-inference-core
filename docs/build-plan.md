@@ -157,9 +157,11 @@ global. So residency is a quality decision with a small price tag, and the manif
 delta so the client chooses it knowingly.
 
 **Routing policy.** By role first, then by residency, then by escalation: start on the cheap tier, and
-escalate to the frontier tier when the task is an agent run, when the question needs multi-document
-synthesis, or when the cheap tier declines for lack of evidence. Every escalation writes an audit
-event with the reason.
+escalate to the frontier tier on three mechanical triggers: the task belongs to the agentic pack's
+list, the request needs synthesis across more than one document, or the user explicitly asks for the
+stronger model. **Nothing about a model's own judgement may move content between lanes.** An earlier
+draft of this plan let the cheap tier escalate itself "for lack of evidence", which hands the data
+boundary to a model's discretion. Every escalation writes an audit event with its trigger.
 
 **The cheap tier is a latency and consistency decision, not a savings one.** Once Haiku 5.5 sits at
 0.11 and 0.10 per million input, the arithmetic collapses: on a 24,000-request profile, Nova Micro for
@@ -285,9 +287,22 @@ meeting lands as hard, and the export is the only artifact they take away.
 | Spend at cap | A runaway loop is burning the client's money |
 
 **Backups and recovery.** RDS automated backups with point-in-time recovery; S3 versioning and Object
-Lock for documents and exports; a restore drill on the calendar. Recovery promises: cloud, five minutes
-of data loss and one hour to recover; office, one hour and four hours. A backup that has never been
-restored is a belief, so the drill is part of the acceptance test rather than a good intention.
+Lock for documents and exports; a restore drill in the acceptance test.
+
+**Recovery objectives are not established yet, and the plan previously asserted numbers it had not
+earned.** An earlier draft promised five minutes of data loss and one hour to recover for the cloud,
+while the reliability pass, working from the same architecture, estimated eight hours and noted that
+neither figure had been demonstrated. Both were guesses. There is no RTO until a restore drill
+produces one, so: run the drill, record what it actually took, and only then put a number in a
+contract. An availability target does not exist either, and should not appear in an agreement before
+a month of measured uptime exists.
+
+**Object Lock mode is a decision with a permanent consequence, and it is not yet made.** Compliance
+mode cannot be shortened or removed by anyone, including the account root, until the retention period
+expires. At 2,190 days, the figure in the example manifest, that is six years in which the bucket
+cannot be deleted at all. Use **Governance** mode with a retention the client agrees to, unless their
+regime demands Compliance, disclose the difference in the contract, and price the storage. A six-year
+immutable audit bucket is a real line item, not a default.
 
 **Updates.** Images digest-pinned with the version recorded beside the pin, signed releases, rollback, a
 maintenance window the client picks, and a scheduled CVE watch. The LiteLLM advisory is why: we pinned
@@ -313,6 +328,8 @@ thresholds of 92 percent retrieval and 85 percent answer support.
 **Four results block a release regardless of the averages:**
 
 - an access-control leak, where a restricted passage reaches the model or the answer
+- **a frontier-bound request that leaves without redaction, or carrying a data class the policy does
+  not permit.** The single boundary control that had no release-blocking test
 - an invented answer to a question the documents do not cover
 - a numeric mismatch against the source
 - a successful prompt injection from document content
@@ -504,7 +521,7 @@ which reuses this plan), **not needed** (deliberate), or **gap** (nothing yet, n
 | # | Item | Where it lands | Status |
 |---|---|---|---|
 | 12.1 | Clock and timezone correctness, NTP, UTC in the audit | C0, verified by a test | gap, assigned |
-| 12.2 | Data residency enforced rather than documented | C1 validator rules, section 3 | covered |
+| 12.2 | Data residency enforced rather than documented | `scripts/validate_manifests.py`: global profiles refused outside none and contractual, Fable refused for regulated profiles, residency required for remote inference | covered, in code |
 | 12.3 | Legal hold | **C1**, blocks a purge for a matter under litigation | gap, assigned |
 | 12.4 | Pilot-light decision for the office box | Office build | office |
 | 12.5 | Quarterly access review | **C8**, an hour, and it answers half of every questionnaire | gap, assigned |

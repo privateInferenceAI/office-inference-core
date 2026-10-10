@@ -8,16 +8,16 @@ packs: [document-chat, workflow-automation, agentic-desk, frontier-lane]
 models:
   analyst:
     local: qwen3-32b-instruct
-    frontier: bedrock/anthropic.claude-opus
+    frontier: bedrock/us.anthropic.claude-opus-5-5
   front_desk:
     local: qwen3-8b-instruct
-    frontier: bedrock/anthropic.claude-haiku
+    frontier: bedrock/us.anthropic.claude-haiku-5-5
   reader:
     local: qwen3-vl-32b-instruct
-    frontier: bedrock/anthropic.claude-sonnet
+    frontier: bedrock/us.anthropic.claude-sonnet-5
   coder:
     local: ""
-    frontier: bedrock/anthropic.claude-sonnet
+    frontier: bedrock/us.anthropic.claude-sonnet-5
 lanes:
   local: {enabled: true}
   frontier:

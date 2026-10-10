@@ -8,13 +8,13 @@ packs: [document-chat, agentic-desk, compliance-pack]
 models:
   analyst:
     local: ""
-    frontier: bedrock/anthropic.claude-sonnet
+    frontier: bedrock/us.anthropic.claude-sonnet-5
   front_desk:
     local: ""
-    frontier: bedrock/anthropic.claude-haiku
+    frontier: bedrock/us.anthropic.claude-haiku-5-5
   reader:
     local: ""
-    frontier: bedrock/anthropic.claude-sonnet
+    frontier: bedrock/us.anthropic.claude-sonnet-5
 lanes:
   frontier:
     enabled: true
@@ -25,6 +25,9 @@ lanes:
     redaction: true
 compliance:
   profile: hipaa
+  # Decides which model forms are allowed. A global inference profile can route a prompt to any
+  # Region, so a regulated deployment names the geography it accepts.
+  data_residency: ["United States"]
   baa_with_provider: true
   baa_with_office_inference: true
   worm_storage: false
