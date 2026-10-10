@@ -54,6 +54,32 @@ lane needs hardware to run on.
   explicitly releases. Every call is recorded with its payload hash.
 - **Office services lane.** Distribution, monitoring, and backup. Present where an office box exists.
 
+### A lane is not a cost tier
+
+These are two different axes, and conflating them makes the tier line sound like a hardware argument
+when it is mostly a data argument.
+
+**Cost tier.** Cheap model for easy work, expensive model for hard work. **Every profile has this.**
+The office build gets its cheap tier from hardware it owns, where the marginal cost of a request is
+electricity. The cloud build gets the same thing from a small provider model, and it does not need a
+card to do it.
+
+The numbers are not close. Nova Micro on Bedrock is about 0.035 USD per million input tokens and
+0.14 USD per million output tokens. A published AWS example puts 22,000 light queries a month, at 800
+input and 60 output tokens each, at under one dollar of inference. The same workload against a
+frontier-class model at roughly 3 and 15 USD per million lands near seventy dollars. That is the
+cheap tier doing its job, and it is a routing decision rather than a hardware purchase.
+
+**Data boundary.** Whether client content reaches a provider at all. This is the axis that changes
+between profiles, and it is the only thing a GPU buys.
+
+So: **you buy local inference for the boundary, not for the price.** At small-business volumes the
+rented cheap tier is far cheaper than owning a card, because the hardware is amortised against
+almost nothing. The honest reasons to choose in-office are that documents cannot leave, that the
+system works without a connection, and that the client wants to own it. "The monthly bills were
+digging in" is true only at unusual volume, and it should be the third reason in a conversation
+rather than the first.
+
 **Feature parity is not capability parity.** All three profiles have the same interface, workflows,
 and audit, and the same lane policy engine. They do not produce the same answers: a 32B local model
 is not a frontier model, which is precisely why the office build can switch the frontier lane on. Say

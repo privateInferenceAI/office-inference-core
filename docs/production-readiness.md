@@ -67,6 +67,12 @@ Docling, Qdrant, Postgres, and the application. What it does not want is a card.
 
 ### When the cloud tier does want a GPU, optionally
 
+**Cost tiering is not on this list.** A cheap model for easy work, with the expensive model reserved
+for hard work, comes from Bedrock small models and needs no card at all. Nova Micro runs at roughly
+0.035 and 0.14 USD per million tokens, so a workload of tens of thousands of light queries a month
+costs about a dollar. A cloud deployment that routes well spends far less than one that sends every
+request to a frontier model, and neither needs a GPU. See the Lanes section in `docs/architecture.md`.
+
 | Situation | Why | Sold as |
 |---|---|---|
 | Heavy scanning volume | Docling's layout, table, and OCR models run far faster on a GPU. Tens of thousands of pages is a different problem from hundreds | An add-on to the build |
