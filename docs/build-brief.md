@@ -392,7 +392,7 @@ Run the set on every model swap, every chunking change, and every parser upgrade
 
 | Phase | Work | Exit criteria |
 |---|---|---|
-| **C0** | Reference instance (m7i.xlarge, no GPU), repo, compose up, manifest rendered, CI running lint and the tests | The stack runs healthy on CPU, `test_audit_verify.py` passes, and `validate_manifests.py` passes |
+| **C0** | Reference instance (m7i.4xlarge, no GPU), repo, compose up, manifest rendered, CI running lint and the tests | The stack runs healthy on CPU, `test_audit_verify.py` passes, and `validate_manifests.py` passes |
 | **C1** | Per-role virtual keys with hard budgets; the anchor job on a timer; the purge tombstone | A key-scoped model call is recorded, anchored, and verifiable with `--anchor`; a purge leaves a visible tombstone |
 | **C2** | Docling ingestion (OCR, tables, layout), Qdrant, TEI, hybrid search, reranking, the three-check citation verifier, document versioning, duplicate detection, PII redaction | A cited answer from a scanned, table-bearing document; a recorded refusal; a superseded document not cited; redaction proven by a test |
 | **C3** | Assistant API: sessions, roles from tokens, streaming, timeouts and retries, degraded mode when Bedrock throttles | Every capability over one API with no UI; a forged role refused and recorded |
