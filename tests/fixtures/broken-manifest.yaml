@@ -1,0 +1,45 @@
+# DELIBERATELY INVALID. Do not repair this file.
+#
+# CI runs `scripts/validate_manifests.py tests/fixtures/broken-manifest.yaml` and requires a
+# non-zero exit. It carries two defects that a validator is supposed to catch, and each one has
+# shipped before:
+#
+#   1. an unknown pack id, which would silently under-deploy a client instead of failing;
+#   2. a `global.` inference profile under the hipaa compliance profile, which can route a prompt
+#      to any Region AWS operates in. Two documents once claimed that rule was enforced when it
+#      was not written in code at all.
+#
+# If this file ever validates cleanly, the gate is worthless and CI fails on purpose to say so.
+manifest_version: 1
+client:
+  name: Broken Example
+  deployment_id: broken-manifest
+profile: cloud
+packs: [document-chat, pack-that-does-not-exist]
+models:
+  analyst:
+    local: ""
+    frontier: bedrock/global.anthropic.claude-sonnet-5
+  front_desk:
+    local: ""
+    frontier: bedrock/us.anthropic.claude-haiku-5-5
+  reader:
+    local: ""
+    frontier: bedrock/us.anthropic.claude-sonnet-5
+lanes:
+  frontier:
+    enabled: true
+    provider: bedrock
+    account_owner: client
+    data_classes_allowed: [public, internal, confidential, regulated]
+    requires_approval: false
+    redaction: true
+compliance:
+  profile: hipaa
+  data_residency: ["United States"]
+  baa_with_provider: true
+  baa_with_office_inference: true
+  worm_storage: false
+  audit_retention_days: 2190
+support:
+  response_window: business hours, 4 hours

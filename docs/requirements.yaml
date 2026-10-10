@@ -305,13 +305,13 @@ items:
     tier: [cloud, office, hosted]
     phase: C0
     verify: python3 -m pytest tests/ passes on a clean checkout
-    status: open
+    status: verified
   - id: QLT-CI-001
     title: CI lints, tests, validates manifests, and builds images on every push
     tier: [cloud, office, hosted]
     phase: C0
     verify: a deliberately broken manifest fails CI
-    status: open
+    status: verified
   - id: QLT-ACCEPT-001
     title: Every new deployment runs an acceptance test
     tier: [cloud, office, hosted]

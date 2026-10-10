@@ -1,0 +1,8 @@
+# Test and CI dependencies.
+#
+# The stack itself runs from digest-pinned images and needs none of this. The file exists so that
+# `python3 -m pytest tests/` works on a clean checkout, which is the verification QLT-TEST-001
+# names in docs/requirements.yaml. Without it that command fails on a fresh machine with
+# "No module named pytest", which is not a passing test.
+pytest>=8.0,<10.0
+PyYAML>=6.0,<7.0
