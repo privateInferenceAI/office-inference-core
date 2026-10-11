@@ -189,6 +189,29 @@ items:
     phase: C2
     verify: a scanned fee-schedule fixture returns correct numbers in a table, and a scanned page returns text rather than nothing
     status: open
+  - id: RET-EMBED-001
+    title: The embedding model and its preprocessing are recorded per collection, and a mismatch is refused
+    tier: [cloud, office, hosted]
+    phase: C2
+    verify: a query against a collection built by a different model or preprocessing is refused, not answered
+    status: open
+    note: >-
+      The research's reversibility contract. Changing an embedding model means re-embedding every chunk,
+      so the model id, revision, sha256, dimension, pooling, normalisation, query and passage prefixes,
+      truncate dimension and chunker version are recorded per collection generation, and the read path
+      refuses a mismatch rather than returning quietly worse results.
+
+  - id: RET-EVAL-001
+    title: Retrieval changes are measured on a fixed question set, not assumed
+    tier: [cloud, office, hosted]
+    phase: C2
+    verify: the harness reports retrieval and support rates with per-category counts, and two configurations can be compared on the same questions
+    status: open
+    note: >-
+      C2 decides the embedding model, the fusion and the chunking, and RET-HYBRID-001 already verifies
+      hybrid on with the same question off, so a yardstick has to exist before those decisions. A fixture
+      corpus and question set in C2; the client's own sixty in C8 under QLT-GOLDEN-001.
+
   - id: RET-HYBRID-001
     title: Hybrid search returns exact identifiers that vector search alone misses
     tier: [cloud, office, hosted]
