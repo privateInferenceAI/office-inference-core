@@ -28,7 +28,15 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - ${OI_ROOT}/data/postgres:/var/lib/postgresql/data
-      - ${OI_ROOT}/db/migrations:/docker-entrypoint-initdb.d:ro
+      # Deliberately NOT mounting db/migrations into /docker-entrypoint-initdb.d. That was here
+      # once, and it broke every fresh install: the entrypoint runs those files against a virgin
+      # data directory, which creates our audit tables in the same database the gateway owns.
+      # LiteLLM's Prisma migrations then refuse to baseline a schema they did not create, and the
+      # gateway restart-loops with "Database migration cannot proceed".
+      #
+      # Our migrations run through `audit migrate` instead, which is the only path that is ordered,
+      # checksummed, and recorded in schema_migrations. The entrypoint path only ever worked on an
+      # empty data directory, so it was never the real path anyway.
     networks: [ai-net]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]

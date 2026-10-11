@@ -1,0 +1,86 @@
+"""Tests for the compose file itself.
+
+Two of these encode failures that actually happened, which is why they are tests rather than review
+notes. The others encode standing rules from the runbook that are easy to break by accident.
+
+Run: python3 -m pytest tests/
+"""
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+import pytest
+import yaml
+
+ROOT = Path(__file__).resolve().parents[1]
+COMPOSE = ROOT / "deploy" / "office" / "compose" / "docker-compose.yml"
+
+
+@pytest.fixture(scope="module")
+def compose() -> dict:
+    return yaml.safe_load(COMPOSE.read_text())
+
+
+@pytest.fixture(scope="module")
+def services(compose) -> dict:
+    return compose["services"]
+
+
+def test_our_migrations_are_not_run_by_the_postgres_entrypoint(services):
+    """The defect that cost an afternoon.
+
+    Mounting db/migrations at /docker-entrypoint-initdb.d creates our audit tables in the same
+    database the gateway owns. Prisma then refuses to baseline a schema it did not create, and
+    litellm restart-loops. It only fires on a virgin data directory, so it hits fresh installs and
+    nobody's dev box that was built before db/ existed. `audit migrate` is the only path.
+    """
+    mounts = services["postgres"].get("volumes", [])
+    offenders = [m for m in mounts if "docker-entrypoint-initdb.d" in str(m)]
+    assert not offenders, (
+        "postgres must not run our migrations at initdb: the gateway keeps its Prisma schema in the "
+        f"same database and will refuse to start. Found: {offenders}"
+    )
+
+
+def test_a_cloud_build_does_not_start_the_local_lane(services):
+    """llamacpp belongs to the office build, and it must be excluded by profile rather than by
+    remembering. The renderer sets COMPOSE_PROFILES from the manifest's profile."""
+    assert services["llamacpp"]["profiles"] == ["office"]
+
+
+def test_the_gateway_does_not_depend_on_the_local_lane(services):
+    """Compose rejects a project whose dependency sits in an inactive profile, which made the cloud
+    build invalid: "service litellm depends on undefined service llamacpp"."""
+    depends = services["litellm"].get("depends_on") or {}
+    assert "llamacpp" not in depends
+
+
+def test_nothing_publishes_a_port(services):
+    """Rule 4 of the standing rules: nothing publishes a port except ingress. The security group is
+    not the control here, because Docker writes its own iptables rules and bypasses UFW."""
+    published = {name: svc["ports"] for name, svc in services.items() if svc.get("ports")}
+    assert not published, f"these services publish ports: {published}"
+
+
+def test_third_party_images_are_pinned_by_digest(services):
+    """Digest pins, with the version recorded beside the pin. The version comment is checked too:
+    an earlier stack pinned a gateway by digest with no version written down, and nobody could
+    answer the first question a security review asks.
+
+    Beside or above: llamacpp records its version inline and litellm records it in the comment block
+    over the pin, which is where the CVE note lives. Both satisfy the rule.
+    """
+    lines = COMPOSE.read_text().splitlines()
+    version_comment = re.compile(r"#.*(pinned|\bv?\d+\.\d+)")
+    for name, svc in services.items():
+        image = str(svc.get("image", ""))
+        if not image.startswith("ghcr.io/"):
+            continue
+        assert "@sha256:" in image, f"{name} pulls {image} without a digest pin"
+        index = next((i for i, line in enumerate(lines) if image in line), None)
+        assert index is not None, f"could not find the image line for {name}"
+        window = lines[max(0, index - 8): index + 1]
+        assert any(version_comment.search(line) for line in window), (
+            f"{name} is digest-pinned with no version recorded beside or above the pin"
+        )
