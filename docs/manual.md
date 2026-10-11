@@ -113,7 +113,7 @@ proves and, more usefully, what it does not.
 | `audit` | The tool that writes and checks the audit record. Runs when you call it, not as a service | A container, started on demand |
 | `keys` | The tool that mints per-role API keys and their ceilings | A container, started on demand |
 | `llamacpp` | A local model server, used by the office build only | A container, switched off in the cloud build by a compose profile |
-| The models | Frontier AI models, reached through the provider's API | Amazon Bedrock, us-east-1: Nova and Claude and DeepSeek models |
+| The models | Frontier AI models, reached through the provider's API | Amazon Bedrock, us-east-1: four models, Nova and DeepSeek. The Claude models appear in the lifecycle table and the example manifests, not in this deployment |
 | The bucket | Where the evidence goes, so the machine cannot erase it | `oi-core-audit-dev`, with Object Lock |
 
 Three terms in that table carry weight, so here they are plainly.
@@ -185,7 +185,7 @@ request and the twelve hours after it, which is the whole system in one pass.
 | 10:00:00 | The anchor timer fires. The audit tool hashes the current head of the chain, writes a 276-byte file, and the shipping job uploads it and reads it back | `journalctl -u oi-core-anchor.service` |
 | 11:00:00 | The anchor fires again. The chain has not changed, so it writes the same filename, and the bucket keeps both versions | `aws s3api list-object-versions` |
 | 15:41:07 | A component asks for a model its key is not scoped to. The gateway refuses before the provider is ever called, and writes that refusal to the spend log with the reason | The refusal, with its error code |
-| 00:00:00 | The export timer fires. The job runs `backfill`, which copies every spend-log row from the last day into the chain, including the refusal, and marks the refusal `denied` rather than as a call that succeeded. Then it exports the day and ships the file and its manifest | `journalctl -u oi-core-export.service` |
+| 00:00:00 | The export timer fires. The job runs `backfill`, which copies every spend-log row from the last day into the chain, including the refusal, and marks the refusal `denied` rather than as a call that succeeded. Then it exports the day that just ended, and ships the file and its manifest | `journalctl -u oi-core-export.service` |
 | 00:00:20 | The bucket holds the day's file, its manifest, and the anchors written through the day. The machine can add to it and read it, and cannot delete from it | `aws s3api list-object-versions --bucket oi-core-audit-dev` |
 | Sometime later | The client's auditor runs two commands. One checks every row in the file against the row before it. The other checks the file against an anchor written while the day was happening, which is what catches rows deleted from the end | The output of `audit verify`, or a failure naming the line |
 
@@ -211,9 +211,9 @@ A client's deployment is described by one YAML file called a manifest. It names 
 profile (cloud, office, or hybrid), the roles and their models, the spending ceilings, what content
 the record may keep, where evidence ships, and any compliance profile.
 
-Nothing is hand-configured on a server. The renderer reads the manifest and writes three files: an
-environment file holding secrets and settings, the gateway's model list, and a normalized copy of the
-manifest. Everything downstream reads those, so changing a deployment means changing the manifest and
+Nothing is hand-configured on a server. The renderer reads the manifest and writes four files: an
+environment file holding secrets and settings, the gateway's model list, the list of services the packs
+add up to, and a normalized copy of the manifest. Everything downstream reads those, so changing a deployment means changing the manifest and
 re-rendering, not editing files in place.
 
 A validator refuses a manifest that would break a promise. It knows, for example, that an office build
@@ -311,8 +311,9 @@ cd /opt/oi-core
 docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env ps
 ```
 
-You should see `postgres` healthy and `litellm` running. Compose prints six columns; the middle two
-are trimmed here for width:
+You should see `postgres` healthy and `litellm` running. Compose prints seven columns; the middle ones
+are trimmed here for width, and `PORTS` shows the exposed ports without a host binding, which is the
+thing to look at when you want to know whether anything is reachable:
 
 ```
 NAME       IMAGE                    COMMAND     SERVICE    CREATED      STATUS
@@ -620,19 +621,31 @@ future Activity screen will use. Reading it directly is the quickest way to see 
 decoding JSON:
 
 ```
-docker exec postgres psql -U oicore -d oicore -c "select * from audit_feed order by id desc limit 10;"
+docker exec postgres psql -U oicore -d oicore -c "select id, summary from audit_feed order by id desc limit 10;"
 ```
 
 ```
  id |                 summary
-----+-----------------------------------------
- 26 | bedrock/amazon.nova-micro-v1:0 answered
- 25 | bedrock/amazon.nova-micro-v1:0 answered
- 24 | bedrock/amazon.nova-lite-v1:0 answered
+----+-------------------------------------------
+ 34 | bedrock/amazon.nova-lite-v1:0 was refused
+ 33 | bedrock/amazon.nova-micro-v1:0 answered
+ 32 | bedrock/amazon.nova-pro-v1:0 was refused
+ 31 | bedrock/amazon.nova-lite-v1:0 answered
 ```
+
+The view is thirteen columns wide, so ask for the two you want to read. A refused call reads as
+refused rather than answered, which it did not before migration 006.
 
 **What the content modes look like side by side.** Three events recorded against the same policy, one per
 class, and what the record kept for each:
+
+```
+docker exec postgres psql -U oicore -d oicore -c "
+  select id, data_class, payload is null as no_content, left(prompt_sha256, 12) as prompt_hash,
+         coalesce(payload ->> 'prompt', '(none)') as stored_prompt
+  from audit_events where event_type = 'model_call' and prompt_sha256 is not null
+  order by id limit 3;"
+```
 
 ```
  id | data_class | no_content | prompt_hash  |                        stored_prompt
@@ -641,6 +654,9 @@ class, and what the record kept for each:
  16 | internal   | f          | 7a098dd2ab2f | email the client on [REDACTED-EMAIL] about [REDACTED-PHONE]
  17 | regulated  | t          | d9cb8186a1b2 | (none)
 ```
+
+`no_content` and `stored_prompt` are aliases this query invents, not columns; the table has `payload`
+and `prompt_sha256`, and a null payload is what hash mode leaves behind.
 
 `public` kept the prompt and its hash, `internal` kept it with the identifiers masked, and `regulated`
 kept only the hash. That third row is what `hash` mode means in practice: the record can prove what was
@@ -653,10 +669,10 @@ oi run --rm audit export --date 2026-10-11
 ```
 
 ```
-exported 6 event(s) for 2026-10-11
+exported 23 event(s) for 2026-10-11
   /app/exports/2026-10-11/audit-events.jsonl
   /app/exports/2026-10-11/manifest.json
-  last row hash 6df2d45eab2d…
+  last row hash 3e7fb0f1d35d6f7218932be29f00aa5943555a18ad9a0bb7841158e477c5098a
 ```
 
 On the host that is `/opt/oi-core/exports/2026-10-11/`. The JSONL file holds one event per line. The
@@ -710,8 +726,8 @@ oi run --rm audit anchor --out /app/exports/anchors
 ```
 
 ```
-anchored 6 event(s), head 6df2d45eab2d…
-  /app/exports/anchors/anchor-2026-10-11-00000006.json
+anchored 23 event(s), head 3e7fb0f1d35d…
+  /app/exports/anchors/anchor-2026-10-11-00000023.json
   Ship this file off this machine. Kept here, it proves nothing.
 ```
 
@@ -727,9 +743,14 @@ oi run --rm audit verify /app/exports/2026-10-11/audit-events.jsonl \
 ```
 
 ```
-ok   /app/exports/2026-10-11/audit-events.jsonl: 6 event(s), chain intact
-     note: matches the anchor written 2026-10-11T04:00:07+00:00 (6df2d45eab2d…, 6 rows)
+ok   /app/exports/2026-10-11/audit-events.jsonl: 23 event(s), chain intact
+     note: matches the anchor written 2026-10-11T04:49:16.784332+00:00 (3e7fb0f1d35d…, 23 rows)
+     note: chained from row 10 (6928b2669fd9…), which is not in this file
 ```
+
+That second note appears when the export's first row chains back to a row the file does not contain,
+which is the ordinary case once a purge has removed the beginning of the chain. It is information, not
+a failure: the check compares the first row's `prev_hash` against the anchor, not against nothing.
 
 With no anchor, the command says plainly that completeness cannot be shown, because deleting rows from
 the end and re-exporting would still verify. That sentence is the honest one, and it is why the
@@ -856,6 +877,10 @@ aws s3api list-object-versions --bucket oi-core-audit-dev --prefix anchors/ \
   --profile oi-credits --query 'Versions[].{key:Key,written:LastModified}' --output table
 ```
 
+**Which day it ships.** The job runs at midnight and exports the day that just ended, in UTC. The
+first version of it took the current date, which at midnight is the day that is starting, so it would
+have shipped an empty file every night.
+
 **The timers:**
 
 ```
@@ -951,7 +976,7 @@ support:
 |---|---|
 | `client.name`, `client.deployment_id` | Who this is for. The id appears in every audit row, and it prefixes the key aliases |
 | `profile` | `cloud`, `office`, or `hybrid`. It decides whether the local model server starts, and which residency rules apply |
-| `packs` | Which sellable bundles are switched on. `core` is implicit and always present |
+| `packs` | Which sellable bundles are switched on. Every sellable pack declares `requires: [core]` in the catalog, and the validator follows those edges, so `core` is implied rather than listed. A pack list that never reaches `core` is refused, because it would leave the deployment with no gateway |
 | `models.<role>.frontier` | The model a role reaches when inference is remote. The `bedrock/` prefix is required |
 | `models.<role>.local` | The model file a role reaches when inference is local, used by the office build |
 | `lanes.frontier.enabled` | Whether remote inference exists at all. Must be false on an office build |
@@ -961,15 +986,15 @@ support:
 | `budgets.period_days`, `budgets.roles` | The ceiling per role, in dollars, over a period in days |
 | `compliance.profile` | `none`, `contractual`, `hipaa`, `glba`, `sec-17a4`, `itar-cui`, `ferpa`, `pci` |
 | `compliance.audit_retention_days` | How long the record is kept. Six years is enforced for `sec-17a4` |
-| `compliance.data_residency` | Required by any compliance profile other than `none` or `contractual` on a cloud or hybrid build. It names the residency the client's contract requires, and it is what makes a global profile refusable |
+| `compliance.data_residency` | Required by any compliance profile other than `none` or `contractual` on a cloud or hybrid build, so the contract records where the client's data must stay. The validator checks that it is named rather than comparing it with anything, so the global-profile refusal follows from the compliance profile itself |
 | `compliance.baa_with_office_inference` | Required by any compliance profile other than `none` or `contractual` on a hardware build, and it must be true. We need a signed agreement before holding that data on a client's machine |
-| `lanes.frontier.redaction` | Whether prompts are redacted before leaving. `false` with `regulated` in `data_classes_allowed` on a cloud build is refused |
-| `lanes.frontier.requires_approval` | Validated policy for a human approval step before a remote call. Nothing enforces it yet; C3 owns the gate |
-| `lanes.frontier.provider` | `bedrock`, or `none` for a build with no remote lane |
+| `lanes.frontier.redaction` | Whether prompts are redacted before leaving. One validator rule refuses `false` with `regulated` on a cloud build, and nothing redacts yet |
+| `lanes.frontier.requires_approval` | A human approval step before a remote call. In the schema, read by no rule and no service; C3 owns the gate |
+| `lanes.frontier.provider` | `bedrock` (the schema also allows `api`). Required when the lane is on, and omitted entirely by a build with no remote lane |
 | `offsite.provider`, `offsite.region`, `offsite.account_owner` | Where evidence ships: `s3`, the Region, and whose account the bucket is in |
 | `offsite` | Where evidence ships, and which artifacts may leave: `anchors`, `exports`, `backups`. `backups` is accepted today and nothing consumes it until C8 |
 | `support.response_window`, `support.remote_access`, `support.drift_reporting` | What the client is promised about support, recorded in the contract. No service reads them |
-| `compliance.baa_with_provider`, `compliance.worm_storage` | Recorded intent for agreements and write-once storage. Validated by the schema and read by nothing |
+| `compliance.baa_with_provider`, `compliance.worm_storage` | Recorded intent for agreements and write-once storage. Described in the schema and read by nothing |
 | `models.<role>.fallback` | Intended as a second model for a role, for when the first is unavailable. It renders nothing and nothing routes to it |
 | `integrations`, `interface` | Reserved and unimplemented |
 
@@ -1005,9 +1030,9 @@ by what the rule protects.
   inside a geography, and a `global.` one may serve them from anywhere. A model offered only through a
   profile cannot be pinned to one Region, which is what disqualifies it for a client whose contract
   names one. The lifecycle table records which of our models this affects.
-- Fable models, a small set of frontier models whose provider terms allow prompts to be retained for
-  improvement unless a human reviews each use. That is incompatible with a promise that a client's
-  material is not kept by a third party, so the validator refuses them outright rather than warning.
+- Fable models. Their provider terms permit only retention modes that let the provider keep inputs and
+  outputs and have people review them, which is incompatible with a promise that a client's material is
+  not held by a third party. The validator refuses them outright rather than warning.
 - The `frontier-lane` pack on the office profile.
 - A compliance profile on a cloud or hybrid build with no `compliance.data_residency`, since residency
   decides which model forms are allowed.
@@ -1031,10 +1056,16 @@ by what the rule protects.
   `ship` list.
 - An unknown compliance profile name.
 
-**Two fields are policy that nothing enforces yet.** `lanes.frontier.data_classes_allowed` and
-`lanes.frontier.requires_approval` are validated and rendered, and no service reads them at call time,
-because nothing labels a request with its data class yet. They become real in C2 and C3. Until then,
-treat them as the client's intent recorded in the contract rather than a control that will stop a call.
+**Three fields are policy that nothing enforces yet.** `lanes.frontier.data_classes_allowed` is
+rendered into the environment and read by no service at call time, because nothing labels a request
+with its data class. `lanes.frontier.requires_approval` is in the schema, read by no validator rule and
+by no service. `lanes.frontier.redaction` is checked by one validator rule, which refuses `false`
+together with `regulated` on a cloud build, and **nothing redacts anything on the way out**; the
+redaction service is sold in the compliance pack and is not built. What redacts today is the record's
+own content mode, which decides what is kept rather than what is sent.
+
+All three become controls in C2 and C3. Until then, treat them as the client's intent recorded in the
+contract rather than something that will stop a call.
 
 Run it before you render anything:
 
@@ -1056,8 +1087,10 @@ python3 scripts/render_manifest.py --manifest manifests/dev-cloud.yaml
 ```
 
 `--root` sets the deployment root the outputs are written for, and it is what lets you render for
-another machine from this one. `--out` overrides the output directory. Every tool in this repository
-answers `--help`, which is the fastest way to see its options:
+another machine from this one. `--out` overrides the output directory.
+
+The three tools built on `argparse` answer `--help`, which is the fastest way to see their options. The
+other three scripts do not, and will try to treat `--help` as a filename:
 
 ```
 python3 scripts/render_manifest.py --help
@@ -1197,10 +1230,13 @@ with its status and a replacement, following `docs/model-lifecycle.md`.
 Then confirm the instance may actually invoke it:
 
 ```
-aws iam get-role-policy --role-name oi-core-dev-instance \
-  --policy-name oi-core-dev-bedrock-invoke --profile oi-credits \
-  --query 'PolicyDocument.Statement[].Resource'
+aws iam get-policy-version --profile oi-credits \
+  --policy-arn arn:aws:iam::878451098165:policy/oi-core-dev-bedrock-invoke \
+  --version-id v1 --query 'PolicyVersion.Document.Statement[].Resource'
 ```
+
+`get-role-policy` returns `NoSuchEntity` for this, because the policy is attached to the role rather
+than written into it, and the error reads like the policy does not exist.
 
 If the new model's ARN is not in that list, add it, or the first call fails with `AccessDenied` and the
 gateway will look like the problem.
@@ -1286,7 +1322,7 @@ startup noise:
 
 ```
 docker logs litellm --tail 40
-docker inspect litellm --format 'restarts={{.RestartCount}} started={{.StartedAt}}'
+docker inspect litellm --format 'restarts={{.RestartCount}} started={{.State.StartedAt}}'
 docker run --rm --network ai-net curlimages/curl -sS http://litellm:4000/health/liveliness
 ```
 
@@ -1471,7 +1507,7 @@ the manual also asks you to type.
 | `aws ssm start-session --profile oi-credits --region us-east-1 --target i-096bebd46308d1673` | A shell with no key and no open port. Needs the Session Manager plugin locally |
 | `aws ec2 stop-instances` / `start-instances --instance-ids i-096bebd46308d1673` | Stop paying for the machine, or bring it back. The address survives |
 | `aws s3api list-object-versions --bucket oi-core-audit-dev --profile oi-credits` | Every version of every piece of evidence, which is where a repeated anchor filename shows its history |
-| `aws iam get-role-policy --role-name oi-core-dev-instance --policy-name oi-core-dev-bedrock-invoke` | Which models this machine may invoke |
+| `aws iam get-policy-version --policy-arn arn:aws:iam::878451098165:policy/oi-core-dev-bedrock-invoke --version-id v1` | Which models this machine may invoke |
 | `aws ec2 describe-instances … --query '…MetadataOptions…'` | The metadata hop limit, when the gateway cannot find credentials |
 | `git log --oneline -1`, `git pull`, `git status --short` | What the box is running, and getting it current |
 | `git stash push -u`, `git stash show -p`, `git stash drop` | Setting aside local changes so a pull can proceed |
@@ -1525,19 +1561,28 @@ only artifact that can detect rows deleted from the end.
 **Backfill.** Copying the gateway's own records into the audit chain.
 
 **Chain.** The audit record's structure: each row carries a hash of the row before it, so edits are
-detectable. Precisely: a row's hash covers that row's own contents plus the previous row's hash, the
-first row chains to nothing, ordering is by id, and a purge continues the chain rather than restarting
-it, because the tombstone is itself a row that chains from the head before the deletion.
+detectable. Precisely: a row's hash covers thirteen of its columns plus the previous row's hash,
+ordering is by id, the first row chains to nothing, and a purge continues the chain rather than
+restarting it, because the tombstone is itself a row that chains from the head before the deletion.
+
+The columns the hash covers are the timestamp, event type, actor, actor role, deployment, data class,
+outcome, tool, model, request id, payload hash, payload size and the previous hash. **Three columns are
+outside it**: `approval`, `prompt_sha256` and `completion_sha256`. Editing one of those in the database
+would not break the chain or fail a verify, so today they are recorded evidence rather than chained
+evidence. That is a known gap rather than a design choice, tracked as `AUD-HASH-001`, and closing it
+means a versioned hash so that rows written before the change still verify.
 
 **Content mode.** What the record keeps for a data class: `hash`, `redacted`, or `full`. The prompt and
 completion hashes are recorded whatever the mode.
 
 **Data class.** How sensitive a piece of material is: `public`, `internal`, `confidential`, `regulated`.
-It decides the content mode, and under a compliance profile it decides which models may see the
-material. Today a caller states it when recording an event rather than the system inferring it.
+It decides the content mode, and under a compliance profile it is meant to decide which models may see
+the material, which C2 enforces. Today a caller states it when recording an event rather than the system
+inferring it.
 
 **Deployment.** One client's installed copy of the core system, described by one manifest, with one
-database, one bucket, and one `deployment_id` that appears in every audit row and key alias. The word
+database, one bucket when evidence ships off the machine, and one `deployment_id` that appears in every
+audit row and key alias. The word
 this manual is organised around, and until this entry, the one it never defined.
 
 **Export.** One day's events as a file, plus a small descriptor called the export manifest, which is a
