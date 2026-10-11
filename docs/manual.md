@@ -1558,16 +1558,17 @@ most likely to want:
 | Variable | What it holds |
 |---|---|
 | `PROFILE` | `cloud`, `office`, or `hybrid`, as rendered |
-| `COMPOSE_PROFILES` | `office` on a non-cloud build, which is what starts the local model server. Absent on cloud |
+| `COMPOSE_PROFILES` | `office` on a non-cloud build, which is what starts the local model server. The renderer removes it on a cloud build, so a cloud deployment's env file does not contain it at all |
 | `MODEL_ROLES` | The roles this deployment serves |
 | `CONTENT_DEFAULT`, `CONTENT_MODE_<CLASS>` | The content policy, one entry per data class. The audit tool reads these |
-| `AUDIT_SHIP_BUCKET`, `AUDIT_SHIP_ARTIFACTS`, `AUDIT_SHIP_REGION` | Where the shipping job sends evidence, and which artifacts may leave. Empty means everything stays on the box |
+| `AUDIT_SHIP_BUCKET`, `AUDIT_SHIP_ARTIFACTS`, `AUDIT_SHIP_REGION` | Where the shipping job sends evidence, and which artifacts may leave. Written only when the manifest declares an `offsite` block; a build without one has no evidence path off the machine |
+| `MODEL_FILE`, `MODEL_CTX`, `MODEL_THREADS` | The local lane's settings: which model file the office build serves, its context window, and how many threads it may use. Written only for a build with a local lane, so a cloud deployment's env file has none of them |
 | `AWS_REGION`, `AWS_DEFAULT_REGION` | The Region the containers use for the provider |
 | `OI_ROOT` | Where the deployment lives, so the tools find the repository without being told |
 | `HOST_UID`, `HOST_GID` | The owner the tools run as, so files they write belong to the operator |
 | `GATEWAY_PORT` | The gateway's port inside the network |
 | `DEPLOYMENT_ID` | Stamped into every audit row |
-| `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `LITELLM_MASTER_KEY`, `DATABASE_URL` | Secrets. Generated once and reused on later renders |
+| `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `LITELLM_MASTER_KEY` | Secrets, generated once and reused on later renders. `DATABASE_URL` is assembled from these by the compose file rather than written here |
 
 Two environment variables are read by the tools but not written by the renderer, which matters when you
 point a tool at another deployment: `LITELLM_URL` (default `http://litellm:4000`) and `RENDERED_DIR`.
