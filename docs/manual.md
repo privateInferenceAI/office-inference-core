@@ -69,7 +69,7 @@ models stored on that hardware, with no cloud account at all. The components are
 differs is configuration, which is the whole commercial claim: one thing to build, maintain, and
 support, assembled differently per client.
 
-Four offerings come out of that, and they are three configurations of one thing:
+Four offerings come out of that, and every one of them is one of three profiles:
 
 | Offering | Whose account | Profile | Models |
 |---|---|---|---|
@@ -77,10 +77,12 @@ Four offerings come out of that, and they are three configurations of one thing:
 | Compliant Cloud | The client's | `cloud`, with a compliance profile | Remote, restricted to forms the compliance profile allows |
 | Standard Cloud Hosted | Ours | `cloud` | Remote |
 | In-Office | None. Hardware in the client's building | `office` | Local weights only |
+| A client with both | Theirs, plus their building | `hybrid` | Both lanes |
 
-`hybrid` is the third profile and not a fifth offering: it is a build with both lanes, which is what a
-client buys when they want documents handled locally and general questions answered by a frontier model.
-This manual covers the core that all four share.
+The first three share the `cloud` profile and differ by whose account they run in and what the contract
+allows. `hybrid` is not a fifth offering for sale; it is the shape a client ends up with when they have
+an appliance in the building and also want a frontier model for general questions, and it is why the
+profile list has three entries rather than two. This manual covers the core that all of them share.
 
 ## 2. The problem it solves
 
@@ -98,8 +100,8 @@ quietly edited. That record leaves the machine on a schedule, so a client can ch
 us.
 
 Two qualifications belong next to that promise rather than nine sections later. The gateway's own log is
-written immediately; the tamper-evident record gets the day's calls when a job copies them in, which
-happens on a timer. And "cannot be quietly edited" is a property of the chain plus the shipped anchors,
+written immediately; the tamper-evident record gets those calls when a job copies them in, which happens
+once a day as the first half of the export job, and can be run by hand at any time. And "cannot be quietly edited" is a property of the chain plus the shipped anchors,
 which together make an edit detectable rather than impossible. Section 13 shows exactly what each check
 proves and, more usefully, what it does not.
 
@@ -162,8 +164,13 @@ suffixed, so a hybrid deployment answers `analyst` from the local model and `ana
 provider. A cloud build has one entry per role under the plain name, because there is no local lane to
 distinguish. Anything naming a model has to name the right one for the build it runs in.
 
-**The record.** The gateway writes every call to its own spend log, including the ones it refused. A
-tool called `audit` copies those rows into our own record, which is a chain: each row contains a hash
+**The record.** The word does two jobs in this manual, so here is the split. The gateway keeps its own
+**spend log**, written as each call happens. Our **record** is the separate, tamper-evident one: a tool
+called `audit` copies rows from the spend log into it, and that is the one that exports and anchors. When
+this manual says "the record" without qualification, it means ours.
+
+The gateway writes every call to its spend log, including the ones it refused. `audit` copies those rows
+into our own record, which is a chain: each row contains a hash
 of the row before it, so any edit or deletion breaks the chain in a way a reader can detect. Each day
 that record exports as a file with a manifest, and every hour a small file recording the head of the
 chain is shipped to a bucket the machine can write to but not delete from. That last part is what
@@ -182,7 +189,7 @@ request and the twelve hours after it, which is the whole system in one pass.
 | 09:14:02 | The gateway calls the provider with the deployment's credentials, which come from the machine's instance role. No key is stored on disk for this | The policy that allows it, on the instance role |
 | 09:14:03 | The provider answers. The gateway returns the answer and writes a row to its own spend log: model, tokens, cost, status, and the key's alias | The spend log, in Postgres |
 | 09:20:00 | Nothing runs. The call sits in the gateway's log and nowhere else | |
-| 10:00:00 | The anchor timer fires. The audit tool hashes the current head of the chain, writes a 276-byte file, and the shipping job uploads it and reads it back | `journalctl -u oi-core-anchor.service` |
+| 10:00:00 | The anchor timer fires. The audit tool writes a small file holding the current head of the chain, a couple of hundred bytes, and the shipping job uploads it and reads it back | `journalctl -u oi-core-anchor.service` |
 | 11:00:00 | The anchor fires again. The chain has not changed, so it writes the same filename, and the bucket keeps both versions | `aws s3api list-object-versions` |
 | 15:41:07 | A component asks for a model its key is not scoped to. The gateway refuses before the provider is ever called, and writes that refusal to the spend log with the reason | The refusal, with its error code |
 | 00:00:00 | The export timer fires. The job runs `backfill`, which copies every spend-log row from the last day into the chain, including the refusal, and marks the refusal `denied` rather than as a call that succeeded. Then it exports the day that just ended, and ships the file and its manifest | `journalctl -u oi-core-export.service` |
@@ -362,7 +369,7 @@ than the alias.
 
 ## 11. Making a model call
 
-The only supported way to reach a model is through the gateway, with a role's key. The `keys` tool has
+The supported way to reach a model is through the gateway with a role's key. The `keys` tool has
 a probe that does exactly that and reports what came back:
 
 ```
@@ -385,8 +392,17 @@ docker run --rm --network ai-net -e KEY="$KEY" curlimages/curl -sS \
   -d '{"model":"analyst","messages":[{"role":"user","content":"In one sentence, what is a gateway?"}],"max_tokens":60}'
 ```
 
-That uses the master key, which is for administration. Use a role key in anything that is not a test.
-The `keys` tool is the supported way to call as a role.
+**Four names for one model, and which one belongs where.** A caller asks for the role name, `analyst`.
+The gateway's config maps that name to a provider model: `model_name: analyst` with
+`litellm_params.model: bedrock/amazon.nova-lite-v1:0`. The manifest writes it with the prefix, as
+`frontier: bedrock/amazon.nova-lite-v1:0`. And the instance's policy allows the model's own ARN, which
+carries the bare id, `amazon.nova-lite-v1:0`. So a `probe` printing `analyst -> analyst: 200` is the role
+answering, not the model, and an `AccessDenied` is a mismatch between the prefixed id in the rendered
+config and the bare ARN in the policy.
+
+That uses the master key, which administers the gateway and can therefore call any model in it. A call
+made with it bypasses the role ceilings and the model permissions, because those belong to role keys, so
+use it for diagnostics and never for work. `keys --probe` is how you call as a role.
 
 ## 12. Keys and budgets
 
@@ -927,10 +943,13 @@ delete failed: … An error occurred (AccessDenied) when calling the DeleteObjec
 |---|---|---|
 | After a start | Containers healthy | `oi ps` |
 | After a start | Gateway answering | `docker run --rm --network ai-net curlimages/curl -sS http://litellm:4000/health/liveliness` |
+| Any time | A client or their auditor wants the evidence | Export the day, hand over the JSONL and its manifest plus the anchor that covers it, and give them the two commands in section 13. There is no read-only account for an auditor today: the evidence travels as files, and they verify it on their own machine |
+
 | Weekly | The record's chain is intact | `oi run --rm audit verify /app/exports/2026-10-11/audit-events.jsonl` (a UTC date, and export the day first) |
 | Weekly | Nothing was refused unexpectedly | `oi run --rm audit list --type model_call --limit 50` |
 | Weekly | Timers have been firing | `journalctl -u oi-core-anchor.service -n 20` |
 | Monthly | Model lifecycle | On the box, after a `git pull`, so it reads the manifests this deployment renders from: `python3 scripts/check_model_lifecycle.py` |
+| Per the contract | Retention purge | `audit purge --before <cutoff> --reason <why>`, run by hand. **Nothing schedules it**: there is no purge timer, and the retention promise in the manifest is a policy the operator keeps rather than a job the machine runs |
 | Monthly | What the deployment is spending | The provider's cost report, not the gateway's |
 
 ---
@@ -994,6 +1013,25 @@ support:
 | `packs` | Which sellable bundles are switched on. Every sellable pack declares `requires: [core]` in the catalog, and the validator follows those edges, so `core` is implied rather than listed. A pack list that never reaches `core` is refused, because it would leave the deployment with no gateway |
 | `models.<role>.frontier` | The model a role reaches when inference is remote. The `bedrock/` prefix is required |
 | `models.<role>.local` | The model file a role reaches when inference is local, used by the office build |
+
+The example above is a cloud build, so every role writes `local: ""` and no role writes a frontier name
+that is missing. An office build is the other way round, and this is the whole of the difference in that
+block:
+
+```yaml
+profile: office
+lanes:
+  frontier:
+    enabled: false
+models:
+  front_desk: {local: qwen3-1.7b-instruct}
+  analyst:    {local: qwen3-1.7b-instruct}
+  reader:     {local: qwen3-1.7b-instruct}
+```
+
+The three roles name a model file that the local server serves, no role names a frontier model, and the
+frontier lane is switched off rather than absent. Leaving `enabled: true` here is the mistake the
+validator refuses, because an appliance that can reach a provider is not an office build.
 | `lanes.frontier.enabled` | Whether remote inference exists at all. Must be false on an office build |
 | `lanes.frontier.account_owner` | `client`, or `office_inference` for our own machines and the hosted tier |
 | `lanes.frontier.data_classes_allowed` | Which data classes may reach a remote model |
@@ -1133,8 +1171,8 @@ data.
 
 A role is a name that maps to a model, with its own key and ceiling. Roles are a naming convention
 rather than a closed set, so a deployment can add as many as it needs. This example adds a `summarizer`
-role on the cheapest model, for a component that should only ever write short summaries. It takes four
-edits and five commands.
+role on the cheapest model, for a component that should only ever write short summaries. It takes two
+edits to the manifest and five commands.
 
 **1. Add the role and its model.** In `manifests/dev-cloud.yaml`, under `models:`:
 
@@ -1217,6 +1255,28 @@ the key for the role it is acting as. If two components should have different ce
 different roles, even if they point at the same model. That costs one line each and keeps the record
 readable, because every event names the role that asked.
 
+### Removing a role
+
+The reverse of adding one, and the order matters because a key outliving its role is a key nothing
+accounts for.
+
+1. Delete the role's entry from `models:` and from `budgets.roles:` in the manifest.
+2. Validate and render, which writes a gateway config without it.
+3. Restart the gateway: `oi restart litellm`. Calls naming the role now fail with a 400, because the name
+   is no longer served.
+4. Delete the role's key **before** the record stops mentioning it. The key lives in two places, the
+   gateway's database and `rendered/keys.json`, and `keys` will not remove it for you because it only
+   ever adds or updates. Delete it through the gateway's administration API with the master key, then
+   remove its entry from `rendered/keys.json`. Leaving it costs nothing while the role is gone, and it
+   becomes a live key again the moment someone re-adds the role name with a fresh budget.
+5. Record what you did: `audit record --dev --type config_change --actor <you> --actor-role admin
+   --payload '{"removed_role":"analyst"}'`.
+
+**Retiring a model** is the same shape with a different first step: pick the replacement from
+`data/model-lifecycle.json`, change the `frontier` line, and follow section 18. A model is retired from
+the manifests rather than from the provider's catalogue, and the lifecycle check is what tells you it is
+time.
+
 ## 18. Changing which model a role uses
 
 Change the line, render, restart, and check that the new model is not deprecated:
@@ -1291,9 +1351,14 @@ systemctl list-timers 'oi-core-*'
 Expect two timers with a NEXT time within the hour and within the day. Both are `Persistent`, so a run
 missed while the machine was stopped happens once at the next start.
 
+**What is not in this manual:** how to build the machine itself. Creating the account, the VPC, the
+instance, the security group, the instance role, the bucket with its lock, and the timers is the
+installer's job, and it is written down in `docs/runbook.md` (Phase 0 and Phase 1 for the cloud build,
+Appendix A for the office one) and in `docs/audit-evidence.md` for the bucket's settings. Terraform
+replaces all of it in C7.
+
 The one thing that is not automatic yet is the account itself. Terraform for the VPC, the bucket, the
-IAM role, and the rest is C7, and today those are created by hand. `docs/audit-evidence.md` records
-what the bucket needs and why.
+IAM role, and the rest is C7, and today those are created by hand.
 
 ## 20. Adding a service or a pack
 
@@ -1310,12 +1375,13 @@ anything else finds the service:
 4. `docs/service-inventory.md`, which is the list of what exists and which build each service runs in.
 
 In the compose file, use the `tools` profile for something that runs when called, as `audit` and `keys`
-do, and leave the profile off for a long-running service. Use `tools` for something that runs when
-called, as `audit` and `keys` do, and leave the profile off for a long-running service.
+do, and leave the profile off for a long-running service.
 
-Two rules apply to anything you add. It joins `ai-net` and publishes no ports, and if it writes to the
-record it writes through `audit` rather than inserting rows itself, because the chain is meant to have
-one writer.
+Two rules apply to anything you add. It joins `ai-net` and publishes no ports. And if it writes to the
+record it writes through `audit` rather than inserting rows itself, because the tool is the record's only
+writer: a component that inserted rows directly could write a row whose hashes did not match the chain,
+and nothing downstream would catch it. `audit record --dev` is the deliberate exception, for a human
+writing an event by hand in development, and it is why that flag exists.
 
 **A pack** is a sellable bundle, listed in `packs/catalog.yaml` with the services it declares. Adding
 one is a catalog entry plus the services it names. The manifest's `packs` list is what switches it on,
@@ -1595,6 +1661,17 @@ means a versioned hash so that rows written before the change still verify.
 **Content mode.** What the record keeps for a data class: `hash`, `redacted`, or `full`. The prompt and
 completion hashes are recorded whatever the mode.
 
+**Chain head.** The hash of the newest row, which is what an anchor records. The next row chains from
+it, so it moves every time the record grows.
+
+**Component.** Anything we build that asks the gateway for an answer: the assistant API, a workflow, a
+connector, a document pipeline. Components are the callers in every description of a request, and none of
+them exist yet; C3 through C6 build them. Until then the callers are the `keys` probe and a curl.
+
+**Spend log.** The gateway's own table of calls, inside its database, written as each call happens and
+including the ones it refused. It is not the audit record: it is the source the audit tool copies from,
+and it keeps its own retention, which is why a purge of our record does not touch it.
+
 **Data class.** How sensitive a piece of material is: `public`, `internal`, `confidential`, `regulated`.
 It decides the content mode, and under a compliance profile it is meant to decide which models may see
 the material, which C2 enforces. Today a caller states it when recording an event rather than the system
@@ -1602,8 +1679,7 @@ inferring it.
 
 **Deployment.** One client's installed copy of the core system, described by one manifest, with one
 database, one bucket when evidence ships off the machine, and one `deployment_id` that appears in every
-audit row and key alias. The word
-this manual is organised around, and until this entry, the one it never defined.
+audit row and key alias.
 
 **Export.** One day's events as a file, plus a small descriptor called the export manifest, which is a
 different artifact from the deployment manifest despite sharing the word. The export manifest holds the
