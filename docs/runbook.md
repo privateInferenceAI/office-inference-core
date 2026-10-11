@@ -702,8 +702,39 @@ allowed to do it.
 
 ### 2.9 Per-role keys with hard budgets
 
-**Status: written and tested against a stub gateway; not yet run against this deployment.** The
-heading gets its marker when the drill below has run on the box.
+**Run on 2026-10-11.** Both restrictions held on the box, and each refusal is harder than the phrase
+"hard budget" promises on its own:
+
+| Test | Result |
+|---|---|
+| `--probe coder` with the role capped below its spend | **422** `Budget has been exceeded! Key=oi-core-dev-cloud:coder Current cost: 2.104e-05, Max budget: 1e-06` |
+| `--probe coder` again | **422**, the same |
+| Restore the manifest's ceiling, then probe | **200**, answered by coder, 13 tokens |
+| `--probe analyst --as-model reader` | **403** `The requested model 'reader' is not available for this API key` |
+
+**Rebuild the tool images after a code change.** The tools run from images, and `docker compose run`
+uses the image it already has. A change to `services/audit/audit.py` or `services/gateway/keys.py`
+does nothing until:
+
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env build audit keys
+
+That cost an hour on 2026-10-11: a backfill ran the old code and printed one line where two were
+expected, which looked like a data problem and was a stale image.
+
+**What the ceiling promises, and what it does not.** The gateway checks the budget against *recorded*
+spend, and the spend write lands a moment after the call returns. So a cap stops a runaway loop, and it
+does not promise zero calls past the line: the call that crosses completes, and in a fast burst more
+than one can slip through before the recorded number catches up. Measured here: the first drill let
+three calls through, and a later drill against a key that already carried spend refused both
+immediately. Write the client-facing promise as "the loop is stopped", not "the number is never
+exceeded".
+
+**Refusals are enforced at the gateway and recorded by the caller.** `LiteLLM_ErrorLogs` stays empty
+through budget and authorization refusals, because those are decided before a request is routed, so
+nothing about them reaches a table the audit tool can read. Successful calls arrive in the chain
+through `audit backfill`, which reads the spend logs. A refusal has to be recorded by whoever made the
+call, which in C3 is the assistant API. That is why `SEC-KEY-001` stays open until then, with the
+enforcement half already verified.
 
 Every component that calls a model uses a key for the **role** it is acting as, and each key carries
 two restrictions: it may call one model, and it has a ceiling in dollars. The master key mints those

@@ -30,12 +30,18 @@ items:
     phase: C1
     verify: exceeding a role budget is refused, not merely alerted, and the refusal is audited
     status: open
+    note: >-
+      Enforcement verified on 2026-10-11: a capped role answered 422 "Budget has been exceeded" and a
+      key scoped to one model answered 403 for another. The audit half is not met by the gateway:
+      LiteLLM_ErrorLogs stays empty through pre-call refusals, so nothing reaches a table the audit
+      tool can backfill. A refusal has to be recorded by the caller, which is the assistant API in C3.
+      This closes when a refused call appears in the chain.
   - id: SEC-KEY-002
     title: The LiteLLM master key is used for administration only
     tier: [cloud, office]
     phase: C1
     verify: grep of every service's environment shows no master key outside the admin path
-    status: open
+    status: verified
   - id: SEC-LEAST-001
     title: The role we hold in a client account is revocable and cannot read documents
     tier: [cloud, hosted]
