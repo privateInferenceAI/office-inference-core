@@ -311,9 +311,9 @@ cd /opt/oi-core
 docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env ps
 ```
 
-You should see `postgres` healthy and `litellm` running. Compose prints seven columns; the middle ones
-are trimmed here for width, and `PORTS` shows the exposed ports without a host binding, which is the
-thing to look at when you want to know whether anything is reachable:
+You should see `postgres` healthy and `litellm` running. Compose prints seven columns and the sample
+below drops the last one for width. That column is worth knowing about: `PORTS` shows the exposed ports
+with no host binding, which is how you confirm from the outside that nothing is reachable:
 
 ```
 NAME       IMAGE                    COMMAND     SERVICE    CREATED      STATUS
@@ -708,7 +708,10 @@ oi run --rm audit verify /app/exports/2026-10-11/audit-events.jsonl
 ```
 
 ```
-ok   /app/exports/2026-10-11/audit-events.jsonl: 6 event(s), chain intact
+ok   /app/exports/2026-10-11/audit-events.jsonl: 23 event(s), chain intact
+     note: no external anchor was supplied, so completeness cannot be shown: deleting rows from the
+           end and re-exporting would still verify. Pass --anchor with the file written by the anchor job
+     note: chained from row 10 (6928b2669fd9...), which is not in this file
 ```
 
 To see it catch something, edit a copy and check that instead:
@@ -747,7 +750,7 @@ an export against one:
 
 ```
 oi run --rm audit verify /app/exports/2026-10-11/audit-events.jsonl \
-  --anchor /app/exports/anchors/anchor-2026-10-11-00000006.json
+  --anchor /app/exports/anchors/anchor-2026-10-11-00000023.json
 ```
 
 ```
@@ -756,9 +759,13 @@ ok   /app/exports/2026-10-11/audit-events.jsonl: 23 event(s), chain intact
      note: chained from row 10 (6928b2669fd9…), which is not in this file
 ```
 
-That second note appears when the export's first row chains back to a row the file does not contain,
-which is the ordinary case once a purge has removed the beginning of the chain. It is information, not
-a failure: the check compares the first row's `prev_hash` against the anchor, not against nothing.
+That second note appears whenever an export starts part-way along the chain, which is every day except
+the record's first: the file's opening row chains back to a row it does not contain. It is information
+rather than a failure, and the check behind it is against the export manifest rather than the anchor.
+The manifest records the hash the first row should chain from, so the comparison proves the file starts
+where it says it starts. The anchor check is the line above it, and the two are different questions:
+the manifest says where this file begins, and the anchor says the record still contains what existed
+when the anchor was written.
 
 With no anchor, the command says plainly that completeness cannot be shown, because deleting rows from
 the end and re-exporting would still verify. That sentence is the honest one, and it is why the
@@ -853,16 +860,16 @@ cd /opt/oi-core
 ./deploy/cloud/ship/oi-core-ship.sh exports
 ```
 
-The numbers below come from one run. Sizes and hashes differ per anchor, and two anchors of the same
-chain differ by a byte or two depending on how many digits the timestamps carry, so read the shape
-rather than the values.
+One run, with its real numbers, so you know what a good one looks like:
 
 ```
-anchored 6 event(s), head 6df2d45eab2d…
-shipping /evidence/anchors/anchor-2026-10-11-00000006.json (276 bytes)
-  local  sha256 e19d146a56ae47e8a9312269809af1f928f84e60415b7fa43f41713d21a2c9c9
-  remote sha256 e19d146a56ae47e8a9312269809af1f928f84e60415b7fa43f41713d21a2c9c9
-  ok: s3://oi-core-audit-dev/anchors/anchor-2026-10-11-00000006.json matches the file that was sent
+anchored 23 event(s), head 3e7fb0f1d35d6f7218932be29f00aa5943555a18ad9a0bb7841158e477c5098a
+  /app/exports/anchors/anchor-2026-10-11-00000023.json
+  Ship this file off this machine. Kept here, it proves nothing.
+shipping /evidence/anchors/anchor-2026-10-11-00000023.json (278 bytes)
+  local  sha256 f9c2f120c0a5801f73d86c5a04c9cbf1c0f667dc978e0fcb838d10caa9a66584
+  remote sha256 f9c2f120c0a5801f73d86c5a04c9cbf1c0f667dc978e0fcb838d10caa9a66584
+  ok: s3://oi-core-audit-dev/anchors/anchor-2026-10-11-00000023.json matches the file that was sent
 anchors shipped to s3://oi-core-audit-dev
 ```
 
@@ -871,12 +878,12 @@ Fetching the object and hashing it is the difference between "we sent it" and "i
 matches".
 
 **Reading an anchor's name.** `anchor-<date>-<eight digits>.json`, where the digits are the number of
-events in the chain when it was written. `00000006` means six events existed; an hour later, with no new
-events, the same name comes back.
+events in the chain when it was written. `00000023` means twenty-three events existed; an hour later,
+with no new events, the same name comes back.
 
 **A filename that repeats on purpose.** An anchor is named for its date and the number of events in
-the chain, so an hourly run over an unchanged chain writes the same key: `anchor-2026-10-11-00000006.json`
-at 03:00 and again at 04:00, with the object's version history holding both. That is deliberate. The
+the chain, so an hourly run over an unchanged chain writes the same key twice, with the object's
+version history holding both. That is deliberate. The
 filename is a fingerprint of the chain's state, so two identical names mean the chain did not change,
 and `aws s3 ls` showing one object is not a lost upload. To see the versions:
 
@@ -907,7 +914,7 @@ it:
 
 ```
 docker run --rm --entrypoint aws -e AWS_REGION=us-east-1 oi-core-ship:local \
-  s3 rm s3://oi-core-audit-dev/anchors/anchor-2026-10-11-00000006.json
+  s3 rm s3://oi-core-audit-dev/anchors/anchor-2026-10-11-00000023.json
 ```
 
 ```
@@ -1064,9 +1071,10 @@ by what the rule protects.
   `ship` list.
 - An unknown compliance profile name.
 
-**Three fields are policy that nothing enforces yet.** `lanes.frontier.data_classes_allowed` is
-rendered into the environment and read by no service at call time, because nothing labels a request
-with its data class. `lanes.frontier.requires_approval` is in the schema, read by no validator rule and
+**Three fields are policy that nothing enforces yet.** `lanes.frontier.data_classes_allowed` is read
+by the validator's own two rules, which refuse an empty list and refuse `regulated` alongside
+`redaction: false` on a cloud build, and by nothing at call time, because nothing labels a request with
+its data class. `lanes.frontier.requires_approval` is in the schema, read by no validator rule and
 by no service. `lanes.frontier.redaction` is checked by one validator rule, which refuses `false`
 together with `regulated` on a cloud build, and **nothing redacts anything on the way out**; the
 redaction service is sold in the compliance pack and is not built. What redacts today is the record's
@@ -1299,7 +1307,10 @@ anything else finds the service:
 1. `services/<name>/` with its code, `Dockerfile`, and `service.yaml`.
 2. `deploy/office/compose/docker-compose.yml`, with a profile.
 3. `packs/catalog.yaml`, in the pack that sells it.
-4. `docs/service-inventory.md`, which is the list of what exists and which build each service runs in. Use `tools` for something that runs when
+4. `docs/service-inventory.md`, which is the list of what exists and which build each service runs in.
+
+In the compose file, use the `tools` profile for something that runs when called, as `audit` and `keys`
+do, and leave the profile off for a long-running service. Use `tools` for something that runs when
 called, as `audit` and `keys` do, and leave the profile off for a long-running service.
 
 Two rules apply to anything you add. It joins `ai-net` and publishes no ports, and if it writes to the
@@ -1515,7 +1526,7 @@ the manual also asks you to type.
 | `aws ssm start-session --profile oi-credits --region us-east-1 --target i-096bebd46308d1673` | A shell with no key and no open port. Needs the Session Manager plugin locally |
 | `aws ec2 stop-instances` / `start-instances --instance-ids i-096bebd46308d1673` | Stop paying for the machine, or bring it back. The address survives |
 | `aws s3api list-object-versions --bucket oi-core-audit-dev --profile oi-credits` | Every version of every piece of evidence, which is where a repeated anchor filename shows its history |
-| `aws iam get-policy-version --policy-arn arn:aws:iam::878451098165:policy/oi-core-dev-bedrock-invoke --version-id v1` | Which models this machine may invoke |
+| `aws iam get-policy-version --profile oi-credits --policy-arn arn:aws:iam::878451098165:policy/oi-core-dev-bedrock-invoke --version-id v1` | Which models this machine may invoke |
 | `aws ec2 describe-instances … --query '…MetadataOptions…'` | The metadata hop limit, when the gateway cannot find credentials |
 | `git log --oneline -1`, `git pull`, `git status --short` | What the box is running, and getting it current |
 | `git stash push -u`, `git stash show -p`, `git stash drop` | Setting aside local changes so a pull can proceed |
