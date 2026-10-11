@@ -17,6 +17,7 @@ turned on) applied to a **profile** (where things run).
 | Path | What lives there |
 |---|---|
 | `docs/manual.md` | **Start here to run it.** The operating manual: how the system works, every command with an example, and how to add a role |
+| `docs/handoff.md` | **Start here to continue it.** Where the build stands, how we work, the next phase, and the traps |
 | `docs/architecture.md` | The layered model: system versus substrate, profiles, and lanes |
 | `docs/service-inventory.md` | Every service, tagged office, cloud, or either |
 | `schemas/manifest.schema.json` | How a client's configuration is described, as the machine-readable contract |
