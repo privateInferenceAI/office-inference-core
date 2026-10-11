@@ -1,4 +1,6 @@
-# Office build, Phase 1: data and gateway.
+# One compose file, two builds. The cloud build sends every generation call to Bedrock and starts
+# the gateway and the database. The office build adds the local lane, whose container sits behind
+# the "office" compose profile; the renderer turns that profile on from the manifest.
 #
 # Run from the repo root on the host:
 #   docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env up -d
@@ -35,24 +37,29 @@ services:
       retries: 5
 
   llamacpp:
-    # llama.cpp server: the CPU path. It runs the local lane with no GPU and no API key,
-    # which is what makes Phase 1 possible on a 2 vCPU box. When the GPU arrives, vLLM
-    # replaces this container and nothing else changes, because the gateway in front of it
-    # does not care which server answers.
+    # llama.cpp server: the CPU path, and the local lane's only implementation. The cloud build
+    # has no local lane, so this sits behind a compose profile. Gating it here rather than in a
+    # second compose file is what keeps one file for both builds; the renderer sets
+    # COMPOSE_PROFILES from the manifest's profile field.
+    profiles: ["office"]
     image: ghcr.io/ggml-org/llama.cpp@sha256:bf3da52e92c083472b3d1c9f9da081f423ab9def95a87ec4bba51940382d75fd  # llama.cpp server, pinned 2026-10-10
     container_name: llamacpp
     restart: unless-stopped
     command:
       - "-m"
-      - "/models/${MODEL_FILE}"
+      # Defaults are empty on purpose. Compose interpolates every variable in this file whatever
+      # profiles are active, so a cloud build would otherwise warn about three settings its
+      # profile excludes. The renderer always writes these for an office manifest, so the empty
+      # default only ever applies to the build that does not start this container.
+      - "/models/${MODEL_FILE:-}"
       - "--host"
       - "0.0.0.0"
       - "--port"
       - "8080"
       - "-c"
-      - "${MODEL_CTX}"
+      - "${MODEL_CTX:-8192}"
       - "-t"
-      - "${MODEL_THREADS}"
+      - "${MODEL_THREADS:-4}"
       - "--jinja"
     volumes:
       - ${OI_ROOT}/models:/models:ro
@@ -72,13 +79,21 @@ services:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       LITELLM_LOG: WARNING
+      # Bedrock, for the cloud build's frontier lane. The gateway picks up credentials from the
+      # instance role through the metadata service, so no key material lands in this file. The
+      # hop limit is 2, which is what lets a container reach the metadata service at all.
+      AWS_REGION: ${AWS_REGION}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
     volumes:
       - ${OI_ROOT}/rendered/litellm.yaml:/app/config.yaml:ro
+    # Deliberately no dependency on llamacpp. Compose refuses a project whose dependency sits in
+    # an inactive profile ("depends on undefined service"), which would make the cloud build
+    # invalid. The gateway does not need the local lane to boot: it needs it per request, and only
+    # on the office build, so readiness belongs in the installer's health check rather than in an
+    # ordering hint here.
     depends_on:
       postgres:
         condition: service_healthy
-      llamacpp:
-        condition: service_started
     networks: [ai-net]
 
   audit:

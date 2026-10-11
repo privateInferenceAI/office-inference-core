@@ -145,10 +145,20 @@ def main() -> int:
     env.setdefault("HOST_GID", str(os.getgid()))
 
     local_models = [e.get("local", "") for e in (manifest.get("models") or {}).values() if e]
-    primary = next((m for m in local_models if m), "")
-    env.setdefault("MODEL_FILE", os.environ.get("MODEL_FILE", "Qwen3-1.7B-Q4_K_M.gguf"))
-    env.setdefault("MODEL_CTX", str(DEFAULT_CTX))
-    env.setdefault("MODEL_THREADS", str(os.cpu_count() or 2))
+    # The local lane's settings exist only where there is a local lane. A cloud build that
+    # rendered MODEL_FILE would leave whoever reads this file wondering which lane answers.
+    if any(local_models):
+        env.setdefault("MODEL_FILE", os.environ.get("MODEL_FILE", "Qwen3-1.7B-Q4_K_M.gguf"))
+        env.setdefault("MODEL_CTX", str(DEFAULT_CTX))
+        env.setdefault("MODEL_THREADS", str(os.cpu_count() or 2))
+    else:
+        for key in ("MODEL_FILE", "MODEL_CTX", "MODEL_THREADS"):
+            env.pop(key, None)
+    # Bedrock needs a Region and the gateway reads it from the environment. A host-level fact with
+    # a default, the same pattern as MODEL_FILE. It belongs in the manifest once a client's
+    # contract names a Region, which is a C7 decision; the manifest has no field for one today.
+    env.setdefault("AWS_REGION", os.environ.get("AWS_REGION", "us-east-1"))
+    env.setdefault("AWS_DEFAULT_REGION", env["AWS_REGION"])
 
     models = list(dict.fromkeys(m for m in local_models if m))
     env["MODEL_ROLES"] = ",".join(
@@ -156,6 +166,14 @@ def main() -> int:
     )
     env["DEPLOYMENT_ID"] = manifest["client"]["deployment_id"]
     env["PROFILE"] = manifest["profile"]
+    # One compose file serves both builds. The local lane's containers sit behind the "office"
+    # profile, so a cloud deployment starts the gateway and the database without them. Set
+    # explicitly rather than defaulted, so rendering a cloud manifest over an office env file
+    # cannot leave a stale profile behind and start a container the build has no model for.
+    if manifest["profile"] == "cloud":
+        env.pop("COMPOSE_PROFILES", None)
+    else:
+        env["COMPOSE_PROFILES"] = "office"
 
     env_path.write_text("".join(f"{k}={v}\n" for k, v in sorted(env.items())))
     env_path.chmod(0o600)

@@ -112,3 +112,43 @@ def test_no_key_material_reaches_the_gateway_config(tmp_path):
     text = (tmp_path / "litellm.yaml").read_text()
     assert "os.environ/LITELLM_MASTER_KEY" in text
     assert "sk-" not in text
+
+
+def test_an_office_build_turns_the_local_lane_on(tmp_path):
+    """The local lane's container sits behind a compose profile, so the rendered env has to ask
+    for it or the office build starts with no model to answer."""
+    assert render(OFFICE, tmp_path).returncode == 0
+    assert env_values(tmp_path)["COMPOSE_PROFILES"] == "office"
+
+
+def test_a_cloud_build_leaves_the_local_lane_off(tmp_path):
+    """The cloud build sends every generation call to Bedrock, so llama.cpp must not start. The
+    renderer removes the profile rather than leaving it unset, so rendering a cloud manifest over
+    an office env file cannot leave the local lane running."""
+    assert render(CLOUD, tmp_path).returncode == 0
+    values = env_values(tmp_path)
+    assert "COMPOSE_PROFILES" not in values
+    # And no local-lane settings either, so the env file does not imply a lane this build lacks.
+    for key in ("MODEL_FILE", "MODEL_CTX", "MODEL_THREADS"):
+        assert key not in values, f"{key} belongs to the local lane"
+
+
+def test_the_bedrock_region_reaches_the_env_file(tmp_path):
+    """Bedrock needs a Region and the gateway reads it from the environment. Without it the
+    container cannot resolve an endpoint, which looks like a credential failure."""
+    assert render(CLOUD, tmp_path).returncode == 0
+    values = env_values(tmp_path)
+    assert values["AWS_REGION"]
+    assert values["AWS_DEFAULT_REGION"] == values["AWS_REGION"]
+
+
+def test_the_dev_cloud_manifest_routes_every_role_to_bedrock(tmp_path):
+    """The cloud build's smoke-test manifest. Four roles, four Bedrock entries, no local lane."""
+    dev_cloud = ROOT / "manifests" / "dev-cloud.yaml"
+    assert render(dev_cloud, tmp_path).returncode == 0
+
+    entries = gateway_entries(tmp_path)
+    assert {entry["model_name"] for entry in entries} == {"front_desk", "analyst", "reader", "coder"}
+    for entry in entries:
+        assert entry["model_info"]["lane"] == "frontier"
+        assert entry["litellm_params"]["model"].startswith("bedrock/")

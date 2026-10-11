@@ -1,0 +1,45 @@
+# Development manifest for the cloud build's smoke test.
+#
+# Every role resolves to Bedrock in this account. The cloud build has no local lane: the box runs
+# the gateway, the database, and the audit sink, and generation happens at Bedrock. The local lane
+# belongs to the office build, which is manifests/dev-office.yaml.
+#
+# The cheap tier is deliberate. Nova Micro is about thirty times cheaper on input than Haiku, so a
+# smoke test costs rounding error. All four models here are ON_DEMAND, which means no inference
+# profile and no cross-Region routing, so this manifest is residency-clean without an exemption.
+manifest_version: 1
+client:
+  name: Office Inference Dev
+  deployment_id: oi-core-dev-cloud
+profile: cloud
+packs: [core]
+models:
+  front_desk:
+    local: ""
+    frontier: bedrock/amazon.nova-micro-v1:0
+  analyst:
+    local: ""
+    frontier: bedrock/amazon.nova-lite-v1:0
+  reader:
+    local: ""
+    frontier: bedrock/amazon.nova-pro-v1:0
+  coder:
+    local: ""
+    frontier: bedrock/deepseek.v3.2
+lanes:
+  frontier:
+    enabled: true
+    provider: bedrock
+    # Our own account rather than a client's, because this is our development box and the same
+    # shape the hosted tier uses. The validator refuses this with a compliance profile attached,
+    # since the hosted tier is standard-only.
+    account_owner: office_inference
+    # Deliberately the two lowest classes. Nothing confidential belongs on a development box.
+    data_classes_allowed: [public, internal]
+    requires_approval: false
+    redaction: false
+compliance:
+  profile: none
+  audit_retention_days: 90
+support:
+  response_window: business hours, 4 hours
