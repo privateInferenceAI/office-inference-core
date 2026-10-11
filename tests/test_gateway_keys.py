@@ -181,3 +181,36 @@ def test_an_over_budget_call_is_reported_as_a_failure(rendered):
 
     args = type("Args", (), {"role": "analyst", "as_model": None})()
     assert rendered.probe(env, args) == 1
+
+
+# --- revoking a key ----------------------------------------------------------------------------
+
+def test_revoke_deletes_the_key_at_the_gateway_and_forgets_it(rendered, monkeypatch):
+    """Deleting a role from a manifest leaves its key behind, scoped to a model that no longer
+    exists. Both reviewers found stale keys on the box for exactly that reason, and minting only ever
+    adds or updates, so nothing else in this tool would remove one."""
+    module = rendered
+    calls = []
+
+    def fake_request(path, token, payload=None):
+        calls.append((path, payload))
+        return 200, {"deleted_keys": ["sk-analyst"]}
+
+    monkeypatch.setattr(module, "request", fake_request)
+    monkeypatch.setattr(module, "load_keys", lambda: {"analyst": {"key": "sk-analyst"}})
+    saved = {}
+    monkeypatch.setattr(module, "save_keys", lambda k: saved.update(k))
+
+    assert module.revoke({"LITELLM_MASTER_KEY": "sk-master"}, "analyst") == 0
+
+    assert calls and calls[0][0] == "/key/delete", calls
+    assert calls[0][1] == {"keys": ["sk-analyst"]}, "the gateway is asked to delete that key"
+    assert saved == {}, "and the tool forgets it, so re-adding the role mints a new one"
+
+
+def test_revoking_a_role_with_no_recorded_key_says_so(rendered, monkeypatch):
+    module = rendered
+    monkeypatch.setattr(module, "load_keys", lambda: {})
+    with pytest.raises(SystemExit) as exit_info:
+        module.revoke({"LITELLM_MASTER_KEY": "sk-master"}, "nobody")
+    assert exit_info.value.code != 0

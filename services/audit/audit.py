@@ -655,7 +655,12 @@ def main() -> int:
     verify.set_defaults(func=cmd_verify)
 
     anchor = sub.add_parser("anchor")
-    anchor.add_argument("--out", default="anchors", help="directory to write the anchor into")
+    # The default is the mounted exports directory, not a bare relative path: the tool runs as the
+    # operator inside a container whose /app is root-owned, so a relative default died with a
+    # PermissionError instead of writing anything.
+    anchor.add_argument("--out", default="/app/exports/anchors",
+                        help="directory to write the anchor into (default /app/exports/anchors, "
+                             "which is the path mounted back to the host)")
     anchor.set_defaults(func=cmd_anchor)
 
     args = parser.parse_args()

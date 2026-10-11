@@ -1,0 +1,26 @@
+name: gateway
+location: either
+image: oi-core-keys
+packs: [core]
+depends_on: [gateway, database]
+ports:
+  internal: none
+healthcheck:
+  command: python3 /app/keys.py --help
+  interval_seconds: 0
+gpu:
+  required: false
+data_class: internal
+config_schema:
+  period_days:
+    type: integer
+    default: 30
+substrate:
+  office:
+    notes: >-
+      Mints the same per-role keys. The roles point at local models, so the model ACL on a key names
+      a role the local server serves.
+  cloud:
+    notes: >-
+      The same tool. The keys it mints are what the gateway checks model permission and budget
+      against, and they are the reason a component never holds the master key.

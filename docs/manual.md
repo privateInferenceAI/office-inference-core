@@ -331,9 +331,11 @@ postgres   postgres:16-alpine                   postgres   4 hours ago  Up 4 hou
 `ps` shows only the two long-running services. `audit` and `keys` are behind the compose `tools`
 profile, so they never appear here and `oi up -d` never starts them. They run when you call them.
 
-Two facts about the output: a `docker compose run` prints its own preamble (`Container postgres
-Running`, `Container oi-core-audit-run-<id> Creating`), so every example in this manual that shows a
-tool's output has those lines above it, and they are not shown again below. And `up -d` prints
+Two facts about the output. A `docker compose run` prints its own preamble above whatever the tool
+says, and how much of it depends on what the service depends on: the audit tool waits for postgres, so
+it prints the postgres lines, while the keys tool depends on nothing and prints only its own
+`Creating` and `Created` lines. Every example below has that preamble above it and it is not shown
+again. And `up -d` prints
 `Container <name> Running` when it decides nothing needs doing, which is not the same as having
 restarted anything.
 
@@ -466,6 +468,7 @@ oi run --rm keys --probe analyst --as-model reader
 ```
 analyst -> reader: 403
   The requested model 'reader' is not available for this API key, or the model name is invalid.
+  Check the models available to you and try again.
 ```
 
 `--as-model` is only read by `--probe`, and on its own it now exits with an error rather than doing
@@ -474,6 +477,22 @@ nothing quietly, which is what it used to do.
 **Exit codes, because they are the opposite of what you might script.** A probe that gets an answer
 exits 0. A probe the gateway refuses exits 1, so a monitoring script must read a 422 or a 403 as the
 control working rather than as the check failing.
+
+**Delete a key.** When a role goes away, its key has to go too, or it stays at the gateway scoped to a
+model that no longer exists:
+
+```
+oi run --rm keys --revoke summarizer
+```
+
+```
+revoked summarizer: deleted at the gateway and removed from /app/rendered/keys.json
+  The role may still exist in the manifest. Add it back to models: and budgets.roles: to deploy it
+  again, and it will get a new key rather than this one.
+```
+
+`--revoke` is the only thing in this tool that removes anything. `keys` on its own never prunes, because
+it restores the manifest's policy and a missing role is not a policy change it can see.
 
 **What the ceilings do and do not promise.** The gateway checks the budget against spend it has
 already recorded, and that number lands a moment after a call returns. So a ceiling stops a runaway
@@ -509,9 +528,8 @@ already present`. Migrations are ordered and checksummed, and editing one that h
 is refused rather than silently accepted, so a schema change means a new file:
 
 ```
-error: 005_content_modes.sql was applied but has changed since.
-       Applied 6ed11a69cf48, now c6b031dad94a.
-       Write a new migration instead of editing an applied one.
+error: 005_content_modes.sql was applied but has changed since. Applied 6ed11a69cf48, now c6b031dad94a.
+Write a new migration instead of editing an applied one.
 ```
 
 ### Writing an event by hand
@@ -532,6 +550,10 @@ oi run --rm audit record --dev --type access --actor anthony --actor-role admin 
   "completion_sha256": null
 }
 ```
+
+Two conventions in the samples below. The compose preamble above each output is elided, and so are the
+trailing footers: `audit list` ends with a count such as `20 event(s)`, and a `psql` query ends with
+`(10 rows)`. Columns are trimmed to fit the page. Nothing else is.
 
 `--dev` is required for a hand-typed actor. Without it the command exits non-zero, because in a real
 deployment the actor comes from an authenticated session rather than from whoever is typing. The actor
@@ -564,8 +586,18 @@ and the warning is there to make that a decision rather than an accident.
 
 ```
 --payload '{"document":"expense-policy.pdf"}'      # inline
---payload @/tmp/event.json                          # from a file
+--payload @/tmp/event.json                          # from a file, which has to be mounted in
 echo '{"document":"x.pdf"}' | ... --payload -       # from standard input
+```
+
+The tool runs in a container whose only mounts are the migrations and the exports directory, so a host
+path is invisible to it. Add the mount, and give stdin a `-T` when you are not on a terminal:
+
+```
+oi run --rm -v /tmp/event.json:/tmp/event.json audit record --dev --type access \
+  --actor anthony --payload @/tmp/event.json
+echo '{"document":"x.pdf"}' | oi run -T --rm audit record --dev --type access \
+  --actor anthony --payload -
 ```
 
 **Recording a model call with its prompt and completion:**
@@ -758,8 +790,11 @@ anchored 23 event(s), head 3e7fb0f1d35d…
   Ship this file off this machine. Kept here, it proves nothing.
 ```
 
-Use `--out` under `/app/exports`, because that directory is the one mounted back to the host. The
-default writes inside the container and the file disappears when the container exits.
+`--out` defaults to `/app/exports/anchors`, which is the directory mounted back to the host, so the
+file lands somewhere you can see it. Point it elsewhere under `/app/exports` if you want it in a
+different place, and nowhere else: a path outside that directory is written inside the container and
+disappears with it. Older builds defaulted to a bare relative path and died with a `PermissionError`,
+which is why the default is explicit now.
 
 An anchor is the only artifact that can prove rows were not deleted from the end of the chain. Check
 an export against one:
@@ -834,6 +869,8 @@ purged 10 event(s) before 2026-10-11T03:00
   "last_id": 10,
   "reason": "retention: 90 days"
 }
+prev_hash is the head before the purge and row_hash is the head after, so an export starting at this
+tombstone can be verified on its own.
 ```
 
 `--actor` records who or what ran the purge, and defaults to `retention-job`, which is what an
@@ -1032,7 +1069,7 @@ models:
 The three roles name a model file that the local server serves, no role names a frontier model, and the
 frontier lane is switched off rather than absent. Leaving `enabled: true` here is the mistake the
 validator refuses, because an appliance that can reach a provider is not an office build.
-| `lanes.frontier.enabled` | Whether remote inference exists at all. Must be false on an office build |
+| `lanes.frontier.enabled` | Whether remote inference exists at all. Must be false on an office build and **must be true on a cloud build**, which has no local lane to fall back on, so switching it off there leaves a deployment with no models and is refused |
 | `lanes.frontier.account_owner` | `client`, or `office_inference` for our own machines and the hosted tier |
 | `lanes.frontier.data_classes_allowed` | Which data classes may reach a remote model |
 | `content.default`, `content.classes` | What the record keeps per data class: `hash`, `redacted`, or `full` |
@@ -1172,7 +1209,7 @@ data.
 A role is a name that maps to a model, with its own key and ceiling. Roles are a naming convention
 rather than a closed set, so a deployment can add as many as it needs. This example adds a `summarizer`
 role on the cheapest model, for a component that should only ever write short summaries. It takes two
-edits to the manifest and five commands.
+edits to the manifest and six commands.
 
 **1. Add the role and its model.** In `manifests/dev-cloud.yaml`, under `models:`:
 
@@ -1241,6 +1278,15 @@ keys for oi-core-dev-cloud:
   summarizer minted   models=[summarizer]  1.0 USD per 30d
 ```
 
+**A faster way to see the change took:** ask the gateway what it serves. This is the whole model list
+rather than one role's answer, so it is the check to reach for when a render seems not to have landed:
+
+```
+MASTER=$(grep '^LITELLM_MASTER_KEY=' rendered/env | cut -d= -f2-)
+docker run --rm --network ai-net -e MASTER="$MASTER" curlimages/curl -sS \
+  -H "Authorization: Bearer $MASTER" http://litellm:4000/v1/models
+```
+
 **7. Prove it works and that it is scoped:**
 
 ```
@@ -1264,11 +1310,15 @@ accounts for.
 2. Validate and render, which writes a gateway config without it.
 3. Restart the gateway: `oi restart litellm`. Calls naming the role now fail with a 400, because the name
    is no longer served.
-4. Delete the role's key **before** the record stops mentioning it. The key lives in two places, the
-   gateway's database and `rendered/keys.json`, and `keys` will not remove it for you because it only
-   ever adds or updates. Delete it through the gateway's administration API with the master key, then
-   remove its entry from `rendered/keys.json`. Leaving it costs nothing while the role is gone, and it
-   becomes a live key again the moment someone re-adds the role name with a fresh budget.
+4. Delete the role's key, because a key outliving its role is a credential nothing accounts for:
+
+```
+oi run --rm keys --revoke analyst
+```
+
+   That deletes it at the gateway and forgets it here. Leaving it costs nothing while the role is gone,
+   and it becomes a live key again the moment someone re-adds the role name, which is the reason to
+   revoke rather than leave it.
 5. Record what you did: `audit record --dev --type config_change --actor <you> --actor-role admin
    --payload '{"removed_role":"analyst"}'`.
 
@@ -1564,7 +1614,8 @@ the manual also asks you to type.
 | `python3 scripts/render_manifest.py --manifest <file>` | Writes `rendered/env`, `rendered/litellm.yaml`, `rendered/services.txt`, `rendered/manifest.json` |
 | `python3 scripts/check_requirements.py` | Reports the register: verified, open, waived, by phase |
 | `python3 scripts/check_model_lifecycle.py [manifest…]` | Fails if a manifest names a deprecated, past-EOL, or unknown model |
-| `python3 -m pytest tests/ -q` | The test suite |
+| `pip install -r requirements-dev.txt` | Once, on a machine that will run the tests. The box has no pytest otherwise |
+| `python3 -m pytest tests/ -q` | The test suite. Runs from a checkout, not from a container |
 | `oi ps` | Container status |
 | `oi logs <service>` | Container logs |
 | `oi up -d` | Start everything, or reconcile a service whose *definition* changed |
@@ -1636,8 +1687,9 @@ most likely to want:
 | `DEPLOYMENT_ID` | Stamped into every audit row |
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `LITELLM_MASTER_KEY` | Secrets, generated once and reused on later renders. `DATABASE_URL` is assembled from these by the compose file rather than written here |
 
-Two environment variables are read by the tools but not written by the renderer, which matters when you
-point a tool at another deployment: `LITELLM_URL` (default `http://litellm:4000`) and `RENDERED_DIR`.
+Four environment variables are set by the compose file rather than by the renderer, which matters when
+you point a tool at another deployment: `LITELLM_URL` (default `http://litellm:4000`) and
+`RENDERED_DIR` for the keys tool, and `MIGRATIONS_DIR` and `EXPORTS_DIR` for the audit tool.
 
 ## 24. Glossary
 
@@ -1647,16 +1699,17 @@ only artifact that can detect rows deleted from the end.
 **Backfill.** Copying the gateway's own records into the audit chain.
 
 **Chain.** The audit record's structure: each row carries a hash of the row before it, so edits are
-detectable. Precisely: a row's hash covers thirteen of its columns plus the previous row's hash,
-ordering is by id, the first row chains to nothing, and a purge continues the chain rather than
+detectable. Precisely: a row's hash covers thirteen of its columns, the last of them the previous row's
+hash, ordering is by id, the first row chains to nothing, and a purge continues the chain rather than
 restarting it, because the tombstone is itself a row that chains from the head before the deletion.
 
-The columns the hash covers are the timestamp, event type, actor, actor role, deployment, data class,
-outcome, tool, model, request id, payload hash, payload size and the previous hash. **Three columns are
-outside it**: `approval`, `prompt_sha256` and `completion_sha256`. Editing one of those in the database
-would not break the chain or fail a verify, so today they are recorded evidence rather than chained
-evidence. That is a known gap rather than a design choice, tracked as `AUD-HASH-001`, and closing it
-means a versioned hash so that rows written before the change still verify.
+The thirteen are the timestamp, event type, actor, actor role, deployment, data class, outcome, tool,
+model, request id, payload hash, payload size and the previous hash. **Four columns are outside them**:
+`approval`, `prompt_sha256`, `completion_sha256` and `occurred_at`. Editing one of those four in the
+database would not break the chain or fail a verify, so they are recorded evidence rather than chained
+evidence. That matters most for `occurred_at`, because the retention purge cuts on it. It is a known gap
+rather than a design choice, tracked as `AUD-HASH-001`, and closing it means a versioned hash so that rows
+written before the change still verify.
 
 **Content mode.** What the record keeps for a data class: `hash`, `redacted`, or `full`. The prompt and
 completion hashes are recorded whatever the mode.

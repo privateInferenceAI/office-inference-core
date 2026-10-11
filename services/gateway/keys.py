@@ -178,11 +178,41 @@ def probe(env: dict, args: argparse.Namespace) -> int:
     return 1
 
 
+def revoke(env: dict, role: str) -> int:
+    """Delete a role's key at the gateway and forget it here.
+
+    Deleting a role from a manifest leaves its key behind, scoped to a model that no longer exists.
+    Nothing else removes it: minting only adds or updates, and re-adding the role name later would
+    bring the old key back to life with the old budget. So revoking is two deliberate steps, and this
+    does both.
+    """
+    master = env.get("LITELLM_MASTER_KEY")
+    if not master:
+        die(f"no LITELLM_MASTER_KEY in {ENV_FILE}: run the renderer first")
+    keys = load_keys()
+    record = keys.get(role)
+    if not record or not record.get("key"):
+        die(f"no key recorded for {role} in {KEYS_FILE}. Nothing to revoke.\n"
+            f"  A role whose key lives only at the gateway is not one this tool can vouch for; "
+            f"delete it there by alias instead.")
+    status, body = request("/key/delete", master, {"keys": [record["key"]]})
+    if status != 200:
+        die(f"could not revoke the key for {role}: {status} {str(body)[:200]}")
+    del keys[role]
+    save_keys(keys)
+    print(f"revoked {role}: deleted at the gateway and removed from {KEYS_FILE}")
+    print("  The role may still exist in the manifest. Add it back to models: and budgets.roles: "
+          "to deploy it again, and it will get a new key rather than this one.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """argv is a parameter so the tests can drive this without touching the process arguments."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--set-budget", nargs=2, metavar=("ROLE", "AMOUNT"))
     parser.add_argument("--probe", metavar="ROLE")
+    parser.add_argument("--revoke", metavar="ROLE",
+                        help="delete a role's key at the gateway and forget it here")
     parser.add_argument("--as-model", metavar="MODEL",
                         help="probe a model the key is not scoped to, which must be refused")
     args = parser.parse_args(argv)
@@ -197,6 +227,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.probe:
         args.role = args.probe
         return probe(env, args)
+    if args.revoke:
+        return revoke(env, args.revoke)
 
     if not MANIFEST_FILE.exists():
         die(f"no rendered manifest at {MANIFEST_FILE}: run the renderer first")

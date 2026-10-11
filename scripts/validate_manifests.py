@@ -147,6 +147,13 @@ def check(manifest: dict, packs: set[str], path: Path) -> list[str]:
         if profile == "cloud" and frontier.get("redaction") is False and "regulated" in allowed:
             problems.append("regulated data allowed through the frontier lane without redaction")
 
+    # A cloud build has no local lane, so switching the frontier lane off leaves it with no models at
+    # all. The renderer used to emit frontier entries regardless on a cloud profile, which quietly
+    # ignored the flag; the shape is refused now instead of being ignored.
+    if profile == "cloud" and not frontier.get("enabled"):
+        problems.append("profile 'cloud' needs the frontier lane enabled: a cloud build has no local "
+                        "lane, so switching it off leaves the deployment with no models")
+
     # Residency. Nearly every frontier model on Bedrock is inference-profile only, and a global
     # profile can route a prompt anywhere AWS operates. The schema carried data_residency and
     # nothing read it; these rules read it.
