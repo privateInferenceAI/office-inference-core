@@ -48,6 +48,37 @@ Two things this process has already caught, out of many: a documented command th
 (`up -d` against a mounted config), and an export job that shipped the wrong day. Both were invisible
 to reading and obvious to running.
 
+## How we choose a component
+
+**Ask what a competent production team would deploy for this job, and let that decide. Never let our
+own test instance decide.** If the right component needs more machine, the machine is what changes:
+the build's hardware is part of the quote, and a component chosen because the development box was small
+bakes the development box into the product.
+
+Three qualifications, because the rule stated alone can be misread two ways.
+
+**Professional is not the same as newest or largest.** It means a licence we can sell, a maintainer
+with a track record, documentation, a supported serving path, and enough adoption that a client is not
+the first to hit its bugs. A leaderboard leader with a research-only licence is the wrong production
+choice, and so is a model nothing serves in a container.
+
+**The client's deployment profile is a real constraint; ours is not.** For an In-Office build the
+hardware is what the client buys, so a component whose appetite matches that box is good engineering
+rather than a compromise. The distinction to keep: never choose because *our* instance is small, and
+always be able to say which of the two you are doing.
+
+**Prefer the choice you can reverse.** The cost of a wrong component is not the component, it is the
+migration away from it. For anything whose replacement means redoing work, store the identifier and
+the version beside the data, keep the intermediate artifact, and version the store, so changing it is
+a background job rather than a re-ingest. The embedding model is the clearest case: changing it means
+re-embedding every chunk, so the model id and its dimension belong in the collection's metadata from
+the first ingest.
+
+**Write the comparison down before choosing.** For a choice that is expensive to reverse, the step
+that installs it starts with a short note in `docs/`: the candidates, their licences, their resource
+needs, the serving path, and what being wrong costs. A choice made from memory is a default, not a
+decision.
+
 ## Conventions
 
 - Work on feature branches. Do not commit to `main` directly. Create the branch **before** the first
