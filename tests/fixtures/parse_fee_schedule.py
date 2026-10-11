@@ -158,11 +158,26 @@ def main() -> int:
     pages = json_content.get("pages") or {}
     strings = collect_strings(json_content, [])
     corpus = "\n".join(strings)
-    print(f"parsed in {elapsed:.0f}s: {len(pages)} page(s), {len(corpus)} characters, "
-          f"{len(md_content)} characters of markdown")
-    if not corpus.strip():
-        print("the page came back empty, which is the failure this gate exists to catch")
+    print(f"parsed in {elapsed:.0f}s: {len(pages)} page(s) in the JSON tree, "
+          f"{len(corpus)} characters of JSON, {len(md_content)} characters of markdown")
+
+    # Emptiness is judged on everything the service returned, not on one field. The first version of
+    # this script called the page empty while holding 3,321 characters of markdown, because it tested
+    # `json_content.pages` alone and that field is not where a conversion necessarily puts its text.
+    # A gate that fails on the presence of an unpopulated dictionary is measuring the wrong thing.
+    if not corpus.strip() and not md_content.strip():
+        print("nothing came back in either representation, which is the failure this gate exists to "
+              "catch: the scan produced no text at all")
         return 1
+
+    # The markdown is worth seeing. A table that came back as a table and a table that came back as
+    # loose lines both satisfy a proximity check, and only one of them is what the chunker needs.
+    print()
+    print("--- markdown, first 60 lines ---")
+    for line in md_content.splitlines()[:60]:
+        print(f"| {line}")
+    print("--- end ---")
+    print()
 
     failures = []
     for name, value, context_words in GRADED:
@@ -186,11 +201,14 @@ def main() -> int:
 
     # The table itself, so the citation story has something to point at rather than prose.
     tables = json_content.get("tables") or []
-    print(f"tables recovered: {len(tables)}")
+    print(f"tables with structure in the JSON tree: {len(tables)}")
     for index, table in enumerate(tables):
         cells = table.get("data", {}).get("num_rows"), table.get("data", {}).get("num_cols")
         print(f"  table {index}: {cells[0]} rows x {cells[1]} cols, "
               f"page {table.get('prov', [{}])[0].get('page_no', '?')}")
+    if not tables:
+        print("  none. Read the markdown above to see whether the fee schedule came back as a table "
+              "or as loose lines, because the chunker needs the first.")
 
     print()
     if failures:
