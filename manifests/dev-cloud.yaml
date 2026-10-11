@@ -45,13 +45,13 @@ compliance:
 # a client deployment gets one in theirs, created by Terraform at C7, and the manifest records its
 # name so nothing is typed on a server.
 #
-# Anchors only, for now. Exports join this list when the daily job exists, and no document or prompt
-# can ever be named here: the validator accepts anchors, exports, and backups, and refuses the rest.
+# Anchors hourly and exports daily. No document or prompt can ever be named here: the validator
+# accepts anchors, exports, and backups, and refuses the rest.
 offsite:
   provider: s3
   account_owner: office_inference
   bucket: oi-core-audit-dev
   region: us-east-1
-  ship: [anchors]
+  ship: [anchors, exports]
 support:
   response_window: business hours, 4 hours

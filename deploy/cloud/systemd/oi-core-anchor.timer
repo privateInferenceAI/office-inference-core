@@ -1,0 +1,15 @@
+# Hourly, and Persistent so a run missed while the box was stopped happens after it starts.
+#
+# Hourly rather than daily because an anchor is about 300 bytes. The interval is the window in which
+# someone could delete rows and rewrite the head before a copy lands somewhere they cannot reach.
+[Unit]
+Description=Hourly audit anchor
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+AccuracySec=1min
+Unit=oi-core-anchor.service
+
+[Install]
+WantedBy=timers.target

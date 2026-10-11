@@ -1,0 +1,12 @@
+# Daily, and Persistent so a run missed while the box was stopped happens after it starts.
+[Unit]
+Description=Daily audit export
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+AccuracySec=5min
+Unit=oi-core-export.service
+
+[Install]
+WantedBy=timers.target

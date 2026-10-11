@@ -1,0 +1,16 @@
+# Writes the day's export and ships it, with its manifest, to the offsite bucket.
+#
+# The export is what a client, an auditor, or a lawyer actually reads, and the manifest is what lets
+# a single day's file be checked on its own. Both go together or neither does.
+[Unit]
+Description=Ship the day's audit export to the offsite bucket
+Documentation=file:///opt/oi-core/docs/audit-evidence.md
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/opt/oi-core
+ExecStart=/opt/oi-core/deploy/cloud/ship/oi-core-ship.sh exports
