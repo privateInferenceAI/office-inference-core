@@ -69,27 +69,18 @@
     },
     "models": {
       "type": "object",
-      "description": "Roles, never model names, in the interface. Each role resolves to a concrete model per lane.",
+      "description": "One entry per role. A role is a name a caller asks for, mapped to a model, with its own key and ceiling, so a deployment may add its own. The three named in required are the ones every build needs; coder and anything else are additional.",
       "required": [
         "analyst",
         "front_desk",
         "reader"
       ],
-      "additionalProperties": false,
-      "properties": {
-        "analyst": {
-          "$ref": "#/$defs/modelRole"
-        },
-        "front_desk": {
-          "$ref": "#/$defs/modelRole"
-        },
-        "reader": {
-          "$ref": "#/$defs/modelRole"
-        },
-        "coder": {
+      "patternProperties": {
+        "^[a-z][a-z0-9_]*$": {
           "$ref": "#/$defs/modelRole"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "lanes": {
       "type": "object",

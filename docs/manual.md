@@ -129,6 +129,13 @@ A validator refuses a manifest that would break a promise. It knows, for example
 cannot use remote models, that a regulated deployment may not route a prompt globally, and that a
 build with remote models must declare spending ceilings.
 
+A word on `schemas/manifest.schema.json`, because it is easy to overrate. It is the machine-readable
+contract and the reference for what a field means, and **nothing enforces it yet**. The gate is the
+hand-written Python in `scripts/validate_manifests.py`, which implements about twenty rules and is the
+authoritative list in section 16. A field that the schema forbids but no Python rule mentions will pass
+validation today. Enforcing the schema is a tracked gap rather than a done thing, and the manual says
+so rather than implying otherwise.
+
 ## 6. What exists today, and what does not
 
 | Working now | Not built yet |
@@ -167,6 +174,22 @@ aws ssm start-session --profile oi-credits --region us-east-1 --target i-096bebd
 
 Both land you in the same shell as the `ubuntu` user, who can run Docker without `sudo`.
 
+**How to check the agent, and how not to.** On Ubuntu the agent is installed as a snap, so
+`systemctl status amazon-ssm-agent` says `Unit amazon-ssm-agent.service could not be found` and a
+`dpkg -l` search finds nothing, while the agent is running perfectly well. That combination has
+already fooled one careful reader of an earlier draft. Look at the snap instead, or ask AWS:
+
+```
+snap list amazon-ssm-agent
+sudo snap services amazon-ssm-agent
+aws ssm describe-instance-information --profile oi-credits --region us-east-1 \
+  --filters Key=InstanceIds,Values=i-096bebd46308d1673 \
+  --query 'InstanceInformationList[].{id:InstanceId,ping:PingStatus,agent:AgentVersion}'
+```
+
+`PingStatus: Online` is the answer that matters. A `not-found` from `systemctl` is a property of how
+the package ships, not a fault.
+
 **What is on the machine.** The repository is at `/opt/oi-core`. Everything the deployment produces
 lives under it: `rendered/` for generated configuration and secrets, `exports/` for the audit
 artifacts, `data/` for the database. The Docker containers are separate from all of that.
@@ -192,12 +215,13 @@ cd /opt/oi-core
 docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env ps
 ```
 
-You should see `postgres` healthy and `litellm` running:
+You should see `postgres` healthy and `litellm` running. Compose prints six columns; the middle two
+are trimmed here for width:
 
 ```
-NAME       IMAGE                    SERVICE    STATUS
-litellm    ghcr.io/berriai/litellm… litellm    Up 4 hours
-postgres   postgres:16-alpine       postgres   Up 4 hours (healthy)
+NAME       IMAGE                    COMMAND     SERVICE    CREATED      STATUS
+litellm    ghcr.io/berriai/litellm…            litellm    4 hours ago  Up 4 hours
+postgres   postgres:16-alpine                   postgres   4 hours ago  Up 4 hours (healthy)
 ```
 
 Then ask the gateway whether it is alive, from a throwaway container on the same private network,
@@ -317,6 +341,9 @@ analyst -> reader: 403
   The requested model 'reader' is not available for this API key, or the model name is invalid.
 ```
 
+`--as-model` is only read by `--probe`, and on its own it now exits with an error rather than doing
+nothing quietly, which is what it used to do.
+
 **What the ceilings do and do not promise.** The gateway checks the budget against spend it has
 already recorded, and that number lands a moment after a call returns. So a ceiling stops a runaway
 loop, and it does not promise that the number is never exceeded: the call that crosses the line
@@ -371,9 +398,36 @@ oi run --rm audit record --dev --type access --actor anthony --actor-role admin 
 deployment the actor comes from an authenticated session rather than from whoever is typing. The actor
 is an identity, not a word.
 
-**The event types:** `model_call`, `tool_call`, `approval`, `access`, `config_change`, `login`.
-**The outcomes:** `ok`, `denied`, `error`, `pending`.
-**The data classes:** `public`, `internal`, `confidential`, `regulated`.
+**The choices you can make:**
+
+| Flag | Values, and what it means |
+|---|---|
+| `--type` | `model_call`, `tool_call`, `approval`, `access`, `config_change`, `login`. Required |
+| `--actor` | Who did it. Required, and refused without `--dev` |
+| `--actor-role` | Their role, for a human: `admin`, `staff`, or a role name |
+| `--dev` | Says out loud that a human typed this actor rather than a session supplying it |
+| `--data-class` | `public`, `internal`, `confidential`, `regulated`. Default `internal`. It decides the content mode |
+| `--outcome` | `ok`, `denied`, `error`, `pending`. Default `ok` |
+| `--tool` | The tool involved, when the event is a `tool_call` |
+| `--model` | The model involved, when the event is a `model_call` |
+| `--request-id` | Ties a hand-written event to the gateway's call. The record is unique on it, so a later `backfill` will not create a duplicate |
+| `--approval` | JSON describing an approval, for the `approval` type |
+| `--payload` | JSON, or `@file` to read a file, or `-` to read standard input |
+| `--prompt`, `--completion` | The text sent and returned. Both hashes are always recorded; the text is kept according to the content mode |
+| `--deployment-id` | Overrides the deployment this event belongs to. Rarely needed |
+
+**Two warnings go to standard error**, so they appear in your terminal but not in the JSON on standard
+output. One says you are in development mode. The other appears if you pass `--store-payload` while the
+content mode would hash: the flag wins, so the event keeps more than the deployment's policy asks for,
+and the warning is there to make that a decision rather than an accident.
+
+**The payload forms, in practice:**
+
+```
+--payload '{"document":"expense-policy.pdf"}'      # inline
+--payload @/tmp/event.json                          # from a file
+echo '{"document":"x.pdf"}' | ... --payload -       # from standard input
+```
 
 **Recording a model call with its prompt and completion:**
 
@@ -423,6 +477,21 @@ moment after a call returns, so a backfill run in the same second can miss the n
 run picks it up. And a retention purge sets a watermark, so calls older than the newest purge are
 deliberately not copied back.
 
+**How the copied rows read.** A backfilled call is attributed to `gateway-key:` followed by eight
+characters of the key's hash, and the role comes from the key's alias, so a refusal reads as the role
+that asked rather than as an anonymous key. A call the gateway refused is recorded as `denied` when the
+gateway answered 4xx and `error` for anything else, with the provider's error code and class, the
+normalized error, the budget figures when the refusal was about money, and the message hashed rather
+than stored, because error strings are the field most likely to quote a prompt back.
+
+**A view built for reading.** `audit_feed` renders each event as a plain-language line, which is what a
+future Activity screen will use. Reading it directly is the quickest way to see what happened without
+decoding JSON:
+
+```
+docker exec postgres psql -U oicore -d oicore -c "select * from audit_feed order by id desc limit 10;"
+```
+
 ### Exporting a day
 
 ```
@@ -439,6 +508,15 @@ exported 6 event(s) for 2026-10-11
 On the host that is `/opt/oi-core/exports/2026-10-11/`. The JSONL file holds one event per line. The
 manifest holds the count, the first and last ids, the hash the first row chains back to, and the hash
 of the file itself. Without `--date` you get today in UTC.
+
+**An export is a snapshot of the record, not a view of it.** The record only holds the gateway's calls
+after a `backfill`, so exporting without one ships whatever the last backfill happened to catch. That
+is how the first export this project shipped came to hold two rows of a twelve-row day, and the file
+verified cleanly, because nothing was wrong with it: it was a faithful export of a record nobody had
+refreshed.
+
+The shipping job now runs `backfill` before every export for exactly that reason. If you export by
+hand, run `backfill` first.
 
 ### Checking an export
 
@@ -498,6 +576,12 @@ With no anchor, the command says plainly that completeness cannot be shown, beca
 the end and re-exporting would still verify. That sentence is the honest one, and it is why the
 shipping job in section 14 exists.
 
+**What the anchor check proves, exactly.** It catches an export that is missing the row the anchor
+recorded, and an export with fewer rows than the anchor's count. It does not prove that nothing
+written *after* the anchored row has gone missing, so the accurate claim is "the chain still contains
+the state that existed when this anchor was written", not "nothing is missing". Anchor often enough
+that the gap between two anchors is small, which is why the job runs hourly.
+
 ### A retention purge
 
 ```
@@ -524,6 +608,9 @@ purged 10 event(s) before 2026-10-11T03:00
   "reason": "retention: 90 days"
 }
 ```
+
+`--actor` records who or what ran the purge, and defaults to `retention-job`, which is what an
+unattended run should say. Give it a person's name when a person is doing it.
 
 A purge is a deliberate hole in the chain. The tombstone is what makes the hole explained instead of
 suspicious, and it carries both hashes: `prev_hash` is the head before the purge and `row_hash` is the
@@ -561,6 +648,17 @@ The read-back is the point. From the sending side a complete upload and a trunca
 Fetching the object and hashing it is the difference between "we sent it" and "it is there and it
 matches".
 
+**A filename that repeats on purpose.** An anchor is named for its date and the number of events in
+the chain, so an hourly run over an unchanged chain writes the same key: `anchor-2026-10-11-00000006.json`
+at 03:00 and again at 04:00, with the object's version history holding both. That is deliberate. The
+filename is a fingerprint of the chain's state, so two identical names mean the chain did not change,
+and `aws s3 ls` showing one object is not a lost upload. To see the versions:
+
+```
+aws s3api list-object-versions --bucket oi-core-audit-dev --prefix anchors/ \
+  --profile oi-credits --query 'Versions[].{key:Key,written:LastModified}' --output table
+```
+
 **The timers:**
 
 ```
@@ -592,10 +690,10 @@ delete failed: … An error occurred (AccessDenied) when calling the DeleteObjec
 |---|---|---|
 | After a start | Containers healthy | `oi ps` |
 | After a start | Gateway answering | `docker run --rm --network ai-net curlimages/curl -sS http://litellm:4000/health/liveliness` |
-| Weekly | The record's chain is intact | `oi run --rm audit verify /app/exports/<today>/audit-events.jsonl` |
+| Weekly | The record's chain is intact | `oi run --rm audit verify /app/exports/2026-10-11/audit-events.jsonl` (a UTC date, and export the day first) |
 | Weekly | Nothing was refused unexpectedly | `oi run --rm audit list --type model_call --limit 50` |
 | Weekly | Timers have been firing | `journalctl -u oi-core-anchor.service -n 20` |
-| Monthly | Model lifecycle and vulnerabilities | `python3 scripts/check_model_lifecycle.py` |
+| Monthly | Model lifecycle | On the box, after a `git pull`, so it reads the manifests this deployment renders from: `python3 scripts/check_model_lifecycle.py` |
 | Monthly | What the deployment is spending | The provider's cost report, not the gateway's |
 
 ---
@@ -666,19 +764,56 @@ support:
 | `budgets.period_days`, `budgets.roles` | The ceiling per role, in dollars, over a period in days |
 | `compliance.profile` | `none`, `contractual`, `hipaa`, `glba`, `sec-17a4`, `itar-cui`, `ferpa`, `pci` |
 | `compliance.audit_retention_days` | How long the record is kept. Six years is enforced for `sec-17a4` |
-| `offsite` | Where evidence ships, and which artifacts may leave: `anchors`, `exports`, `backups` |
+| `offsite` | Where evidence ships, and which artifacts may leave: `anchors`, `exports`, `backups`. `backups` is accepted today and nothing consumes it until C8 |
 
-**What the validator refuses**, all of it deliberately:
+**What the validator refuses.** The script is the authoritative list; this is what it covers, grouped
+by what the rule protects.
 
-- A global inference profile under a compliance profile, because it can route a prompt to any region.
-- Fable models, whose retention terms require a human review step.
-- An office build with a frontier lane, since the account is not what makes inference remote.
-- A remote model with no spending ceiling.
-- An unknown pack, an unknown role in a budget, an unknown data class in a content policy.
-- `offsite.ship` naming anything but anchors, exports, or backups. Documents and prompts can never
+*Promises to the client:*
+
+- An office build with a frontier lane, since an AWS account is not what makes inference remote.
+- A remote model with no spending ceiling, because a remote call costs money and an uncapped role is
+  how a loop empties an account.
+- `offsite.ship` naming anything but `anchors`, `exports`, or `backups`. Documents and prompts can never
   leave the building, and the list is how that stays true.
-- `itar-cui` with any offsite destination at all.
+- An unknown pack id, so a purchase cannot quietly under-deploy.
+- A missing `client.name` or `client.deployment_id`, or an id with characters outside letters, digits,
+  and hyphens.
+- A missing `models.analyst`, `models.front_desk`, or `models.reader`, or a role entry without a
+  `local` key, which is how a build with no local lane is described explicitly rather than by omission.
+
+*Residency and model eligibility:*
+
+- A global inference profile under any compliance profile other than `none` or `contractual`, because
+  it can route a prompt to any Region.
+- Fable models, whose retention terms require a human review step.
+- The `frontier-lane` pack on the office profile.
+- A compliance profile on a cloud or hybrid build with no `compliance.data_residency`, since residency
+  decides which model forms are allowed.
+- `regulated` in `data_classes_allowed` on a cloud build with `redaction: false`.
+- A frontier lane enabled with an empty `data_classes_allowed`, which would allow everything.
+
+*Agreements and accountability:*
+
+- A compliance profile other than `none` or `contractual` on a hardware build without
+  `compliance.baa_with_office_inference`, because we need a signed agreement to hold that data.
+- `account_owner: office_inference` under any compliance profile. The hosted tier is standard-only, so
+  a compliance claim belongs in the client's own account.
+- `itar-cui` on anything but the office profile, and `itar-cui` with any offsite destination at all.
 - A `sec-17a4` deployment with under six years of retention.
+
+*Shape of the data:*
+
+- An unknown role in `budgets.roles`, an unknown data class or mode in the content policy, a budget
+  that is not positive, a `period_days` that is not a positive whole number.
+- An unknown `offsite.provider`, a bucket name that is not a valid S3 name, or an offsite block with no
+  `ship` list.
+- An unknown compliance profile name.
+
+**Two fields are policy that nothing enforces yet.** `lanes.frontier.data_classes_allowed` and
+`lanes.frontier.requires_approval` are validated and rendered, and no service reads them at call time,
+because nothing labels a request with its data class yet. They become real in C2 and C3. Until then,
+treat them as the client's intent recorded in the contract rather than a control that will stop a call.
 
 Run it before you render anything:
 
@@ -716,9 +851,10 @@ data.
 
 ## 17. Adding a role
 
-A role is a name that maps to a model, with its own key and ceiling. Adding one takes four edits and
-three commands. This example adds a `summarizer` role on the cheapest model, for a component that
-should only ever write short summaries.
+A role is a name that maps to a model, with its own key and ceiling. Roles are a naming convention
+rather than a closed set, so a deployment can add as many as it needs. This example adds a `summarizer`
+role on the cheapest model, for a component that should only ever write short summaries. It takes four
+edits and five commands.
 
 **1. Add the role and its model.** In `manifests/dev-cloud.yaml`, under `models:`:
 
@@ -735,6 +871,15 @@ should only ever write short summaries.
 ```
 
 A role with no ceiling fails validation whenever remote inference is on, so this is not optional.
+
+**If the model is one this deployment has not used before, two more things are needed**, and both fail
+late rather than at validation:
+
+- An entry in `data/model-lifecycle.json`, or `check_model_lifecycle.py` fails and names the model. The
+  format and the refresh procedure are in `docs/model-lifecycle.md`.
+- The model in the instance role's Bedrock policy. That policy allows exactly four model ARNs today, so
+  a new one answers `AccessDenied` at call time and nothing before that catches it. Section 18 shows
+  the check.
 
 **3. Decide what the record keeps for it.** It inherits `content.default`, which is `hash`. If you want
 something else for its events, that is a per-data-class decision rather than per-role, so leave it
@@ -810,6 +955,21 @@ questions before a client sees the new answers, which is C8's work rather than s
 
 If the model is unknown to `data/model-lifecycle.json`, the lifecycle check fails and names it. Add it
 with its status and a replacement, following `docs/model-lifecycle.md`.
+
+Then confirm the instance may actually invoke it:
+
+```
+aws iam get-role-policy --role-name oi-core-dev-instance \
+  --policy-name oi-core-dev-bedrock-invoke --profile oi-credits \
+  --query 'PolicyDocument.Statement[].Resource'
+```
+
+If the new model's ARN is not in that list, add it, or the first call fails with `AccessDenied` and the
+gateway will look like the problem.
+
+One ordering note: the renderer rewrites `rendered/litellm.yaml` in place, and the running gateway has
+that file open read-only. Render and restart promptly rather than leaving a gateway reading a file
+that changed underneath it.
 
 ## 19. Standing up a second deployment for a new client
 
@@ -915,6 +1075,11 @@ timers are `Persistent`. If it did not fire at all, check `systemctl list-timers
 **The night's work is stale on the machine.** `git pull` on the box, then rebuild the tools. The
 repository is the source of truth for code, and `main` is what runs.
 
+Two related traps. The box can sit several merges behind without anything looking wrong, so check
+`git log --oneline -1` on the box against `origin/main` when a fix seems not to have taken. And the
+manual you are reading lives in the repository rather than on the machine, so a fresh box will not have
+it until the branch that added it is merged and pulled.
+
 ---
 
 # Part 6: reference
@@ -958,7 +1123,30 @@ repository is the source of truth for code, and `main` is what runs.
 | `/opt/oi-core/exports/anchors/` | Anchors written on this machine |
 | `/opt/oi-core/data/postgres/` | The database's files |
 | `/opt/oi-core/db/migrations/` | Schema migrations, applied by `audit migrate` |
+| `/opt/oi-core/data/model-lifecycle.json` | Model status and replacements, read by the lifecycle check |
 | `/etc/systemd/system/oi-core-*.{service,timer}` | The shipping schedule |
+
+### What the renderer writes into `rendered/env`
+
+The env file is generated, mode 600, and holds both secrets and settings. The settings a reader is
+most likely to want:
+
+| Variable | What it holds |
+|---|---|
+| `PROFILE` | `cloud`, `office`, or `hybrid`, as rendered |
+| `COMPOSE_PROFILES` | `office` on a non-cloud build, which is what starts the local model server. Absent on cloud |
+| `MODEL_ROLES` | The roles this deployment serves |
+| `CONTENT_DEFAULT`, `CONTENT_MODE_<CLASS>` | The content policy, one entry per data class. The audit tool reads these |
+| `AUDIT_SHIP_BUCKET`, `AUDIT_SHIP_ARTIFACTS`, `AUDIT_SHIP_REGION` | Where the shipping job sends evidence, and which artifacts may leave. Empty means everything stays on the box |
+| `AWS_REGION`, `AWS_DEFAULT_REGION` | The Region the containers use for the provider |
+| `OI_ROOT` | Where the deployment lives, so the tools find the repository without being told |
+| `HOST_UID`, `HOST_GID` | The owner the tools run as, so files they write belong to the operator |
+| `GATEWAY_PORT` | The gateway's port inside the network |
+| `DEPLOYMENT_ID` | Stamped into every audit row |
+| `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `LITELLM_MASTER_KEY`, `DATABASE_URL` | Secrets. Generated once and reused on later renders |
+
+Two environment variables are read by the tools but not written by the renderer, which matters when you
+point a tool at another deployment: `LITELLM_URL` (default `http://litellm:4000`) and `RENDERED_DIR`.
 
 ## 24. Glossary
 

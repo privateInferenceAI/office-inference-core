@@ -64,6 +64,11 @@ case "$MODE" in
     ;;
   exports)
     day="$(date -u +%F)"
+    # Pull the gateway's calls into the record first. The gateway writes a row as each call happens,
+    # and the record only has them after a backfill, so exporting without one ships whatever the last
+    # backfill happened to catch. That is how the first shipped export came to hold two rows of a
+    # twelve-row day: nothing was wrong with the export, it exported a record nobody had refreshed.
+    docker compose -f "$COMPOSE" --env-file "$ENV_FILE" run --rm audit backfill
     docker compose -f "$COMPOSE" --env-file "$ENV_FILE" run --rm audit export --date "$day"
     pairs+=("$EXPORTS/$day/audit-events.jsonl|exports/$day/audit-events.jsonl")
     pairs+=("$EXPORTS/$day/manifest.json|exports/$day/manifest.json")
