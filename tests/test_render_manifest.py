@@ -163,7 +163,7 @@ def test_an_offsite_destination_reaches_the_env_file(tmp_path):
     assert render(DEV_CLOUD, tmp_path).returncode == 0
     values = env_values(tmp_path)
     assert values["AUDIT_SHIP_BUCKET"] == "oi-core-audit-dev"
-    assert values["AUDIT_SHIP_ARTIFACTS"] == "anchors"
+    assert values["AUDIT_SHIP_ARTIFACTS"] == "anchors,exports"
     assert values["AUDIT_SHIP_REGION"] == "us-east-1"
 
 

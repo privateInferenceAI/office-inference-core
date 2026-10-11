@@ -1,0 +1,17 @@
+# Writes the audit chain head and ships it to the offsite bucket.
+#
+# The anchor is the only artifact that can prove rows were not deleted from the end of the chain, so
+# it only counts once it is somewhere this box cannot rewrite. The job exits non-zero if the upload
+# or the read-back fails, which surfaces as a failed unit rather than as a quiet gap in the record.
+[Unit]
+Description=Ship the audit chain anchor to the offsite bucket
+Documentation=file:///opt/oi-core/docs/audit-evidence.md
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/opt/oi-core
+ExecStart=/opt/oi-core/deploy/cloud/ship/oi-core-ship.sh anchors

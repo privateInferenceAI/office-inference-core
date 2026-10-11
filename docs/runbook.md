@@ -634,6 +634,59 @@ document covers the bucket, the retention mode, the permissions that stop the bo
 wrote, and the three build shapes, including an office appliance that has its own AWS account without
 being a hybrid deployment.
 
+### 2.8 Ship the evidence off the box
+
+**Status: written and tested in pieces, not yet run as a timer on this deployment.** The bucket exists
+and `docs/audit-evidence.md` records its settings, the manifest declares it, and the job is in
+`deploy/cloud/ship/`. This heading gets its "run" marker when the first anchor lands.
+
+The job is two containers and nothing installed on the host. The **audit tool** writes the anchor or
+the export, because it owns the chain and knows how to produce them. The **ship image** delivers the
+file and reads it back to compare hashes, because the audit tool is not allowed a cloud dependency:
+the office appliance runs that same tool with no bucket in sight.
+
+Install the timers:
+
+    cd /opt/oi-core
+    sudo cp deploy/cloud/systemd/oi-core-*.service deploy/cloud/systemd/oi-core-*.timer /etc/systemd/system/
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now oi-core-anchor.timer oi-core-export.timer
+    systemctl list-timers 'oi-core-*'
+
+Run one by hand first, which is also how you debug it:
+
+    ./deploy/cloud/ship/oi-core-ship.sh anchors
+    ./deploy/cloud/ship/oi-core-ship.sh exports
+
+Expected, for the anchor:
+
+    anchored 2 event(s), head 768f01c8...
+      /app/exports/anchors/anchor-2026-10-11-00000002.json
+      Ship this file off this machine. Kept here, it proves nothing.
+    shipping /evidence/anchors/anchor-2026-10-11-00000002.json (276 bytes)
+      local  sha256 ...
+      remote sha256 ...
+      ok: s3://oi-core-audit-dev/anchors/anchor-... matches the file that was sent
+    anchors shipped to s3://oi-core-audit-dev
+
+Then see what the timers have been doing:
+
+    journalctl -u oi-core-anchor.service -n 40
+    systemctl status oi-core-anchor.timer
+
+**Why the read-back is inside the script.** From the sending side a complete upload and a truncated one
+look identical: both are silent and both exit zero. Fetching the object and hashing it is the
+difference between "we sent it" and "it is there and it matches".
+
+**Why `Persistent=true` on both timers.** The box is stopped when nobody is working, so a scheduled run
+gets missed. Persistent means a missed run happens once, after the box starts, rather than silently
+never happening.
+
+**If it breaks:** `no offsite destination in the manifest` means the job correctly found nothing to do.
+`AccessDenied` on the upload means the role's policy and the bucket name disagree. `AccessDenied` on a
+*delete* is the system working, and section 5 of `docs/audit-evidence.md` explains why the box is not
+allowed to do it.
+
 ## Phase 3 — Documents  *(outline)*
 
 Docling ingestion, chunking with access labels, Qdrant, TEI embeddings and reranker. Ends with a
