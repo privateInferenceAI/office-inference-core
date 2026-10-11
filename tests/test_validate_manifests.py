@@ -276,3 +276,41 @@ def test_a_local_only_build_may_have_no_budget(packs):
     manifest = load(ROOT / "manifests" / "example-in-office.yaml")
     assert not (manifest.get("budgets") or {}).get("roles"), "the office example should ship uncapped"
     assert problems(manifest, packs) == []
+
+
+# --- content modes ----------------------------------------------------------------------------
+
+def content_manifest(**overrides) -> dict:
+    manifest = load(STANDARD)
+    block = {"default": "hash", "classes": {"public": "full", "internal": "redacted"}}
+    block.update(overrides)
+    manifest["content"] = block
+    return manifest
+
+
+def test_a_content_policy_for_each_class_is_accepted(packs):
+    assert problems(content_manifest(), packs) == []
+
+
+def test_an_unknown_content_mode_is_refused(packs):
+    """A typo here decides whether a client's documents end up in the evidence file, so it is refused
+    rather than defaulted."""
+    found = problems(content_manifest(classes={"public": "everything"}), packs)
+    assert mentions(found, "content.classes.public"), found
+
+
+def test_an_unknown_data_class_in_the_content_policy_is_refused(packs):
+    found = problems(content_manifest(classes={"secret": "hash"}), packs)
+    assert mentions(found, "not a data class"), found
+
+
+def test_an_unknown_default_mode_is_refused(packs):
+    found = problems(content_manifest(default="none"), packs)
+    assert mentions(found, "content.default"), found
+
+
+def test_the_shipped_dev_manifest_declares_its_content_policy(packs):
+    manifest = load(ROOT / "manifests" / "dev-cloud.yaml")
+    assert manifest["content"]["classes"]["public"] == "full"
+    assert manifest["content"]["classes"]["internal"] == "redacted"
+    assert problems(manifest, packs) == []

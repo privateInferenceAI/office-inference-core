@@ -35,6 +35,7 @@ import yaml  # noqa: E402
 from validate_manifests import check, load_catalog_packs  # noqa: E402
 
 DEFAULT_CTX = 8192
+DATA_CLASSES = ("public", "internal", "confidential", "regulated")
 SERVICES_FROM_CATALOG = ("core",)
 
 
@@ -159,6 +160,16 @@ def main() -> int:
     # contract names a Region, which is a C7 decision; the manifest has no field for one today.
     env.setdefault("AWS_REGION", os.environ.get("AWS_REGION", "us-east-1"))
     env.setdefault("AWS_DEFAULT_REGION", env["AWS_REGION"])
+
+    # Content modes reach the audit tool through the environment, because the tool runs in its own
+    # container with the deployment root mounted rather than the repository. Every class is written
+    # explicitly, so the tool reads a decision rather than applying a fallback of its own.
+    content = manifest.get("content") or {}
+    default_mode = content.get("default", "hash")
+    declared = content.get("classes") or {}
+    env["CONTENT_DEFAULT"] = default_mode
+    for data_class in sorted(DATA_CLASSES):
+        env[f"CONTENT_MODE_{data_class.upper()}"] = declared.get(data_class, default_mode)
 
     # Offsite delivery of audit artifacts. Absent means this build keeps everything on the box,
     # which is a valid office shape and the default. Set and removed explicitly rather than
