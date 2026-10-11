@@ -1,0 +1,54 @@
+{
+  "_comment": "Model lifecycle, refreshed deliberately rather than queried at check time so the check runs in CI without credentials and gives the same answer everywhere. Refresh it with the procedure in docs/model-lifecycle.md. A model absent from this table fails the check on purpose: adding one should be a decision, not an accident.",
+  "verified_on": "2026-10-11",
+  "source": "bedrock:ListFoundationModels, GetFoundationModel and GetFoundationModelAvailability, us-east-1, on 2026-10-11",
+  "models": {
+    "amazon.nova-micro-v1:0": {
+      "provider": "Amazon",
+      "status": "ACTIVE",
+      "eol_date": null,
+      "replacement": "amazon.nova-lite-v1:0",
+      "note": "The brief flags Nova Micro as past its stated end-of-life floor. The Bedrock API reports ACTIVE and ON_DEMAND today, and the model card's support window has not been read yet, so eol_date stays null rather than guessed. Verifying it is the first item in the review cadence."
+    },
+    "amazon.nova-lite-v1:0": {
+      "provider": "Amazon",
+      "status": "ACTIVE",
+      "eol_date": null,
+      "replacement": "amazon.nova-pro-v1:0"
+    },
+    "amazon.nova-pro-v1:0": {
+      "provider": "Amazon",
+      "status": "ACTIVE",
+      "eol_date": null,
+      "replacement": "anthropic.claude-sonnet-5"
+    },
+    "deepseek.v3.2": {
+      "provider": "DeepSeek",
+      "status": "ACTIVE",
+      "eol_date": null,
+      "replacement": "amazon.nova-pro-v1:0",
+      "note": "ON_DEMAND, so it survives the single-Region residency rule that disqualifies the inference-profile-only frontier models."
+    },
+    "anthropic.claude-sonnet-5": {
+      "provider": "Anthropic",
+      "status": "ACTIVE",
+      "eol_date": null,
+      "replacement": "amazon.nova-pro-v1:0",
+      "note": "Inference-profile only, so a single-Region requirement disqualifies it and the ON_DEMAND models are the fallback. The brief records no retention requirement on this model."
+    },
+    "anthropic.claude-haiku-5-5": {
+      "provider": "Anthropic",
+      "status": "ACTIVE",
+      "eol_date": null,
+      "replacement": "amazon.nova-lite-v1:0",
+      "note": "Inference-profile only. No retention requirement reported, which is what makes it usable for regulated work."
+    },
+    "anthropic.claude-opus-5-5": {
+      "provider": "Anthropic",
+      "status": "ACTIVE",
+      "eol_date": null,
+      "replacement": "anthropic.claude-sonnet-5",
+      "note": "Inference-profile only. Used by the hybrid example as the analyst's frontier tier."
+    }
+  }
+}

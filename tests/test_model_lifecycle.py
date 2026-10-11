@@ -78,6 +78,18 @@ def test_an_inference_profile_resolves_to_the_model_underneath(check):
     assert check.model_id("bedrock/amazon.nova-micro-v1:0") == "amazon.nova-micro-v1:0"
 
 
+def test_the_lifecycle_table_is_tracked_by_git():
+    """It lives under data/, which .gitignore excludes as runtime data. The first version of this file
+    was silently untracked for that reason: every test passed locally because the file was there, and
+    CI failed because it was not. A check that only works on the machine that wrote it is not a check.
+    """
+    import subprocess
+    result = subprocess.run(["git", "ls-files", "--error-unmatch", "data/model-lifecycle.json"],
+                            capture_output=True, text=True, cwd=ROOT)
+    assert result.returncode == 0, (
+        "data/model-lifecycle.json is not tracked by git, so CI cannot see it. Check .gitignore.")
+
+
 def test_the_real_table_records_where_its_facts_came_from(real_table):
     """A table nobody can date is a table nobody can trust."""
     assert real_table["verified_on"] == "2026-10-11"

@@ -13,7 +13,11 @@ deploy/**/.terraform/
 !*.tfvars.example
 
 # runtime data
-data/
+data/*
+# Checked-in reference data lives here too, and the directory-wide exclusion above swallowed it once:
+# the model lifecycle table was untracked locally and only CI noticed. tests/test_model_lifecycle.py
+# asserts this file is tracked, so the next silent exclusion fails a test instead of a pipeline.
+!data/model-lifecycle.json
 backups/
 logs/
 exports/
