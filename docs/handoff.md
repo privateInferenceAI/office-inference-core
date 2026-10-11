@@ -24,9 +24,22 @@ four roles on Bedrock, per-role keys with hard ceilings and model permissions, a
 hash-chained record, a daily export and an hourly anchor shipped to an S3 bucket the machine cannot
 delete from, and CI that tests all of it.
 
-What does not exist yet: anything that reads a document. The system answers from a model's general
-knowledge today. That is C2, and it is the phase that makes the product answer from a client's own
-material.
+**C2 has started, and it starts with a decision rather than with code.** The retrieval architecture is
+decided — seven stages, the lexical arm in Postgres, page-bounded chunks, the reranker on by default
+inside a latency budget — and the evidence for it is in the repository. What is built so far: the
+vector store, the two model services, and a benchmark. What is next is a measurement, then ingestion.
+
+Read these in this order for C2:
+
+| Document | What it gives you |
+|---|---|
+| `docs/search-architecture.md` | The decision: what we build, what we do not, and why |
+| `docs/research/search-2026-10/` | The evidence: nine research angles, two adversarial critiques, the revision |
+| `docs/evaluation-corpora.md` | Which corpora and question sets we may use, licence-verified, with a three-tier policy |
+| `docs/review-log.md` | Every review round, what it covered, and what it caught |
+
+What does not exist yet: anything that reads a document end to end. The system answers from a model's
+general knowledge today.
 
 ## How we work
 
@@ -48,7 +61,11 @@ House rules that have earned their place:
   is still open before pushing to its branch**, and open a fresh one if it is not. This has cost time
   twice.
 - A phase is finished when someone who did not write it can run it from the documentation. The review
-  panel and the three-round cap are in `AGENTS.md` under "What finished means".
+  panel and the three-round cap are in `AGENTS.md` under "What finished means", and every round is
+  recorded in `docs/review-log.md`. Two loops exist: the deliverable loop at the end of a phase, and the
+  decision loop before a choice that is expensive to reverse.
+- **Append to `docs/review-log.md` after every round.** Name what was covered and the findings that
+  changed something. A round that found nothing worth changing is the signal the phase is done.
 - Write down every new mechanism in `docs/`, and record every register change in
   `docs/requirements.yaml` at the same time as the code.
 - Verify on the box before calling something done. Three of the most useful findings in C1 came from
@@ -108,9 +125,14 @@ refusal; a superseded document not cited; and redaction proven by a test.** Twel
 | Security | `SEC-ACL-001` role filtering inside the search; `SEC-REDACT-001` redaction before anything frontier-bound leaves; `SEC-INJECT-001` document content cannot change the lane or the answer's provenance |
 | Data lifecycle | `DATA-RETAIN-001` retention for documents and conversations; `DATA-PURGE-001` a client-requested purge everywhere; `DATA-HOLD-001` legal hold blocks a purge |
 
-The first thing to do is not code. It is to write the C2 section of `docs/runbook.md` the way C1's
-Phase 2 was written: the sequence, in order, with what each step proves, and then build it a step at a
-time. Pick the first item from the table above, not the whole phase.
+The phase plan is written: `docs/runbook.md` Phase 3, twelve steps with what each proves. The first
+thing to do is a measurement, not code — the reranker's real latency on the serving instance against the
+five-second budget that Anthony set, using `scripts/bench_rerank.py`. The depth of the candidate pool
+follows from that number, and everything downstream depends on it.
+
+Then the spine, in this order: Docling ingestion with page and table provenance, page-bounded chunking,
+the fixture corpus and question set, the embedding contract, dense retrieval. The gate is a scanned
+multi-column document reading back with the right numbers on the right page.
 
 Two notes that will save time:
 

@@ -491,6 +491,7 @@ Each of these cost time or credibility once. They are here so they cost nothing 
 | `docs/runbook.md` | Phases 0 to 2 as actually built, with commands |
 | `docs/manual.md` | The operating manual: how the system works, every command with an example, and how to add a role |
 | `docs/handoff.md` | Where the build stands, how the work is done, and what is next |
+| `docs/review-log.md` | Every review round, what it covered, and what it caught |
 | `docs/search-architecture.md` | **The C2 decision.** What we build for retrieval, what we do not, and the measurements behind it |
 | `docs/evaluation-corpora.md` | Which public corpora and question sets we may use for evaluation, licence-verified |
 | `docs/research/search-2026-10/` | The evidence: nine research angles, a synthesis, two adversarial critiques and the revision |

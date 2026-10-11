@@ -44,6 +44,16 @@ run it from the documentation, and that has been checked rather than assumed. Th
 
 Within a phase, review only what changed; the full panel runs once, at the end.
 
+**Before a decision that is expensive to reverse, run the decision loop instead.** Several independent
+agents research one angle each, one synthesises, two attack the result — one on evidence, one on client
+reality — and one revises. The C2 retrieval architecture was decided that way: thirteen agents, and among
+what they caught were a constraint one researcher had carried across from a sibling project, a component
+whose CPU cost made the brief's plan unshippable, and a licence that I had treated as a prohibition when
+it is a decision.
+
+**Record every round in `docs/review-log.md`**, naming what was covered and the findings that changed
+something. A round that found nothing worth changing is the signal that the phase is done.
+
 Two things this process has already caught, out of many: a documented command that reloaded nothing
 (`up -d` against a mounted config), and an export job that shipped the wrong day. Both were invisible
 to reading and obvious to running.
