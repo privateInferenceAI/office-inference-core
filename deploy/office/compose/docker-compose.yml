@@ -45,10 +45,12 @@ services:
       retries: 5
 
   # Embeddings and reranking, both on CPU through the same image, both unmodified upstream.
-  # Text Embeddings Inference from Hugging Face, Apache-2.0, pinned with its version above the pin.
+  # Text Embeddings Inference from Hugging Face, Apache-2.0.
   # The models are downloaded on first start into a shared cache under OI_ROOT, so a rebuild does not
   # re-download them and an air-gapped office build can ship with the cache pre-filled.
   embeddings:
+    # ghcr.io/huggingface/text-embeddings-inference:cpu-1.9. The cpu- prefix is load-bearing: the
+    # bare 1.9 tag is the CUDA build and fails on a box with no GPU.
     image: ghcr.io/huggingface/text-embeddings-inference@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d
     container_name: embeddings
     restart: unless-stopped
@@ -76,6 +78,8 @@ services:
   # The reranker is a separate service because it is a separate decision: it ships only if it stays
   # inside the latency budget on this instance. See docs/search-architecture.md.
   reranker:
+    # ghcr.io/huggingface/text-embeddings-inference:cpu-1.9. The cpu- prefix is load-bearing: the
+    # bare 1.9 tag is the CUDA build and fails on a box with no GPU.
     image: ghcr.io/huggingface/text-embeddings-inference@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d
     container_name: reranker
     restart: unless-stopped
