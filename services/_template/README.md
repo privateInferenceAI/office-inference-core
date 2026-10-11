@@ -1,7 +1,7 @@
 # _template
 
 Copy this directory to add a service. Fill in `service.yaml`, then register the service in the
-four places the convention asks for:
+three places the convention asks for:
 
 1. `docs/service-inventory.md`, the list of what exists and which build it runs in.
 2. `packs/catalog.yaml`, in the pack that should turn it on.
