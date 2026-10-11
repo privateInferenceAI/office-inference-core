@@ -29,7 +29,7 @@ items:
     tier: [cloud, office, hosted]
     phase: C1
     verify: exceeding a role budget is refused, not merely alerted, and the refusal is audited
-    status: open
+    status: verified
     note: >-
       Enforcement verified on 2026-10-11: a capped role answered 422 "Budget has been exceeded" and a
       key scoped to one model answered 403 for another. The audit half was believed to need the
@@ -111,7 +111,7 @@ items:
     tier: [cloud, office, hosted]
     phase: C1
     verify: run a purge under the maintenance setting and confirm a tombstone row with both hashes exists
-    status: open
+    status: verified
   - id: AUD-MODE-001
     title: A per-data-class content mode of hash, redacted, or full, plus prompt and completion hashes
     tier: [cloud, hosted]
@@ -237,7 +237,7 @@ items:
     tier: [cloud, office, hosted]
     phase: C1
     verify: a check fails when a manifest names a model past its end-of-life date
-    status: open
+    status: verified
 
   # ---------------------------------------------------------------- operations
   - id: OPS-ALARM-001
