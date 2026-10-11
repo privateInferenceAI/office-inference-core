@@ -1143,9 +1143,20 @@ line of the generator's output is a count of extractable characters and it must 
 
 - `docker compose` reports no such service: the compose file on the box is older than the pull. Check
   `git log --oneline -1` and `grep -n "parser:" deploy/office/compose/docker-compose.yml`.
+- **`unhealthy`, the probe logging `Connection refused`, and the app log ending in
+  `FileNotFoundError: RapidOCR artifacts not found or incomplete in artifacts_path`.** This is the
+  failure the first attempt at this step hit, and the cause is a setting that reads like a cache and
+  is not one. `DOCLING_SERVE_ARTIFACTS_PATH` means *load the weights from here and never download
+  them*, so pointing it at an empty directory tells the service its weights are missing while
+  forbidding it from fetching them. The log says so twice, in
+  `artifacts_path is set to a valid directory. No model weights will be downloaded at runtime` and then
+  in the missing-file list. The image already carries every weight it needs, which is why the pull is
+  2 GB rather than 8, so the fix is to leave the variable unset. Do not "fill the cache" instead: that
+  is work the image has already done.
 - The container never leaves `starting`: it is loading layout, table and OCR weights, which takes
-  minutes on first run. `docker logs parser --tail 20` will show a model being fetched or loaded. If
-  the log shows it fetching from Hugging Face and the box has no egress, the cache path is wrong.
+  minutes on first run. `docker logs parser --tail 20` will show a model being fetched or loaded. With
+  the artifacts path unset there should be nothing to fetch, so a download appearing here means a
+  model the image does not carry, and that is worth reading carefully rather than waiting out.
 - `healthy` but the gate reports zero characters: OCR did not run. Confirm with
   `docker run --rm --network ai-net curlimages/curl -sS http://parser:5001/health`, then re-run and
   watch `docker logs parser` for the OCR stage. A scan read as a blank page is the exact failure this

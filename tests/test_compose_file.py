@@ -121,13 +121,24 @@ def test_the_parser_healthcheck_can_actually_run(compose):
     assert "python" in test[1]
 
 
-def test_the_parser_weights_are_cached_outside_the_container(compose):
-    """4.4 GB of weights. A rebuild must not re-download them, and an air-gapped office build has to
-    be able to ship with the cache already filled, which means the path under OI_ROOT rather than
-    anything inside the image."""
+def test_the_parser_does_not_point_its_artifacts_path_at_an_empty_directory(compose):
+    """The failure that stopped the parser's first start, 2026-10-11.
+
+    DOCLING_SERVE_ARTIFACTS_PATH does not mean "cache the weights here". It means "load the weights
+    from here and never download them", so setting it to an empty bind mount tells the service its
+    weights are missing while forbidding it from fetching them:
+
+        artifacts_path is set to a valid directory. No model weights will be downloaded at runtime.
+        FileNotFoundError: RapidOCR artifacts not found or incomplete in artifacts_path.
+
+    The image carries the weights it needs, so the correct configuration is to leave the variable
+    unset. An air-gapped build is better served by weights inside the image than by a cache directory.
+    """
     service = compose["services"]["parser"]
-    assert service["environment"]["DOCLING_SERVE_ARTIFACTS_PATH"] == "/data"
-    assert any("docling-cache" in str(v) for v in service["volumes"]), service["volumes"]
+    assert "DOCLING_SERVE_ARTIFACTS_PATH" not in service.get("environment", {}), (
+        "leave the artifacts path unset: it is a read location, not a cache, and pointing it at an "
+        "empty directory stops the service from starting"
+    )
 
 
 

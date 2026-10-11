@@ -151,11 +151,15 @@ services:
       DOCLING_SERVE_ENG_LOC_NUM_WORKERS: "1"
       DOCLING_SERVE_ENG_LOC_SHARE_MODELS: "true"
       DOCLING_DEVICE: cpu
-      # Weights are cached under OI_ROOT rather than inside the container, so a rebuild does not
-      # re-download them and an air-gapped office build can ship with the cache already filled.
-      DOCLING_SERVE_ARTIFACTS_PATH: /data
-    volumes:
-      - ${OI_ROOT}/data/docling-cache:/data
+      # No DOCLING_SERVE_ARTIFACTS_PATH, and that is a decision rather than an omission. The variable
+      # does not mean "cache the models here": it means "load the models from here and never download
+      # them". Pointing it at an empty directory tells the service its weights are missing and forbids
+      # it from fetching them, which is exactly how this container failed its first start:
+      # "artifacts_path is set to a valid directory. No model weights will be downloaded at runtime",
+      # then FileNotFoundError for the RapidOCR checkpoints under /data/RapidOcr. The image already
+      # carries every weight it needs, which is why the pull is 2 GB, so the correct configuration is
+      # to let it use them. An air-gapped office build is served better by weights inside the image
+      # than by a cache directory: there is nothing to fill and nothing to download at run time.
     networks:
       - ai-net
     healthcheck:
