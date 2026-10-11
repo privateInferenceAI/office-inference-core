@@ -94,9 +94,13 @@ it without trusting us.
 | The models | Frontier AI models, reached through the provider's API | Amazon Bedrock, us-east-1: Nova and Claude and DeepSeek models |
 | The bucket | Where the evidence goes, so the machine cannot erase it | `oi-core-audit-dev`, with Object Lock |
 
-Nothing publishes a port. The containers talk to each other over a private Docker network called
-`ai-net`, and the only way in is SSH or a Systems Manager session. That is deliberate: a machine with
-no listening ports is a machine that cannot be attacked over the network.
+No container publishes a port. The containers talk to each other over a private Docker network called
+`ai-net`, and nothing of ours is reachable from outside the machine.
+
+The machine itself listens on one port, 22, for SSH, and the security group allows it from a single
+address. That is the whole inbound surface: no gateway port, no database port, no dashboard. The state
+to aim for is that the only way in is SSH or a Systems Manager session, and the only thing listening is
+the door you came through.
 
 ## 4. The two paths: a request, and its record
 
@@ -206,6 +210,11 @@ aws ssm start-session --profile oi-credits --region us-east-1 --target i-096bebd
 
 Both land you in the same shell as the `ubuntu` user, who can run Docker without `sudo`.
 
+**One prerequisite on your workstation:** the AWS CLI needs the Session Manager plugin, which is a
+separate download from the CLI itself. Without it the command fails with `SessionManagerPlugin is not
+found`, which reads like a permissions problem and is not. Install it once per workstation, following
+the AWS instructions for your platform.
+
 **How to check the agent, and how not to.** On Ubuntu the agent is installed as a snap, so
 `systemctl status amazon-ssm-agent` says `Unit amazon-ssm-agent.service could not be found` and a
 `dpkg -l` search finds nothing, while the agent is running perfectly well. That combination has
@@ -256,8 +265,17 @@ litellm    ghcr.io/berriai/litellm…            litellm    4 hours ago  Up 4 ho
 postgres   postgres:16-alpine                   postgres   4 hours ago  Up 4 hours (healthy)
 ```
 
+`ps` shows only the two long-running services. `audit` and `keys` are behind the compose `tools`
+profile, so they never appear here and `oi up -d` never starts them. They run when you call them.
+
+Two facts about the output: a `docker compose run` prints its own preamble (`Container postgres
+Running`, `Container oi-core-audit-run-<id> Creating`), so every example in this manual that shows a
+tool's output has those lines above it, and they are not shown again below. And `up -d` prints
+`Container <name> Running` when it decides nothing needs doing, which is not the same as having
+restarted anything.
+
 Then ask the gateway whether it is alive, from a throwaway container on the same private network,
-because nothing is published to the host:
+because no container publishes a port:
 
 ```
 docker run --rm --network ai-net curlimages/curl -sS http://litellm:4000/health/liveliness
@@ -280,6 +298,11 @@ alias oi='docker compose -f deploy/office/compose/docker-compose.yml --env-file 
 ```
 
 Everything below uses `oi`. Without the alias, write the whole thing out.
+
+**The alias exists only in the shell where you typed it.** In `ssh host 'command'`, in a script, or in
+a cron entry, write the compose command in full, because a non-interactive bash does not expand
+aliases and you will get `oi: command not found`. That failure looks like the tool is missing rather
+than the alias.
 
 ## 11. Making a model call
 
@@ -375,6 +398,10 @@ analyst -> reader: 403
 
 `--as-model` is only read by `--probe`, and on its own it now exits with an error rather than doing
 nothing quietly, which is what it used to do.
+
+**Exit codes, because they are the opposite of what you might script.** A probe that gets an answer
+exits 0. A probe the gateway refuses exits 1, so a monitoring script must read a 422 or a 403 as the
+control working rather than as the check failing.
 
 **What the ceilings do and do not promise.** The gateway checks the budget against spend it has
 already recorded, and that number lands a moment after a call returns. So a ceiling stops a runaway
@@ -550,6 +577,11 @@ refreshed.
 The shipping job now runs `backfill` before every export for exactly that reason. If you export by
 hand, run `backfill` first.
 
+**Re-exporting a date replaces that day's file on this machine**, because the day keeps growing as calls
+happen. The copy in the bucket does not change, because uploads there are versioned and locked. So when
+someone asks what the record said, the shipped version is the frozen one and the local file is the
+working copy. Export once at the end of a day, and know which of the two you are handing over.
+
 ### Checking an export
 
 ```
@@ -616,7 +648,14 @@ that the gap between two anchors is small, which is why the job runs hourly.
 
 ### A retention purge
 
+A retention window is a date in the past, so the exact command depends on what the record holds. Two
+forms, and both are dry runs:
+
 ```
+# everything older than 90 days, which is what a scheduled purge would do
+oi run --rm audit purge --before "$(date -u -d '90 days ago' +%Y-%m-%d)" --reason "retention: 90 days" --dry-run
+
+# a specific moment, which is easier to reason about while learning
 oi run --rm audit purge --before 2026-10-11T03:00 --reason "retention: 90 days" --dry-run
 ```
 
@@ -624,6 +663,15 @@ oi run --rm audit purge --before 2026-10-11T03:00 --reason "retention: 90 days" 
 would purge 10 event(s) before 2026-10-11T03:00 (ids 1..10)
   the tombstone would chain from 98ea3b7877e3d2c9a71cf505b93533ec79f4bab10a631c3794c711407a3e8499
 ```
+
+**When the window contains nothing, that is a success, not an error**, and it says so:
+
+```
+nothing to purge before 2026-10-11T03:00: the chain head is 7d106dcb560d…
+```
+
+Everything in the examples below is from one run on 2026-10-11, and the ids and hashes are that run's.
+On your box they will differ, which is the point of a chain.
 
 Then for real, without `--dry-run`:
 
@@ -667,6 +715,10 @@ cd /opt/oi-core
 ./deploy/cloud/ship/oi-core-ship.sh exports
 ```
 
+The numbers below come from one run. Sizes and hashes differ per anchor, and two anchors of the same
+chain differ by a byte or two depending on how many digits the timestamps carry, so read the shape
+rather than the values.
+
 ```
 anchored 6 event(s), head 6df2d45eab2d…
 shipping /evidence/anchors/anchor-2026-10-11-00000006.json (276 bytes)
@@ -679,6 +731,10 @@ anchors shipped to s3://oi-core-audit-dev
 The read-back is the point. From the sending side a complete upload and a truncated one look the same.
 Fetching the object and hashing it is the difference between "we sent it" and "it is there and it
 matches".
+
+**Reading an anchor's name.** `anchor-<date>-<eight digits>.json`, where the digits are the number of
+events in the chain when it was written. `00000006` means six events existed; an hour later, with no new
+events, the same name comes back.
 
 **A filename that repeats on purpose.** An anchor is named for its date and the number of events in
 the chain, so an hourly run over an unchanged chain writes the same key: `anchor-2026-10-11-00000006.json`
@@ -936,12 +992,19 @@ python3 scripts/render_manifest.py --manifest manifests/dev-cloud.yaml
 
 The render now reports `gateway 5 model entries`.
 
-**5. Restart the gateway** so it reads the new model list. The file is mounted rather than baked in, so
-the container needs a restart to pick it up:
+**5. Restart the gateway** so it reads the new model list. The file is mounted rather than baked in,
+and the gateway reads it once at startup:
 
 ```
-oi up -d litellm
+oi restart litellm
 ```
+
+`oi up -d litellm` is **not** the command here, and this is worth understanding rather than
+memorising. Compose recreates a container when the service definition changes, and a mounted file
+changing underneath a running container is not a change it can see. So `up -d` prints
+`Container litellm Running` and does nothing, which looks like success. `restart` restarts the process,
+which re-reads the file. LiteLLM does not watch its own config, which was verified by appending a model
+to a mounted config in a throwaway container and watching the model list stay unchanged.
 
 **6. Mint the key:**
 
@@ -986,7 +1049,7 @@ Change the line, render, restart, and check that the new model is not deprecated
 python3 scripts/validate_manifests.py
 python3 scripts/check_model_lifecycle.py
 python3 scripts/render_manifest.py --manifest manifests/dev-cloud.yaml
-oi up -d litellm
+oi restart litellm
 oi run --rm keys --probe analyst
 ```
 
@@ -1019,13 +1082,27 @@ The same repository serves every client. A new deployment is a new manifest, a n
 bucket.
 
 1. Copy `manifests/dev-cloud.yaml` to `manifests/<client>.yaml`.
-2. Change `client.name` and `client.deployment_id`. The id must be unique and is used in every audit
-   row.
+2. Change `client.name` and `client.deployment_id`. The id is used in every audit row and in every key
+   alias, so it must be unique. **Nothing enforces that for you**: no validator rule compares ids across
+   manifests, and nothing checks the id against a deployment already running. Two clients sharing an id
+   would produce a record that cannot be separated afterwards, so this is an operator's job until C7
+   puts the deployments under one piece of infrastructure.
 3. Set the models, ceilings, content policy, and compliance profile the client bought.
 4. Point `offsite.bucket` at a bucket in the client's account, with Object Lock enabled at creation,
    because that cannot be turned on afterwards.
 5. Validate and render on the new machine, then mint the keys there.
-6. Ship the evidence: install the timers from `deploy/cloud/systemd/`.
+6. Ship the evidence, by installing the timers. The unit files hard-code `/opt/oi-core` and the
+   `ubuntu` user, so they work as they are only at that path with that user:
+
+```
+sudo cp deploy/cloud/systemd/oi-core-* /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now oi-core-anchor.timer oi-core-export.timer
+systemctl list-timers 'oi-core-*'
+```
+
+Expect two timers with a NEXT time within the hour and within the day. Both are `Persistent`, so a run
+missed while the machine was stopped happens once at the next start.
 
 The one thing that is not automatic yet is the account itself. Terraform for the VPC, the bucket, the
 IAM role, and the rest is C7, and today those are created by hand. `docs/audit-evidence.md` records
@@ -1033,9 +1110,17 @@ what the bucket needs and why.
 
 ## 20. Adding a service or a pack
 
-**A service** is a container with a job. `services/_template/` holds the shape, and `services/audit/`
-is the worked example: a `Dockerfile`, the code, and a short README. Then add it to
-`deploy/office/compose/docker-compose.yml` with a profile. Use `tools` for something that runs when
+**A service** is a container with a job. `services/_template/` holds the shape: a `service.yaml`
+declaring what it is, and a README describing the convention. `services/audit/` is the worked example,
+with a `Dockerfile`, the code, and its own README.
+
+Four places to touch, which is the convention rather than a suggestion, because the last three are how
+anything else finds the service:
+
+1. `services/<name>/` with its code, `Dockerfile`, and `service.yaml`.
+2. `deploy/office/compose/docker-compose.yml`, with a profile.
+3. `packs/catalog.yaml`, in the pack that sells it.
+4. `docs/service-inventory.md`, which is the list of what exists and which build each service runs in. Use `tools` for something that runs when
 called, as `audit` and `keys` do, and leave the profile off for a long-running service.
 
 Two rules apply to anything you add. It joins `ai-net` and publishes no ports, and if it writes to the
@@ -1061,21 +1146,31 @@ it already has. A change to `services/audit/audit.py` does nothing until:
 oi build audit keys
 ```
 
-**The gateway restarts in a loop and nothing answers on port 4000.** Read the logs before anything
-else:
+**The gateway is not answering.** Read the logs, then check the two things that tell a fault from
+startup noise:
 
 ```
 docker logs litellm --tail 40
+docker inspect litellm --format 'restarts={{.RestartCount}} started={{.StartedAt}}'
+docker run --rm --network ai-net curlimages/curl -sS http://litellm:4000/health/liveliness
 ```
 
-If the message is `Database migration cannot proceed. Cannot automatically baseline this database`,
-something created tables in the gateway's own database that its migration tool does not recognise. That
-happened once, through a Postgres first-boot mount running our migrations into the gateway's schema.
-Check what is there:
+**Do not read `Database migration cannot proceed. Cannot automatically baseline this database` as the
+fault.** It prints thirteen times in the first seconds of every healthy start on this box, then the
+service comes up and answers. It has misled one careful reader of this manual already. It becomes the
+answer only alongside a rising `RestartCount` and a liveliness check that stays silent a minute after
+the container starts.
+
+If that is what you have, something created tables in the gateway's own database that its migration tool
+does not recognise. That happened once, through a Postgres first-boot mount running our migrations into
+the gateway's schema. Check what is there:
 
 ```
 docker exec postgres psql -U oicore -d oicore -c '\dt'
 ```
+
+You are looking for our tables, `audit_events` and `schema_migrations`, inside the database the gateway
+owns. They belong to us and should live only in ours.
 
 **A curl prints nothing at all.** `-s` hides connection errors. Use `-sS`, or drop `-s`, and you get
 `curl: (7) Failed to connect` instead of silence.
@@ -1107,15 +1202,51 @@ transaction: `begin; set local oi.allow_audit_maintenance = 'on'; …; commit;`
 **A tombstone with no purge behind it.** Impossible since migration 004, which refuses a `purge` row
 unless the maintenance setting is on. Before that it was possible, and it happened.
 
-**`verify --anchor` fails on an old anchor.** Expected after a retention purge: the anchored rows are
-gone and the tombstone is the artifact that explains it. Any other time, treat it as a real finding.
+**`verify --anchor` fails, saying the anchored row is missing from this export.** Two ordinary causes
+before you suspect tampering.
+
+The export predates the anchor. Anchors are written hourly and the export is written daily, so pairing
+today's anchor with this morning's export asks whether a file contains rows written after it. The
+message names the row it wanted, which is the clue. Export the day again and re-verify.
+
+The anchor belongs to a different chain than the export. Check the ids and the date in both filenames
+before concluding anything.
+
+Expected after a retention purge: the anchored rows are genuinely gone and the tombstone is the artifact
+that explains it. Any other time, with a fresh export and a matching anchor, treat it as a real
+finding.
 
 **The timer did not fire while the machine was stopped.** It fires once at the next start, because both
 timers are `Persistent`. If it did not fire at all, check `systemctl list-timers 'oi-core-*'` and
 `journalctl -u oi-core-anchor.service`.
 
+**Containers suddenly point at an empty database, or exports land in the wrong place.** Check
+`OI_ROOT` in `rendered/env` before anything else. Every container path derives from it: the database
+files, the exports, the migrations, the rendered configuration. Rendering with a different root, or
+running compose with an env file that names one, starts a database against an empty directory. It looks
+like data loss and is a path change. Confirm where postgres is actually mounting from:
+
+```
+docker inspect postgres --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{"\n"}}{{end}}'
+```
+
 **The night's work is stale on the machine.** `git pull` on the box, then rebuild the tools. The
 repository is the source of truth for code, and `main` is what runs.
+
+```
+cd /opt/oi-core
+git pull
+oi build audit keys
+```
+
+Expect the build to finish in seconds when only Python changed, and the next tool run to reflect it. If
+a change seems not to have taken, check `git log --oneline -1` on the box against `origin/main` before
+looking anywhere else.
+
+**A script works locally and not on the box.** If it reads a file, check the file is there. The lifecycle
+table is the example: `data/model-lifecycle.json` is tracked in the repository, and `.gitignore` excludes
+`data/*` with a single negation for that file, which has already swallowed it once. On a box that has
+not pulled it, `check_model_lifecycle.py` exits with `no lifecycle table at …`.
 
 Two related traps. The box can sit several merges behind without anything looking wrong, so check
 `git log --oneline -1` on the box against `origin/main` when a fix seems not to have taken. And the
@@ -1150,7 +1281,8 @@ git stash drop                                 # only once you are sure
 | `python3 -m pytest tests/ -q` | The test suite |
 | `oi ps` | Container status |
 | `oi logs <service>` | Container logs |
-| `oi up -d [service]` | Start, or restart one service after its config changed |
+| `oi up -d` | Start everything, or reconcile a service whose *definition* changed |
+| `oi restart <service>` | Restart one service so it re-reads a mounted file, such as a new model list |
 | `oi run --rm audit migrate` | Apply database migrations |
 | `oi run --rm audit record …` | Write one event by hand. Needs `--dev` |
 | `oi run --rm audit list [--type T] [--limit N]` | Read the record |
