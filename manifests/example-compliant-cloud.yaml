@@ -23,6 +23,14 @@ lanes:
     data_classes_allowed: [public, internal, confidential, regulated]
     requires_approval: false
     redaction: true
+budgets:
+  # Per-role ceilings in USD. A hard cap: the gateway refuses over-budget requests rather
+  # than alerting about them. Example figures for a small firm.
+  period_days: 30
+  roles:
+    analyst: 50
+    front_desk: 5
+    reader: 50
 compliance:
   profile: hipaa
   # Decides which model forms are allowed. A global inference profile can route a prompt to any

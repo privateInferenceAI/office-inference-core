@@ -27,6 +27,15 @@ lanes:
     data_classes_allowed: [public, internal]
     requires_approval: true
     redaction: true
+budgets:
+  # Per-role ceilings in USD. A hard cap: the gateway refuses over-budget requests rather
+  # than alerting about them. Example figures for a small firm.
+  period_days: 30
+  roles:
+    analyst: 50
+    front_desk: 5
+    reader: 50
+    coder: 20
 compliance:
   profile: contractual
   baa_with_office_inference: false

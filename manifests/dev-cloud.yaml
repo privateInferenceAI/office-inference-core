@@ -38,6 +38,15 @@ lanes:
     data_classes_allowed: [public, internal]
     requires_approval: false
     redaction: false
+budgets:
+  # Per-role ceilings, in USD, over the period below. A hard cap: the gateway refuses over-budget
+  # requests rather than alerting about them. Internal cost control, not client billing.
+  period_days: 30
+  roles:
+    front_desk: 2
+    analyst: 10
+    reader: 10
+    coder: 5
 compliance:
   profile: none
   audit_retention_days: 90
