@@ -23,7 +23,7 @@ items:
     tier: [cloud, office]
     phase: C1
     verify: running record --actor someone without the dev flag exits non-zero
-    status: open
+    status: verified
   - id: SEC-KEY-001
     title: Per-role virtual keys with hard budgets, one set per deployment
     tier: [cloud, office, hosted]
