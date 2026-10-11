@@ -314,3 +314,14 @@ def test_the_shipped_dev_manifest_declares_its_content_policy(packs):
     assert manifest["content"]["classes"]["public"] == "full"
     assert manifest["content"]["classes"]["internal"] == "redacted"
     assert problems(manifest, packs) == []
+
+
+def test_a_pack_list_that_never_requires_core_is_refused(packs):
+    """A manifest listing only sellable packs renders a stack with no gateway, database or audit sink.
+    The catalog's requires edges are what make core implicit, and until this rule existed nothing read
+    them."""
+    manifest = load(STANDARD)
+    manifest["packs"] = ["document-chat"]
+    assert problems(manifest, packs) == [], "document-chat requires core, so this is fine"
+    manifest["packs"] = []
+    assert problems(manifest, packs), "an empty pack list is still refused"

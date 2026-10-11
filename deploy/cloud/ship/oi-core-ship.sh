@@ -63,7 +63,10 @@ case "$MODE" in
     pairs+=("$newest|anchors/$(basename "$newest")")
     ;;
   exports)
-    day="$(date -u +%F)"
+    # Yesterday in UTC, because this job runs daily at 00:00: the day that just ended is the one with
+    # events in it. Exporting the day that is starting ships an empty file every night, which is what
+    # the first version of this script did.
+    day="$(date -u -d yesterday +%F)"
     # Pull the gateway's calls into the record first. The gateway writes a row as each call happens,
     # and the record only has them after a backfill, so exporting without one ships whatever the last
     # backfill happened to catch. That is how the first shipped export came to hold two rows of a
