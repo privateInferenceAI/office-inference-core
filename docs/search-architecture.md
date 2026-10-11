@@ -139,7 +139,9 @@ Accuracy-critical first, and **measurements before code**. The full ordering is 
 `docs/research/search-2026-10/final-architecture.md` section 5; the waves are:
 
 0. **Measurements that gate decisions**: the reranker's real latency on our instance at 25, 50 and 100
-   candidates, against the five-second budget, using `scripts/bench_rerank.py`; whether the pinned TEI serves a CPU reranker and the warmup settings that turn a ten-minute
+   candidates, against the five-second budget, using `scripts/bench_rerank.py` (the research reports
+   refer to the same tool as `bench_tei2.py`, which was a scratch script on the researcher's machine and
+   is not in the repository); whether the pinned TEI serves a CPU reranker and the warmup settings that turn a ten-minute
    first boot into twenty seconds; local model throughput. All four are hours, and each replaces a
    guess in the plan with a number.
 1. **The spine**: parse with page and table provenance, page-bounded chunking, the golden set, the

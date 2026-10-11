@@ -43,6 +43,14 @@ section rewritten so every entry gives a discriminator rather than a suspicion.
 The research reports, the critiques and the revision are in `docs/research/search-2026-10/`. The
 decision they produced is `docs/search-architecture.md`.
 
+## What does not go here
+
+**Measurements and build records.** A latency benchmark, a throughput number or a step's output belongs
+in `docs/runbook.md` under the phase it belongs to, because that is the build log and it is ordered by
+what was built. A decision a measurement produces updates the document that holds the decision, such as
+`docs/search-architecture.md`, and moves the register item that was waiting on it. This log holds review
+rounds only.
+
 ## What the log is for
 
 Three things, none of which is bookkeeping:
