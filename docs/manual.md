@@ -114,6 +114,38 @@ chain is shipped to a bucket the machine can write to but not delete from. That 
 makes the record evidence rather than a log file: the machine cannot cover its tracks without the
 missing piece being visible somewhere it does not control.
 
+### One request, end to end, in time order
+
+Two paths described separately are easy to nod along to and hard to hold in your head. Here is one
+request and the twelve hours after it, which is the whole system in one pass.
+
+| Time | What happens | What you could look at |
+|---|---|---|
+| 09:14:02 | A component asks the gateway for the `analyst` role, presenting its key. It never names a model | Nothing yet |
+| 09:14:02 | The gateway matches the key to its alias, `oi-core-dev-cloud:analyst`, which gives it the deployment and the role. It checks the key may call the analyst model, and that the role is inside its ceiling | The key and its limits: `oi run --rm keys` |
+| 09:14:02 | The gateway calls the provider with the deployment's credentials, which come from the machine's instance role. No key is stored on disk for this | The policy that allows it, on the instance role |
+| 09:14:03 | The provider answers. The gateway returns the answer and writes a row to its own spend log: model, tokens, cost, status, and the key's alias | The spend log, in Postgres |
+| 09:20:00 | Nothing runs. The call sits in the gateway's log and nowhere else | |
+| 10:00:00 | The anchor timer fires. The audit tool hashes the current head of the chain, writes a 276-byte file, and the shipping job uploads it and reads it back | `journalctl -u oi-core-anchor.service` |
+| 11:00:00 | The anchor fires again. The chain has not changed, so it writes the same filename, and the bucket keeps both versions | `aws s3api list-object-versions` |
+| 15:41:07 | A component asks for a model its key is not scoped to. The gateway refuses before the provider is ever called, and writes that refusal to the spend log with the reason | The refusal, with its error code |
+| 00:00:00 | The export timer fires. The job runs `backfill`, which copies every spend-log row from the last day into the chain, including the refusal, and marks the refusal `denied` rather than as a call that succeeded. Then it exports the day and ships the file and its manifest | `journalctl -u oi-core-export.service` |
+| 00:00:20 | The bucket holds the day's file, its manifest, and the anchors written through the day. The machine can add to it and read it, and cannot delete from it | `aws s3api list-object-versions --bucket oi-core-audit-dev` |
+| Sometime later | The client's auditor runs two commands. One checks every row in the file against the row before it. The other checks the file against an anchor written while the day was happening, which is what catches rows deleted from the end | The output of `audit verify`, or a failure naming the line |
+
+Three things about that timeline are worth noticing, because they are the design.
+
+The gateway is the only thing that talks to a model, so there is exactly one place where permission,
+cost, and recording are decided. A refusal happens there, before any money is spent, and it is recorded
+there too.
+
+The record is written by the tool rather than by the caller, so a component that forgets to log
+something cannot erase it from the record: the gateway's own log is the source, and the tool copies
+from it.
+
+The evidence leaves the machine on a schedule rather than when someone remembers. The machine does not
+hold the credentials to delete it afterwards, which is what turns a log into evidence.
+
 ## 5. The manifest is the contract
 
 A client's deployment is described by one YAML file called a manifest. It names the client, the
