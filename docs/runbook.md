@@ -16,9 +16,10 @@ commands.
 **How to use this:** work one phase at a time. A phase is not finished until its verification step
 passes. Later phases stay as outlines until we reach them, so nothing here goes stale.
 
-**Status, 2026-10-10:** Phase 0 built and run on the cloud reference instance. Phase 1 written for the
-cloud build; its verification has not run yet. Phase 2 was run on the office lane and has not run
-against a cloud deployment. Phases 3 to 11 outlined.
+**Status, 2026-10-11:** **C0 complete.** Phases 0 and 1 built, run, and verified on the cloud reference
+instance: two containers healthy, a role-routed call answered by Bedrock, and the spend row to prove
+it. Phase 2 is written and was run on the office lane; it has not run against this deployment. Phases
+3 to 11 outlined.
 
 ## The environment we are building on
 
@@ -364,6 +365,38 @@ All four must pass:
 2. `config --services` lists `postgres` and `litellm`, and no local model server.
 3. A chat completion returns an answer, and the response names a Bedrock model.
 4. That call appears in `LiteLLM_SpendLogs`.
+
+### 1.8 C0 closed, 2026-10-11
+
+C0's exit criteria come from `docs/build-brief.md` section 11. What satisfied each one:
+
+| Criterion | Evidence |
+|---|---|
+| The stack runs healthy on CPU | `postgres` healthy, `litellm` running with `restarts=0`, `"I'm alive!"` from `health/liveliness` |
+| `test_audit_verify.py` passes | `all four attacks are now caught`, exit 0, run on the box |
+| `validate_manifests.py` passes | `6/6 manifests valid; 8 packs known` |
+| Repo, compose, manifest rendered, CI | `main` at the C0 merges, two containers up from a rendered `dev-cloud.yaml`, CI green on every pull request |
+
+**The first cloud call, for the record.** `analyst` resolved to `bedrock/amazon.nova-lite-v1:0` and
+answered in about a second: 41 tokens, 9 prompt and 32 completion, recorded in `LiteLLM_SpendLogs`
+under `chatcmpl-2152501b-e2a5-4dfa-8919-d544a4ae410a`. The response body named the role and the spend
+row named the model, which is the indirection doing its job in public.
+
+**Two defects surfaced during C0, both fixed with tests that lock them:**
+
+1. **The validator refused our own hosted tier.** It demanded `account_owner: client` while the schema
+   allowed `office_inference`, so no development manifest could validate and the hosted offering could
+   not be expressed at all. Pull request #14.
+2. **The Postgres entrypoint created tables in the gateway's schema.** Mounting `db/migrations` at
+   `/docker-entrypoint-initdb.d` ran our audit migration against a virgin data directory in the
+   database LiteLLM keeps its Prisma schema in, and Prisma refused to baseline. The gateway
+   restart-looped eight times. Pull request #16.
+
+Both were fresh-install bugs. Neither would have appeared on a box that had been built incrementally,
+which is exactly why the reference instance gets built from scratch.
+
+**Cost so far.** Two containers and one stopped instance: about USD 3.65 a month for the elastic
+address, and the instance hours only while it runs.
 
 ### If it breaks
 
