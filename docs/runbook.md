@@ -895,10 +895,102 @@ That is also why the tests assert the transaction block is opened rather than on
 statement was issued. The first version of those tests passed while the command was broken, because
 they checked the words and not the effect.
 
-## Phase 3 — Documents  *(outline)*
+## Phase 3 — Documents
 
-Docling ingestion, chunking with access labels, Qdrant, TEI embeddings and reranker. Ends with a
-cited answer and a logged refusal.
+C2. The phase that makes this system answer from a client's own material instead of from a model's
+general knowledge. It is the largest phase so far, and it is built one step at a time.
+
+**The acceptance test, from the brief:** a cited answer from a scanned, table-bearing document; a
+recorded refusal; a superseded document not cited; and redaction proven by a test.
+
+**The pieces, and what each is for.** Docling parses documents, including scans and tables, into text
+with page numbers. An ingestion worker turns that text into chunks, embeds them, and writes them to
+Qdrant with the access labels the search filters on. Two TEI services serve the embedding model and
+the reranker on the box, so no document content leaves for either. Retrieval is hybrid: a vector arm
+for meaning and a lexical arm for the exact identifiers that vectors miss. Every answer carries
+citations, and every citation is checked three ways before a client sees it.
+
+**What runs where.** Four new containers, all on `ai-net`, none publishing a port: `vector` (Qdrant),
+`embeddings` and `reranker` (TEI), and `ingestion` (the worker). They are the services the
+`document-chat` pack declares, which is why a manifest that lists that pack already asks for them.
+
+**The steps, and what each proves.**
+
+| Step | Builds | Proves |
+|---|---|---|
+| 3.1 | The vector store | A point round-trips: written, indexed, and found by a query |
+| 3.2 | Embeddings on the box | Text becomes a 1024-dimension vector, deterministically, without a network call |
+| 3.3 | The reranker | A pair's order changes by relevance, which is what makes top-10 worth reading |
+| 3.4 | Ingestion | A scanned, table-bearing PDF becomes chunks carrying page numbers and a content hash |
+| 3.5 | Access labels | A role cannot retrieve a chunk its label excludes, because the filter is inside the search |
+| 3.6 | Hybrid search | An exact identifier that the vector arm misses is found by the lexical arm and surfaces |
+| 3.7 | Versioning and duplicates | A superseded document is not cited while its replacement exists; a near-duplicate is flagged at ingest |
+| 3.8 | Citations, three checks | A citation that is fabricated, on the wrong page, or unsupported by its chunk is refused |
+| 3.9 | Redaction before the frontier | A test shows the outbound payload carries no PII, and the record says what was redacted |
+| 3.10 | Injection resistance | A document containing instructions cannot change the lane or the answer's provenance |
+| 3.11 | Document retention | A client-requested purge removes content everywhere; a legal hold blocks it |
+| 3.12 | Verification | The brief's acceptance test, run end to end, with the outputs recorded here |
+
+**Order matters.** 3.1 to 3.3 build the floor and have nothing to do with documents yet; they are
+proved with hand-made input, which keeps a retrieval bug from hiding inside a parsing bug. 3.4 is the
+first step that needs a real document. 3.5 comes before 3.6 because a filter bolted on after the
+search returns results is the mistake this phase exists to avoid.
+
+**Two things not to confuse.** The content modes from C1 decide what the *record* keeps; 3.9 is about
+what leaves the building for a frontier model, and the record's pattern-based redactor is not a
+substitute for it. And access labels are per chunk, decided at ingest, not per document.
+
+### 3.1 The vector store
+
+**Goal.** Qdrant running on the box, on the private network, holding its data where the rest of the
+deployment lives, with a collection whose shape matches the embedding model we are going to use.
+
+**Commands.**
+
+    cd /opt/oi-core
+    git pull
+    oi up -d vector
+    oi ps
+
+**Expected.** `vector` appears alongside `postgres` and `litellm`, and its state is `Up`.
+
+**What just happened.** The manifest's `document-chat` pack declares a service called `vector`, and
+that name is now a container. It is on `ai-net` like everything else, and publishes no port, so the
+only way to reach it is from another container on that network. Its storage is a bind mount under
+`/opt/oi-core/data/qdrant`, which is the same root the database uses, so the retention and backup
+story stays in one place.
+
+**Verify.** From a container on the network, ask Qdrant for its readiness and its version:
+
+    docker run --rm --network ai-net curlimages/curl -sS http://vector:6333/readyz
+    docker run --rm --network ai-net curlimages/curl -sS http://vector:6333/
+
+Then create the collection, which is the shape every later step depends on: 1024 dimensions because
+the embedding model produces 1024, and cosine distance because that is how these vectors compare.
+
+    docker run --rm --network ai-net curlimages/curl -sS -X PUT http://vector:6333/collections/documents \
+      -H 'Content-Type: application/json' \
+      -d '{"vectors": {"size": 1024, "distance": "Cosine"}}'
+
+And prove a point round-trips, with a hand-made vector so nothing here depends on a model:
+
+    docker run --rm --network ai-net curlimages/curl -sS -X PUT \
+      http://vector:6333/collections/documents/points \
+      -H 'Content-Type: application/json' \
+      -d '{"points":[{"id":1,"vector":[0.1,0.2,0.3],"payload":{"text":"a probe"}}]}'
+
+The vector above is three numbers where the collection expects 1024, so this last one is *supposed* to
+be refused with a message naming the size. That refusal is the proof the collection has the shape we
+asked for. Creating a 1024-long vector by hand is not worth typing; step 3.2 produces real ones.
+
+**If it breaks.**
+
+- `vector` starts and immediately exits: check `docker logs vector`. The usual cause is a storage
+  directory the container cannot write, which on this box means `/opt/oi-core/data/qdrant` is owned by
+  root rather than by uid 1000.
+- A connection refused from the curl container: the service is on `ai-net` and the curl container has
+  to join that network. Forgetting `--network ai-net` is the common mistake, and the error reads like
+  the service is down.
 
 ## Phase 4 — Assistant API  *(outline)*
 
