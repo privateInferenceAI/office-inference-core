@@ -491,6 +491,7 @@ Each of these cost time or credibility once. They are here so they cost nothing 
 | `docs/runbook.md` | Phases 0 to 2 as actually built, with commands |
 | `docs/manual.md` | The operating manual: how the system works, every command with an example, and how to add a role |
 | `docs/handoff.md` | Where the build stands, how the work is done, and what is next |
+| `docs/evaluation-corpora.md` | Which public corpora and question sets we may use for evaluation, licence-verified |
 | `docs/audit-evidence.md` | What leaves the building: the record, the export, the anchor, the bucket, the permissions, and how the three build shapes differ |
 | `docs/architecture.md` | Layers, profiles, lanes |
 | `docs/decisions/` | ADRs: service implementations, agent topology |
