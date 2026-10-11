@@ -453,13 +453,19 @@ install is now: bring the stack up so the gateway migrates its own tables, then 
 ### 2.2 Record an event
 
     docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env run --rm audit \
-      record --type access --actor anthony --actor-role admin --data-class internal \
+      record --dev --type access --actor anthony --actor-role admin --data-class internal \
       --payload '{"document":"expense-policy.pdf","pages":3}'
 
 Expected: JSON with an id, a timestamp, a `row_hash`, and a `payload_sha256`.
 
     docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
       run --rm audit list
+
+**Why `--dev` is on that command.** An actor is an identity, not a word someone types. Outside
+development mode `record` refuses a hand-typed actor and exits non-zero, because a deployment records
+events through the assistant API with the identity from an authenticated session. The flag exists so
+the developer can work on a box that holds no client data, it prints a warning every time it is used,
+and C3 is where it stops being needed.
 
 **Why the payload is hashed and not stored by default:** the record needs to prove *what* was sent
 without becoming a second copy of the client's documents. `--store-payload` keeps the content, but

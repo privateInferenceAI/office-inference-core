@@ -108,6 +108,17 @@ def cmd_migrate(args) -> int:
 # --------------------------------------------------------------------------- record
 
 def cmd_record(args) -> int:
+    # An actor is an identity, not a word someone types. Until the assistant API passes an
+    # authenticated one (C3), recording from the command line is a development act, and it says so.
+    # The guard comes first, before anything touches the database, so a refusal cannot leave a
+    # half-written event behind.
+    if not getattr(args, "dev", False):
+        die("record refuses a hand-typed actor outside development mode. An actor comes from an "
+            "authenticated session, so a deployment records through the API rather than this CLI. "
+            "Pass --dev when you are the developer and the box holds no client data.")
+    print("warning: --dev is set, so this event's actor is whatever was typed rather than an "
+          "authenticated identity", file=sys.stderr)
+
     payload = None
     if args.payload:
         raw = sys.stdin.read() if args.payload == "-" else args.payload
@@ -429,6 +440,9 @@ def main() -> int:
                         choices=["model_call", "tool_call", "approval", "access",
                                  "config_change", "login"])
     record.add_argument("--actor", required=True)
+    record.add_argument("--dev", action="store_true",
+                        help="accept a hand-typed actor. Development only: a deployment takes the "
+                             "actor from an authenticated session, which is the assistant API's job")
     record.add_argument("--actor-role")
     record.add_argument("--deployment-id", default=DEPLOYMENT_ID)
     record.add_argument("--data-class", default="internal",
