@@ -23,6 +23,9 @@ REQUIRED_MODEL_ROLES = ("analyst", "front_desk", "reader")
 PROFILES = ("cloud", "office", "hybrid")
 # What may leave the machine under offsite.ship. Deliberately closed: no documents, no prompts.
 OFFSITE_ARTIFACTS = frozenset({"anchors", "exports", "backups"})
+# What the record may keep for a piece of content.
+CONTENT_MODES = frozenset({"hash", "redacted", "full"})
+DATA_CLASSES = frozenset({"public", "internal", "confidential", "regulated"})
 
 
 def load_catalog_packs() -> set[str]:
@@ -141,6 +144,22 @@ def check(manifest: dict, packs: set[str], path: Path) -> list[str]:
 
     compliance = manifest.get("compliance") or {}
     cprofile = compliance.get("profile", "none")
+
+    # Content modes. What the record keeps, per data class. The prompt and completion hashes are
+    # recorded whatever this says; the text is what this governs, so a typo here decides whether a
+    # client's documents end up in the evidence file.
+    content = manifest.get("content") or {}
+    if content:
+        if content.get("default", "hash") not in CONTENT_MODES:
+            problems.append(f"content.default must be one of {sorted(CONTENT_MODES)}, "
+                            f"got {content.get('default')!r}")
+        for data_class, mode in sorted((content.get("classes") or {}).items()):
+            if data_class not in DATA_CLASSES:
+                problems.append(f"content.classes names {data_class!r}, which is not a data class. "
+                                f"Known classes: {sorted(DATA_CLASSES)}")
+            if mode not in CONTENT_MODES:
+                problems.append(f"content.classes.{data_class} must be one of {sorted(CONTENT_MODES)}, "
+                                f"got {mode!r}")
 
     # Budgets. Required wherever a call costs money, because an uncapped deployment is the runaway
     # loop that spends the client's balance, and spend-at-cap is one of the five alarms in the brief.

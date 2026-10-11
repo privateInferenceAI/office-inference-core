@@ -38,6 +38,15 @@ lanes:
     data_classes_allowed: [public, internal]
     requires_approval: false
     redaction: false
+content:
+  # What the record keeps, per data class: hash only, redacted, or full. The prompt and completion
+  # hashes are recorded whatever this says, so the record can prove what was said without keeping it.
+  #
+  # A development box, so the two lowest classes are generous and the higher ones are not.
+  default: hash
+  classes:
+    public: full
+    internal: redacted
 budgets:
   # Per-role ceilings, in USD, over the period below. A hard cap: the gateway refuses over-budget
   # requests rather than alerting about them. Internal cost control, not client billing.

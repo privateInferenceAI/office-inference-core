@@ -148,6 +148,31 @@
         }
       }
     },
+    "content": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What the record keeps per data class. Prompt and completion hashes are recorded whatever this says; only the text is governed here. Under a compliance profile this is a client decision that belongs in the contract, because 'full' means the record holds what was said.",
+      "properties": {
+        "default": {
+          "enum": [
+            "hash",
+            "redacted",
+            "full"
+          ],
+          "default": "hash"
+        },
+        "classes": {
+          "type": "object",
+          "additionalProperties": {
+            "enum": [
+              "hash",
+              "redacted",
+              "full"
+            ]
+          }
+        }
+      }
+    },
     "compliance": {
       "type": "object",
       "additionalProperties": false,

@@ -25,6 +25,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -129,23 +130,46 @@ def cmd_record(args) -> int:
         except json.JSONDecodeError as exc:
             die(f"--payload is not valid JSON: {exc}")
 
-    payload_sha = sha256_hex(canonical_json(payload if payload is not None else {}))
+    mode = content_mode(args.data_class)
+    if args.store_payload and mode == "hash":
+        print("warning: --store-payload is storing content that the manifest's content mode would "
+              "hash, so this event keeps more than the deployment's policy asks for", file=sys.stderr)
+        mode = "full"
+
+    stored_payload = apply_content_mode(payload, mode)
+
+    # The hashes are recorded whatever the mode. That is the point of having them: the record can
+    # prove what was said without keeping it.
+    prompt_sha = sha256_hex(args.prompt) if args.prompt else None
+    completion_sha = sha256_hex(args.completion) if args.completion else None
+    if mode != "hash":
+        if prompt_sha or completion_sha:
+            stored_payload = dict(stored_payload or {})
+            if prompt_sha:
+                stored_payload["prompt"] = apply_content_mode(args.prompt, mode)
+            if completion_sha:
+                stored_payload["completion"] = apply_content_mode(args.completion, mode)
+
+    payload_sha = sha256_hex(canonical_json(stored_payload if stored_payload is not None else {}))
     approval = json.loads(args.approval) if args.approval else None
 
     with connect() as conn, conn.cursor() as cur:
         cur.execute("""
             insert into audit_events
               (event_type, actor, actor_role, deployment_id, data_class, outcome,
-               tool, model, request_id, approval, payload_sha256, payload)
-            values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               tool, model, request_id, approval, payload_sha256, payload,
+               prompt_sha256, completion_sha256)
+            values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             returning id, ts_iso, row_hash""",
             (args.type, args.actor, args.actor_role, args.deployment_id, args.data_class,
              args.outcome, args.tool, args.model, args.request_id,
              Jsonb(approval) if approval is not None else None, payload_sha,
-             Jsonb(payload) if (payload is not None and args.store_payload) else None))
+             Jsonb(stored_payload) if stored_payload is not None else None,
+             prompt_sha, completion_sha))
         row = cur.fetchone()
     print(json.dumps({"id": row[0], "ts_iso": row[1], "row_hash": row[2],
-                      "payload_sha256": payload_sha}, indent=2))
+                      "payload_sha256": payload_sha, "content_mode": mode,
+                      "prompt_sha256": prompt_sha, "completion_sha256": completion_sha}, indent=2))
     return 0
 
 
@@ -260,6 +284,51 @@ def call_outcome(status: str | None, error_code: str | None, normalized_error: s
     # and anything unrecognised is a failure rather than a decision, and the two should not look
     # alike to whoever reads this later.
     return "denied" if code.startswith("4") else "error"
+
+
+# Pattern-based redaction for the "redacted" content mode. Deliberately small and deliberately
+# documented as such: it catches the identifiers that show up in business documents, and it is not a
+# compliance guarantee. SEC-REDACT-001 in C2 owns the real engine, which has to run before anything
+# leaves for a frontier model rather than only on the way into the record.
+REDACTION_PATTERNS = (
+    ("ssn", re.compile(r"\b\d{3}-\d{2}-\d{4}\b")),
+    ("card", re.compile(r"\b(?:\d[ -]?){13,16}\b")),
+    ("email", re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.]{2,}\b")),
+    ("phone", re.compile(r"\b(?:\+1[ -]?)?\(?\d{3}\)?[ -]?\d{3}[ -]?\d{4}\b")),
+)
+
+CONTENT_MODES = ("hash", "redacted", "full")
+
+
+def content_mode(data_class: str) -> str:
+    """The mode for a data class, from the rendered environment.
+
+    The renderer writes CONTENT_MODE_<CLASS> for all four classes and CONTENT_DEFAULT for anything
+    else, so this reads a decision the manifest made rather than one made here. An unset environment
+    falls back to hashing, because storing content nobody asked to store is the failure that matters.
+    """
+    explicit = os.environ.get(f"CONTENT_MODE_{data_class.upper()}")
+    if explicit in CONTENT_MODES:
+        return explicit
+    default = os.environ.get("CONTENT_DEFAULT")
+    return default if default in CONTENT_MODES else "hash"
+
+
+def redact(text: str) -> str:
+    for label, pattern in REDACTION_PATTERNS:
+        text = pattern.sub(f"[REDACTED-{label.upper()}]", text)
+    return text
+
+
+def apply_content_mode(value, mode: str):
+    """What to store for a piece of content under a mode: nothing, a redacted copy, or the text."""
+    if value is None:
+        return None
+    if mode == "hash":
+        return None
+    if mode == "redacted":
+        return redact(value) if isinstance(value, str) else value
+    return value
 
 
 def role_from_alias(alias: str | None) -> str:
@@ -550,6 +619,9 @@ def main() -> int:
     record.add_argument("--request-id")
     record.add_argument("--approval", help="JSON describing the approval")
     record.add_argument("--payload", help="JSON, @file, or - for stdin")
+    record.add_argument("--prompt", help="the prompt as sent. Its hash is always recorded; the text "
+                                          "is stored only if the content mode allows it")
+    record.add_argument("--completion", help="the completion as returned, under the same rule")
     record.add_argument("--store-payload", action="store_true",
                         help="keep the payload itself, not just its hash. A policy decision.")
     record.set_defaults(func=cmd_record)

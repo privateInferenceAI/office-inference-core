@@ -143,6 +143,13 @@ services:
       DEPLOYMENT_ID: ${DEPLOYMENT_ID}
       MIGRATIONS_DIR: /app/migrations
       EXPORTS_DIR: /app/exports
+      # What the record may keep per data class. A policy the manifest declares and the renderer
+      # writes, so the tool reads a decision rather than holding one of its own.
+      CONTENT_DEFAULT: ${CONTENT_DEFAULT}
+      CONTENT_MODE_PUBLIC: ${CONTENT_MODE_PUBLIC}
+      CONTENT_MODE_INTERNAL: ${CONTENT_MODE_INTERNAL}
+      CONTENT_MODE_CONFIDENTIAL: ${CONTENT_MODE_CONFIDENTIAL}
+      CONTENT_MODE_REGULATED: ${CONTENT_MODE_REGULATED}
     volumes:
       - ${OI_ROOT}/db/migrations:/app/migrations:ro
       - ${OI_ROOT}/exports:/app/exports
