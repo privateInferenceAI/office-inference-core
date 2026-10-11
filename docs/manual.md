@@ -834,6 +834,16 @@ Then render, which turns the manifest into the files the deployment reads:
 python3 scripts/render_manifest.py --manifest manifests/dev-cloud.yaml
 ```
 
+`--root` sets the deployment root the outputs are written for, and it is what lets you render for
+another machine from this one. `--out` overrides the output directory. Every tool in this repository
+answers `--help`, which is the fastest way to see its options:
+
+```
+python3 scripts/render_manifest.py --help
+oi run --rm audit --help
+oi run --rm keys --help
+```
+
 ```
 rendered dev-cloud.yaml -> /opt/oi-core/rendered
   profile      cloud
@@ -1079,6 +1089,19 @@ Two related traps. The box can sit several merges behind without anything lookin
 `git log --oneline -1` on the box against `origin/main` when a fix seems not to have taken. And the
 manual you are reading lives in the repository rather than on the machine, so a fresh box will not have
 it until the branch that added it is merged and pulled.
+
+**If `git pull` refuses because the box has local changes**, look at them before discarding anything. A
+change can be a real fix made on the box, and it can also be work that is already upstream, applied by
+hand rather than merged, which is what happened here and left the checkout unable to pull:
+
+```
+git status --short
+git stash push -u -m "work applied by hand, check whether it is already upstream"
+git pull
+git status
+git stash show -p stash@{0} | head -40        # anything not already upstream?
+git stash drop                                 # only once you are sure
+```
 
 ---
 
