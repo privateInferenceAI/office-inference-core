@@ -469,12 +469,50 @@ that is a policy decision a client makes, not a default we choose for them.
     docker exec postgres psql -U oicore -d oicore -c \
       'update audit_events set actor = '"'"'someone else'"'"' where id = 1;'
     docker exec postgres psql -U oicore -d oicore -c 'delete from audit_events where id = 1;'
-    docker exec postgres psql -U oicore -d oicore -c \
-      'update audit_events set actor = '"'"'maintenance'"'"' where id = 1;' --set=oi.allow_audit_maintenance=on
 
-Expected: the first two raise `audit_events is append-only`. The third is the escape hatch, and it
-demonstrates that a retention purge is possible but has to be asked for explicitly. The purge in
-Phase 9 will run inside a transaction that sets the flag, not by dropping the trigger.
+Expected: both raise `audit_events is append-only; UPDATE is not permitted`, and the same with `DELETE`,
+each with a hint naming the maintenance setting. The row is still there afterwards, unchanged.
+
+**The escape hatch, corrected on 2026-10-11.** This step used to end with
+
+    ... set actor = 'maintenance' where id = 1;' --set=oi.allow_audit_maintenance=on
+
+which cannot work. `psql --set` defines a **client** variable, and the trigger reads
+`current_setting('oi.allow_audit_maintenance', true)`, which is a **server** setting. The variable
+never reaches the server, so the trigger sees nothing and the update is refused exactly as before. The
+command looked like a passing check while proving nothing, which is the failure mode this runbook
+exists to catch. The brief counts it among four verification steps that cannot fail.
+
+The form that works is a transaction, which is what a retention purge will run:
+
+    docker exec postgres psql -U oicore -d oicore -c \
+      "begin; set local oi.allow_audit_maintenance = 'on'; \
+       update audit_events set actor = 'maintenance' where id = 1; commit;"
+
+**Know what that costs before running it.** The chain trigger fires on insert only, so an update that
+slips through the hatch leaves the row's `row_hash` describing contents that are no longer there. The
+alteration is detectable afterwards, and nothing records that the hatch was used. That gap is
+`AUD-PURGE-001` in the register, and C1 closes it with a tombstone. Put the row back afterwards and the
+hash matches again, because the contents return to what it was computed from:
+
+    docker exec postgres psql -U oicore -d oicore -c \
+      "begin; set local oi.allow_audit_maintenance = 'on'; \
+       update audit_events set actor = 'anthony' where id = 1; commit;"
+
+Verify it either way, because this is the check a third party would run:
+
+    docker exec -i postgres psql -U oicore -d oicore <<'SQL'
+    select id, actor,
+           row_hash = encode(digest(concat_ws('|',
+             ts_iso, event_type, actor, coalesce(actor_role, ''), deployment_id,
+             data_class, outcome, coalesce(tool, ''), coalesce(model, ''),
+             coalesce(request_id, ''), payload_sha256, payload_bytes::text,
+             coalesce(prev_hash, '')), 'sha256'), 'hex') as hash_matches_contents
+    from audit_events order by id;
+    SQL
+
+Expected: `t` after a restore. While the row still says `maintenance`, it reports `f`, which is the
+hash chain doing the only job it can do after the fact.
 
 **Why a trigger rather than revoked privileges:** in a single-box deployment the application connects
 as the table owner, and an owner can always re-grant its own rights. A trigger stops accidents, which
