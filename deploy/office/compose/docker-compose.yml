@@ -44,6 +44,61 @@ services:
       timeout: 5s
       retries: 5
 
+  # Embeddings and reranking, both on CPU through the same image, both unmodified upstream.
+  # Text Embeddings Inference from Hugging Face, Apache-2.0, pinned with its version above the pin.
+  # The models are downloaded on first start into a shared cache under OI_ROOT, so a rebuild does not
+  # re-download them and an air-gapped office build can ship with the cache pre-filled.
+  embeddings:
+    image: ghcr.io/huggingface/text-embeddings-inference@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d
+    container_name: embeddings
+    restart: unless-stopped
+    command:
+      - "--model-id=BAAI/bge-m3"
+      - "--port=80"
+      - "--max-batch-tokens=4096"
+      - "--max-concurrent-requests=16"
+    environment:
+      HF_HOME: /data
+      # A ten-minute first boot becomes twenty seconds with the warmup bounded.
+      MAX_WARMUP_SEQUENCE_LENGTH: "256"
+      MAX_WARMUP_BATCH_SIZE: "4"
+    volumes:
+      - ${OI_ROOT}/data/hf-cache:/data
+    networks:
+      - ai-net
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:80/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+
+  # The reranker is a separate service because it is a separate decision: it ships only if it stays
+  # inside the latency budget on this instance. See docs/search-architecture.md.
+  reranker:
+    image: ghcr.io/huggingface/text-embeddings-inference@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d
+    container_name: reranker
+    restart: unless-stopped
+    command:
+      - "--model-id=BAAI/bge-reranker-v2-m3"
+      - "--port=80"
+      - "--max-batch-tokens=8192"
+      - "--max-concurrent-requests=8"
+    environment:
+      HF_HOME: /data
+      MAX_WARMUP_SEQUENCE_LENGTH: "256"
+      MAX_WARMUP_BATCH_SIZE: "4"
+    volumes:
+      - ${OI_ROOT}/data/hf-cache:/data
+    networks:
+      - ai-net
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:80/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 180s
+
   # The vector store: chunks, their embeddings, and the access labels the search filters on.
   # Qdrant v1.19.2, current release line as of 2026-10-11.
   vector:

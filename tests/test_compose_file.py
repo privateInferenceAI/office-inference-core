@@ -84,3 +84,26 @@ def test_third_party_images_are_pinned_by_digest(services):
         assert any(version_comment.search(line) for line in window), (
             f"{name} is digest-pinned with no version recorded beside or above the pin"
         )
+
+
+def test_the_document_services_are_pinned_and_unpublished(compose):
+    """The C2 containers. Every one of them is digest-pinned, on ai-net, and publishes no port: the
+    posture is that nothing of ours is reachable from outside the machine."""
+    services = compose["services"]
+    for name in ("vector", "embeddings", "reranker"):
+        service = services[name]
+        assert "sha256:" in service["image"], f"{name} must be digest-pinned"
+        assert "ai-net" in service["networks"], f"{name} must be on the private network"
+        assert not service.get("ports"), f"{name} must not publish a port"
+
+
+def test_the_embedding_and_reranker_models_share_one_cache(compose):
+    """Both download from Hugging Face on first start. One cache means a rebuild does not re-download
+    them, and an office build can ship with the cache already filled."""
+    services = compose["services"]
+    embeddings = services["embeddings"]["volumes"]
+    reranker = services["reranker"]["volumes"]
+    assert embeddings == reranker, "the two services should share one model cache"
+    assert any("hf-cache" in v for v in embeddings), embeddings
+    for name in ("embeddings", "reranker"):
+        assert services[name]["environment"]["HF_HOME"] == "/data"
