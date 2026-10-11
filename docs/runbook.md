@@ -629,6 +629,11 @@ token counts, spend, provider.
 purge still leaves no tombstone, the record proves a call happened but not what was said, and the
 daily export does not leave the box. Each is a named item in `docs/requirements.yaml`.
 
+**Where these artifacts go next, and what may leave the building, is `docs/audit-evidence.md`.** That
+document covers the bucket, the retention mode, the permissions that stop the box erasing what it
+wrote, and the three build shapes, including an office appliance that has its own AWS account without
+being a hybrid deployment.
+
 ## Phase 3 — Documents  *(outline)*
 
 Docling ingestion, chunking with access labels, Qdrant, TEI embeddings and reranker. Ends with a

@@ -489,6 +489,7 @@ Each of these cost time or credibility once. They are here so they cost nothing 
 | `docs/production-readiness.md` | The 49-item gap list plus ten added, with status |
 | `docs/requirements.yaml` | The register: every item with a phase, a verification, and a status |
 | `docs/runbook.md` | Phases 0 to 2 as actually built, with commands |
+| `docs/audit-evidence.md` | What leaves the building: the record, the export, the anchor, the bucket, the permissions, and how the three build shapes differ |
 | `docs/architecture.md` | Layers, profiles, lanes |
 | `docs/decisions/` | ADRs: service implementations, agent topology |
 | `docs/service-inventory.md` | Every component, what it is, where it came from |
