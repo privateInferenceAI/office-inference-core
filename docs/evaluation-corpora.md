@@ -1,5 +1,35 @@
 # Evaluation corpora
 
+## How we treat evaluation data
+
+Three tiers, because "internal use" needs a definition or it drifts into distribution.
+
+**Tier 1, use freely.** Public records, and datasets under CC BY, CC BY-SA, CDLA, Apache or MIT:
+SEC filings, GovInfo and IRS publications, CUAD, TAT-QA, CORD, DocLayNet, HotpotQA, SQuAD v2, the
+pdf.js corpus, and anything we author. These may appear in the fixture corpus, in a demo, in a
+screenshot, in a client-facing sample set, and in git. This tier covers every document shape the
+product needs to be tested against.
+
+**Tier 2, internal only.** Datasets with no stated licence, or terms we cannot read. Usable for a
+one-off comparison when nothing in Tier 1 will do, under three conditions: it stays out of git, it
+never appears in anything a client sees, and the reason is written down here. The value is usually
+low, because Tier 1 is sufficient, which is the point of saying so plainly rather than leaving it to
+judgement in the moment.
+
+**Tier 3, do not use.** Anything with accepted terms we would be breaking: MS MARCO's
+non-commercial-only checkbox, SlideVQA's evaluation agreement, the RRC-gated DocVQA family, LDC's
+fee-based collections. The reason is not that a court case is likely. It is that we would be
+affirmatively agreeing to terms we intend to ignore, and that a procurement review will eventually
+ask what we tested against.
+
+**Why this costs us nothing.** Every hard case in the C2 acceptance test, a scanned page, a table, a
+spreadsheet, an email thread, a contract and a slide deck, is available from Tier 1. The questionable
+datasets are not the only route to any of it.
+
+**The trap in this area is contamination, not just licensing.** Popular benchmarks are in the
+training data of the models we test, so a fixture built from one risks measuring memorisation.
+Fixtures we author or take from obscure public records do not have that problem.
+
 What we may use to build the fixture corpus and the question sets, and what we may not. Verified by
 reading licence pages and dataset cards on 2026-10-11; nothing was downloaded.
 
