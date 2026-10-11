@@ -636,9 +636,22 @@ being a hybrid deployment.
 
 ### 2.8 Ship the evidence off the box
 
-**Status: written and tested in pieces, not yet run as a timer on this deployment.** The bucket exists
-and `docs/audit-evidence.md` records its settings, the manifest declares it, and the job is in
-`deploy/cloud/ship/`. This heading gets its "run" marker when the first anchor lands.
+**Run on 2026-10-11**, and what it produced:
+
+| Evidence | Result |
+|---|---|
+| Anchor shipped | `anchors/anchor-2026-10-11-00000002.json`, 276 bytes, hashes matched on both sides |
+| Export shipped | `exports/2026-10-11/audit-events.jsonl` (1,299 bytes) and `manifest.json` (405 bytes) |
+| Retention applied | All four objects locked `GOVERNANCE` until **2027-01-09**, from the bucket default |
+| Delete refused | `AccessDenied`, naming `assumed-role/oi-core-dev-instance/i-096bebd46308d1673` and `no identity-based policy allows the s3:DeleteObject action` |
+| Deleted tail caught | An export with its last row removed failed verification against the shipped anchor: `the anchored row 768f01c89c08... is missing from this export` |
+
+The delete attempt is what this whole slice exists for. The same call succeeded from a workstation
+credential an hour earlier. Same bucket, same object, two identities, two answers.
+
+**On "delete it as root":** root on the box gets the same denial, because EC2 credentials come from the
+instance role through the metadata service and do not vary by local user. The denial names the role
+rather than a user for exactly that reason.
 
 The job is two containers and nothing installed on the host. The **audit tool** writes the anchor or
 the export, because it owns the chain and knows how to produce them. The **ship image** delivers the

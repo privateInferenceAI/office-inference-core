@@ -136,7 +136,25 @@ intact. Without it, a truncated upload and a successful one look the same.
 
 Both jobs run on a **systemd timer**: a `.timer` unit says when, a `.service` unit says what,
 `systemctl list-timers` shows the schedule, and `journalctl -u` shows every run with its output. That
-is the operational story a support conversation needs.
+is the operational story a support conversation needs. `Persistent=true` on both, because the box is
+stopped when nobody is working, and a missed run should happen at the next start rather than never.
+
+**Why the anchor key repeats, and why that is deliberate.** The filename is the date plus the event
+count, so an hourly anchor over an unchanged chain uploads the *same key* every time. S3 versioning
+then records each write as its own version with a server-side timestamp, which is a better record than
+unique filenames would be: the version list is an ordered history of every anchor written, timestamped
+by AWS rather than by us.
+
+Two consequences worth knowing before you look:
+
+- `aws s3 ls` shows one object per key. `aws s3api list-object-versions` shows the sequence. An
+  examiner wants the second one.
+- Each version carries its own retention clock, so the bucket grows by about 300 bytes an hour instead
+  of being overwritten.
+
+An anchor whose head hash equals the previous run's is the healthy case: nothing changed in between. A
+head hash that moves backwards, or that changes when no events were written, is the signal worth
+alarming on, and it is one of the five alarms in the brief.
 
 ---
 
