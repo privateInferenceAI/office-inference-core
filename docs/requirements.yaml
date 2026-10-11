@@ -91,7 +91,7 @@ items:
     tier: [cloud, office, hosted]
     phase: C1
     verify: verify --anchor against an anchor written before a deliberate row deletion fails
-    status: open
+    status: verified
   - id: AUD-PAYLOAD-001
     title: A stored payload is verified against its own hash
     tier: [cloud, office, hosted]
@@ -115,7 +115,7 @@ items:
     tier: [cloud, hosted]
     phase: C1
     verify: delete an exported object as root and confirm it is refused
-    status: open
+    status: verified
   - id: AUD-LOCK-001
     title: The Object Lock mode and retention period are chosen deliberately and disclosed
     tier: [cloud, hosted]
