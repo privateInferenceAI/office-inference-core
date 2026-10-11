@@ -16,10 +16,11 @@ commands.
 **How to use this:** work one phase at a time. A phase is not finished until its verification step
 passes. Later phases stay as outlines until we reach them, so nothing here goes stale.
 
-**Status, 2026-10-11:** **C0 complete.** Phases 0 and 1 built, run, and verified on the cloud reference
-instance: two containers healthy, a role-routed call answered by Bedrock, and the spend row to prove
-it. Phase 2 is written and was run on the office lane; it has not run against this deployment. Phases
-3 to 11 outlined.
+**Status, 2026-10-11:** **C0 complete.** Phases 0, 1, and 2 built, run, and verified on the cloud
+reference instance. The chain holds the first live model call, the day is exported with a manifest,
+and an anchor records the head. C1 is the work that remains in the audit story: the anchor on a timer
+and shipped off the machine, the purge tombstone, the per-data-class content modes, and the daily
+export to the client's bucket. Phases 3 to 11 outlined.
 
 ## The environment we are building on
 
@@ -590,6 +591,43 @@ or our word.
 4. `backfill` brings the gateway's call in, and a second run changes nothing.
 5. `export` writes JSONL plus a manifest.
 6. `verify` passes on the untouched file and fails on the edited one.
+
+### 2.7 Phase 2 run on this deployment, 2026-10-11
+
+All six passed, against real data rather than the synthetic rows in `tests/test_audit_verify.py`.
+What exists on the box as a result:
+
+| Artifact | What it is |
+|---|---|
+| `audit_events` | Two rows: the hand-recorded access event, and the model call backfilled from the gateway |
+| `schema_migrations` | `002_audit_events.sql`, checksum `2d96020ef5e0` |
+| `exports/2026-10-11/audit-events.jsonl` | The day, one canonical JSON object per line |
+| `exports/2026-10-11/manifest.json` | Event count, first and last ids, the hash the first row chains back to, and the file's own sha256 |
+| `exports/anchors/anchor-2026-10-11-00000002.json` | The chain head at 01:05: `768f01c8…`, two events |
+
+The manifest and the anchor agree on the head hash, and they were produced by two separate commands
+two minutes apart, which is what makes them a cross-check rather than a restatement.
+
+**The backfilled row is worth reading once.** Its actor is `gateway-key:05315140`, a fingerprint of
+the API key rather than the key, so calls can be told apart without the record holding a credential.
+Its payload *is* stored, unlike the hand-recorded event's, because what it holds is metadata: model,
+token counts, spend, provider.
+
+**Three things surfaced while running this phase, all now written down:**
+
+1. **The escape-hatch command could never work** (`psql --set` sets a client variable, the trigger
+   reads a server setting). Corrected in 2.3, with what the hatch costs recorded beside it. Fixed in
+   pull request #18.
+2. **`audit anchor`'s default output path is inside the container.** The default is `anchors` relative
+   to `/app`, which is not a mounted directory, so the one artifact that must survive a container exit
+   is discarded by default. Use `--out /app/exports/anchors`. The anchor job in C1 should settle this
+   by defining the path rather than leaving it to a flag.
+3. **`backfill`'s skip counter can never be anything but zero**, because its query only selects rows
+   that are not already in the chain. The idempotence is real and the message is noise. Cosmetic.
+
+**What is not done, and belongs to C1:** nothing ships the anchor off this machine on a schedule, a
+purge still leaves no tombstone, the record proves a call happened but not what was said, and the
+daily export does not leave the box. Each is a named item in `docs/requirements.yaml`.
 
 ## Phase 3 — Documents  *(outline)*
 
