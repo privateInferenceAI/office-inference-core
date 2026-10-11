@@ -109,8 +109,8 @@ compliance profile for compliance-pack; hold voice until the voice phase ships.
 
 | Thing | Value |
 |---|---|
-| Development instance | `i-0887564c9fe06b0b5`, t3.large, 2 vCPU / 8 GB, **running and to be retired**. The build moves to a fresh m7i.4xlarge (section 4) |
-| Address | Elastic IP `52.204.202.66` (`eipalloc-0f0560d02bcb32517`) |
+| Development instance | `i-096bebd46308d1673`, m7i.4xlarge, 16 vCPU / 61 GB, 200 GB gp3. The t3.large `i-0887564c9fe06b0b5` was **terminated on 2026-10-10**, with its 30 GB volume and no snapshots left behind |
+| Address | Elastic IP `52.204.202.66` (`eipalloc-0f0560d02bcb32517`), **moved to the new instance and deliberately kept**. It survives stop and start, so SSH needs no address lookup between sessions |
 | Account | **878451098165 (Office Inference)**, holds the credits. Profile `oi-credits` |
 | Credits | 5,000 USD AWS Activate, expires **2028-10-31**. October spend in that account: **0.01 USD** |
 | GPU account | 426063972668 (Novus AI Labs), 48 vCPU G quota, holds a stopped g6e.2xlarge. Profile `default` |
@@ -155,10 +155,17 @@ roughly 142 a month, which is about three years of credits. The credits expire i
 bge-m3 and the reranker are 2.3 GB each, and Postgres and Qdrant both grow. A 30 GB volume fails at
 the first model download.
 
-**The old box is retired.** Terminate `i-0887564c9fe06b0b5` and release the elastic IP when the new
-instance is up. Nothing unique lives on it: the repository is on GitHub, the rendered environment file
-regenerates from the manifest, and its audit rows are demonstration data. A stopped instance still
-bills for its volume and its address, so leaving it parked costs money for nothing.
+**The old box is retired, and it was.** `i-0887564c9fe06b0b5` was terminated on 2026-10-10, its volume
+went with it, and no snapshots remain. Nothing unique lived on it: the repository is on GitHub, the
+rendered environment file regenerates from the manifest, and its audit rows were demonstration data. A
+stopped instance still bills for its volume and its address, so leaving it parked costs money for
+nothing.
+
+**One deviation from this section, made deliberately on 2026-10-10: the elastic IP was kept.** Section
+4 said to release it with the box. Anthony rides in over SSH, and without a stable address every stop
+and start changes the target. The address now points at the new instance and costs about USD 3.65 a
+month, which is the price of one SSH command that keeps working. Section 9's "client boxes use SSM
+only" still governs anything a client runs.
 
 **This is the cloud reference instance.** The office build's GPU work happens later, on different
 hardware, in the Novus account. No GPU here, and none planned.

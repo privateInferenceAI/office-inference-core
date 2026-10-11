@@ -3,21 +3,34 @@
 Build log and operating manual for the core system. Commands you can paste, in order, with the
 reasoning recorded at the point each component is added.
 
+**Which build this follows: the cloud build.** The box runs the gateway, the database, and the audit
+sink. Every generation call goes to Bedrock, cheap tier or frontier tier. There is no model on the box
+and no GPU on the box. The office build runs open weights on the client's own hardware; its record is
+Appendix A, and those are not steps in this build. On 2026-10-10 this document did not say which build
+it followed, and an hour was spent building the wrong lane on the right box.
+
+**The sequence of record** is `docs/build-brief.md` section 11, phases C0 to C9. The phases here cover
+the same work in more detail and are not numbered alike, so read the brief for order and this for
+commands.
+
 **How to use this:** work one phase at a time. A phase is not finished until its verification step
 passes. Later phases stay as outlines until we reach them, so nothing here goes stale.
 
-**Status:** Phase 0 written and ready. Phases 1 to 11 outlined.
+**Status, 2026-10-10:** Phase 0 built and run on the cloud reference instance. Phase 1 written for the
+cloud build; its verification has not run yet. Phase 2 was run on the office lane and has not run
+against a cloud deployment. Phases 3 to 11 outlined.
 
 ## The environment we are building on
 
 | | |
 |---|---|
 | Account | Office Inference, `878451098165` (holds the Activate credits) |
-| Instance | `i-0887564c9fe06b0b5`, t3.large, Ubuntu 24.04, 30 GB gp3 encrypted |
-| Elastic IP | `52.204.202.66` (stable across stops) |
+| Instance | `i-096bebd46308d1673`, m7i.4xlarge, Ubuntu 24.04, 200 GB gp3 encrypted. 16 vCPU, 61 GB RAM, no GPU |
+| Elastic IP | `52.204.202.66` (stable across stops; moved from the retired t3.large) |
 | SSH key | `ai-stack-key`, private key at `~/ai-stack/ai-stack-key.pem` on the workstation |
 | SSH allowed from | 47.164.45.109 only (security group `sg-09d9bfffbd28014c9`) |
-| Instance role | `oi-core-dev-instance` (SSM, for keyless access) |
+| Instance role | `oi-core-dev-instance`: `AmazonSSMManagedInstanceCore` for keyless access, plus `oi-core-dev-bedrock-invoke`, which allows exactly the four models the dev manifest names |
+| Inference | Bedrock, us-east-1. No model runs on this box |
 | Region | us-east-1 |
 | State | **stopped** when not in use |
 
@@ -25,21 +38,27 @@ Why this shape: an Elastic IP so the address survives stops; a keyless SSM role 
 depend on a key file; and a security group that publishes nothing but SSH from one address. That is
 the same posture a client box gets, minus the credit card.
 
+The box is CPU-only because generation happens at Bedrock, not because a small model runs here. It is
+sized at 16 vCPU and 64 GB for the components that do run on it later: Docling's layout, table, and OCR
+models, and Qdrant serving vectors from RAM.
+
 ---
 
 ## Phase 0 — Reference machine
 
 **Goal.** A clean host with Docker, a private container network, the repository, and a passing
-manifest validation. No GPU needed, so this can run on the smallest box.
+manifest validation. No GPU, because nothing on this box generates text: the cloud build's inference
+is Bedrock. It is an m7i.4xlarge rather than something smaller because later phases put Docling and
+Qdrant on it.
 
 ### 0.1 Start the instance
 
 From the workstation:
 
     aws ec2 start-instances --profile oi-credits --region us-east-1 \
-      --instance-ids i-0887564c9fe06b0b5
+      --instance-ids i-096bebd46308d1673
     aws ec2 wait instance-running --profile oi-credits --region us-east-1 \
-      --instance-ids i-0887564c9fe06b0b5
+      --instance-ids i-096bebd46308d1673
     aws ec2 describe-addresses --profile oi-credits --region us-east-1 \
       --allocation-ids eipalloc-0f0560d02bcb32517 --query 'Addresses[0].PublicIp' --output text
 
@@ -190,74 +209,72 @@ Nothing of ours is running yet, and that is correct. Phase 0 built the floor, no
 
 ---
 
-## Phase 1 — Data and gateway
+## Phase 1 — Data and gateway (cloud build)
 
-**Goal.** Configuration rendered from the manifest, Postgres, a model server, and the gateway
-running, with one model call travelling the whole path and landing in the database as an audit row.
+**Goal.** Configuration rendered from the manifest, Postgres, the gateway, and one model call that
+travels the whole path and lands in the database as a spend row. **Every generation call goes to
+Bedrock**, because this is the cloud build.
+
+**What starts, and what deliberately does not.** Four services are defined and two of them run:
+
+| Service | Runs? | What it is |
+|---|---|---|
+| `postgres` | yes, healthy | The gateway's keys and spend, and later the audit trail. Becomes RDS in a client account |
+| `litellm` | yes | The single control point. Four roles, all of them Bedrock model ids |
+| `audit` | on demand | Defined under the `tools` profile: it runs when called and exits, because a resident process would be a container for something that runs for a second |
+| `llamacpp` | **no** | The local lane, which belongs to the office build. The renderer leaves its compose profile off, so a cloud deployment never starts it |
+
+That last row is the whole shape of the cloud build. There is no model on this box and no GPU on this
+box: generation happens at Bedrock, and the box runs the gateway, the database, and the record.
 
 ### 1.1 Render the manifest into configuration
 
     cd /opt/oi-core
-    python3 scripts/render_manifest.py --manifest manifests/dev-office.yaml
-    python3 scripts/render_manifest.py --manifest manifests/dev-office.yaml   # rerun on purpose
-    sed -E 's/(PASSWORD|MASTER_KEY)=.*/\1=redacted/' rendered/env
+    python3 scripts/render_manifest.py --manifest manifests/dev-cloud.yaml
+    python3 scripts/render_manifest.py --manifest manifests/dev-cloud.yaml   # rerun on purpose
+    sed -E 's/(PASSWORD|MASTER_KEY|AWS_SECRET|AWS_ACCESS).*/\1=redacted/' rendered/env
 
-Expected: the second run reports **secrets reused from the existing env file**, and `rendered/`
-holds `env` (mode 600), `litellm.yaml`, `services.txt`, and `manifest.json`.
+Expected, the second run reporting reused secrets:
 
-**Why:** the manifest is what a client buys, and this turns it into what the deployment reads, so
-nobody hand-edits configuration on a server. Secrets are generated once and reused, because
-regenerating the database password would lock the stack out of its own data. That is why the rerun
-is part of the step rather than an afterthought.
+    rendered dev-cloud.yaml -> /opt/oi-core/rendered
+      profile      cloud
+      packs        core
+      local models (none)
+      gateway      4 model entries
+      secrets      generated
+      env file     /opt/oi-core/rendered/env (mode 600)
 
-**The cloud build renders a different manifest.** `manifests/dev-office.yaml` declares the office
-profile, whose inference is the local lane: llama.cpp on this box, serving the GGUF from 1.2.
-`manifests/dev-cloud.yaml` declares the cloud profile, where every role resolves to Bedrock and
-there is no local lane at all. The same compose file serves both, because the renderer sets
-`COMPOSE_PROFILES` only for a build that has local containers; a cloud render starts Postgres and
-the gateway and leaves llama.cpp out. The cloud smoke test is C0 work and gets its own section once
-it has run.
+**Why the rerun is part of the step:** secrets are generated once and reused. Regenerating the
+database password would lock the stack out of its own data directory, because Postgres initialized
+with the old one.
 
-### 1.2 Fetch the development model
+**Why `local models (none)` is correct here and not a defect.** `dev-cloud.yaml` names a Bedrock model
+for every role and has no local lane. The office build's `dev-office.yaml` is the opposite: local
+models, no Bedrock. Same renderer, same compose file, different configuration, and that is the claim
+this whole design rests on. If a cloud render ever reports a local model, the wrong manifest was
+passed.
 
-    mkdir -p /opt/oi-core/models
-    curl -L --fail -o /opt/oi-core/models/Qwen3-1.7B-Q4_K_M.gguf \
-      https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf
-    ls -lh /opt/oi-core/models/
+**The gateway list is the thing to check, not the file's existence.** Four entries, one per role, each
+`bedrock/`-prefixed:
 
-Expected: about 1.1 GB.
+    grep -E 'model_name|model:' rendered/litellm.yaml
 
-**Why:** this box has no GPU, so the local lane runs a 1.7B CPU model. It exists to prove the path,
-not to be good, and every role points at it for now. When the GPU arrives, vLLM replaces llama.cpp
-and the roles point at real models. Nothing in front of it changes, because the gateway is the only
-thing that knows a model exists.
+### 1.2 Confirm which containers this build starts
 
-### 1.2b Know this before you start: Docker creates missing mount paths as root
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env config --services
 
-The Postgres service mounts `${OI_ROOT}/db/migrations`. **If that path does not exist, the Docker daemon
-creates it, owned by `root`, not by you.** In Phase 1 the repository has no `db/` directory yet (it
-arrives in Phase 2), so after the first `up -d` the directory exists and is not yours.
+Expected: exactly two lines, `postgres` and `litellm`. If `llamacpp` appears, `rendered/env` came from
+an office render and the wrong lane is about to start.
 
-The symptom appears later, and it looks unrelated: `git pull` in Phase 2 fails with
-`unable to create file db/migrations/002_audit_events.sql: Permission denied`.
+**Why this check exists as its own step.** Compose refuses a project whose service depends on one that
+an inactive profile excludes, so `litellm` has no dependency on `llamacpp`. That was verified with
+`docker compose up --dry-run`, which failed with:
 
-Check and fix before it bites:
+    service "litellm" depends on undefined service "llamacpp": invalid compose project
 
-    ls -ld /opt/oi-core/db /opt/oi-core/db/migrations 2>/dev/null
-    sudo chown -R "$USER":"$USER" /opt/oi-core/db
-
-**Do not chown the whole tree.** `data/` and `exports/` are root-owned on purpose, because Docker made
-them for volumes.
-
-**If a pull is interrupted halfway**, git leaves what it already wrote: tracked files modified and new
-files untracked. Recover with:
-
-    rm -rf services/audit          # or whatever the pull listed as untracked
-    git checkout -- .
-    git pull
-
-Deleting those untracked files is safe: they are partial copies of what the pull is about to write
-from the same commit.
+One compose file can serve both builds only because the local lane sits behind a profile and the
+gateway boots without it. The gateway does not need a model server to start; it needs one per request,
+and only on the office build.
 
 ### 1.3 Start the stack
 
@@ -265,62 +282,37 @@ from the same commit.
     docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env up -d
     docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env ps
 
-Expected: `postgres` healthy, `llamacpp` and `litellm` running. First start takes a minute or two
-while images pull, Postgres initializes, and the gateway runs its migrations.
-
-**Why these three, in this order:**
-
-- **Postgres** because the gateway needs somewhere to keep keys, spend, and the audit trail. It runs
-  as a container here and becomes RDS in the cloud build, with the same schema and the same queries.
-- **llama.cpp** because it is the only way to get a local model answering on a CPU box.
-- **LiteLLM** because it is the single control point: authentication, per-role routing, budgets,
-  spend, and logging live in one place. It is also the seam that makes a model swap a one-line
-  configuration change rather than a project.
+Expected: `postgres` healthy, `litellm` running. First start takes a minute or two while images pull,
+Postgres initializes, and the gateway runs its migrations.
 
 Note what is not published: no host ports at all. Everything is reachable on `ai-net` only, which is
 why the checks below run a throwaway container on that network.
 
-### 1.4 Verify the gateway and the model
+### 1.4 Verify the gateway
 
     docker exec litellm python -c "from importlib.metadata import version; print('litellm', version('litellm'))"
     docker run --rm --network ai-net curlimages/curl -s http://litellm:4000/health/liveliness
-    docker run --rm --network ai-net curlimages/curl -s http://llamacpp:8080/v1/models
-
-Expected: a version of **1.104.x**, `"I'm alive!"`, and one model listed by llama.cpp.
-
-**Why the version check is a step and not a nicety:** LiteLLM's CVEs are version-bound.
-CVE-2026-59822 affects everything before 1.84.0 and sits in CISA's KEV catalog. We verify the running
-version rather than trusting the pin, because a pin records intent and the version reports reality.
-
-**Cross-check the running digest.** This is the check that actually matters:
-
     docker images --digests | grep litellm
 
-Expected: a line whose DIGEST column reads `sha256:3d88bd75...`, matching the pin in
-`deploy/office/compose/docker-compose.yml`. The TAG column will say `<none>`, and that is correct:
-we pulled by digest, so no tag was ever stored.
+Expected: a version of **1.104.x**, `"I'm alive!"`, and a DIGEST column reading `sha256:3d88bd75...`,
+matching the pin in the compose file. The TAG column will say `<none>`, which is correct: pulled by
+digest, so no tag was ever stored.
 
-Three things the first run taught us, all worth knowing because each one is a command that looks
-right and fails:
+**Why the version check is a step and not a nicety:** LiteLLM's CVEs are version-bound.
+CVE-2026-59822 affects everything before 1.84.0 and sits in CISA's KEV catalog. A pin records intent;
+the running version reports reality, and only one of those answers a security review.
 
-- **`docker inspect litellm` inspects the container, not the image.** Containers have no
-  `RepoDigests` field, so the request errored even though the image was fine.
-- **`docker image inspect ghcr.io/berriai/litellm` fails with "No such image: ...:latest".** Omitting a
-  tag makes Docker assume `latest`, and a digest pull stores no tag. To inspect by name you must give
-  the digest: `docker image inspect ghcr.io/berriai/litellm@sha256:3d88bd75...`, or inspect by ID:
-  `docker image inspect $(docker inspect --format '{{.Image}}' litellm)`.
+Three dead ends worth knowing, because each looks right and fails:
+
+- **`docker inspect litellm` inspects the container, not the image.** Containers have no `RepoDigests`
+  field.
+- **`docker image inspect ghcr.io/berriai/litellm` fails with "No such image".** Omitting a tag makes
+  Docker assume `latest`, and a digest pull stores no tag. Use `docker images --digests`, or inspect
+  by ID.
 - **This image ships no `org.opencontainers.image.version` label**, so a label check returns empty. Not
-  every publisher sets one, which is why the digest is the comparison that counts.
+  every publisher sets one.
 
-`docker images --digests` sidesteps all three: it lists what is on disk with the digest Docker
-recorded when it pulled, and it needs neither a tag nor a container.
-
-**Why `importlib.metadata` instead of `litellm.__version__`:** LiteLLM 1.104 loads attributes lazily and
-does not export `__version__`, so the obvious command raises `AttributeError`. The package metadata is
-the reliable source, and the digest comparison is what actually proves the running build is the one we
-pinned.
-
-### 1.5 Make a call through the gateway
+### 1.5 Make a call through the gateway, and make it reach Bedrock
 
     KEY=$(grep '^LITELLM_MASTER_KEY=' rendered/env | cut -d= -f2-)
     docker run --rm --network ai-net -e KEY="$KEY" curlimages/curl -s \
@@ -328,35 +320,29 @@ pinned.
       -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
       -d '{"model":"analyst","messages":[{"role":"user","content":"In one sentence, what is a gateway?"}],"max_tokens":60}'
 
-Expected: JSON containing an answer. On two vCPUs, expect a few seconds.
+Expected: JSON with an answer, and the `model` field naming a Nova model. A second or two, not the
+seventy a CPU model took.
 
-**Why:** one request exercises the entire path, client to gateway to model and back, with the
-gateway doing authentication, role routing, and logging. The model name `analyst` is a role, not a
-model, which is the indirection that lets the model tier change without touching anything upstream.
+**Why this is the phase's real test.** One request exercises authentication, role routing, the AWS
+credential chain, the Bedrock call, and the spend record. The model name `analyst` is a role, not a
+model: that indirection is what lets the tier change without touching anything upstream.
 
-**What a good response looks like, and the thinking-token trap.** The first successful call may come
-back with an **empty `content`**, a populated `reasoning_content`, and `"finish_reason": "length"`.
-That is not a failure. Qwen3 is a reasoning model: it spends tokens thinking before it answers, and a
-60-token budget gets consumed entirely by the thinking phase.
+**How the container gets AWS credentials.** The instance carries the role `oi-core-dev-instance`, and
+the gateway picks credentials up from the instance metadata service. Two things make that work, and
+both are configuration rather than luck: the metadata hop limit is 2, which is what lets a container
+reach IMDS at all, and the role carries a policy naming exactly the four models in the manifest. No
+key material exists on the box or in the env file.
 
-Two ways to see an actual answer:
+**If it fails, the error names the cause:**
 
-    # give it room: thinking still happens, but there is budget left to answer
-    #   ... "max_tokens": 400 ...
+| Error | Cause |
+|---|---|
+| `AccessDeniedException` | The model id and the role's policy disagree. Compare the id in `rendered/litellm.yaml` against the policy's resource list |
+| `Unable to locate credentials` | IMDS is unreachable from the container, usually the hop limit, or the instance has no role |
+| `ValidationException: on-demand throughput isn't supported` | That model is inference-profile only, which is the case for Claude. It needs a `us.` profile, and it is why the dev manifest uses `ON_DEMAND` models |
+| `ResourceNotFoundException` | The model id is not available in this Region, or not spelled exactly |
 
-    # or turn thinking off for this request, which llama.cpp honours per request
-    #   ... "chat_template_kwargs": {"enable_thinking": false} ...
-
-Why this matters beyond a smoke test: **thinking tokens are billed tokens and they are slow tokens.**
-A front desk answering "when are you open" should not spend 300 tokens reasoning first. That is the
-argument for the role indirection doing real work: a small non-thinking model serves the front desk
-while the analyst keeps its reasoning, and both run through the same gateway.
-
-**Measured on 2026-10-10, for the record:** 1.7B Q4 on 2 vCPU gave 7.2 predicted tokens per second and
-21 tokens per second of prompt processing. A 500-token answer would take about 70 seconds. Fine for
-proving a path; unusable for a client, and the clearest possible argument for the GPU.
-
-### 1.6 Find the audit row
+### 1.6 Find the spend row
 
     docker exec postgres psql -U oicore -d oicore -c '\dt' | tail -12
     docker exec postgres psql -U oicore -d oicore -c 'select count(*) from "LiteLLM_SpendLogs";'
@@ -365,24 +351,24 @@ proving a path; unusable for a client, and the clearest possible argument for th
 
 Expected: your call, with the model, the token count, and a timestamp.
 
-**Why this matters more than it looks:** the audit trail exists from the first call, without us
-writing a line of logging code. Every model call is recorded with which key made it, which model
-answered, how many tokens it cost, and when. Phase 2 adds our own append-only sink for actions and
-approvals, but the model-call record starts here.
+**Why this matters more than it looks:** the record exists from the first call, without us writing a
+line of logging code. Every call is recorded with which key made it, which model answered, how many
+tokens it cost, and when. Phase 2 adds our own append-only sink for actions and approvals; the
+model-call record starts here.
 
 ### 1.7 Verification, which ends the phase
 
-All four of these must pass:
+All four must pass:
 
 1. `health/liveliness` returns alive.
-2. llama.cpp lists a model.
-3. A chat completion returns an answer through the gateway.
+2. `config --services` lists `postgres` and `litellm`, and no local model server.
+3. A chat completion returns an answer, and the response names a Bedrock model.
 4. That call appears in `LiteLLM_SpendLogs`.
 
 ### If it breaks
 
-- **llamacpp restarting in a loop:** the file name in `rendered/env` (`MODEL_FILE`) must match what is
-  in `models/`. Check `docker logs llamacpp`.
+- **`llamacpp` appears in `config --services`:** `rendered/env` is from an office render. Re-render
+  `dev-cloud.yaml`; the renderer removes `COMPOSE_PROFILES` for a cloud manifest.
 - **litellm unhealthy:** check that postgres is healthy first, then `docker logs litellm | tail -30`.
   A bad password in `DATABASE_URL` shows up as an authentication error.
 - **curl cannot resolve `litellm`:** the container has to be on the same network. `--network ai-net`
@@ -561,3 +547,224 @@ The denial appeal agent end to end.
 3. Every image is digest-pinned with its version in a comment.
 4. Nothing publishes a port except ingress.
 5. Stop the instance when you stop working. The credits are generous, not infinite.
+
+---
+
+## Appendix A — The office lane, as built on the retired t3.large
+
+**Not this build.** This is the record of the local lane: the office build runs it, the cloud build
+does not. It was built first, on the t3.large, before the cloud build existed, and it stays in this
+document because the office offering is real work with real numbers in it.
+
+Why it is fenced off: on 2026-10-10 these steps were followed on the cloud reference instance by
+mistake. That rendered the office manifest and downloaded a 1.1 GB model the cloud build has no use
+for. The lane is now switched off by configuration rather than by memory, but this record has to say
+which build it belongs to. It did not, and that cost an hour.
+
+The measurement worth keeping is in A.5: 1.7B Q4 on 2 vCPU predicted 7.2 tokens per second. That is
+the argument for the GPU in the office offering, and it is not an argument about the cloud build at
+all.
+
+### The goal, as it was set at the time
+
+**Goal.** Configuration rendered from the manifest, Postgres, a model server, and the gateway
+running, with one model call travelling the whole path and landing in the database as an audit row.
+The model server is llama.cpp on this box, and that single container is the difference between the two
+builds.
+
+### A.1 Render the manifest into configuration
+
+    cd /opt/oi-core
+    python3 scripts/render_manifest.py --manifest manifests/dev-office.yaml
+    python3 scripts/render_manifest.py --manifest manifests/dev-office.yaml   # rerun on purpose
+    sed -E 's/(PASSWORD|MASTER_KEY)=.*/\1=redacted/' rendered/env
+
+Expected: the second run reports **secrets reused from the existing env file**, and `rendered/`
+holds `env` (mode 600), `litellm.yaml`, `services.txt`, and `manifest.json`.
+
+**Why:** the manifest is what a client buys, and this turns it into what the deployment reads, so
+nobody hand-edits configuration on a server. Secrets are generated once and reused, because
+regenerating the database password would lock the stack out of its own data. That is why the rerun
+is part of the step rather than an afterthought.
+
+**The cloud build renders a different manifest.** `manifests/dev-office.yaml` declares the office
+profile, whose inference is the local lane: llama.cpp on this box, serving the GGUF from 1.2.
+`manifests/dev-cloud.yaml` declares the cloud profile, where every role resolves to Bedrock and
+there is no local lane at all. The same compose file serves both, because the renderer sets
+`COMPOSE_PROFILES` only for a build that has local containers; a cloud render starts Postgres and
+the gateway and leaves llama.cpp out. The cloud smoke test is C0 work and gets its own section once
+it has run.
+
+### A.2 Fetch the development model
+
+    mkdir -p /opt/oi-core/models
+    curl -L --fail -o /opt/oi-core/models/Qwen3-1.7B-Q4_K_M.gguf \
+      https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf
+    ls -lh /opt/oi-core/models/
+
+Expected: about 1.1 GB.
+
+**Why:** this box has no GPU, so the local lane runs a 1.7B CPU model. It exists to prove the path,
+not to be good, and every role points at it for now. When the GPU arrives, vLLM replaces llama.cpp
+and the roles point at real models. Nothing in front of it changes, because the gateway is the only
+thing that knows a model exists.
+
+### A.2b Know this before you start: Docker creates missing mount paths as root
+
+The Postgres service mounts `${OI_ROOT}/db/migrations`. **If that path does not exist, the Docker daemon
+creates it, owned by `root`, not by you.** When this lane was built, the repository had no `db/`
+directory yet, so the first `up -d` created it as root. `db/migrations` is tracked in git now, so that
+particular directory arrives with the clone; `data/`, `models/`, and `exports/` are the ones to create
+by hand, and `exports` matters most because the audit tool runs as your user and cannot write into a
+root-owned directory.
+
+The symptom appears later, and it looks unrelated: `git pull` in Phase 2 fails with
+`unable to create file db/migrations/002_audit_events.sql: Permission denied`.
+
+Check and fix before it bites:
+
+    ls -ld /opt/oi-core/db /opt/oi-core/db/migrations 2>/dev/null
+    sudo chown -R "$USER":"$USER" /opt/oi-core/db
+
+**Do not chown the whole tree.** `data/` and `exports/` are root-owned on purpose, because Docker made
+them for volumes.
+
+**If a pull is interrupted halfway**, git leaves what it already wrote: tracked files modified and new
+files untracked. Recover with:
+
+    rm -rf services/audit          # or whatever the pull listed as untracked
+    git checkout -- .
+    git pull
+
+Deleting those untracked files is safe: they are partial copies of what the pull is about to write
+from the same commit.
+
+### A.3 Start the stack
+
+    cd /opt/oi-core
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env up -d
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env ps
+
+Expected: `postgres` healthy, `llamacpp` and `litellm` running. First start takes a minute or two
+while images pull, Postgres initializes, and the gateway runs its migrations.
+
+**Why these three, in this order:**
+
+- **Postgres** because the gateway needs somewhere to keep keys, spend, and the audit trail. It runs
+  as a container here and becomes RDS in the cloud build, with the same schema and the same queries.
+- **llama.cpp** because it is the only way to get a local model answering on a CPU box.
+- **LiteLLM** because it is the single control point: authentication, per-role routing, budgets,
+  spend, and logging live in one place. It is also the seam that makes a model swap a one-line
+  configuration change rather than a project.
+
+Note what is not published: no host ports at all. Everything is reachable on `ai-net` only, which is
+why the checks below run a throwaway container on that network.
+
+### A.4 Verify the gateway and the model
+
+    docker exec litellm python -c "from importlib.metadata import version; print('litellm', version('litellm'))"
+    docker run --rm --network ai-net curlimages/curl -s http://litellm:4000/health/liveliness
+    docker run --rm --network ai-net curlimages/curl -s http://llamacpp:8080/v1/models
+
+Expected: a version of **1.104.x**, `"I'm alive!"`, and one model listed by llama.cpp.
+
+**Why the version check is a step and not a nicety:** LiteLLM's CVEs are version-bound.
+CVE-2026-59822 affects everything before 1.84.0 and sits in CISA's KEV catalog. We verify the running
+version rather than trusting the pin, because a pin records intent and the version reports reality.
+
+**Cross-check the running digest.** This is the check that actually matters:
+
+    docker images --digests | grep litellm
+
+Expected: a line whose DIGEST column reads `sha256:3d88bd75...`, matching the pin in
+`deploy/office/compose/docker-compose.yml`. The TAG column will say `<none>`, and that is correct:
+we pulled by digest, so no tag was ever stored.
+
+Three things the first run taught us, all worth knowing because each one is a command that looks
+right and fails:
+
+- **`docker inspect litellm` inspects the container, not the image.** Containers have no
+  `RepoDigests` field, so the request errored even though the image was fine.
+- **`docker image inspect ghcr.io/berriai/litellm` fails with "No such image: ...:latest".** Omitting a
+  tag makes Docker assume `latest`, and a digest pull stores no tag. To inspect by name you must give
+  the digest: `docker image inspect ghcr.io/berriai/litellm@sha256:3d88bd75...`, or inspect by ID:
+  `docker image inspect $(docker inspect --format '{{.Image}}' litellm)`.
+- **This image ships no `org.opencontainers.image.version` label**, so a label check returns empty. Not
+  every publisher sets one, which is why the digest is the comparison that counts.
+
+`docker images --digests` sidesteps all three: it lists what is on disk with the digest Docker
+recorded when it pulled, and it needs neither a tag nor a container.
+
+**Why `importlib.metadata` instead of `litellm.__version__`:** LiteLLM 1.104 loads attributes lazily and
+does not export `__version__`, so the obvious command raises `AttributeError`. The package metadata is
+the reliable source, and the digest comparison is what actually proves the running build is the one we
+pinned.
+
+### A.5 Make a call through the gateway
+
+    KEY=$(grep '^LITELLM_MASTER_KEY=' rendered/env | cut -d= -f2-)
+    docker run --rm --network ai-net -e KEY="$KEY" curlimages/curl -s \
+      -X POST http://litellm:4000/v1/chat/completions \
+      -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+      -d '{"model":"analyst","messages":[{"role":"user","content":"In one sentence, what is a gateway?"}],"max_tokens":60}'
+
+Expected: JSON containing an answer. On two vCPUs, expect a few seconds.
+
+**Why:** one request exercises the entire path, client to gateway to model and back, with the
+gateway doing authentication, role routing, and logging. The model name `analyst` is a role, not a
+model, which is the indirection that lets the model tier change without touching anything upstream.
+
+**What a good response looks like, and the thinking-token trap.** The first successful call may come
+back with an **empty `content`**, a populated `reasoning_content`, and `"finish_reason": "length"`.
+That is not a failure. Qwen3 is a reasoning model: it spends tokens thinking before it answers, and a
+60-token budget gets consumed entirely by the thinking phase.
+
+Two ways to see an actual answer:
+
+    # give it room: thinking still happens, but there is budget left to answer
+    #   ... "max_tokens": 400 ...
+
+    # or turn thinking off for this request, which llama.cpp honours per request
+    #   ... "chat_template_kwargs": {"enable_thinking": false} ...
+
+Why this matters beyond a smoke test: **thinking tokens are billed tokens and they are slow tokens.**
+A front desk answering "when are you open" should not spend 300 tokens reasoning first. That is the
+argument for the role indirection doing real work: a small non-thinking model serves the front desk
+while the analyst keeps its reasoning, and both run through the same gateway.
+
+**Measured on 2026-10-10, for the record:** 1.7B Q4 on 2 vCPU gave 7.2 predicted tokens per second and
+21 tokens per second of prompt processing. A 500-token answer would take about 70 seconds. Fine for
+proving a path; unusable for a client, and the clearest possible argument for the GPU.
+
+### A.6 Find the audit row
+
+    docker exec postgres psql -U oicore -d oicore -c '\dt' | tail -12
+    docker exec postgres psql -U oicore -d oicore -c 'select count(*) from "LiteLLM_SpendLogs";'
+    docker exec postgres psql -U oicore -d oicore -c \
+      'select request_id, model, total_tokens, "startTime" from "LiteLLM_SpendLogs" order by "startTime" desc limit 3;'
+
+Expected: your call, with the model, the token count, and a timestamp.
+
+**Why this matters more than it looks:** the audit trail exists from the first call, without us
+writing a line of logging code. Every model call is recorded with which key made it, which model
+answered, how many tokens it cost, and when. Phase 2 adds our own append-only sink for actions and
+approvals, but the model-call record starts here.
+
+### A.7 Verification, which ends the phase
+
+All four of these must pass:
+
+1. `health/liveliness` returns alive.
+2. llama.cpp lists a model.
+3. A chat completion returns an answer through the gateway.
+4. That call appears in `LiteLLM_SpendLogs`.
+
+### If it breaks
+
+- **llamacpp restarting in a loop:** the file name in `rendered/env` (`MODEL_FILE`) must match what is
+  in `models/`. Check `docker logs llamacpp`.
+- **litellm unhealthy:** check that postgres is healthy first, then `docker logs litellm | tail -30`.
+  A bad password in `DATABASE_URL` shows up as an authentication error.
+- **curl cannot resolve `litellm`:** the container has to be on the same network. `--network ai-net`
+  is not optional, and omitting it is the most common version of this mistake.
+
