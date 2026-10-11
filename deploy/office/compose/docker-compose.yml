@@ -44,6 +44,23 @@ services:
       timeout: 5s
       retries: 5
 
+  # The vector store: chunks, their embeddings, and the access labels the search filters on.
+  # Qdrant v1.19.2, current release line as of 2026-10-11.
+  vector:
+    # The image ships neither curl nor wget, so there is no healthcheck here on purpose. Readiness is
+    # checked from another container, which is how the runbook proves it, and the ingestion worker
+    # retries rather than assuming the store is up.
+    image: qdrant/qdrant@sha256:b7b0444c4c351c970b98e90a6f89c2ee4287c65b44e52b4cb503fa5b2aa927ad
+    container_name: vector
+    restart: unless-stopped
+    environment:
+      QDRANT__SERVICE__HTTP_PORT: "6333"
+      QDRANT__TELEMETRY_DISABLED: "true"
+    volumes:
+      - ${OI_ROOT}/data/qdrant:/qdrant/storage
+    networks:
+      - ai-net
+
   llamacpp:
     # llama.cpp server: the CPU path, and the local lane's only implementation. The cloud build
     # has no local lane, so this sits behind a compose profile. Gating it here rather than in a
