@@ -28,6 +28,7 @@ packs:
     description: Ask questions across the client's own documents, with citations and per-role access.
     services:
       - ingestion
+      - parser
       - vector
       - embeddings
       - reranker

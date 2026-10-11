@@ -90,11 +90,45 @@ def test_the_document_services_are_pinned_and_unpublished(compose):
     """The C2 containers. Every one of them is digest-pinned, on ai-net, and publishes no port: the
     posture is that nothing of ours is reachable from outside the machine."""
     services = compose["services"]
-    for name in ("vector", "embeddings", "reranker"):
+    for name in ("parser", "vector", "embeddings", "reranker"):
         service = services[name]
         assert "sha256:" in service["image"], f"{name} must be digest-pinned"
         assert "ai-net" in service["networks"], f"{name} must be on the private network"
         assert not service.get("ports"), f"{name} must not publish a port"
+
+
+def test_the_parser_has_every_outbound_door_shut(compose):
+    """Docling Serve can fetch remote sources, call vision-language APIs, load third-party plugins and
+    serve a browser UI. None of that belongs on a box whose promise is that documents do not leave it,
+    and none of it is on by default in a way we can rely on: remote services and plugins default to
+    false, but so does everything else here, and a default is not a decision."""
+    env = compose["services"]["parser"]["environment"]
+    assert env["DOCLING_SERVE_ENABLE_REMOTE_SERVICES"] == "false"
+    assert env["DOCLING_SERVE_ALLOW_EXTERNAL_PLUGINS"] == "false"
+    assert env["DOCLING_SERVE_ENABLE_UI"] == "false"
+    assert env["DOCLING_SERVE_ENABLE_API_DOCS"] == "false"
+    assert env["DOCLING_SERVE_DEBUG_ERROR_DETAILS"] == "false"
+    assert env["DOCLING_SERVE_CORS_ORIGINS"] != '["*"]', "CORS must not stay at its default"
+
+
+def test_the_parser_healthcheck_can_actually_run(compose):
+    """The image installs tesseract and GL libraries and no HTTP client, so a curl healthcheck fails
+    with "not found" and the container is never healthy. This is a test rather than a comment because
+    it is invisible until someone waits ten minutes for a service that was up the whole time."""
+    test = compose["services"]["parser"]["healthcheck"]["test"]
+    assert test[0] == "CMD"
+    assert "curl" not in " ".join(test), "the parser image has no curl"
+    assert "python" in test[1]
+
+
+def test_the_parser_weights_are_cached_outside_the_container(compose):
+    """4.4 GB of weights. A rebuild must not re-download them, and an air-gapped office build has to
+    be able to ship with the cache already filled, which means the path under OI_ROOT rather than
+    anything inside the image."""
+    service = compose["services"]["parser"]
+    assert service["environment"]["DOCLING_SERVE_ARTIFACTS_PATH"] == "/data"
+    assert any("docling-cache" in str(v) for v in service["volumes"]), service["volumes"]
+
 
 
 def test_the_embedding_and_reranker_models_share_one_cache(compose):

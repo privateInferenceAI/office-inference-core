@@ -114,6 +114,61 @@ services:
       retries: 5
       start_period: 180s
 
+  # The parser: documents become structured text with page numbers, before anything is chunked or
+  # embedded. Docling Serve, MIT, whose licence posture is recorded in docs/search-architecture.md.
+  #
+  # It is its own service rather than a library inside the ingestion worker for one reason: the
+  # layout, table and OCR models are the largest thing in the pipeline, and a worker that restarts on
+  # every document change should not reload them.
+  parser:
+    # ghcr.io/docling-project/docling-serve-cpu:v1.36.0, released 2026-10-01. The -cpu suffix is
+    # load-bearing in the same way TEI's is: it is the variant that does not pull CUDA wheels onto a
+    # box with no GPU.
+    image: ghcr.io/docling-project/docling-serve-cpu@sha256:225c8586e20d5d0fc6811a9e0e044fa602bcc4393f00389009bad42d6787b58f
+    container_name: parser
+    restart: unless-stopped
+    environment:
+      # Everything a request could ask for that reaches outside the box is off. Remote services covers
+      # vision-language models called over APIs, external plugins covers third-party code, the UI is a
+      # browser surface nothing needs, and the API docs publish the schema to anonymous callers.
+      DOCLING_SERVE_ENABLE_REMOTE_SERVICES: "false"
+      DOCLING_SERVE_ALLOW_EXTERNAL_PLUGINS: "false"
+      DOCLING_SERVE_ENABLE_UI: "false"
+      DOCLING_SERVE_ENABLE_API_DOCS: "false"
+      DOCLING_SERVE_ENABLE_MANAGEMENT_ENDPOINTS: "false"
+      DOCLING_SERVE_DEBUG_ERROR_DETAILS: "false"
+      # Narrowed from the "*" default. Nothing browses this service, but a permissive default on an
+      # internal service is how a stray page becomes an API.
+      DOCLING_SERVE_CORS_ORIGINS: '["http://localhost"]'
+      # Structured logs, so a parse failure is greppable rather than a paragraph.
+      DOCLING_SERVE_LOG_FORMAT: json
+      DOCLING_SERVE_LOG_LEVEL: INFO
+      # This box is 16 vCPU and its default of 4 leaves three quarters idle, on the slowest stage in
+      # ingestion. The workers are threads inside one process and they share the loaded models, which
+      # is the configuration that matters on a 64 GB box: the alternative allocates a second copy of
+      # every model per worker.
+      DOCLING_NUM_THREADS: "12"
+      DOCLING_SERVE_ENG_LOC_NUM_WORKERS: "1"
+      DOCLING_SERVE_ENG_LOC_SHARE_MODELS: "true"
+      DOCLING_DEVICE: cpu
+      # Weights are cached under OI_ROOT rather than inside the container, so a rebuild does not
+      # re-download them and an air-gapped office build can ship with the cache already filled.
+      DOCLING_SERVE_ARTIFACTS_PATH: /data
+    volumes:
+      - ${OI_ROOT}/data/docling-cache:/data
+    networks:
+      - ai-net
+    healthcheck:
+      # Python rather than curl: this image installs tesseract and GL libraries and no HTTP client,
+      # so a curl healthcheck would fail with "not found" and the container would never be healthy.
+      # It is a UBI Python image, so the interpreter is the one thing guaranteed to be there.
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:5001/health', timeout=4)"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 300s
+
   # The vector store: chunks, their embeddings, and the access labels the search filters on.
   # Qdrant v1.19.2, current release line as of 2026-10-11.
   vector:
