@@ -117,7 +117,7 @@ items:
     tier: [cloud, hosted]
     phase: C1
     verify: in full mode a stored prompt hash matches the recorded prompt; in hash mode no content is stored
-    status: open
+    status: verified
   - id: AUD-EXPORT-001
     title: The daily export ships to the client's bucket under Object Lock
     tier: [cloud, hosted]
