@@ -159,7 +159,7 @@ def cmd_list(args) -> int:
 # --------------------------------------------------------------------------- backfill
 
 def cmd_backfill(args) -> int:
-    """Copy the gateway's model calls into the audit record, once each."""
+    """Copy the gateway's model calls and its refusals into the audit record, once each."""
     with connect() as conn, conn.cursor() as cur:
         cur.execute("""
             select s.request_id, s.model, s.total_tokens, s.prompt_tokens, s.completion_tokens,
@@ -187,7 +187,49 @@ def cmd_backfill(args) -> int:
                 values (%s,'model_call',%s,'gateway',%s,'internal','ok',%s,%s,%s,%s)""",
                 (started, actor, DEPLOYMENT_ID, model, request_id, payload_sha, Jsonb(payload)))
             inserted += 1
+
+        # Refusals. A call the gateway refuses never reaches a model, so it never reaches the spend
+        # logs, and a refusal nobody recorded is a refusal nobody can prove happened. The gateway
+        # keeps them here instead, and they belong in the same chain as everything else.
+        #
+        # The exception text is hashed rather than stored. Error strings are the one field most
+        # likely to quote a prompt back at us, so the chain records which error occurred while the
+        # gateway's own table keeps the words. That is the same rule the payload hash exists for.
+        cur.execute("""
+            select e.request_id, e.model_group, e.litellm_model_name, e.exception_type,
+                   e.exception_string, e.status_code, e."startTime"
+            from "LiteLLM_ErrorLogs" e
+            where e.request_id is not null
+              and not exists (select 1 from audit_events a where a.request_id = e.request_id)
+            order by e."startTime"
+            limit %s""", (args.limit,))
+        errors = cur.fetchall()
+
+        refused = 0
+        for (request_id, model_group, model_name, exception_type, exception_string,
+             status_code, started) in errors:
+            # 4xx is the gateway refusing the caller: over budget, no permission for that model, a
+            # bad key. 5xx is the gateway or the provider failing, which is an error rather than a
+            # decision.
+            outcome = "denied" if str(status_code).startswith("4") else "error"
+            payload = {
+                "model_group": model_group,
+                "litellm_model_name": model_name,
+                "exception_type": exception_type,
+                "status_code": status_code,
+                "exception_sha256": sha256_hex(exception_string or ""),
+            }
+            cur.execute("""
+                insert into audit_events
+                  (occurred_at, event_type, actor, actor_role, deployment_id, data_class,
+                   outcome, model, request_id, payload_sha256, payload)
+                values (%s,'model_call','gateway','gateway',%s,'internal',%s,%s,%s,%s,%s)""",
+                (started, DEPLOYMENT_ID, outcome, model_group or model_name, request_id,
+                 sha256_hex(canonical_json(payload)), Jsonb(payload)))
+            refused += 1
+
     print(f"backfilled {inserted} model call(s); {len(rows) - inserted} skipped")
+    print(f"backfilled {refused} refusal(s) or error(s)")
     return 0
 
 
