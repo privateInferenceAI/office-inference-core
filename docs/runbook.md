@@ -1038,19 +1038,22 @@ Against real chunks it was wrong by about eighteen times on the number that matt
 - **Cloud build: Bedrock `cohere.rerank-v3-5:0`.** No reranker on the box at all. `us-east-1`,
   ON_DEMAND, ACTIVE since 2024-12-01. One call per query, 1 to 1,000 sources, returning an index and a
   relevance score, so a 40 to 50 candidate pool costs a few hundred milliseconds on their hardware.
-- **Office build: local, on the GPU that build already carries** for local weights. TEI's GPU image
-  does the same work in tens of milliseconds.
-- **The CPU reranker stays in the repo behind the `bench` profile.** It produced this number, and it is
-  the office fallback if that build ever ships without a GPU. It starts in no build by accident:
-  `docker compose config --services` lists no `reranker` for either manifest, and `--profile bench`
-  brings it back. `embeddings` did not move, because `bge-m3` is the dense retriever and belongs in
-  the default build.
+  This is the decision that matters now, because the cloud build is the one being built.
+- **The office build is not decided here.** Its reranking belongs to that build, on hardware that does
+  not exist yet, and it will arrive with its own problems. What this measurement establishes is only
+  the negative: a CPU reranker cannot serve it at our chunk size, so whatever that build does, it is
+  not this without a GPU.
+- **The CPU reranker stays in the repo behind the `bench` profile.** It produced this number on an
+  instance with no GPU, which is the only way we could have learned that the CPU path fails. It starts
+  in no build by accident: `docker compose config --services` lists no `reranker` for either manifest,
+  and `--profile bench` brings it back. `embeddings` did not move, because `bge-m3` is the dense
+  retriever and belongs in the default build.
 
-The shape for either build:
+The shape on the cloud build:
 
     query -> dense (Qdrant, top 500) + lexical (Postgres full-text, top 500)
           -> RRF fusion in our code -> top 40 to 50
-          -> rerank (Bedrock on cloud, GPU on office) -> top 8 to 10
+          -> rerank at Bedrock -> top 8 to 10
           -> generate -> verify -> answer or refuse
 
 Retrieval decides recall and the reranker only orders. Nothing in the reranker can surface a passage
