@@ -484,11 +484,19 @@ skip    002_audit_events.sql (already applied)
 skip    003_purge_events.sql (already applied)
 skip    004_purge_needs_the_hatch.sql (already applied)
 skip    005_content_modes.sql (already applied)
-0 migration(s) applied, 4 already present
+skip    006_feed_tells_the_truth.sql (already applied)
+0 migration(s) applied, 5 already present
 ```
 
-Migrations are ordered and checksummed. Editing a migration that has already been applied is refused
-rather than silently accepted, so a schema change means a new file.
+On a fresh machine the same command prints `applied` for each in order and `5 migration(s) applied, 0
+already present`. Migrations are ordered and checksummed, and editing one that has already been applied
+is refused rather than silently accepted, so a schema change means a new file:
+
+```
+error: 005_content_modes.sql was applied but has changed since.
+       Applied 6ed11a69cf48, now c6b031dad94a.
+       Write a new migration instead of editing an applied one.
+```
 
 ### Writing an event by hand
 
