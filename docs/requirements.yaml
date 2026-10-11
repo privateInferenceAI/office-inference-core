@@ -32,10 +32,12 @@ items:
     status: open
     note: >-
       Enforcement verified on 2026-10-11: a capped role answered 422 "Budget has been exceeded" and a
-      key scoped to one model answered 403 for another. The audit half is not met by the gateway:
-      LiteLLM_ErrorLogs stays empty through pre-call refusals, so nothing reaches a table the audit
-      tool can backfill. A refusal has to be recorded by the caller, which is the assistant API in C3.
-      This closes when a refused call appears in the chain.
+      key scoped to one model answered 403 for another. The audit half was believed to need the
+      caller, because LiteLLM_ErrorLogs stays empty through these refusals. That was wrong: the
+      spend log records them with status='failure', a zero-token usage object, the reason under
+      metadata.error_information, and the alias of the key that asked. The backfill now classifies
+      them, so this closes when a refused call appears in the chain as denied rather than as a
+      successful call with no tokens.
   - id: SEC-KEY-002
     title: The LiteLLM master key is used for administration only
     tier: [cloud, office]
