@@ -114,8 +114,9 @@ items:
     status: open
     note: >-
       An audit of the manual against the migrations found that the row hash covers thirteen columns and
-      not these three: approval, prompt_sha256 and completion_sha256. Editing one of them in the database
-      leaves the chain verifying cleanly, so they are recorded evidence rather than chained evidence.
+      not these four: approval, prompt_sha256, completion_sha256 and occurred_at. Editing one of them in
+      the database leaves the chain verifying cleanly, so they are recorded evidence rather than chained
+      evidence, and occurred_at is the one that matters most because the retention purge cuts on it.
       Closing it needs a versioned hash, because changing the canonical string would fail verification
       for every row written before the change unless the verifier knows which version hashed which row.
   - id: AUD-PURGE-001
