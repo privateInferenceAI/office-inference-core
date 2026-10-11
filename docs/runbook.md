@@ -709,7 +709,8 @@ allowed to do it.
 ### 2.9 Per-role keys with hard budgets
 
 **Run on 2026-10-11.** Both restrictions held on the box, and each refusal is harder than the phrase
-"hard budget" promises on its own:
+"hard budget" promises on its own. The retention purge and the classification fix below landed the
+same night, so this section is the whole of C1's audit-record work in one place:
 
 | Test | Result |
 |---|---|
@@ -735,12 +736,16 @@ three calls through, and a later drill against a key that already carried spend 
 immediately. Write the client-facing promise as "the loop is stopped", not "the number is never
 exceeded".
 
-**Refusals are enforced at the gateway and recorded by the caller.** `LiteLLM_ErrorLogs` stays empty
-through budget and authorization refusals, because those are decided before a request is routed, so
-nothing about them reaches a table the audit tool can read. Successful calls arrive in the chain
-through `audit backfill`, which reads the spend logs. A refusal has to be recorded by whoever made the
-call, which in C3 is the assistant API. That is why `SEC-KEY-001` stays open until then, with the
-enforcement half already verified.
+**Refusals reach the chain through the spend log, not the error log.** `LiteLLM_ErrorLogs` stays empty
+through budget and authorization refusals, because both are decided before a request is routed. The
+spend log holds them anyway: `status = 'failure'`, a zero-token usage object, the reason under
+`metadata.error_information` with its code, class, and budget numbers, and `user_api_key_alias` naming
+the role that asked. `audit backfill` reads all of that and records `denied` for a 4xx and `error` for
+anything else.
+
+An earlier version of the backfill ignored `status` and recorded refusals as successful calls with no
+tokens. Keep that in mind when adding a source to the record: a row saying "a model answered" about a
+call the gateway refused is worse than a missing row, because nothing about it looks wrong.
 
 Every component that calls a model uses a key for the **role** it is acting as, and each key carries
 two restrictions: it may call one model, and it has a ceiling in dollars. The master key mints those
@@ -816,6 +821,68 @@ environment and why the answer stays a one-item list.
 the only way to reach a gateway that publishes no port. `no rendered manifest` means the renderer has
 not run. A refusal on a probe for the key's *own* role means the ceiling is doing its job, not that
 the key is broken.
+
+### 2.10 Retention purge, and the tombstone that explains it
+
+**Written and tested against a scripted cursor; not yet run on this deployment.** The heading gets its
+marker when a real purge has left a real tombstone.
+
+A retention purge is a deliberate hole in the chain. Without a tombstone the hole is indistinguishable
+from tampering: rows are simply missing, and the only artifact that could tell the difference is an
+anchor, which would report the loss without knowing why.
+
+    cd /opt/oi-core
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      run --rm audit purge --before 2026-10-01 --reason "retention: 90 days" --dry-run
+
+Expected, on a record with nothing that old: `nothing to purge before 2026-10-01`, and the chain head.
+
+Then for real, without `--dry-run`:
+
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      run --rm audit purge --before 2026-10-01 --reason "retention: 90 days"
+
+Expected:
+
+    purged 4 event(s) before 2026-10-01
+    {
+      "tombstone_id": 7,
+      "ts_iso": "2026-10-11T...",
+      "head_before": "...",
+      "head_after": "...",
+      "deleted_count": 4,
+      ...
+    }
+
+**Why the tombstone is written before the rows are deleted.** Its `prev_hash` is then the chain head
+from before the purge and its `row_hash` is the head after, so the two hashes the record needs are the
+row's own columns rather than a copy that could drift from them. Reverse the order and the tombstone
+chains from the surviving rows, and the hash from before the gap is lost with the rows it described.
+
+**The whole thing runs with the maintenance setting on**, inside one transaction, because the
+append-only trigger refuses both the insert and the delete. That setting is the escape hatch 2.3
+demonstrates by hand; this is the one operation that uses it, and it is why the tombstone matters: the
+hatch leaves no trace except through what it writes.
+
+**Reading the tombstone afterwards:**
+
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      run --rm audit list --type purge
+
+**A purge is not undone by the next backfill.** The gateway's spend logs are not subject to our
+retention window, so without a watermark the next `audit backfill` would re-create every model call the
+purge had just removed. The watermark is the newest tombstone's cutoff, and both backfill queries
+respect it.
+
+**What a purge does to anchors written before it.** An anchor from before the purge records a head hash
+whose row is now gone, so `verify --anchor` against it will report the missing row. That is the honest
+outcome rather than a bug: the rows are gone, and the tombstone is the artifact that says why. A client
+under a retention obligation should be told that a purge invalidates earlier anchors and that the
+tombstone is what carries the explanation forward.
+
+**If it breaks:** `audit_events is append-only; DELETE is not permitted` means the maintenance setting
+did not reach the transaction, so nothing was deleted and no tombstone was written. A tombstone with no
+`deleted_count` means the payload was not stored, which would be a bug worth reporting.
 
 ## Phase 3 — Documents  *(outline)*
 
