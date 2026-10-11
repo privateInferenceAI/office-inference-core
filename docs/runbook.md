@@ -992,60 +992,85 @@ asked for. Creating a 1024-long vector by hand is not worth typing; step 3.2 pro
   to join that network. Forgetting `--network ai-net` is the common mistake, and the error reads like
   the service is down.
 
-### 3.3 The reranker, and the two limits that stopped the first measurement
+### 3.3 The reranker, measured
 
-**Goal.** `bge-reranker-v2-m3` answering on the box, so its real latency can be measured against the
-five-second budget and the candidate depth chosen from a number.
+**Goal.** Answer one question with a number rather than an opinion: how many candidates can the
+reranker score inside the five-second budget, on the box that would serve them.
 
-**Commands.**
+**Commands.** The service first, then the measurement. The reranker is behind the `bench` profile, so
+it does not start with the stack:
 
     cd /opt/oi-core
     git pull
-    oi up -d reranker
-    oi ps
-
-**Expected.** `reranker` appears alongside `postgres` and `litellm`, state `Up (healthy)`. The first
-start downloads 2.2 GB into `data/hf-cache`, the directory it shares with `embeddings`, and takes
-about two and a half minutes: 33 seconds of that is the download and the rest is the bounded warmup.
-Nothing publishes a port, so the only way to reach it is from a container on `ai-net`.
-
-**What just happened.** The reranker is a second TEI service on the same pinned image as the
-embeddings service, CPU only, on the private network. What it is not is a drop-in: it refused the
-first call the benchmark made, twice, for two different reasons.
-
-*The client limit.* A call carrying more than 32 texts is refused with `HTTP 422` before any inference
-happens. `scripts/bench_rerank.py` asked for 100 candidates in one call, so it measured nothing. The
-limit is the service's `max_client_batch_size`, and it is visible in `/info` without guessing.
-
-*The permit limit.* TEI consumes one infer permit per candidate, not one per inference batch, and a
-request that cannot get its permits is refused with `HTTP 429` immediately rather than queued. This is
-the one that hides, because it moves with the service's own configuration:
-
-| `--max-concurrent-requests` | nine candidates, one call | three concurrent eight-candidate calls |
-|---|---|---|
-| 8, as shipped | refused, 429 | one succeeded, two refused in 17 to 27 ms |
-| 64, tested | not tested | all three succeeded |
-
-At 8, a single eight-candidate pool consumes the entire permit pool, so a second caller has nothing to
-take and is rejected in under 30 milliseconds. That reads like a broken service and is really a
-capacity setting an order of magnitude too small. Permits are released between calls, so the service
-does not degrade as it runs; it simply refuses everything that arrives alongside other work. The
-compose file now sets 256, which covers eight callers at the 32-text limit, and
-`tests/test_compose_file.py` fails if it drops below one full client batch again.
-
-Both limits are the client's problem to avoid, not the service's to forgive. The serving code will
-have to chunk its candidate pool and retry a 429, exactly as the benchmark now does.
-
-**Verify.** The measurement itself, which is what the rest of C2 waits on:
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      --profile bench up -d reranker
 
     docker run --rm --network ai-net \
       -v /opt/oi-core/scripts:/app/scripts:ro \
       python:3.12-slim python /app/scripts/bench_rerank.py --depth 25 50 100
+    docker run --rm --network ai-net \
+      -v /opt/oi-core/scripts:/app/scripts:ro \
+      python:3.12-slim python /app/scripts/bench_rerank.py --depth 25 50 --words 420
 
-**What the numbers are not.** The passages the benchmark builds are 56 to 70 words. A chunk in this
-system is 384 to 512 tokens. Until the same run is repeated with `--words 420`, the figure is a floor
-on the cost of a real query rather than an estimate of it, and the gap is large enough to move the
-chosen depth.
+The first start downloads 2.2 GB into `data/hf-cache`, shared with `embeddings`, and takes about two
+and a half minutes, of which 33 seconds is the download and the rest the bounded warmup.
+
+**The measurements, 2026-10-11, idle box, load average 0.00, 16 vCPU, nothing else running.**
+
+| Passage length | Candidates | Median | Per candidate | Per token |
+|---|---|---|---|---|
+| 56 to 70 words (about 85 tokens) | 25 | 4,897 ms | 196 ms | 2.3 ms |
+| 56 to 70 words | 50 | 10,237 ms | 205 ms | 2.4 ms |
+| 56 to 70 words | 100 | 19,764 ms | 198 ms | 2.3 ms |
+| 420 words (about 570 tokens) | 25 | 45,185 ms | 1,807 ms | 3.2 ms |
+| 420 words | 50 | 91,202 ms | 1,824 ms | 3.2 ms |
+
+**Read it per token, not per candidate.** That is the only reading that transfers. Cost is flat in the
+number of candidates, so there are no economies of scale in depth: doubling the pool doubles the time.
+Cost rises with passage length at roughly 2.5 to 3 ms per token. A five-second budget therefore buys
+about 1,700 to 2,000 tokens of candidate text, which is three or four of our 500-token chunks.
+
+The earlier estimate that put a 50-candidate pool at the borderline was sized on the short passages.
+Against real chunks it was wrong by about eighteen times on the number that matters.
+
+**The decision, recorded 2026-10-11.**
+
+- **Cloud build: Bedrock `cohere.rerank-v3-5:0`.** No reranker on the box at all. `us-east-1`,
+  ON_DEMAND, ACTIVE since 2024-12-01. One call per query, 1 to 1,000 sources, returning an index and a
+  relevance score, so a 40 to 50 candidate pool costs a few hundred milliseconds on their hardware.
+- **Office build: local, on the GPU that build already carries** for local weights. TEI's GPU image
+  does the same work in tens of milliseconds.
+- **The CPU reranker stays in the repo behind the `bench` profile.** It produced this number, and it is
+  the office fallback if that build ever ships without a GPU. It starts in no build by accident:
+  `docker compose config --services` lists no `reranker` for either manifest, and `--profile bench`
+  brings it back. `embeddings` did not move, because `bge-m3` is the dense retriever and belongs in
+  the default build.
+
+The shape for either build:
+
+    query -> dense (Qdrant, top 500) + lexical (Postgres full-text, top 500)
+          -> RRF fusion in our code -> top 40 to 50
+          -> rerank (Bedrock on cloud, GPU on office) -> top 8 to 10
+          -> generate -> verify -> answer or refuse
+
+Retrieval decides recall and the reranker only orders. Nothing in the reranker can surface a passage
+that retrieval missed, which is why the identifier work stays in the lexical arm.
+
+**Three constraints that come with it.**
+
+- **The reranked passages leave the box on the cloud build.** Apply the data-classification gate: only
+  chunks whose class permits a frontier call are sent. For a query whose candidates are all regulated
+  without permission, skip the reranker, use the fused order, and record that no reranker ran.
+  Degrading is allowed; claiming we reranked when we did not is not.
+- **A new IAM permission is a prerequisite.** `oi-core-dev-bedrock-invoke` allows `bedrock:InvokeModel`
+  and `bedrock:InvokeModelWithResponseStream` on four model ARNs and nothing else, so the rerank path
+  needs `bedrock:Rerank` on the rerank model's ARN before it can work at all.
+- **It must degrade rather than fail.** Throttling, or a Region where the model is unavailable, falls
+  back to the fused order and records that in the audit row.
+
+**What the numbers are not.** Both runs used synthetic passages built from a word list, so they say
+nothing about whether reranking improves retrieval on real documents. That question belongs to the
+golden set, and it is a separate item from the depth.
 
 **If it breaks.**
 
@@ -1053,7 +1078,7 @@ chosen depth.
   the call. Retrying a 422 is pointless, and the benchmark deliberately does not.
 - `HTTP 429` and the run fails inside 30 ms: permits were unavailable. Confirm what the service has
   with `docker run --rm --network ai-net curlimages/curl -sS http://reranker:80/info` and compare
-  `max_concurrent_requests` with the pool being sent. A batch of N candidates needs N permits.
+  `max_concurrent_requests` with the pool being sent. A pool of N candidates needs N permits.
 - `No such file or directory` for `/app/scripts/bench_rerank.py`, or an empty `/app`: the `-v` mount
   did not land. The path inside the container is one directory below the mount point, and a bind mount
   that silently fails looks identical to a missing file.

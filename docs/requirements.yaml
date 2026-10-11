@@ -208,11 +208,19 @@ items:
     verify: reranking the fused candidate list stays inside the agreed latency budget and improves retrieval and support on the golden set
     status: open
     note: >-
-      Agreed 2026-10-11: about five seconds is acceptable for this stage if it buys precision, which makes
-      the reranker a default rather than an experiment. The open work is the depth, set by a measurement
-      on the serving instance rather than by a number from someone else's hardware: scripts/bench_rerank.py
-      reports milliseconds per candidate and the affordable depth follows. The named fallbacks if no depth
-      fits are a shallower pool, Bedrock's reranker on the cloud build, or a GPU on the office build.
+      Depth measured and decided 2026-10-11, recorded in docs/runbook.md step 3.3 and in
+      docs/search-architecture.md. A CPU reranker costs about 2.5 to 3 ms per token of candidate text on
+      the reference instance, flat in candidate count, so a five-second budget buys three or four of our
+      500-token chunks. The stage therefore moves rather than shrinks: cloud build reranks 40 to 50
+      candidates through Bedrock cohere.rerank-v3-5:0, and the office build reranks locally on the GPU
+      that build already carries. The CPU reranker stays in the repository behind the bench profile as
+      the instrument that produced the number and as the office fallback if that build ever ships
+      without a GPU. Prerequisite for the cloud path: the instance role's oi-core-dev-bedrock-invoke
+      policy allows bedrock:InvokeModel on four model ARNs and needs bedrock:Rerank on the rerank model
+      ARN. The cloud path also carries the data-classification gate, sending only chunks whose class
+      permits a frontier call and recording when no reranker ran, and it degrades to the fused order
+      under throttling rather than failing. Still open: whether reranking improves retrieval on our
+      documents, which is the golden set's question and not the latency measurement's.
 
   - id: RET-EVAL-001
     title: Retrieval changes are measured on a fixed question set, not assumed

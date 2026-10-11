@@ -116,9 +116,8 @@ def test_the_reranker_admits_a_full_candidate_pool(services):
     permits is refused with 429 in tens of milliseconds. The reranker shipped with
     `--max-concurrent-requests=8`, which is exactly what one eight-candidate call needs, so three
     concurrent calls left two of them refused. Nine candidates in one call was refused by the same
-    arithmetic. The value has to cover the pool we send, not the number of callers we expect, and
-    the pool is set by the client's 32-text limit and by RET-RERANK-001's depth. A floor here turns
-    a silent capacity regression back into a test failure.
+    arithmetic. A pool of N candidates needs N permits, so the value has to cover the pool the
+    benchmark sends rather than the number of callers anyone expected.
     """
     command = services["reranker"]["command"]
     permits = next((int(c.split("=", 1)[1]) for c in command
@@ -128,4 +127,24 @@ def test_the_reranker_admits_a_full_candidate_pool(services):
         f"the reranker admits {permits} permits, which is below one full client batch of 32 "
         f"candidates; a request needing more permits than this is refused with 429 rather than queued"
     )
+
+
+def test_the_cpu_reranker_is_a_bench_instrument_not_a_serving_component(services):
+    """The decision of 2026-10-11, measured in step 3.3.
+
+    The CPU reranker costs roughly 2.5 to 3 ms per token of candidate text, so a five-second budget
+    buys three or four of our 500-token chunks. It is therefore out of the serving path on both
+    builds: the cloud build reranks at Bedrock, and the office build reranks on its GPU. The service
+    stays in the file behind the `bench` profile, because it is the instrument that produced the
+    measurement and the office fallback if that build ships without a GPU. A profile is what keeps it
+    from starting by accident, the same way `office` keeps the local lane out of the cloud build.
+    """
+    assert services["reranker"]["profiles"] == ["bench"], (
+        "the CPU reranker must sit behind the bench profile; the renderer sets COMPOSE_PROFILES from "
+        "the manifest, so this leaves it stopped in every build"
+    )
+    assert "profiles" not in services["embeddings"], (
+        "embeddings is the dense retriever and belongs in the default build; only the reranker moved"
+    )
+
 
