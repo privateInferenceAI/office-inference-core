@@ -367,12 +367,24 @@ All four must pass:
 
 ### If it breaks
 
+- **litellm restarting in a loop, `status=running` but nothing answers on :4000:** read the logs
+  before anything else, because the message names the cause. If it says *"Database migration cannot
+  proceed. Cannot automatically baseline this database: its schema has not been verified to match this
+  build"*, the database holds tables Prisma did not create. That happened on 2026-10-10 and the cause
+  was ours: `db/migrations` was mounted into the Postgres entrypoint, which runs those files against a
+  virgin data directory and created `audit_events` in the gateway's own database. Check with
+  `docker exec postgres psql -U oicore -d oicore -c '\dt'`. If you see our tables and no
+  `_prisma_migrations`, that is the collision. The mount is gone from the compose file; a volume that
+  already has the bad state needs the two tables dropped, or the volume wiped.
 - **`llamacpp` appears in `config --services`:** `rendered/env` is from an office render. Re-render
   `dev-cloud.yaml`; the renderer removes `COMPOSE_PROFILES` for a cloud manifest.
 - **litellm unhealthy:** check that postgres is healthy first, then `docker logs litellm | tail -30`.
   A bad password in `DATABASE_URL` shows up as an authentication error.
 - **curl cannot resolve `litellm`:** the container has to be on the same network. `--network ai-net`
   is not optional, and omitting it is the most common version of this mistake.
+- **curl prints nothing at all:** `-s` hides connection errors. Use `-sS`, or drop `-s`, and you get
+  `curl: (7) Failed to connect to litellm:4000` instead of silence. An empty answer from a silent
+  curl looks like a broken model and is usually a container that is not listening.
 
 ## Phase 2 — Audit sink
 
@@ -396,6 +408,13 @@ Expected: `applied 002_audit_events.sql`, then a count.
 in `docker-entrypoint-initdb.d` when the data directory is empty. Fresh installs get them for free,
 but every later change needs an ordered, recorded migration. `schema_migrations` stores each file's
 checksum, and editing an applied migration is refused rather than silently ignored.
+
+**That reasoning was right, and the shortcut it described was still in the compose file.** Postgres
+mounted `db/migrations` at `/docker-entrypoint-initdb.d` as well, so a fresh install got our tables
+without this step. On 2026-10-10 that broke the gateway: the entrypoint created `audit_events` in the
+same database LiteLLM keeps its Prisma schema in, and Prisma refused to baseline a schema it had not
+created. The mount is gone. `audit migrate`, right here, is the only path, and the order for a fresh
+install is now: bring the stack up so the gateway migrates its own tables, then run this step.
 
 ### 2.2 Record an event
 
