@@ -208,14 +208,15 @@ items:
     verify: reranking the fused candidate list stays inside the agreed latency budget and improves retrieval and support on the golden set
     status: open
     note: >-
-      Depth measured and decided 2026-10-11, recorded in docs/runbook.md step 3.3 and in
-      docs/search-architecture.md. A CPU reranker costs about 2.5 to 3 ms per token of candidate text on
-      the reference instance, flat in candidate count, so a five-second budget buys three or four of our
-      500-token chunks. The stage therefore moves rather than shrinks: cloud build reranks 40 to 50
-      candidates through Bedrock cohere.rerank-v3-5:0, and the office build reranks locally on the GPU
-      that build already carries. The CPU reranker stays in the repository behind the bench profile as
-      the instrument that produced the number and as the office fallback if that build ever ships
-      without a GPU. Prerequisite for the cloud path: the instance role's oi-core-dev-bedrock-invoke
+      Depth measured and decided for the cloud build, 2026-10-11, recorded in docs/runbook.md step 3.3
+      and in docs/search-architecture.md. A CPU reranker costs about 2.5 to 3 ms per token of candidate
+      text on the reference instance, flat in candidate count, so a five-second budget buys three or
+      four of our 500-token chunks. The stage therefore moves rather than shrinks: the cloud build
+      reranks 40 to 50 candidates through Bedrock cohere.rerank-v3-5:0. The office build is out of
+      scope here and decides its own reranking when it is built, on hardware that does not exist yet;
+      what this measurement settles for it is only that a CPU reranker cannot serve it at our chunk
+      size. The CPU reranker stays in the repository behind the bench profile as the instrument that
+      produced the number. Prerequisite for the cloud path: the instance role's oi-core-dev-bedrock-invoke
       policy allows bedrock:InvokeModel on four model ARNs and needs bedrock:Rerank on the rerank model
       ARN. The cloud path also carries the data-classification gate, sending only chunks whose class
       permits a frontier call and recording when no reranker ran, and it degrades to the fused order

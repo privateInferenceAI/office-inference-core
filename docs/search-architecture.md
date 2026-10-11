@@ -36,7 +36,7 @@ our actual failure case.
 | The brief says | We will do | Why |
 |---|---|---|
 | "Qdrant prefetch plus reciprocal rank fusion" | Fusion of our own, `k=60`, deterministic tie-break | Citation determinism, not a version limit. **The Qdrant pin is `v1.19.2`**, digest `b7b0444c` |
-| Rerank 50 to 100 candidates with a cross-encoder | **Per build.** Cloud: Bedrock `cohere.rerank-v3-5:0`, 40 to 50 candidates. Office: local on the GPU that build already carries. The CPU reranker stays as a bench instrument and starts in no build | Measured 2026-10-11 in `docs/runbook.md` step 3.3. The CPU reranker costs roughly 2.5 to 3 ms per token of candidate text, flat in the number of candidates, so a five-second budget buys three or four of our 500-token chunks rather than the 40 to 50 the brief asked for. Moving the stage rather than shrinking it: a smaller cross-encoder ten times faster still leaves 25 real chunks at 4.5 seconds and gives up accuracy to get there |
+| Rerank 50 to 100 candidates with a cross-encoder | The cloud build reranks 40 to 50 candidates at Bedrock `cohere.rerank-v3-5:0`, with no reranker on the box. The CPU reranker stays as a bench instrument and starts in no build | Measured 2026-10-11 in `docs/runbook.md` step 3.3. The CPU reranker costs roughly 2.5 to 3 ms per token of candidate text, flat in the number of candidates, so a five-second budget buys three or four of our 500-token chunks rather than the 40 to 50 the brief asked for. Moving the stage rather than shrinking it: a smaller cross-encoder ten times faster still leaves 25 real chunks at 4.5 seconds and gives up accuracy to get there. The office build decides its own reranking when it is built |
 | Advanced query understanding | A rule-gated rewrite, a corpus-mined acronym glossary, and structured date filters. No HyDE, no multi-query, no decomposition by default | The query-side report labels its own findings as inference, and the latency is ours to pay on a CPU box |
 | Hybrid dense and sparse vectors | Hybrid dense plus **Postgres full-text**, with `pg_trgm` reachable for reranking a candidate set | `word_similarity` matched BM25 on trailing-digit queries (189 of 200) but took 13 seconds a query, so it can only rerank. The `%` operator scored 0 of 60: geometrically hopeless against a 1,300-character chunk |
 | Sixty golden questions in C8 | A fixture corpus and question set in **C2**, the client's own sixty in C8 | C2's decisions need a yardstick. `RET-HYBRID-001` already assumes one: it verifies hybrid on with the same question off |
@@ -54,12 +54,11 @@ our actual failure case.
 - **A Lucene sidecar, ever.** A second store that can disagree with Postgres means a reconciliation job,
   a second backup and restore procedure, and a second authentication surface, on a box maintained by one
   person for thirty users.
-- **Cutting the reranker permanently, or shrinking it to fit the CPU.** It is moved, not dropped, and
-  not made smaller. The office build has a GPU in its roadmap and that is where the local reranker
-  lives; the cloud build reranks at Bedrock. A faster small cross-encoder is the wrong lever: ten times
-  faster still leaves 25 real chunks at 4.5 seconds, and the accuracy it gives up is the only thing the
-  stage exists to buy. If an office build ever ships without a GPU, the answer is late interaction,
-  not a smaller cross-encoder.
+- **Cutting the reranker, or shrinking it to fit the CPU.** Not dropped and not made smaller. The cloud
+  build reranks at Bedrock, where the pool of 40 to 50 is affordable because the silicon is theirs. A
+  faster small cross-encoder is the wrong lever: ten times faster still leaves 25 real chunks at 4.5
+  seconds, and the accuracy it gives up is the only thing the stage exists to buy. What the office
+  build does about reranking is that build's question, on hardware that does not exist yet.
 - **Consolidating onto `pgvector` to remove Qdrant.** Qdrant's filtered-search recall and its quantisation
   are features we would have to rebuild, and the measured filter behaviour is a reason to keep it.
 
@@ -73,8 +72,7 @@ a rerank that did not happen is not, because the record is what a client would b
 
 **Degradation, not failure.** Throttling, a Region where the model is unavailable, or any other
 transport failure falls back to the fused order and flags it in the audit row. Reranking is an ordering
-improvement, so losing it must cost quality and never availability. The same rule applies to the office
-build's GPU reranker, for the day the GPU is busy.
+improvement, so losing it must cost quality and never availability.
 
 Both rules follow from one property: the reranker orders candidates that retrieval already found, so
 there is always a valid list to fall back to. Nothing here can lose a document the retriever found.
@@ -202,9 +200,9 @@ Accuracy-critical first, and **measurements before code**. The full ordering is 
 1. **The sixty-question split**: adopt the two-by-two above, or keep the brief's axis alone?
 2. **Ask ParadeDB for a price?** I would. The blocker is purely commercial, and knowing the number
    changes the next architecture review.
-3. **Does the office build get a GPU?** **Answered 2026-10-11: yes**, which is why the local reranker
-   lives there rather than being cut. It also keeps the late-interaction option open if a future office
-   build has to ship without one.
+3. **Does the office build get a GPU?** Open, and deliberately so. It is that build's decision, taken
+   when that build starts on hardware that does not exist yet. What is settled is narrower: a CPU
+   reranker cannot serve it at our chunk size.
 4. **ParadeDB.** Ask for the Enterprise quote, and decide whether the partial-identifier capability is
    worth the copyleft conversation. If it is, it becomes the lexical arm and the Postgres-core work
    becomes the fallback rather than the plan.

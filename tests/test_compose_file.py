@@ -133,11 +133,11 @@ def test_the_cpu_reranker_is_a_bench_instrument_not_a_serving_component(services
     """The decision of 2026-10-11, measured in step 3.3.
 
     The CPU reranker costs roughly 2.5 to 3 ms per token of candidate text, so a five-second budget
-    buys three or four of our 500-token chunks. It is therefore out of the serving path on both
-    builds: the cloud build reranks at Bedrock, and the office build reranks on its GPU. The service
-    stays in the file behind the `bench` profile, because it is the instrument that produced the
-    measurement and the office fallback if that build ships without a GPU. A profile is what keeps it
-    from starting by accident, the same way `office` keeps the local lane out of the cloud build.
+    buys three or four of our 500-token chunks. It is therefore out of the serving path: the cloud
+    build reranks at Bedrock, where the pool of 40 to 50 is affordable because the silicon is not ours.
+    The service stays in the file behind the `bench` profile, because it is the instrument that
+    produced the measurement, on an instance with no GPU. A profile is what keeps it from starting by
+    accident, the same way `office` keeps the local lane out of the cloud build.
     """
     assert services["reranker"]["profiles"] == ["bench"], (
         "the CPU reranker must sit behind the bench profile; the renderer sets COMPOSE_PROFILES from "
