@@ -992,6 +992,72 @@ asked for. Creating a 1024-long vector by hand is not worth typing; step 3.2 pro
   to join that network. Forgetting `--network ai-net` is the common mistake, and the error reads like
   the service is down.
 
+### 3.3 The reranker, and the two limits that stopped the first measurement
+
+**Goal.** `bge-reranker-v2-m3` answering on the box, so its real latency can be measured against the
+five-second budget and the candidate depth chosen from a number.
+
+**Commands.**
+
+    cd /opt/oi-core
+    git pull
+    oi up -d reranker
+    oi ps
+
+**Expected.** `reranker` appears alongside `postgres` and `litellm`, state `Up (healthy)`. The first
+start downloads 2.2 GB into `data/hf-cache`, the directory it shares with `embeddings`, and takes
+about two and a half minutes: 33 seconds of that is the download and the rest is the bounded warmup.
+Nothing publishes a port, so the only way to reach it is from a container on `ai-net`.
+
+**What just happened.** The reranker is a second TEI service on the same pinned image as the
+embeddings service, CPU only, on the private network. What it is not is a drop-in: it refused the
+first call the benchmark made, twice, for two different reasons.
+
+*The client limit.* A call carrying more than 32 texts is refused with `HTTP 422` before any inference
+happens. `scripts/bench_rerank.py` asked for 100 candidates in one call, so it measured nothing. The
+limit is the service's `max_client_batch_size`, and it is visible in `/info` without guessing.
+
+*The permit limit.* TEI consumes one infer permit per candidate, not one per inference batch, and a
+request that cannot get its permits is refused with `HTTP 429` immediately rather than queued. This is
+the one that hides, because it moves with the service's own configuration:
+
+| `--max-concurrent-requests` | nine candidates, one call | three concurrent eight-candidate calls |
+|---|---|---|
+| 8, as shipped | refused, 429 | one succeeded, two refused in 17 to 27 ms |
+| 64, tested | not tested | all three succeeded |
+
+At 8, a single eight-candidate pool consumes the entire permit pool, so a second caller has nothing to
+take and is rejected in under 30 milliseconds. That reads like a broken service and is really a
+capacity setting an order of magnitude too small. Permits are released between calls, so the service
+does not degrade as it runs; it simply refuses everything that arrives alongside other work. The
+compose file now sets 256, which covers eight callers at the 32-text limit, and
+`tests/test_compose_file.py` fails if it drops below one full client batch again.
+
+Both limits are the client's problem to avoid, not the service's to forgive. The serving code will
+have to chunk its candidate pool and retry a 429, exactly as the benchmark now does.
+
+**Verify.** The measurement itself, which is what the rest of C2 waits on:
+
+    docker run --rm --network ai-net \
+      -v /opt/oi-core/scripts:/app/scripts:ro \
+      python:3.12-slim python /app/scripts/bench_rerank.py --depth 25 50 100
+
+**What the numbers are not.** The passages the benchmark builds are 56 to 70 words. A chunk in this
+system is 384 to 512 tokens. Until the same run is repeated with `--words 420`, the figure is a floor
+on the cost of a real query rather than an estimate of it, and the gap is large enough to move the
+chosen depth.
+
+**If it breaks.**
+
+- `HTTP 422` on a call: the payload is above the 32-text client limit and no inference happened. Chunk
+  the call. Retrying a 422 is pointless, and the benchmark deliberately does not.
+- `HTTP 429` and the run fails inside 30 ms: permits were unavailable. Confirm what the service has
+  with `docker run --rm --network ai-net curlimages/curl -sS http://reranker:80/info` and compare
+  `max_concurrent_requests` with the pool being sent. A batch of N candidates needs N permits.
+- `No such file or directory` for `/app/scripts/bench_rerank.py`, or an empty `/app`: the `-v` mount
+  did not land. The path inside the container is one directory below the mount point, and a bind mount
+  that silently fails looks identical to a missing file.
+
 ## Phase 4 — Assistant API  *(outline)*
 
 The single surface the client app talks to: ask, tasks, approvals, activity, settings.
