@@ -6,6 +6,12 @@ this project and is comfortable in a terminal.
 Everything here has been run. Where a command's output matters, the manual shows what you should see.
 Where something is not built yet, it says so rather than leaving you to discover it.
 
+**About the examples.** Every command output in this manual is real, taken from a development
+deployment on 2026-10-11. They were captured at different moments in that deployment's life, so the
+event ids, counts and hashes do not agree between sections, and one section may show a state that a later
+purge removed. Read the shape and the wording, not the arithmetic. On your deployment the numbers will be
+your own, which is the point of a hash chain.
+
 **Status when this was written:** phase C1 complete. The system runs, answers through a gateway,
 records what it did, ships that record off the machine, and can prove the record was not altered. It
 cannot read a client's documents yet. That is phase C2 and it is next.
@@ -63,9 +69,18 @@ models stored on that hardware, with no cloud account at all. The components are
 differs is configuration, which is the whole commercial claim: one thing to build, maintain, and
 support, assembled differently per client.
 
-Four offerings come out of that: Standard Cloud and Compliant Cloud in the client's account, a hosted
-tier in ours, and In-Office on the client's own machine. This manual covers the core, which is what
-all four share.
+Four offerings come out of that, and they are three configurations of one thing:
+
+| Offering | Whose account | Profile | Models |
+|---|---|---|---|
+| Standard Cloud | The client's | `cloud` | Remote |
+| Compliant Cloud | The client's | `cloud`, with a compliance profile | Remote, restricted to forms the compliance profile allows |
+| Standard Cloud Hosted | Ours | `cloud` | Remote |
+| In-Office | None. Hardware in the client's building | `office` | Local weights only |
+
+`hybrid` is the third profile and not a fifth offering: it is a build with both lanes, which is what a
+client buys when they want documents handled locally and general questions answered by a frontier model.
+This manual covers the core that all four share.
 
 ## 2. The problem it solves
 
@@ -77,9 +92,16 @@ the way a leak spends water. And they cannot always let their data go to a third
 reasons or because their client would object.
 
 This system answers all three. Every AI call goes through one gateway that knows which role asked,
-what that role may spend, and which model it may reach. Every call and every refusal lands in a record
-that cannot be quietly edited, and that record leaves the machine on a schedule so a client can check
-it without trusting us.
+what that role may spend, and which model it may reach. The gateway writes down every call and every
+refusal as it happens, including the refusals, and a tool copies that record into one that cannot be
+quietly edited. That record leaves the machine on a schedule, so a client can check it without trusting
+us.
+
+Two qualifications belong next to that promise rather than nine sections later. The gateway's own log is
+written immediately; the tamper-evident record gets the day's calls when a job copies them in, which
+happens on a timer. And "cannot be quietly edited" is a property of the chain plus the shipped anchors,
+which together make an edit detectable rather than impossible. Section 13 shows exactly what each check
+proves and, more usefully, what it does not.
 
 ## 3. What runs where
 
@@ -93,6 +115,23 @@ it without trusting us.
 | `llamacpp` | A local model server, used by the office build only | A container, switched off in the cloud build by a compose profile |
 | The models | Frontier AI models, reached through the provider's API | Amazon Bedrock, us-east-1: Nova and Claude and DeepSeek models |
 | The bucket | Where the evidence goes, so the machine cannot erase it | `oi-core-audit-dev`, with Object Lock |
+
+Three terms in that table carry weight, so here they are plainly.
+
+**A deployment** is one client's installed copy of the core system: one manifest, one database, one
+bucket, one `deployment_id` that appears in every audit row and in every key alias. This manual's
+example deployment is a development one in our own account. "This deployment" throughout means that
+one, and the steps for a second client in section 19 are the steps for making another.
+
+**Object Lock** is an S3 setting that stops objects being deleted or overwritten for a retention period,
+enforced by the storage service rather than by the account using it. It can only be switched on when a
+bucket is created, which is why `docs/audit-evidence.md` treats it as a decision rather than a setting.
+It is what makes the shipped evidence worth something: the machine uploads, and cannot take back.
+
+**A data class** is how sensitive a piece of material is: `public`, `internal`, `confidential`, or
+`regulated`. It decides what the record may keep for it, and under a compliance profile it also decides
+which models may see it. Nothing labels a request with a class yet, so today a class is a decision the
+caller makes when it records an event rather than something the system infers.
 
 No container publishes a port. The containers talk to each other over a private Docker network called
 `ai-net`, and nothing of ours is reachable from outside the machine.
@@ -137,6 +176,9 @@ request and the twelve hours after it, which is the whole system in one pass.
 | 00:00:20 | The bucket holds the day's file, its manifest, and the anchors written through the day. The machine can add to it and read it, and cannot delete from it | `aws s3api list-object-versions --bucket oi-core-audit-dev` |
 | Sometime later | The client's auditor runs two commands. One checks every row in the file against the row before it. The other checks the file against an anchor written while the day was happening, which is what catches rows deleted from the end | The output of `audit verify`, or a failure naming the line |
 
+The timeline's numbers are illustrative and come from one development run. Later sections quote other
+runs, so counts differ between them on purpose.
+
 Three things about that timeline are worth noticing, because they are the design.
 
 The gateway is the only thing that talks to a model, so there is exactly one place where permission,
@@ -180,7 +222,7 @@ so rather than implying otherwise.
 | Four roles on the provider's models, through one gateway | A user interface of any kind. C4 |
 | Per-role keys with model permissions and hard spending ceilings | Per-user permissions. Today roles are all there is |
 | An append-only audit record with a hash chain | Alarms that page someone, and a restore drill. C8 |
-| Daily export, hourly anchor, shipped to a bucket with Object Lock | Loading the seventy questions that judge answer quality. C8 |
+| Daily export, hourly anchor, shipped to a bucket with Object Lock | Loading the sixty golden questions that judge answer quality. C8 |
 | Evidence that survives a deleted-tail check | Voice, agents, workflows. C5, C6 |
 | CI that tests, validates manifests, and catches deprecated models | |
 
@@ -543,6 +585,23 @@ gateway answered 4xx and `error` for anything else, with the provider's error co
 normalized error, the budget figures when the refusal was about money, and the message hashed rather
 than stored, because error strings are the field most likely to quote a prompt back.
 
+**What a refusal looks like in the record.** This is the row a budget refusal produced, read back with
+`audit list --type model_call`:
+
+```
+    id  when                         type           actor                   class          outcome  detail
+    14  2026-10-11T03:40:29.633000Z  model_call     gateway-key:50b578d6    internal       denied   bedrock/deepseek.v3.2
+```
+
+`denied` rather than `ok` is the whole point. The gateway refused the call before spending anything, and
+the record says so, attributed to the role whose key asked. The provider's error code, its class, the
+normalized error, the budget figures, and a hash of the message are in the row's payload:
+
+```
+docker exec postgres psql -U oicore -d oicore -c \
+  "select jsonb_pretty(payload) from audit_events where id = 14;"
+```
+
 **A view built for reading.** `audit_feed` renders each event as a plain-language line, which is what a
 future Activity screen will use. Reading it directly is the quickest way to see what happened without
 decoding JSON:
@@ -550,6 +609,29 @@ decoding JSON:
 ```
 docker exec postgres psql -U oicore -d oicore -c "select * from audit_feed order by id desc limit 10;"
 ```
+
+```
+ id |                 summary
+----+-----------------------------------------
+ 26 | bedrock/amazon.nova-micro-v1:0 answered
+ 25 | bedrock/amazon.nova-micro-v1:0 answered
+ 24 | bedrock/amazon.nova-lite-v1:0 answered
+```
+
+**What the content modes look like side by side.** Three events recorded against the same policy, one per
+class, and what the record kept for each:
+
+```
+ id | data_class | no_content | prompt_hash  |                        stored_prompt
+----+------------+------------+--------------+-------------------------------------------------------------
+ 15 | public     | f          | a20d5f4b90a6 | what is the mileage rate?
+ 16 | internal   | f          | 7a098dd2ab2f | email the client on [REDACTED-EMAIL] about [REDACTED-PHONE]
+ 17 | regulated  | t          | d9cb8186a1b2 | (none)
+```
+
+`public` kept the prompt and its hash, `internal` kept it with the identifiers masked, and `regulated`
+kept only the hash. That third row is what `hash` mode means in practice: the record can prove what was
+said, if someone later produces the text, without holding it.
 
 ### Exporting a day
 
@@ -696,6 +778,20 @@ A purge is a deliberate hole in the chain. The tombstone is what makes the hole 
 suspicious, and it carries both hashes: `prev_hash` is the head before the purge and `row_hash` is the
 head after. The tombstone is written first, inside the same transaction as the deletion, so either both
 happen or neither does.
+
+**What the record looks like afterwards**, which is worth seeing before running a destructive command.
+The surviving rows and the tombstone, with the hashes that tie them together:
+
+```
+ id | event_type |          occurred_at          |     prev     |     hash
+----+------------+-------------------------------+--------------+--------------
+ 11 | access     | 2026-10-11 03:23:21.203369+00 | 6928b2669fd9 | 98ea3b7877e3
+ 13 | purge      | 2026-10-11 03:33:36.544593+00 | 98ea3b7877e3 | 6df2d45eab2d
+```
+
+Row 11 chains to a purged row that is no longer in the table, and row 13 chains to row 11. The chain is
+intact across the gap, and the tombstone is the row that explains why the ids jump from 11 to 13. Note
+that ids can have gaps even without a purge, because a failed insert consumes one.
 
 Two consequences to know. A purge invalidates anchors written before it, because the anchored rows are
 genuinely gone, and the tombstone is the artifact that says why. And the rows it removes are not
@@ -852,7 +948,19 @@ support:
 | `budgets.period_days`, `budgets.roles` | The ceiling per role, in dollars, over a period in days |
 | `compliance.profile` | `none`, `contractual`, `hipaa`, `glba`, `sec-17a4`, `itar-cui`, `ferpa`, `pci` |
 | `compliance.audit_retention_days` | How long the record is kept. Six years is enforced for `sec-17a4` |
+| `compliance.data_residency` | Required by any compliance profile other than `none` or `contractual` on a cloud or hybrid build. It names the residency the client's contract requires, and it is what makes a global profile refusable |
+| `compliance.baa_with_office_inference` | Required by any compliance profile other than `none` or `contractual` on a hardware build, and it must be true. We need a signed agreement before holding that data on a client's machine |
+| `lanes.frontier.redaction` | Whether prompts are redacted before leaving. `false` with `regulated` in `data_classes_allowed` on a cloud build is refused |
+| `lanes.frontier.requires_approval` | Validated policy for a human approval step before a remote call. Nothing enforces it yet; C3 owns the gate |
+| `lanes.frontier.provider` | `bedrock`, or `none` for a build with no remote lane |
+| `offsite.provider`, `offsite.region`, `offsite.account_owner` | Where evidence ships: `s3`, the Region, and whose account the bucket is in |
 | `offsite` | Where evidence ships, and which artifacts may leave: `anchors`, `exports`, `backups`. `backups` is accepted today and nothing consumes it until C8 |
+| `support.response_window` | What the client is promised, recorded in the contract. Nothing reads it |
+| `models.<role>.fallback`, `integrations`, `interface` | Reserved and unimplemented. They render into the normalized manifest and no service reads them |
+
+The last two rows matter when you write a manifest for a client: a field can be in the schema, pass
+validation, and still do nothing, because the schema describes the contract we intend and the services
+implement what exists. Section 25 lists what exists.
 
 **What the validator refuses.** The script is the authoritative list; this is what it covers, grouped
 by what the rule protects.
@@ -867,14 +975,22 @@ by what the rule protects.
 - An unknown pack id, so a purchase cannot quietly under-deploy.
 - A missing `client.name` or `client.deployment_id`, or an id with characters outside letters, digits,
   and hyphens.
-- A missing `models.analyst`, `models.front_desk`, or `models.reader`, or a role entry without a
-  `local` key, which is how a build with no local lane is described explicitly rather than by omission.
+- A missing `models.analyst`, `models.front_desk`, or `models.reader`. Every role entry must also
+  carry a `local` key, written as an empty string when the build has no local lane. The key is required
+  and the value may be empty, which says "this deployment has no local model for this role" rather than
+  leaving a reader to guess whether it was forgotten.
 
 *Residency and model eligibility:*
 
 - A global inference profile under any compliance profile other than `none` or `contractual`, because
-  it can route a prompt to any Region.
-- Fable models, whose retention terms require a human review step.
+  it can route a prompt to any Region. An *inference profile* is the provider's name for a routing
+  layer in front of a model: a Region-scoped one such as `us.anthropic.claude-sonnet-5` keeps requests
+  inside a geography, and a `global.` one may serve them from anywhere. A model offered only through a
+  profile cannot be pinned to one Region, which is what disqualifies it for a client whose contract
+  names one. The lifecycle table records which of our models this affects.
+- Fable models, a small set of frontier models whose provider terms allow prompts to be retained for
+  improvement unless a human reviews each use. That is incompatible with a promise that a client's
+  material is not kept by a third party, so the validator refuses them outright rather than warning.
 - The `frontier-lane` pack on the office profile.
 - A compliance profile on a cloud or hybrid build with no `compliance.data_residency`, since residency
   decides which model forms are allowed.
@@ -1072,9 +1188,11 @@ aws iam get-role-policy --role-name oi-core-dev-instance \
 If the new model's ARN is not in that list, add it, or the first call fails with `AccessDenied` and the
 gateway will look like the problem.
 
-One ordering note: the renderer rewrites `rendered/litellm.yaml` in place, and the running gateway has
-that file open read-only. Render and restart promptly rather than leaving a gateway reading a file
-that changed underneath it.
+One ordering note, which sounds worse than it is. The renderer rewrites `rendered/litellm.yaml` while
+the gateway has that file mounted read-only. The running container keeps the old contents, because a
+process that has already read its config does not see the file change, and a render during traffic
+disturbs nothing. What it does mean is that the change is not live until you restart, so a render on its
+own can look like it did nothing.
 
 ## 19. Standing up a second deployment for a new client
 
@@ -1179,7 +1297,20 @@ owns. They belong to us and should live only in ours.
 `rendered/litellm.yaml` with the policy attached to the instance role.
 
 **`Unable to locate credentials` from the gateway.** The container cannot reach the instance role
-through the metadata service. The instance's metadata hop limit must be 2 for a container to reach it.
+through the metadata service, because a request from inside a container is one hop further than the
+default limit allows. Confirm it, then raise it:
+
+```
+aws ec2 describe-instances --profile oi-credits --region us-east-1 \
+  --instance-ids i-096bebd46308d1673 \
+  --query 'Reservations[].Instances[].MetadataOptions.HttpPutResponseHopLimit'
+
+aws ec2 modify-instance-metadata-options --profile oi-credits --region us-east-1 \
+  --instance-id i-096bebd46308d1673 --http-put-response-hop-limit 2 --http-tokens required
+```
+
+The value should read 2. If the query returns 1 and the gateway says it cannot find credentials, that is
+the cause rather than a guess.
 
 **`403 The requested model … is not available for this API key`.** The model permission working. That
 key is scoped to another role.
@@ -1270,7 +1401,12 @@ git stash drop                                 # only once you are sure
 
 # Part 6: reference
 
-## 22. Every command in one table
+## 22. The commands, in one table
+
+Two tables: the tools in this repository, then the surrounding commands from the host, AWS and git that
+the manual also asks you to type.
+
+### The tools
 
 | Command | What it does |
 |---|---|
@@ -1297,6 +1433,23 @@ git stash drop                                 # only once you are sure
 | `./deploy/cloud/ship/oi-core-ship.sh anchors\|exports` | Ship an artifact and prove it arrived |
 | `systemctl list-timers 'oi-core-*'` | The shipping schedule |
 | `journalctl -u oi-core-anchor.service -n 40` | What the anchor job did |
+
+### The host, the provider, and git
+
+| Command | What it does |
+|---|---|
+| `ssh -i <key> ubuntu@52.204.202.66` | Get a shell on the machine |
+| `aws ssm start-session --profile oi-credits --region us-east-1 --target i-096bebd46308d1673` | A shell with no key and no open port. Needs the Session Manager plugin locally |
+| `aws ec2 stop-instances` / `start-instances --instance-ids i-096bebd46308d1673` | Stop paying for the machine, or bring it back. The address survives |
+| `aws s3api list-object-versions --bucket oi-core-audit-dev --profile oi-credits` | Every version of every piece of evidence, which is where a repeated anchor filename shows its history |
+| `aws iam get-role-policy --role-name oi-core-dev-instance --policy-name oi-core-dev-bedrock-invoke` | Which models this machine may invoke |
+| `aws ec2 describe-instances … --query '…MetadataOptions…'` | The metadata hop limit, when the gateway cannot find credentials |
+| `git log --oneline -1`, `git pull`, `git status --short` | What the box is running, and getting it current |
+| `git stash push -u`, `git stash show -p`, `git stash drop` | Setting aside local changes so a pull can proceed |
+| `docker logs <service> --tail 40` | A container's logs |
+| `docker exec postgres psql -U oicore -d oicore -c '<sql>'` | Read the record directly, including the `audit_feed` view |
+| `docker inspect <service> --format '…'` | Where a container mounts from, and how often it has restarted |
+| `systemctl list-timers 'oi-core-*'`, `journalctl -u <unit>`, `systemctl status <unit>` | The shipping schedule and its history |
 
 ## 23. What lives where on the machine
 
@@ -1342,12 +1495,25 @@ only artifact that can detect rows deleted from the end.
 
 **Backfill.** Copying the gateway's own records into the audit chain.
 
-**Chain.** The audit record's structure: each row hashes the row before it, so edits are detectable.
+**Chain.** The audit record's structure: each row carries a hash of the row before it, so edits are
+detectable. Precisely: a row's hash covers that row's own contents plus the previous row's hash, the
+first row chains to nothing, ordering is by id, and a purge continues the chain rather than restarting
+it, because the tombstone is itself a row that chains from the head before the deletion.
 
 **Content mode.** What the record keeps for a data class: `hash`, `redacted`, or `full`. The prompt and
 completion hashes are recorded whatever the mode.
 
-**Export.** One day's events as a file, with a manifest describing it.
+**Data class.** How sensitive a piece of material is: `public`, `internal`, `confidential`, `regulated`.
+It decides the content mode, and under a compliance profile it decides which models may see the
+material. Today a caller states it when recording an event rather than the system inferring it.
+
+**Deployment.** One client's installed copy of the core system, described by one manifest, with one
+database, one bucket, and one `deployment_id` that appears in every audit row and key alias. The word
+this manual is organised around, and until this entry, the one it never defined.
+
+**Export.** One day's events as a file, plus a small descriptor called the export manifest, which is a
+different artifact from the deployment manifest despite sharing the word. The export manifest holds the
+count, the first and last ids, the hash the first row chains back to, and a hash of the file itself.
 
 **Lane.** Where inference happens. `local` means a model on the machine, `frontier` means a remote
 provider. A build may have one or both.
