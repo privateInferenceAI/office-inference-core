@@ -143,11 +143,24 @@ the door you came through.
 
 ## 4. The two paths: a request, and its record
 
-**A request.** Something wants an answer. It authenticates with a key, and the key belongs to a role:
-`front_desk`, `analyst`, `reader`, or `coder`. The gateway checks that the key may call the model that
-role maps to, checks that the role is inside its spending ceiling, calls the model, and returns the
-answer. The caller never names a model. It names a role, which is what lets you change which model
-answers without touching the caller.
+**A request.** Something wants an answer. It authenticates with a key, and the key belongs to a role.
+Four are configured, and the names describe the job rather than the model:
+
+| Role | What it is for | Model in this deployment |
+|---|---|---|
+| `front_desk` | The first thing a question meets. Cheap and fast, for triage and short answers | `amazon.nova-micro-v1:0` |
+| `analyst` | The workhorse. Reasoning over retrieved material, where most answers come from | `amazon.nova-lite-v1:0` |
+| `reader` | Long documents. Summarising material too large for the others | `amazon.nova-pro-v1:0` |
+| `coder` | Code and structured output | `deepseek.v3.2` |
+
+The gateway checks that the key may call the model that role maps to, checks that the role is inside its
+spending ceiling, calls the model, and returns the answer. The caller never names a model. It names a
+role, which is what lets you change which model answers without touching the caller.
+
+**On a hybrid build the names change.** The local entry keeps the plain role name and the remote one is
+suffixed, so a hybrid deployment answers `analyst` from the local model and `analyst-frontier` from the
+provider. A cloud build has one entry per role under the plain name, because there is no local lane to
+distinguish. Anything naming a model has to name the right one for the build it runs in.
 
 **The record.** The gateway writes every call to its own spend log, including the ones it refused. A
 tool called `audit` copies those rows into our own record, which is a chain: each row contains a hash
@@ -955,12 +968,16 @@ support:
 | `lanes.frontier.provider` | `bedrock`, or `none` for a build with no remote lane |
 | `offsite.provider`, `offsite.region`, `offsite.account_owner` | Where evidence ships: `s3`, the Region, and whose account the bucket is in |
 | `offsite` | Where evidence ships, and which artifacts may leave: `anchors`, `exports`, `backups`. `backups` is accepted today and nothing consumes it until C8 |
-| `support.response_window` | What the client is promised, recorded in the contract. Nothing reads it |
-| `models.<role>.fallback`, `integrations`, `interface` | Reserved and unimplemented. They render into the normalized manifest and no service reads them |
+| `support.response_window`, `support.remote_access`, `support.drift_reporting` | What the client is promised about support, recorded in the contract. No service reads them |
+| `compliance.baa_with_provider`, `compliance.worm_storage` | Recorded intent for agreements and write-once storage. Validated by the schema and read by nothing |
+| `models.<role>.fallback` | Intended as a second model for a role, for when the first is unavailable. It renders nothing and nothing routes to it |
+| `integrations`, `interface` | Reserved and unimplemented |
 
-The last two rows matter when you write a manifest for a client: a field can be in the schema, pass
-validation, and still do nothing, because the schema describes the contract we intend and the services
-implement what exists. Section 25 lists what exists.
+Those last four rows matter when you write a manifest for a client: a field can be in the schema, pass
+validation, and still do nothing, because the schema describes the contract we intend while the services
+implement what exists. The fields that change behaviour today are the ones named in the sections above:
+which models a role uses, whether a lane is on, the budgets, the content policy, the compliance profile,
+and the offsite block. Section 25 lists what exists.
 
 **What the validator refuses.** The script is the authoritative list; this is what it covers, grouped
 by what the rule protects.
