@@ -1,0 +1,183 @@
+"""Tests for the key tool, against a stub gateway.
+
+The tool's job is to mint one key per role, cap it, and be safe to run twice. Each of those is a
+claim until something exercises it, and the real gateway is not available in CI, so these tests run
+against a small HTTP server that stands in for LiteLLM's key endpoints and records what it was asked.
+"""
+from __future__ import annotations
+
+import importlib.util
+import json
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+KEYS_PY = ROOT / "services" / "gateway" / "keys.py"
+
+MANIFEST = {
+    "models": {"front_desk": {}, "analyst": {}, "reader": {}},
+    "budgets": {"period_days": 30,
+                "roles": {"front_desk": 5, "analyst": 50, "reader": 50}},
+}
+
+
+class StubGateway(BaseHTTPRequestHandler):
+    """Stands in for LiteLLM. Records every call, mints incrementing keys, and refuses calls made
+    with a key that has been capped, which is what a budget refusal looks like from the client."""
+
+    calls: list = []
+    capped: set = set()
+
+    def log_message(self, *args):  # keep the test output readable
+        return
+
+    def _read(self) -> dict:
+        length = int(self.headers.get("Content-Length") or 0)
+        return json.loads(self.rfile.read(length) or b"{}")
+
+    def _send(self, status: int, body: dict) -> None:
+        payload = json.dumps(body).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def do_POST(self):
+        body = self._read()
+        token = (self.headers.get("Authorization") or "").replace("Bearer ", "")
+        StubGateway.calls.append({"path": self.path, "body": body, "token": token})
+
+        if self.path == "/key/generate":
+            self._send(200, {"key": f"sk-role-{len(StubGateway.calls)}"})
+        elif self.path == "/key/update":
+            if body.get("max_budget") is not None and float(body["max_budget"]) < 0.01:
+                StubGateway.capped.add(body["key"])
+            self._send(200, {"key": body.get("key")})
+        elif self.path == "/v1/chat/completions":
+            if token in StubGateway.capped:
+                self._send(400, {"error": {"message": "budget exceeded for this key"}})
+            else:
+                self._send(200, {"model": body.get("model"), "usage": {"total_tokens": 12}})
+        else:
+            self._send(404, {"error": {"message": f"no stub for {self.path}"}})
+
+
+@pytest.fixture
+def gateway():
+    StubGateway.calls = []
+    StubGateway.capped = set()
+    server = HTTPServer(("127.0.0.1", 0), StubGateway)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{server.server_port}"
+    server.shutdown()
+
+
+@pytest.fixture
+def rendered(tmp_path, gateway, monkeypatch):
+    (tmp_path / "env").write_text(
+        "LITELLM_MASTER_KEY=sk-master\nDEPLOYMENT_ID=test-deploy\n")
+    (tmp_path / "manifest.json").write_text(json.dumps(MANIFEST))
+    monkeypatch.setenv("RENDERED_DIR", str(tmp_path))
+    monkeypatch.setenv("LITELLM_URL", gateway)
+
+    spec = importlib.util.spec_from_file_location("oi_keys_under_test", KEYS_PY)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def paths(gateway_calls) -> list[str]:
+    return [c["path"] for c in gateway_calls]
+
+
+def test_first_run_mints_one_key_per_role(rendered):
+    assert rendered.main([]) == 0
+    calls = StubGateway.calls
+    assert paths(calls).count("/key/generate") == 3
+    assert all(c["token"] == "sk-master" for c in calls), "the admin path uses the master key"
+
+    keys = json.loads((rendered.KEYS_FILE).read_text())
+    assert sorted(keys) == ["analyst", "front_desk", "reader"]
+    assert keys["analyst"]["models"] == ["analyst"], "each key is scoped to its own role"
+    assert keys["analyst"]["max_budget"] == 50
+    assert keys["analyst"]["budget_duration"] == "30d"
+    assert keys["analyst"]["alias"] == "test-deploy:analyst"
+
+
+def test_the_keys_file_is_readable_only_by_its_owner(rendered):
+    assert rendered.main([]) == 0
+    mode = rendered.KEYS_FILE.stat().st_mode & 0o777
+    assert mode == 0o600, f"the file holds credentials and is mode {oct(mode)}"
+
+
+def test_a_second_run_updates_rather_than_minting(rendered):
+    """Re-running must restore the manifest's policy, not litter the database with credentials.
+    The key material is the part that must not change, because components already hold it."""
+    assert rendered.main([]) == 0
+    first = json.loads(rendered.KEYS_FILE.read_text())
+    StubGateway.calls = []
+
+    assert rendered.main([]) == 0
+    assert paths(StubGateway.calls) == ["/key/update"] * 3
+
+    second = json.loads(rendered.KEYS_FILE.read_text())
+    assert second == first, "the secrets and their policy should be unchanged"
+
+
+def test_every_role_carries_its_budget_and_its_acl(rendered):
+    assert rendered.main([]) == 0
+    sent = {c["body"].get("key_alias") or c["body"].get("key"): c["body"] for c in StubGateway.calls}
+    for alias, body in sent.items():
+        assert body["models"] == [alias.split(":")[1]]
+        assert body["max_budget"] > 0
+        assert body["metadata"]["deployment_id"] == "test-deploy"
+
+
+def test_capping_one_role_touches_only_that_key(rendered):
+    assert rendered.main([]) == 0
+    keys_before = json.loads(rendered.KEYS_FILE.read_text())
+    StubGateway.calls = []
+
+    args = type("Args", (), {"role": "analyst", "amount": "0.000001"})()
+    assert rendered.set_budget(rendered.read_env(rendered.ENV_FILE), args) == 0
+
+    updates = [c for c in StubGateway.calls if c["path"] == "/key/update"]
+    assert len(updates) == 1
+    assert updates[0]["body"]["key"] == keys_before["analyst"]["key"]
+    assert updates[0]["body"]["max_budget"] == pytest.approx(0.000001)
+
+    keys_after = json.loads(rendered.KEYS_FILE.read_text())
+    assert keys_after["reader"] == keys_before["reader"], "another role's key was disturbed"
+
+
+def test_a_probe_reports_the_answer_and_the_tokens(rendered):
+    assert rendered.main([]) == 0
+    args = type("Args", (), {"role": "analyst", "as_model": None})()
+    assert rendered.probe(rendered.read_env(rendered.ENV_FILE), args) == 0
+
+
+def test_a_probe_of_a_model_the_key_is_not_scoped_to_is_refused(rendered):
+    """The drill that proves the ACL. The stub refuses nothing here, so this asserts the request
+    carries the model the operator asked for rather than the key's own role."""
+    assert rendered.main([]) == 0
+    StubGateway.calls = []
+    args = type("Args", (), {"role": "analyst", "as_model": "reader"})()
+    assert rendered.probe(rendered.read_env(rendered.ENV_FILE), args) == 0
+    body = [c for c in StubGateway.calls if c["path"] == "/v1/chat/completions"][0]["body"]
+    assert body["model"] == "reader", "the probe must ask for the model it was told to ask for"
+
+
+def test_an_over_budget_call_is_reported_as_a_failure(rendered):
+    """What the operator sees when the ceiling holds: a non-zero exit and the gateway's reason,
+    not a traceback."""
+    assert rendered.main([]) == 0
+    env = rendered.read_env(rendered.ENV_FILE)
+    rendered.set_budget(env, type("Args", (), {"role": "analyst", "amount": "0.000001"})())
+
+    args = type("Args", (), {"role": "analyst", "as_model": None})()
+    assert rendered.probe(env, args) == 1

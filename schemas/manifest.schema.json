@@ -185,6 +185,26 @@
         }
       }
     },
+    "budgets": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Per-role ceilings in USD over a period. A hard cap: the gateway refuses over-budget requests rather than alerting about them. Internal cost control, not client billing. Required wherever the frontier lane is enabled, because a remote call costs money.",
+      "properties": {
+        "period_days": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 30
+        },
+        "roles": {
+          "type": "object",
+          "description": "One amount per model role declared in this manifest.",
+          "additionalProperties": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          }
+        }
+      }
+    },
     "offsite": {
       "type": "object",
       "additionalProperties": false,

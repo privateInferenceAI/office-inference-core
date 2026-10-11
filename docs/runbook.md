@@ -18,9 +18,9 @@ passes. Later phases stay as outlines until we reach them, so nothing here goes 
 
 **Status, 2026-10-11:** **C0 complete.** Phases 0, 1, and 2 built, run, and verified on the cloud
 reference instance. The chain holds the first live model call, the day is exported with a manifest,
-and an anchor records the head. C1 is the work that remains in the audit story: the anchor on a timer
-and shipped off the machine, the purge tombstone, the per-data-class content modes, and the daily
-export to the client's bucket. Phases 3 to 11 outlined.
+the anchor ships on a timer to a bucket the box cannot delete from, and per-role keys with hard
+budgets are written. C1 still owes the purge tombstone, the per-data-class content modes, the audit
+CLI's refusal of hand-typed actors, and a decision on model deprecation. Phases 3 to 11 outlined.
 
 ## The environment we are building on
 
@@ -699,6 +699,86 @@ never happening.
 `AccessDenied` on the upload means the role's policy and the bucket name disagree. `AccessDenied` on a
 *delete* is the system working, and section 5 of `docs/audit-evidence.md` explains why the box is not
 allowed to do it.
+
+### 2.9 Per-role keys with hard budgets
+
+**Status: written and tested against a stub gateway; not yet run against this deployment.** The
+heading gets its marker when the drill below has run on the box.
+
+Every component that calls a model uses a key for the **role** it is acting as, and each key carries
+two restrictions: it may call one model, and it has a ceiling in dollars. The master key mints those
+keys and appears nowhere else, which is what makes it an administration credential instead of a
+shared secret.
+
+The ceilings come from the manifest:
+
+    budgets:
+      period_days: 30
+      roles:
+        front_desk: 2
+        analyst: 10
+
+A role with no budget is a validation failure whenever the frontier lane is on, because a remote call
+costs money and an uncapped role is how a loop empties an account.
+
+Mint or update them:
+
+    cd /opt/oi-core
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env run --rm keys
+
+Expected:
+
+    keys for oi-core-dev-cloud:
+      analyst    minted   models=[analyst]  10.0 USD per 30d
+      coder      minted   models=[coder]  5.0 USD per 30d
+      front_desk minted   models=[front_desk]  2.0 USD per 30d
+      reader     minted   models=[reader]  10.0 USD per 30d
+      secrets in /app/rendered/keys.json (mode 600) and never printed
+
+Running it a second time reports `updated` rather than `minted`, and the secrets do not change,
+because components already hold them. The gateway's database is the source of truth for the policy;
+`rendered/keys.json` is the source of truth for the secrets.
+
+**The drill, which is what the requirement actually asks for.** A ceiling that reports is not a
+ceiling, so narrow one and prove the refusal:
+
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      run --rm keys --set-budget coder 0.000001
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      run --rm keys --probe coder
+
+Expected: the probe exits non-zero and prints the gateway's reason, `budget exceeded for this key`.
+Then put it back, which also demonstrates idempotence:
+
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env run --rm keys
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      run --rm keys --probe coder
+
+**The model ACL.** A key may call its own model and nothing else:
+
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      run --rm keys --probe analyst --as-model reader
+
+Expected: a refusal. The analyst key is scoped to `analyst`, so asking for `reader` is denied at the
+gateway rather than by convention.
+
+**`--set-budget` is not only a drill.** It is the emergency brake: when something is looping, capping
+the role stops it now instead of at the next deploy. The next plain run restores the manifest's value.
+
+**The master key check** (`SEC-KEY-002`). Exactly one service has it in its environment, and it is
+the gateway itself:
+
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env config \
+      | python3 -c "import sys, yaml; d = yaml.safe_load(sys.stdin); print([s for s, v in d['services'].items() if 'LITELLM_MASTER_KEY' in (v.get('environment') or {})])"
+
+Expected: `['litellm']`. The key tool reads the master key from the rendered env *file* through its
+mount rather than from an environment variable, which is why it does not appear in its own
+environment and why the answer stays a one-item list.
+
+**If it breaks:** `cannot reach the gateway` means the tool is not on the `ai-net` network, which is
+the only way to reach a gateway that publishes no port. `no rendered manifest` means the renderer has
+not run. A refusal on a probe for the key's *own* role means the ceiling is doing its job, not that
+the key is broken.
 
 ## Phase 3 — Documents  *(outline)*
 

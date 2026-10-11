@@ -104,6 +104,26 @@ services:
         condition: service_healthy
     networks: [ai-net]
 
+  keys:
+    # Mints and updates the per-role virtual keys, and runs the drill that proves a budget is a
+    # ceiling rather than a notification. A tool, like the audit sink: it runs when called and exits.
+    #
+    # It is deliberately the only thing besides the gateway itself that reads the master key, and it
+    # reads it from the rendered env file rather than from this file's environment. That is what
+    # makes the master key an administration credential instead of a shared secret, and it is why
+    # no other service here has it.
+    build:
+      context: ${OI_ROOT}
+      dockerfile: services/gateway/Dockerfile
+    container_name: keys
+    profiles: ["tools"]
+    user: "${HOST_UID}:${HOST_GID}"
+    environment:
+      LITELLM_URL: http://litellm:4000
+    volumes:
+      - ${OI_ROOT}/rendered:/app/rendered
+    networks: [ai-net]
+
   audit:
     # The audit sink, as a tool rather than a service: it runs when called and exits. It is
     # where every other component will record model calls, tool calls, and approvals, so the

@@ -224,3 +224,55 @@ def test_an_unknown_provider_is_refused(packs):
 def test_a_missing_account_owner_is_refused(packs):
     found = problems(offsite_manifest(account_owner=None), packs)
     assert mentions(found, "offsite.account_owner"), found
+
+
+# --- budgets ----------------------------------------------------------------------------------
+#
+# A ceiling is only a ceiling if it is refused rather than reported. These lock the declaration
+# rules; the refusal itself is proven against the running gateway, in the runbook's drill.
+
+
+def budgeted_manifest(**overrides) -> dict:
+    manifest = load(STANDARD)
+    block = {"period_days": 30, "roles": {"front_desk": 5, "analyst": 50, "reader": 50}}
+    block.update(overrides)
+    manifest["budgets"] = block
+    return manifest
+
+
+def test_a_budget_for_every_role_is_accepted(packs):
+    assert problems(budgeted_manifest(), packs) == []
+
+
+def test_a_role_without_a_budget_is_refused_when_the_frontier_lane_is_on(packs):
+    """The rule that exists because a remote call costs money. An uncapped role is how a runaway
+    loop empties an account before anyone looks at a dashboard."""
+    found = problems(budgeted_manifest(roles={"analyst": 50, "reader": 50}), packs)
+    assert mentions(found, "have no budget"), found
+    assert mentions(found, "front_desk"), found
+
+
+def test_a_budget_for_a_role_that_does_not_exist_is_refused(packs):
+    """Typo protection. 'analist: 50' would otherwise look like a budget while capping nothing."""
+    found = problems(budgeted_manifest(roles={"analyst": 50, "reader": 50, "front_desk": 5,
+                                              "analist": 50}), packs)
+    assert mentions(found, "not model roles"), found
+
+
+def test_a_zero_or_negative_budget_is_refused(packs):
+    for bad in (0, -1):
+        found = problems(budgeted_manifest(roles={"analyst": bad, "reader": 50, "front_desk": 5}), packs)
+        assert mentions(found, "positive amount"), (bad, found)
+
+
+def test_a_non_positive_period_is_refused(packs):
+    found = problems(budgeted_manifest(period_days=0), packs)
+    assert mentions(found, "period_days"), found
+
+
+def test_a_local_only_build_may_have_no_budget(packs):
+    """Nothing leaves the building and nothing is billed per call, so a ceiling there would be
+    decoration rather than a control."""
+    manifest = load(ROOT / "manifests" / "example-in-office.yaml")
+    assert not (manifest.get("budgets") or {}).get("roles"), "the office example should ship uncapped"
+    assert problems(manifest, packs) == []

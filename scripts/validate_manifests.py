@@ -142,6 +142,29 @@ def check(manifest: dict, packs: set[str], path: Path) -> list[str]:
     compliance = manifest.get("compliance") or {}
     cprofile = compliance.get("profile", "none")
 
+    # Budgets. Required wherever a call costs money, because an uncapped deployment is the runaway
+    # loop that spends the client's balance, and spend-at-cap is one of the five alarms in the brief.
+    # A local-only build costs nothing per call, so a ceiling there would be decoration.
+    budgets = manifest.get("budgets") or {}
+    declared_budgets = budgets.get("roles") or {}
+    if budgets:
+        period = budgets.get("period_days", 30)
+        if not isinstance(period, int) or period <= 0:
+            problems.append(f"budgets.period_days must be a positive whole number, got {period!r}")
+        unknown_roles = sorted(set(declared_budgets) - set(models))
+        if unknown_roles:
+            problems.append(f"budgets.roles names {unknown_roles}, which are not model roles in this "
+                            f"manifest. Known roles: {sorted(models)}")
+        for role, amount in sorted(declared_budgets.items()):
+            if not isinstance(amount, (int, float)) or isinstance(amount, bool) or amount <= 0:
+                problems.append(f"budgets.roles.{role} must be a positive amount, got {amount!r}")
+    if ((manifest.get("lanes") or {}).get("frontier") or {}).get("enabled"):
+        unbudgeted = sorted(set(models) - set(declared_budgets))
+        if unbudgeted:
+            problems.append(
+                f"the frontier lane is enabled and {unbudgeted} have no budget. A remote call costs "
+                "money, and an uncapped role is how a loop empties an account")
+
     # Offsite delivery. Evidence and backups may leave the building when the manifest says so, and
     # nothing else may. The list is an allowlist rather than a set of suggestions, because
     # "nothing leaves the building" is the office offering's central promise and a promise that can
