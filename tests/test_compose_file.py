@@ -107,3 +107,25 @@ def test_the_embedding_and_reranker_models_share_one_cache(compose):
     assert any("hf-cache" in v for v in embeddings), embeddings
     for name in ("embeddings", "reranker"):
         assert services[name]["environment"]["HF_HOME"] == "/data"
+
+
+def test_the_reranker_admits_a_full_candidate_pool(services):
+    """The defect that stopped the first measurement, 2026-10-11.
+
+    TEI consumes one infer permit per candidate and does not queue: a request that cannot get its
+    permits is refused with 429 in tens of milliseconds. The reranker shipped with
+    `--max-concurrent-requests=8`, which is exactly what one eight-candidate call needs, so three
+    concurrent calls left two of them refused. Nine candidates in one call was refused by the same
+    arithmetic. The value has to cover the pool we send, not the number of callers we expect, and
+    the pool is set by the client's 32-text limit and by RET-RERANK-001's depth. A floor here turns
+    a silent capacity regression back into a test failure.
+    """
+    command = services["reranker"]["command"]
+    permits = next((int(c.split("=", 1)[1]) for c in command
+                    if isinstance(c, str) and c.startswith("--max-concurrent-requests=")), None)
+    assert permits is not None, "the reranker must set --max-concurrent-requests explicitly"
+    assert permits >= 32, (
+        f"the reranker admits {permits} permits, which is below one full client batch of 32 "
+        f"candidates; a request needing more permits than this is refused with 429 rather than queued"
+    )
+

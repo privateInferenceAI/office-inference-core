@@ -87,7 +87,15 @@ services:
       - "--model-id=BAAI/bge-reranker-v2-m3"
       - "--port=80"
       - "--max-batch-tokens=8192"
-      - "--max-concurrent-requests=8"
+      # Permits are consumed per candidate, not per inference batch, and a request that cannot get
+      # one is refused with 429 immediately rather than queued. Measured on this instance
+      # 2026-10-11: at 8, nine candidates in one call were refused because it asked for nine
+      # permits, and of three concurrent eight-candidate calls only one succeeded while the other
+      # two failed in 17 to 27 ms. At 64, all three succeeded. So this value has to be at least the
+      # largest candidate pool sent in one call, with room for concurrent callers: 256 covers eight
+      # callers at the 32-text client limit. TEI's own queue is what serialises the forward passes,
+      # not this number.
+      - "--max-concurrent-requests=256"
     environment:
       HF_HOME: /data
       MAX_WARMUP_SEQUENCE_LENGTH: "256"
