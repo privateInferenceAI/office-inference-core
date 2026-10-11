@@ -21,6 +21,9 @@ RENDERER = ROOT / "scripts" / "render_manifest.py"
 MANIFESTS = sorted((ROOT / "manifests").glob("*.yaml"))
 CLOUD = ROOT / "manifests" / "example-standard-cloud.yaml"
 OFFICE = ROOT / "manifests" / "dev-office.yaml"
+# The manifest this deployment actually renders, and the only one that declares an offsite
+# destination. The example manifests stay illustrative.
+DEV_CLOUD = ROOT / "manifests" / "dev-cloud.yaml"
 
 
 def render(manifest: Path, out: Path) -> subprocess.CompletedProcess:
@@ -152,3 +155,29 @@ def test_the_dev_cloud_manifest_routes_every_role_to_bedrock(tmp_path):
     for entry in entries:
         assert entry["model_info"]["lane"] == "frontier"
         assert entry["litellm_params"]["model"].startswith("bedrock/")
+
+
+def test_an_offsite_destination_reaches_the_env_file(tmp_path):
+    """The shipping job reads its destination from the environment, because a client's bucket name
+    comes from their Terraform and nothing is typed on a server."""
+    assert render(DEV_CLOUD, tmp_path).returncode == 0
+    values = env_values(tmp_path)
+    assert values["AUDIT_SHIP_BUCKET"] == "oi-core-audit-dev"
+    assert values["AUDIT_SHIP_ARTIFACTS"] == "anchors"
+    assert values["AUDIT_SHIP_REGION"] == "us-east-1"
+
+
+def test_a_manifest_without_a_destination_gets_no_shipping_settings(tmp_path):
+    """An office build with no account keeps everything on the box, and the env file says so by
+    saying nothing. Rendering a cloud manifest over an office env file must also clear the settings,
+    or a box could inherit a destination it was never given."""
+    assert render(OFFICE, tmp_path).returncode == 0
+    for key in ("AUDIT_SHIP_BUCKET", "AUDIT_SHIP_ARTIFACTS", "AUDIT_SHIP_REGION"):
+        assert key not in env_values(tmp_path), f"{key} should be absent"
+
+    assert render(DEV_CLOUD, tmp_path).returncode == 0
+    assert env_values(tmp_path)["AUDIT_SHIP_BUCKET"] == "oi-core-audit-dev"
+
+    assert render(OFFICE, tmp_path).returncode == 0
+    for key in ("AUDIT_SHIP_BUCKET", "AUDIT_SHIP_ARTIFACTS", "AUDIT_SHIP_REGION"):
+        assert key not in env_values(tmp_path), f"{key} survived a render with no destination"

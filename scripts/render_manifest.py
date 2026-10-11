@@ -160,6 +160,18 @@ def main() -> int:
     env.setdefault("AWS_REGION", os.environ.get("AWS_REGION", "us-east-1"))
     env.setdefault("AWS_DEFAULT_REGION", env["AWS_REGION"])
 
+    # Offsite delivery of audit artifacts. Absent means this build keeps everything on the box,
+    # which is a valid office shape and the default. Set and removed explicitly rather than
+    # defaulted, so a manifest without a destination cannot inherit one from an earlier render.
+    offsite = manifest.get("offsite") or {}
+    if offsite:
+        env["AUDIT_SHIP_BUCKET"] = str(offsite["bucket"])
+        env["AUDIT_SHIP_ARTIFACTS"] = ",".join(offsite.get("ship") or [])
+        env["AUDIT_SHIP_REGION"] = str(offsite.get("region") or env["AWS_REGION"])
+    else:
+        for key in ("AUDIT_SHIP_BUCKET", "AUDIT_SHIP_ARTIFACTS", "AUDIT_SHIP_REGION"):
+            env.pop(key, None)
+
     models = list(dict.fromkeys(m for m in local_models if m))
     env["MODEL_ROLES"] = ",".join(
         f"{role}={entry.get('local','')}" for role, entry in sorted((manifest.get("models") or {}).items())
