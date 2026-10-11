@@ -1,0 +1,14 @@
+{
+  "_comment": "A fixture, not the real table. It exists so the test for a past end-of-life date can fail on purpose without editing data/model-lifecycle.json.",
+  "verified_on": "2024-01-01",
+  "source": "fixture",
+  "models": {
+    "amazon.nova-micro-v1:0": {
+      "provider": "Amazon",
+      "status": "ACTIVE",
+      "eol_date": "2025-12-31",
+      "replacement": "amazon.nova-lite-v1:0",
+      "note": "Pretend this passed its end-of-life date last year."
+    }
+  }
+}

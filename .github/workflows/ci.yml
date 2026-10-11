@@ -61,6 +61,9 @@ jobs:
       - name: the requirements register is well formed
         run: python3 scripts/check_requirements.py
 
+      - name: no manifest names a deprecated model
+        run: python3 scripts/check_model_lifecycle.py
+
       - name: every manifest renders a model list
         run: |
           set -euo pipefail
