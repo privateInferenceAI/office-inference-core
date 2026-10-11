@@ -141,3 +141,86 @@ def test_the_shipped_dev_cloud_manifest_validates(packs):
     """The cloud build's smoke-test manifest: no local lane, every role on Bedrock."""
     manifest = load(ROOT / "manifests" / "dev-cloud.yaml")
     assert problems(manifest, packs) == []
+
+
+# --- offsite delivery -------------------------------------------------------------------------
+#
+# Evidence and backups may leave the building when the manifest names them. Nothing else may, which
+# is the machine-checkable half of "nothing leaves the building".
+
+
+def offsite_manifest(**overrides) -> dict:
+    manifest = load(STANDARD)
+    block = {"provider": "s3", "account_owner": "client", "bucket": "acme-audit",
+             "region": "us-east-1", "ship": ["anchors"]}
+    block.update(overrides)
+    manifest["offsite"] = block
+    return manifest
+
+
+def test_an_offsite_destination_for_evidence_is_accepted(packs):
+    assert problems(offsite_manifest(), packs) == []
+
+
+def test_documents_may_never_be_shipped(packs):
+    """The rule that keeps the office promise true. A list that accepted "documents" would let
+    anyone switch "nothing leaves the building" off by editing configuration."""
+    found = problems(offsite_manifest(ship=["anchors", "documents"]), packs)
+    assert mentions(found, "may not leave the building"), found
+    assert mentions(found, "documents"), found
+
+
+def test_prompts_may_never_be_shipped(packs):
+    found = problems(offsite_manifest(ship=["prompts"]), packs)
+    assert mentions(found, "may not leave the building"), found
+
+
+def test_an_empty_ship_list_is_refused(packs):
+    found = problems(offsite_manifest(ship=[]), packs)
+    assert mentions(found, "must name what may leave"), found
+
+
+def test_an_office_build_may_ship_evidence(packs):
+    """An office appliance with its own AWS account is a legitimate shape, and it is not hybrid:
+    hybrid means both inference lanes. That account holds evidence and backups."""
+    manifest = offsite_manifest(ship=["anchors", "backups"])
+    manifest["profile"] = "office"
+    manifest["lanes"] = {"frontier": {"enabled": False}}
+    found = problems(manifest, packs)
+    assert not mentions(found, "offsite"), found
+
+
+def test_an_office_build_still_cannot_enable_the_frontier_lane(packs):
+    """The account does not make inference remote. That stays true whatever the offsite block says."""
+    manifest = offsite_manifest()
+    manifest["profile"] = "office"
+    manifest["lanes"] = {"frontier": {"enabled": True, "provider": "bedrock",
+                                      "account_owner": "client",
+                                      "data_classes_allowed": ["internal"]}}
+    found = problems(manifest, packs)
+    assert mentions(found, "frontier lane enabled on the office profile"), found
+
+
+def test_itar_cui_refuses_offsite_delivery(packs):
+    manifest = offsite_manifest()
+    manifest["profile"] = "office"
+    manifest["lanes"] = {"frontier": {"enabled": False}}
+    manifest["compliance"] = {"profile": "itar-cui", "baa_with_office_inference": True,
+                              "audit_retention_days": 365}
+    found = problems(manifest, packs)
+    assert mentions(found, "itar-cui refuses offsite delivery"), found
+
+
+def test_an_invalid_bucket_name_is_refused(packs):
+    found = problems(offsite_manifest(bucket="Not A Bucket"), packs)
+    assert mentions(found, "not a valid S3 bucket name"), found
+
+
+def test_an_unknown_provider_is_refused(packs):
+    found = problems(offsite_manifest(provider="gcs"), packs)
+    assert mentions(found, "offsite.provider must be s3"), found
+
+
+def test_a_missing_account_owner_is_refused(packs):
+    found = problems(offsite_manifest(account_owner=None), packs)
+    assert mentions(found, "offsite.account_owner"), found

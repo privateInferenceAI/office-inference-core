@@ -12,6 +12,7 @@ Usage:  python3 scripts/validate_manifests.py [manifest ...]
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -20,6 +21,8 @@ SCHEMA_PATH = ROOT / "schemas" / "manifest.schema.json"
 CATALOG_PATH = ROOT / "packs" / "catalog.yaml"
 REQUIRED_MODEL_ROLES = ("analyst", "front_desk", "reader")
 PROFILES = ("cloud", "office", "hybrid")
+# What may leave the machine under offsite.ship. Deliberately closed: no documents, no prompts.
+OFFSITE_ARTIFACTS = frozenset({"anchors", "exports", "backups"})
 
 
 def load_catalog_packs() -> set[str]:
@@ -138,6 +141,42 @@ def check(manifest: dict, packs: set[str], path: Path) -> list[str]:
 
     compliance = manifest.get("compliance") or {}
     cprofile = compliance.get("profile", "none")
+
+    # Offsite delivery. Evidence and backups may leave the building when the manifest says so, and
+    # nothing else may. The list is an allowlist rather than a set of suggestions, because
+    # "nothing leaves the building" is the office offering's central promise and a promise that can
+    # be switched off by editing a list is not one.
+    #
+    # An AWS account here does not make a build hybrid. Hybrid means both inference lanes; this is
+    # the offsite axis, and the two are independent. See docs/audit-evidence.md.
+    offsite = manifest.get("offsite") or {}
+    if offsite:
+        provider = offsite.get("provider")
+        if provider != "s3":
+            problems.append(f"offsite.provider must be s3, got {provider!r}")
+        owner = offsite.get("account_owner")
+        if owner not in ("client", "office_inference"):
+            problems.append("offsite.account_owner is required: client, or office_inference for our "
+                            "own deployments")
+        bucket = str(offsite.get("bucket") or "")
+        if not bucket:
+            problems.append("offsite.bucket is required, because the destination is configuration "
+                            "rather than something typed on a server")
+        elif not re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]", bucket):
+            problems.append(f"offsite.bucket {bucket!r} is not a valid S3 bucket name")
+        ship = offsite.get("ship") or []
+        if not ship:
+            problems.append("offsite.ship must name what may leave, using "
+                            f"{sorted(OFFSITE_ARTIFACTS)}")
+        unknown = sorted(set(ship) - OFFSITE_ARTIFACTS)
+        if unknown:
+            problems.append(
+                f"offsite.ship names {unknown}, which may not leave the building. The only accepted "
+                f"values are {sorted(OFFSITE_ARTIFACTS)}: documents and prompts are never shipped")
+        if cprofile == "itar-cui":
+            problems.append("itar-cui refuses offsite delivery: that profile exists so no third "
+                            "party, including a cloud provider, can reach the material")
+
     if cprofile not in ("none", "contractual", "hipaa", "glba", "sec-17a4", "itar-cui", "ferpa", "pci"):
         problems.append(f"unknown compliance profile: {cprofile!r}")
     if cprofile not in ("none", "contractual"):

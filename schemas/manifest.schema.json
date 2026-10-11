@@ -185,6 +185,49 @@
         }
       }
     },
+    "offsite": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Where audit artifacts go off this machine. Absent means nowhere, which is a valid office shape. An AWS account for this is not what makes a build hybrid: hybrid means both inference lanes. See docs/audit-evidence.md.",
+      "properties": {
+        "provider": {
+          "enum": [
+            "s3"
+          ]
+        },
+        "account_owner": {
+          "enum": [
+            "client",
+            "office_inference"
+          ],
+          "default": "client"
+        },
+        "bucket": {
+          "type": "string",
+          "description": "S3 bucket in the owner's account, created by Terraform at C7."
+        },
+        "region": {
+          "type": "string"
+        },
+        "ship": {
+          "type": "array",
+          "description": "An allowlist. Documents and prompts can never appear here.",
+          "items": {
+            "enum": [
+              "anchors",
+              "exports",
+              "backups"
+            ]
+          }
+        }
+      },
+      "required": [
+        "provider",
+        "account_owner",
+        "bucket",
+        "ship"
+      ]
+    },
     "integrations": {
       "type": "array",
       "items": {
