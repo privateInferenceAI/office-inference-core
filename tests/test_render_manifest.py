@@ -181,3 +181,31 @@ def test_a_manifest_without_a_destination_gets_no_shipping_settings(tmp_path):
     assert render(OFFICE, tmp_path).returncode == 0
     for key in ("AUDIT_SHIP_BUCKET", "AUDIT_SHIP_ARTIFACTS", "AUDIT_SHIP_REGION"):
         assert key not in env_values(tmp_path), f"{key} survived a render with no destination"
+
+
+def test_a_sellable_pack_pulls_in_core(tmp_path):
+    """The catalog says every sellable pack requires core. Until the renderer followed those edges, a
+    manifest listing only sellable packs produced a service list with no gateway, no database and no
+    audit sink: everything a client bought, and nothing that makes it work."""
+    manifest = tmp_path / "packs-only.yaml"
+    data = yaml.safe_load(CLOUD.read_text())
+    data["packs"] = ["document-chat"]
+    manifest.write_text(yaml.safe_dump(data))
+    out = tmp_path / "rendered"
+
+    result = render(manifest, out)
+    assert result.returncode == 0, result.stderr
+
+    services = out.joinpath("services.txt").read_text()
+    declared = [line for line in services.splitlines() if line and not line.startswith("#")]
+    for required in ("gateway", "database", "audit-sink"):
+        assert required in declared, f"{required} came from core and should be here: {declared}"
+    assert "ingestion" in declared, "and the pack the client bought is still there"
+
+
+def test_the_render_names_the_files_it_writes(tmp_path):
+    """Four of them, and the manual says so."""
+    out = tmp_path / "rendered"
+    assert render(DEV_CLOUD, out).returncode == 0
+    written = sorted(p.name for p in out.iterdir())
+    assert written == ["env", "litellm.yaml", "manifest.json", "services.txt"], written

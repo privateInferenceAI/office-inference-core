@@ -187,6 +187,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="probe a model the key is not scoped to, which must be refused")
     args = parser.parse_args(argv)
 
+    if args.as_model and not args.probe:
+        die("--as-model only means something with --probe ROLE, and on its own it would do nothing")
+
     env = read_env(ENV_FILE)
     if args.set_budget:
         args.role, args.amount = args.set_budget

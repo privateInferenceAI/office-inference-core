@@ -28,6 +28,29 @@ CONTENT_MODES = frozenset({"hash", "redacted", "full"})
 DATA_CLASSES = frozenset({"public", "internal", "confidential", "regulated"})
 
 
+def load_catalog_requires() -> dict[str, list[str]]:
+    """The `requires` edges between packs, read from the same catalog as the ids."""
+    import yaml
+
+    catalog = yaml.safe_load(CATALOG_PATH.read_text()) or {}
+    return {str(p["id"]): [str(r) for r in (p.get("requires") or [])]
+            for p in catalog.get("packs", []) if p.get("id")}
+
+
+def resolve_packs(used: list[str], known: set[str]) -> set[str]:
+    """The closure of the chosen packs under `requires`, which is what actually gets deployed."""
+    requires = load_catalog_requires()
+    resolved: set[str] = set()
+    queue = [p for p in used if p in known]
+    while queue:
+        pack = queue.pop()
+        if pack in resolved:
+            continue
+        resolved.add(pack)
+        queue.extend(requires.get(pack, []))
+    return resolved
+
+
 def load_catalog_packs() -> set[str]:
     """Pack ids from the catalog.
 
@@ -77,6 +100,14 @@ def check(manifest: dict, packs: set[str], path: Path) -> list[str]:
         problems.append(f"unknown pack ids: {unknown}. Known packs: {sorted(packs)}")
     if not used:
         problems.append("packs must list at least one sellable pack")
+
+    # The catalog's `requires` edges were documentation until now. Resolve them, because a pack list
+    # that never reaches core renders a stack with no gateway, no database and no audit sink, and the
+    # manifests here rely on core being implied rather than listed.
+    resolved = resolve_packs(used, packs)
+    if used and "core" not in resolved:
+        problems.append(f"packs {used} do not require 'core', so this deployment would have no "
+                        f"gateway, database or audit sink. Resolved to {sorted(resolved)}")
 
     models = manifest.get("models", {})
     for role in REQUIRED_MODEL_ROLES:

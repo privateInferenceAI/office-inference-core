@@ -106,6 +106,18 @@ items:
     phase: C1
     verify: rewriting a payload in an export makes verify fail
     status: verified
+  - id: AUD-HASH-001
+    title: The row hash covers every column that carries meaning
+    tier: [cloud, office, hosted]
+    phase: C8
+    verify: editing the approval, prompt hash or completion hash column breaks the chain and fails verify
+    status: open
+    note: >-
+      An audit of the manual against the migrations found that the row hash covers thirteen columns and
+      not these three: approval, prompt_sha256 and completion_sha256. Editing one of them in the database
+      leaves the chain verifying cleanly, so they are recorded evidence rather than chained evidence.
+      Closing it needs a versioned hash, because changing the canonical string would fail verification
+      for every row written before the change unless the verifier knows which version hashed which row.
   - id: AUD-PURGE-001
     title: A retention purge writes a tombstone carrying the hash before and after
     tier: [cloud, office, hosted]
@@ -117,7 +129,7 @@ items:
     tier: [cloud, hosted]
     phase: C1
     verify: in full mode a stored prompt hash matches the recorded prompt; in hash mode no content is stored
-    status: open
+    status: verified
   - id: AUD-EXPORT-001
     title: The daily export ships to the client's bucket under Object Lock
     tier: [cloud, hosted]

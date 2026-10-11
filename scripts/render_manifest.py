@@ -51,11 +51,29 @@ def read_env_file(path: Path) -> dict[str, str]:
 
 
 def pack_services(pack_ids: list[str]) -> list[str]:
-    """Union of the services declared by the chosen packs."""
+    """Union of the services declared by the chosen packs, following `requires`.
+
+    The catalog says every sellable pack requires core, and until this followed those edges a
+    manifest listing only sellable packs rendered a stack with no gateway in it: the services a
+    client buys, and none of the ones that make them work.
+    """
     catalog = yaml.safe_load((ROOT / "packs" / "catalog.yaml").read_text())
     by_id = {p["id"]: p for p in catalog.get("packs", [])}
-    services: list[str] = []
+
+    resolved: list[str] = []
+
+    def add(pack_id: str) -> None:
+        if pack_id in resolved:
+            return
+        resolved.append(pack_id)
+        for required in (by_id.get(pack_id, {}) or {}).get("requires") or []:
+            add(str(required))
+
     for pack_id in pack_ids:
+        add(str(pack_id))
+
+    services: list[str] = []
+    for pack_id in resolved:
         for service in (by_id.get(pack_id, {}) or {}).get("services") or []:
             name = str(service).split()[0]  # strips trailing comments if any
             if name not in services:
