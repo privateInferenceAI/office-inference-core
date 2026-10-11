@@ -62,6 +62,15 @@ with a track record, documentation, a supported serving path, and enough adoptio
 the first to hit its bugs. A leaderboard leader with a research-only licence is the wrong production
 choice, and so is a model nothing serves in a container.
 
+**On copyleft, be accurate rather than reflexively strict.** AGPL and GPL permit commercial use and
+redistribution. The obligations are to pass on the licence, make the source available and preserve
+notices, and AGPL's network clause engages only if we modify the software and let users interact with
+the modified version over a network. So copyleft is a decision with a price and a process, not a
+prohibition. What rules a component out is a licence that forbids commercial use outright, a licence
+whose price we cannot see, or a client's own procurement policy. When a copyleft component is the best
+technical answer, say so, name the obligations, and put the decision to Anthony rather than deciding it
+by default.
+
 **The client's deployment profile is a real constraint; ours is not.** For an In-Office build the
 hardware is what the client buys, so a component whose appetite matches that box is good engineering
 rather than a compromise. The distinction to keep: never choose because *our* instance is small, and
