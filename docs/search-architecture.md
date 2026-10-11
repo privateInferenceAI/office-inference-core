@@ -36,7 +36,7 @@ our actual failure case.
 | The brief says | We will do | Why |
 |---|---|---|
 | "Qdrant prefetch plus reciprocal rank fusion" | Fusion of our own, `k=60`, deterministic tie-break | Citation determinism, not a version limit. **The Qdrant pin is `v1.19.2`**, digest `b7b0444c` |
-| Rerank 50 to 100 candidates with a cross-encoder | Rerank the top 40 to 50, **behind a flag**, only if three gates pass | Not a ban: a deferral pending measurement. CPU cross-encoder latency at 50 to 100 candidates is 1.7 to 9.3 seconds per query on BEIR hardware, with a worst case of 12.8; at 25 candidates it is 325 to 434 ms. If the gates pass, it ships. If they fail, the alternatives in order are a 25-candidate pool, Bedrock's `cohere.rerank-3-5:0` on the cloud build through the data-classification gate, or the office build's GPU |
+| Rerank 50 to 100 candidates with a cross-encoder | `bge-reranker-v2-m3`, **on by default**, depth set by a latency budget of about five seconds | Anthony's decision, 2026-10-11. It moves the question from "does it earn its CPU" to "what depth fits the budget". The published CPU figures came from other hardware and our own came from a contended laptop, so the depth is measured on ours: `scripts/bench_rerank.py` reports milliseconds per candidate and prints the largest depth that fits. The named fallbacks if no depth fits are a shallower pool, Bedrock's `cohere.rerank-3-5:0` on the cloud build, or a GPU |
 | Advanced query understanding | A rule-gated rewrite, a corpus-mined acronym glossary, and structured date filters. No HyDE, no multi-query, no decomposition by default | The query-side report labels its own findings as inference, and the latency is ours to pay on a CPU box |
 | Hybrid dense and sparse vectors | Hybrid dense plus **Postgres full-text**, with `pg_trgm` reachable for reranking a candidate set | `word_similarity` matched BM25 on trailing-digit queries (189 of 200) but took 13 seconds a query, so it can only rerank. The `%` operator scored 0 of 60: geometrically hopeless against a 1,300-character chunk |
 | Sixty golden questions in C8 | A fixture corpus and question set in **C2**, the client's own sixty in C8 | C2's decisions need a yardstick. `RET-HYBRID-001` already assumes one: it verifies hybrid on with the same question off |
@@ -97,6 +97,13 @@ on partial identifiers, at 3.8 ms.** Our Postgres-core workaround matched BM25 o
 needed `word_similarity` for partials, which took 13 seconds a query and can only rerank a small
 candidate set. For a client whose documents are full of invoice or part numbers, that gap is the product.
 
+**Anthony is asking for the quote, and the work does not wait for it.** The lexical arm sits behind one
+interface with two implementations: ParadeDB where a client's policy allows copyleft, and the
+Postgres-core arm (fixed `ts_rank`, an identifier column, `pg_trgm` for reranking a candidate set) where
+it does not. **The Postgres-core implementation gets built first**, because it depends on nothing outside
+core Postgres, and ParadeDB becomes an upgrade behind the same interface when the number arrives. That
+also moves the copyleft question from once per release to once per client, which is where it belongs.
+
 **Two actions.** Ask ParadeDB for an Enterprise quote, because a priced licence ends the question. And ask
 a lawyer one bounded question rather than a general one: *we redistribute an unmodified ParadeDB
 Community image inside appliances we sell, our application communicates over a SQL socket, what do we owe,
@@ -132,7 +139,7 @@ Accuracy-critical first, and **measurements before code**. The full ordering is 
 `docs/research/search-2026-10/final-architecture.md` section 5; the waves are:
 
 0. **Measurements that gate decisions**: the reranker's real latency on our instance at 25, 50 and 100
-   candidates; whether the pinned TEI serves a CPU reranker and the warmup settings that turn a ten-minute
+   candidates, against the five-second budget, using `scripts/bench_rerank.py`; whether the pinned TEI serves a CPU reranker and the warmup settings that turn a ten-minute
    first boot into twenty seconds; local model throughput. All four are hours, and each replaces a
    guess in the plan with a number.
 1. **The spine**: parse with page and table provenance, page-bounded chunking, the golden set, the
