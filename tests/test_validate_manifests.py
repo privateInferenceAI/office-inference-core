@@ -325,3 +325,13 @@ def test_a_pack_list_that_never_requires_core_is_refused(packs):
     assert problems(manifest, packs) == [], "document-chat requires core, so this is fine"
     manifest["packs"] = []
     assert problems(manifest, packs), "an empty pack list is still refused"
+
+
+def test_a_cloud_build_cannot_switch_off_the_frontier_lane(packs):
+    """A cloud build has no local lane, so switching off the remote one leaves it with no models at
+    all. The renderer used to emit frontier entries anyway, which quietly ignored the flag; the shape
+    is refused now."""
+    manifest = load(STANDARD)
+    manifest["lanes"]["frontier"]["enabled"] = False
+    found = problems(manifest, packs)
+    assert mentions(found, "needs the frontier lane enabled"), found

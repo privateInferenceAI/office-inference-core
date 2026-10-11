@@ -1,0 +1,28 @@
+name: audit
+location: either
+image: oi-core-audit
+packs: [core]
+depends_on: [database]
+ports:
+  internal: none
+healthcheck:
+  command: python3 /app/audit.py --help
+  interval_seconds: 0
+gpu:
+  required: false
+data_class: internal
+config_schema:
+  content_mode:
+    type: string
+    default: hash
+substrate:
+  office:
+    notes: >-
+      Runs on demand inside the appliance, writes only to the local database and the exports
+      directory, and has no cloud dependency at all. An office build with no offsite block never
+      ships anything.
+  cloud:
+    notes: >-
+      The same image. The shipping job calls this tool to write an anchor or an export and then
+      hands the file to the courier image, because this tool is deliberately not allowed any
+      cloud credentials of its own.
