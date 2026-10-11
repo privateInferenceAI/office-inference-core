@@ -67,9 +67,25 @@ class ScriptedCursor:
 class ScriptedConnection:
     def __init__(self, cursor: ScriptedCursor) -> None:
         self.cursor_obj = cursor
+        self.transactions = 0
 
     def cursor(self) -> ScriptedCursor:
         return self.cursor_obj
+
+    def transaction(self):
+        """psycopg3's explicit transaction block. The purge needs one because the connection is in
+        autocommit mode, where SET LOCAL outside a transaction is silently ignored."""
+        connection = self
+
+        class Block:
+            def __enter__(self):
+                connection.transactions += 1
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        return Block()
 
     def __enter__(self):
         return self
@@ -94,7 +110,9 @@ def statements(cursor: ScriptedCursor) -> list[str]:
 def connection(monkeypatch):
     def build(rows_to_purge=3, first_id=1, last_id=3):
         cursor = ScriptedCursor(rows_to_purge, first_id, last_id)
-        monkeypatch.setattr(audit, "connect", lambda: ScriptedConnection(cursor))
+        conn = ScriptedConnection(cursor)
+        cursor.connection = conn
+        monkeypatch.setattr(audit, "connect", lambda: conn)
         return cursor
     return build
 
@@ -112,14 +130,25 @@ def test_the_tombstone_is_written_before_the_rows_are_deleted(connection):
 
 
 def test_the_maintenance_setting_is_switched_on_before_anything_is_written(connection):
-    """Without it the append-only trigger refuses both the insert and the delete, which is the whole
-    point of the trigger."""
+    """Without it the append-only trigger refuses the delete, which is the whole point of the trigger.
+    Issuing the statement is not enough on its own: this connection is in autocommit mode, so SET LOCAL
+    has no effect unless it runs inside a transaction block."""
     cursor = connection()
     assert audit.cmd_purge(purge_args()) == 0
 
     written = statements(cursor)
     assert written[0] == "set local oi.allow_audit_maintenance = 'on'", written
     assert sum(1 for q in written if "allow_audit_maintenance" in q) == 1
+
+
+def test_the_purge_runs_inside_an_explicit_transaction(connection):
+    """The bug this exists for: with autocommit on, SET LOCAL outside a transaction is ignored with a
+    warning, so the first version of this command wrote a tombstone and then failed to delete
+    anything, leaving a purge claim for a purge that never happened."""
+    cursor = connection()
+    assert audit.cmd_purge(purge_args()) == 0
+    assert cursor.connection.transactions == 1, (
+        "the tombstone and the deletion must share one transaction")
 
 
 def test_the_tombstone_names_what_was_removed(connection):
@@ -136,6 +165,7 @@ def test_the_tombstone_names_what_was_removed(connection):
 def test_a_dry_run_changes_nothing(connection):
     cursor = connection()
     assert audit.cmd_purge(purge_args(dry_run=True)) == 0
+    assert cursor.connection.transactions == 0, "a dry run opens no transaction at all"
     written = statements(cursor)
     assert not any(q.lower().startswith("insert") for q in written), written
     assert not any(q.lower().startswith("delete") for q in written), written

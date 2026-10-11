@@ -881,8 +881,19 @@ under a retention obligation should be told that a purge invalidates earlier anc
 tombstone is what carries the explanation forward.
 
 **If it breaks:** `audit_events is append-only; DELETE is not permitted` means the maintenance setting
-did not reach the transaction, so nothing was deleted and no tombstone was written. A tombstone with no
-`deleted_count` means the payload was not stored, which would be a bug worth reporting.
+did not reach the transaction. On 2026-10-11 that happened for real, and the damage was worse than a
+failed command: the connection is in autocommit mode, so `SET LOCAL` outside a transaction block was
+ignored, the tombstone inserted anyway because nothing blocks an insert, and the delete was refused
+afterwards. The result was a tombstone claiming ten purged events with all ten still present.
+
+Two changes came out of it. The purge now runs its insert and its delete inside one explicit
+transaction, so either both happen or neither does. And migration 004 adds a trigger that refuses a
+`purge` row unless the maintenance setting is on, so a bare tombstone cannot be written at all, by this
+tool or any other.
+
+That is also why the tests assert the transaction block is opened rather than only that the `SET LOCAL`
+statement was issued. The first version of those tests passed while the command was broken, because
+they checked the words and not the effect.
 
 ## Phase 3 — Documents  *(outline)*
 

@@ -171,15 +171,16 @@ def cmd_purge(args) -> int:
     except ValueError:
         die(f"--before must be an ISO date, got {cutoff!r}")
 
-    with connect() as conn, conn.cursor() as cur:
-        cur.execute("""
-            select count(*), min(id), max(id) from audit_events
-            where occurred_at < %s and event_type <> 'purge'""", (cutoff,))
-        count, first_id, last_id = cur.fetchone()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                select count(*), min(id), max(id) from audit_events
+                where occurred_at < %s and event_type <> 'purge'""", (cutoff,))
+            count, first_id, last_id = cur.fetchone()
 
-        cur.execute("select id, row_hash from audit_events order by id desc limit 1")
-        head = cur.fetchone()
-        head_before = head[1] if head else None
+            cur.execute("select id, row_hash from audit_events order by id desc limit 1")
+            head = cur.fetchone()
+            head_before = head[1] if head else None
 
         if count == 0:
             print(f"nothing to purge before {cutoff}: the chain head is {head_before}")
@@ -193,19 +194,26 @@ def cmd_purge(args) -> int:
                    "before": cutoff, "reason": args.reason}
         payload_sha = sha256_hex(canonical_json(payload))
 
-        cur.execute("set local oi.allow_audit_maintenance = 'on'")
-        cur.execute("""
-            insert into audit_events
-              (event_type, actor, actor_role, deployment_id, data_class, outcome,
-               payload_sha256, payload)
-            values ('purge', %s, 'operator', %s, 'internal', 'ok', %s, %s)
-            returning id, ts_iso, prev_hash, row_hash""",
-            (args.actor, DEPLOYMENT_ID, payload_sha, Jsonb(payload)))
-        tombstone = cur.fetchone()
+        # An explicit transaction, because this connection is in autocommit mode: SET LOCAL outside a
+        # transaction block is ignored with a warning, which is how the first version of this command
+        # wrote a tombstone and then failed to delete anything. Either the tombstone and the deletion
+        # both happen or neither does.
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute("set local oi.allow_audit_maintenance = 'on'")
+                cur.execute("""
+                    insert into audit_events
+                      (event_type, actor, actor_role, deployment_id, data_class, outcome,
+                       payload_sha256, payload)
+                    values ('purge', %s, 'operator', %s, 'internal', 'ok', %s, %s)
+                    returning id, ts_iso, prev_hash, row_hash""",
+                    (args.actor, DEPLOYMENT_ID, payload_sha, Jsonb(payload)))
+                tombstone = cur.fetchone()
 
-        cur.execute("""
-            delete from audit_events where occurred_at < %s and event_type <> 'purge'""", (cutoff,))
-        deleted = cur.rowcount
+                cur.execute("""
+                    delete from audit_events where occurred_at < %s and event_type <> 'purge'""",
+                    (cutoff,))
+                deleted = cur.rowcount
 
     print(f"purged {deleted} event(s) before {cutoff}")
     print(json.dumps({"tombstone_id": tombstone[0], "ts_iso": tombstone[1],
