@@ -1086,6 +1086,74 @@ golden set, and it is a separate item from the depth.
   did not land. The path inside the container is one directory below the mount point, and a bind mount
   that silently fails looks identical to a missing file.
 
+### 3.4 The parser, and the scanned fee schedule
+
+**Goal.** A scanned, two-column, table-bearing document becomes structured text with page numbers and
+its numbers attached to the right rows. This is the gate the rest of C2 sits behind: if the parser
+mangles a page, no chunker, embedding or verifier downstream recovers it.
+
+**Commands.** The image is 4.4 GB and carries its own weights, so pull it before starting anything:
+
+    cd /opt/oi-core
+    git pull
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env up -d parser
+
+Wait for it, about two to five minutes on first start:
+
+    for i in $(seq 1 40); do
+      s=$(docker inspect parser --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>/dev/null)
+      echo "$s"
+      [ "$s" = "healthy" ] && break
+      sleep 15
+    done
+
+**Expected.** `healthy`, and:
+
+    docker run --rm --network ai-net curlimages/curl -sS http://parser:5001/health
+
+**What just happened.** Docling Serve runs as its own container on `ai-net`, publishing nothing, with
+its weights cached under `/opt/oi-core/data/docling-cache` so a rebuild does not re-download them. It
+is separate from the ingestion worker because the layout, table and OCR models are the heaviest thing
+in the pipeline and a worker that restarts on every document change should not reload them.
+
+Everything a request could ask for that reaches outside the box is switched off in the compose file:
+remote services, third-party plugins, the browser UI, and the API documentation. CORS is narrowed from
+its `*` default. The parser is the one stage that ever sees a document in its original form, so its
+surface is worth keeping small.
+
+**Verify.** The gate. The fixture is authored, not downloaded, because the corpus policy says a
+question set over small-business paperwork has to be ours and the same argument applies to the
+document: a fee schedule built here can put its numbers exactly where the failure mode lives, which is
+a table in the second column with a price list in dense prose beside it.
+
+    cd /opt/oi-core
+    ls -l tests/fixtures/fee-schedule-scanned.pdf
+    docker run --rm --network ai-net -v /opt/oi-core/tests/fixtures:/fixtures:ro \
+      python:3.12-slim python /fixtures/parse_fee_schedule.py
+
+**Expected.** Seven `ok` lines and `GATE PASSED`, with the tables recovered line saying one table, and
+the page count saying one page. The fixture's own generator prints the same seven values, so the
+question and the answer cannot drift apart.
+
+The fixture has no text layer on purpose, and the generator refuses to write one that does. A parse
+that succeeds by copying characters out of the PDF has proved nothing about OCR, which is why the last
+line of the generator's output is a count of extractable characters and it must be zero.
+
+**If it breaks.**
+
+- `docker compose` reports no such service: the compose file on the box is older than the pull. Check
+  `git log --oneline -1` and `grep -n "parser:" deploy/office/compose/docker-compose.yml`.
+- The container never leaves `starting`: it is loading layout, table and OCR weights, which takes
+  minutes on first run. `docker logs parser --tail 20` will show a model being fetched or loaded. If
+  the log shows it fetching from Hugging Face and the box has no egress, the cache path is wrong.
+- `healthy` but the gate reports zero characters: OCR did not run. Confirm with
+  `docker run --rm --network ai-net curlimages/curl -sS http://parser:5001/health`, then re-run and
+  watch `docker logs parser` for the OCR stage. A scan read as a blank page is the exact failure this
+  step exists to catch, so treat it as a finding rather than a hiccup.
+- A graded value reported as `MISS`: the page parsed but the number is not beside its label. Read the
+  output rather than re-running it. A number attached to the wrong row is worse than a missing one,
+  because it produces a confidently cited wrong figure, so this is a stop-and-look.
+
 ## Phase 4 — Assistant API  *(outline)*
 
 The single surface the client app talks to: ask, tasks, approvals, activity, settings.

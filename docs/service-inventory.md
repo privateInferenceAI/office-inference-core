@@ -25,10 +25,11 @@ These are on in every build. The *Core* pack is implicit and not sold separately
 
 | Service | Location | Purpose | Pack |
 |---|---|---|---|
-| `ingestion` | either | Parse, chunk, embed, reconcile deletions | Document Chat |
+| `ingestion` | either | Chunk, embed, reconcile deletions | Document Chat |
+| `parser` | either | Documents become structured text with page numbers: layout, tables, OCR | Document Chat |
 | `vector` | either | Qdrant collection per client | Document Chat |
 | `embeddings` | either | bge-m3 through TEI | Document Chat |
-| `reranker` | either | bge-reranker through TEI | Document Chat |
+| `reranker` | either | Reranking reads: Bedrock on the cloud build, local on the office build. The CPU implementation is a bench instrument | Document Chat |
 
 ## Inference
 

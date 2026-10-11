@@ -1,0 +1,30 @@
+name: parser
+location: either
+image: ghcr.io/docling-project/docling-serve-cpu
+packs: [document-chat]
+depends_on: []
+ports:
+  internal: 5001
+healthcheck:
+  http: /health
+  interval_seconds: 15
+gpu:
+  required: false
+data_class: confidential
+config_schema:
+  threads:
+    type: integer
+    default: 12
+  table_mode:
+    type: string
+    default: accurate
+substrate:
+  office:
+    notes: >-
+      The same image and the same weights, cached under OI_ROOT so an air-gapped install ships with
+      the cache filled. On a GPU appliance the CUDA variant of the same release replaces the CPU one,
+      which is a tag change and nothing else.
+  cloud:
+    notes: >-
+      Runs on CPU on the reference instance. It is the only stage in the pipeline that touches a
+      document in its original form, so nothing downstream depends on a model that saw the raw file.
