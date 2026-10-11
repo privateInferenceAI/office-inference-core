@@ -1291,10 +1291,10 @@ docker run --rm --network ai-net curlimages/curl -sS http://litellm:4000/health/
 ```
 
 **Do not read `Database migration cannot proceed. Cannot automatically baseline this database` as the
-fault.** It prints thirteen times in the first seconds of every healthy start on this box, then the
-service comes up and answers. It has misled one careful reader of this manual already. It becomes the
-answer only alongside a rising `RestartCount` and a liveliness check that stays silent a minute after
-the container starts.
+fault.** On this box it prints thirteen times while a newly created container starts, then the service
+comes up and answers, and it does not appear again on ordinary restarts. It has misled one careful
+reader of this manual already. It becomes the answer only alongside a rising `RestartCount` and a
+liveliness check that stays silent a minute after the container starts.
 
 If that is what you have, something created tables in the gateway's own database that its migration tool
 does not recognise. That happened once, through a Postgres first-boot mount running our migrations into
@@ -1317,6 +1317,10 @@ owns. They belong to us and should live only in ours.
 through the metadata service, because a request from inside a container is one hop further than the
 default limit allows. Confirm it, then raise it:
 
+Run these from a workstation, not from the box: the instance carries no AWS CLI and no credentials for
+one, which is deliberate, and an operator mid-incident should not discover that with a
+`command not found`.
+
 ```
 aws ec2 describe-instances --profile oi-credits --region us-east-1 \
   --instance-ids i-096bebd46308d1673 \
@@ -1326,8 +1330,8 @@ aws ec2 modify-instance-metadata-options --profile oi-credits --region us-east-1
   --instance-id i-096bebd46308d1673 --http-put-response-hop-limit 2 --http-tokens required
 ```
 
-The value should read 2. If the query returns 1 and the gateway says it cannot find credentials, that is
-the cause rather than a guess.
+The value should read 2, and it does on this instance. If the query returns 1 and the gateway says it
+cannot find credentials, that is the cause rather than a guess.
 
 **`403 The requested model … is not available for this API key`.** The model permission working. That
 key is scoped to another role.
@@ -1357,8 +1361,10 @@ The export predates the anchor. Anchors are written hourly and the export is wri
 today's anchor with this morning's export asks whether a file contains rows written after it. The
 message names the row it wanted, which is the clue. Export the day again and re-verify.
 
-The anchor belongs to a different chain than the export. Check the ids and the date in both filenames
-before concluding anything.
+The anchor belongs to a different chain than the export. Nothing inside either artifact records which
+one came first, so compare the anchors by name, where the date and the event count are visible, and fall
+back to file modification times. If in doubt, export the day again and verify against the newest anchor:
+that pairing is the one that can pass.
 
 Expected after a retention purge: the anchored rows are genuinely gone and the tombstone is the artifact
 that explains it. Any other time, with a fresh export and a matching anchor, treat it as a real
@@ -1390,6 +1396,12 @@ oi build audit keys
 Expect the build to finish in seconds when only Python changed, and the next tool run to reflect it. If
 a change seems not to have taken, check `git log --oneline -1` on the box against `origin/main` before
 looking anywhere else.
+
+Two limits on that check, both of which have burned time here. It cannot see a fix that lives on an
+unmerged branch, so a box can be level with `main` and still lack the change you are testing. Run
+`git log --oneline -1 origin/main` and confirm the commit you expect is actually in `main`, not just
+pushed. And `main` is what runs on a client machine, so nothing reaches a box until it is merged and
+pulled, however green the branch is.
 
 **A script works locally and not on the box.** If it reads a file, check the file is there. The lifecycle
 table is the example: `data/model-lifecycle.json` is tracked in the repository, and `.gitignore` excludes
