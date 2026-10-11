@@ -253,7 +253,7 @@ matters for voice and the front desk.
    Claude, GPT, Grok, and Kimi K3. It leaves **58 ON_DEMAND models**, including
    `mistral.mistral-large-3-675b-instruct`, `qwen.qwen3-vl-235b-a22b`, `nvidia.nemotron-super-3-120b`,
    `openai.gpt-oss-120b-1:0`, `moonshotai.kimi-k2.5`, `zai.glm-5`, ON_DEMAND embeddings
-   (`cohere.embed-v4:0`, `amazon.titan-embed-text-v2:0`), and a reranker (`cohere.rerank-3-5:0`).
+   (`cohere.embed-v4:0`, `amazon.titan-embed-text-v2:0`), and a reranker (`cohere.rerank-v3-5:0`).
    Residency costs some capability, not most of it.
 
 **Retention rules to verify per model card and then encode:** Haiku 5.5, Sonnet 5, and Sonnet 5.5 are

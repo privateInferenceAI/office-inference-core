@@ -36,7 +36,7 @@ our actual failure case.
 | The brief says | We will do | Why |
 |---|---|---|
 | "Qdrant prefetch plus reciprocal rank fusion" | Fusion of our own, `k=60`, deterministic tie-break | Citation determinism, not a version limit. **The Qdrant pin is `v1.19.2`**, digest `b7b0444c` |
-| Rerank 50 to 100 candidates with a cross-encoder | `bge-reranker-v2-m3`, **on by default**, depth set by a latency budget of about five seconds | Anthony's decision, 2026-10-11. It moves the question from "does it earn its CPU" to "what depth fits the budget". The published CPU figures came from other hardware and our own came from a contended laptop, so the depth is measured on ours: `scripts/bench_rerank.py` reports milliseconds per candidate and prints the largest depth that fits. The named fallbacks if no depth fits are a shallower pool, Bedrock's `cohere.rerank-3-5:0` on the cloud build, or a GPU |
+| Rerank 50 to 100 candidates with a cross-encoder | **Per build.** Cloud: Bedrock `cohere.rerank-v3-5:0`, 40 to 50 candidates. Office: local on the GPU that build already carries. The CPU reranker stays as a bench instrument and starts in no build | Measured 2026-10-11 in `docs/runbook.md` step 3.3. The CPU reranker costs roughly 2.5 to 3 ms per token of candidate text, flat in the number of candidates, so a five-second budget buys three or four of our 500-token chunks rather than the 40 to 50 the brief asked for. Moving the stage rather than shrinking it: a smaller cross-encoder ten times faster still leaves 25 real chunks at 4.5 seconds and gives up accuracy to get there |
 | Advanced query understanding | A rule-gated rewrite, a corpus-mined acronym glossary, and structured date filters. No HyDE, no multi-query, no decomposition by default | The query-side report labels its own findings as inference, and the latency is ours to pay on a CPU box |
 | Hybrid dense and sparse vectors | Hybrid dense plus **Postgres full-text**, with `pg_trgm` reachable for reranking a candidate set | `word_similarity` matched BM25 on trailing-digit queries (189 of 200) but took 13 seconds a query, so it can only rerank. The `%` operator scored 0 of 60: geometrically hopeless against a 1,300-character chunk |
 | Sixty golden questions in C8 | A fixture corpus and question set in **C2**, the client's own sixty in C8 | C2's decisions need a yardstick. `RET-HYBRID-001` already assumes one: it verifies hybrid on with the same question off |
@@ -54,10 +54,31 @@ our actual failure case.
 - **A Lucene sidecar, ever.** A second store that can disagree with Postgres means a reconciliation job,
   a second backup and restore procedure, and a second authentication surface, on a box maintained by one
   person for thirty users.
-- **Cutting the reranker permanently.** The office build has a GPU in its roadmap, which changes the
-  arithmetic. It is deferred, not deleted.
+- **Cutting the reranker permanently, or shrinking it to fit the CPU.** It is moved, not dropped, and
+  not made smaller. The office build has a GPU in its roadmap and that is where the local reranker
+  lives; the cloud build reranks at Bedrock. A faster small cross-encoder is the wrong lever: ten times
+  faster still leaves 25 real chunks at 4.5 seconds, and the accuracy it gives up is the only thing the
+  stage exists to buy. If an office build ever ships without a GPU, the answer is late interaction,
+  not a smaller cross-encoder.
 - **Consolidating onto `pgvector` to remove Qdrant.** Qdrant's filtered-search recall and its quantisation
   are features we would have to rebuild, and the measured filter behaviour is a reason to keep it.
+
+### The reranker runs on someone else's silicon, so it carries two rules
+
+**The data-classification gate.** On the cloud build the reranked passages leave the box, because the
+rerank call is a frontier call. Only chunks whose data class permits a frontier call may be sent. When
+every candidate for a query is regulated without permission, the reranker is skipped: the fused order
+is used as it stands, and the audit row says that no reranker ran. Degrading is acceptable. Recording
+a rerank that did not happen is not, because the record is what a client would be shown.
+
+**Degradation, not failure.** Throttling, a Region where the model is unavailable, or any other
+transport failure falls back to the fused order and flags it in the audit row. Reranking is an ordering
+improvement, so losing it must cost quality and never availability. The same rule applies to the office
+build's GPU reranker, for the day the GPU is busy.
+
+Both rules follow from one property: the reranker orders candidates that retrieval already found, so
+there is always a valid list to fall back to. Nothing here can lose a document the retriever found.
+
 
 ## Licence posture
 
@@ -143,7 +164,10 @@ Accuracy-critical first, and **measurements before code**. The full ordering is 
    refer to the same tool as `bench_tei2.py`, which was a scratch script on the researcher's machine and
    is not in the repository); whether the pinned TEI serves a CPU reranker and the warmup settings that turn a ten-minute
    first boot into twenty seconds; local model throughput. All four are hours, and each replaces a
-   guess in the plan with a number.
+   guess in the plan with a number. **The reranker measurement is done and the answer is in
+   `docs/runbook.md` step 3.3**: about 2.5 to 3 ms per token of candidate text on this box, so three or
+   four of our chunks inside five seconds. That is why the stage moved to a GPU or to Bedrock rather
+   than getting a shallower pool.
 1. **The spine**: parse with page and table provenance, page-bounded chunking, the golden set, the
    embedding contract, dense retrieval. The gate is a scanned multi-column fee schedule reading back with
    the right numbers on the right page.
@@ -156,8 +180,13 @@ Accuracy-critical first, and **measurements before code**. The full ordering is 
 
 - **`bge-m3`'s CPU throughput.** The 28-hours-for-50k-pages figure is arithmetic, not measurement, and it
   could be wrong by three times either way. It gates any client-facing throughput or pricing promise.
-- **The reranker's latency on our hardware.** The numbers quoted are from BEIR, not from us. Fifteen
-  minutes on the instance settles it, which is why it is Wave 0.
+- **Whether reranking improves retrieval on our documents.** The latency question is settled and
+  recorded in `docs/runbook.md` step 3.3. What the latency number cannot say is whether reordering the
+  fused list actually moves a citation onto the right page, which is the only reason to pay for the
+  stage. That belongs to the golden set, per build, before the rerank path is wired.
+- **Bedrock's rerank latency and cost from this box.** The API shape is verified and the model is
+  ACTIVE in `us-east-1`, but no call has been made from the instance. The permission is not granted
+  yet either, so the first live call is also the test of the prerequisite.
 - **MiniCheck's false-negative rate.** The headline figure came from 24 of 150 pairs and the report says
   to treat it as a direction. It belongs in the engineering record, not in a client document.
 - **Whether hybrid closes the dense-model gap.** `multilingual-e5-large` beats `bge-m3` by 0.109 nDCG@10
@@ -173,8 +202,9 @@ Accuracy-critical first, and **measurements before code**. The full ordering is 
 1. **The sixty-question split**: adopt the two-by-two above, or keep the brief's axis alone?
 2. **Ask ParadeDB for a price?** I would. The blocker is purely commercial, and knowing the number
    changes the next architecture review.
-3. **Does the office build get a GPU?** It changes the reranker from a flag to a default, and it changes
-   the late-interaction calculus.
+3. **Does the office build get a GPU?** **Answered 2026-10-11: yes**, which is why the local reranker
+   lives there rather than being cut. It also keeps the late-interaction option open if a future office
+   build has to ship without one.
 4. **ParadeDB.** Ask for the Enterprise quote, and decide whether the partial-identifier capability is
    worth the copyleft conversation. If it is, it becomes the lexical arm and the Postgres-core work
    becomes the fallback rather than the plan.

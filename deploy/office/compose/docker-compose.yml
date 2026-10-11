@@ -75,13 +75,18 @@ services:
       retries: 5
       start_period: 120s
 
-  # The reranker is a separate service because it is a separate decision: it ships only if it stays
-  # inside the latency budget on this instance. See docs/search-architecture.md.
+  # The CPU reranker is a benchmark instrument, not a serving component. Measured 2026-10-11 at
+  # roughly 2.5 to 3 ms per token of candidate text, which is three or four 500-token chunks inside a
+  # five-second budget. That is why it sits behind a profile: the cloud build reranks at Bedrock and
+  # the office build reranks on the GPU it already has for local weights, so nothing starts this on
+  # purpose. It stays because it produced the number, and because it is the office fallback if that
+  # build ever ships without a GPU. Start it explicitly with --profile bench.
   reranker:
     # ghcr.io/huggingface/text-embeddings-inference:cpu-1.9. The cpu- prefix is load-bearing: the
     # bare 1.9 tag is the CUDA build and fails on a box with no GPU.
     image: ghcr.io/huggingface/text-embeddings-inference@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d
     container_name: reranker
+    profiles: ["bench"]
     restart: unless-stopped
     command:
       - "--model-id=BAAI/bge-reranker-v2-m3"
@@ -89,13 +94,12 @@ services:
       - "--max-batch-tokens=8192"
       # Permits are consumed per candidate, not per inference batch, and a request that cannot get
       # one is refused with 429 immediately rather than queued. Measured on this instance
-      # 2026-10-11: at 8, nine candidates in one call were refused because it asked for nine
-      # permits, and of three concurrent eight-candidate calls only one succeeded while the other
-      # two failed in 17 to 27 ms. At 64, all three succeeded. So this value has to be at least the
-      # largest candidate pool sent in one call, with room for concurrent callers: 256 covers eight
-      # callers at the 32-text client limit. TEI's own queue is what serialises the forward passes,
-      # not this number.
-      - "--max-concurrent-requests=256"
+      # 2026-10-11: at the 8 this shipped with, nine candidates in one call were refused because it
+      # asked for nine permits, and of three concurrent eight-candidate calls only one succeeded
+      # while the other two failed in 17 to 27 ms. A pool of N candidates therefore needs N permits,
+      # and 64 leaves room for the benchmark's chunking plus a concurrent probe. TEI's own queue is
+      # what serialises the forward passes, not this number.
+      - "--max-concurrent-requests=64"
     environment:
       HF_HOME: /data
       MAX_WARMUP_SEQUENCE_LENGTH: "256"
