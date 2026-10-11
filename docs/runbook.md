@@ -59,7 +59,7 @@ If SSH complains about key permissions:
 
 Alternative, no key and no open port:
 
-    aws ssm start-session --profile oi-credits --region us-east-1 --target i-0887564c9fe06b0b5
+    aws ssm start-session --profile oi-credits --region us-east-1 --target i-096bebd46308d1673
 
 **Why:** SSH is convenient during the build. Session Manager is the pattern a client box will use,
 because it needs no inbound port and no key material in the client's hands, and every session is
@@ -72,7 +72,12 @@ logged in their account. Both work here, so you can practise the one clients wil
     free -g | head -2
     df -h / | tail -1
 
-Expected: Ubuntu 24.04.x LTS, 2 CPUs, 8 GB RAM (about 7 usable), 30 GB disk with most of it free.
+Expected: Ubuntu 24.04.x LTS, 16 CPUs, 64 GB RAM (about 61 usable), 200 GB disk with most of it free.
+
+**These numbers changed on 2026-10-10.** Phases 0 to 2 below were first run on the t3.large, which had
+2 CPUs, 8 GB, and a 30 GB disk. The reference instance is now an m7i.4xlarge, because Docling wants
+cores for OCR and layout work and Qdrant serves vectors from RAM. Where a step says "2 CPUs", read it
+as history rather than as the machine you are on.
 
 **Why:** the runbook doubles as the record of what the system was built on. When a client asks six
 months from now, the answer should not be a guess.
@@ -164,7 +169,12 @@ Expected:
     ok   example-in-office.yaml  (profile=office, packs=[...])
     ok   example-standard-cloud.yaml  (profile=cloud, packs=[...])
 
-    4/4 manifests valid; 8 packs known
+    6/6 manifests valid; 8 packs known
+
+**The count moves.** It was 4/4 when this section was written, and 6/6 on 2026-10-10 after
+`dev-office.yaml` and `dev-cloud.yaml` were added. What matters is that every manifest passes, not
+the number; a manifest appearing here is a new deployment shape, and a manifest failing is the
+validator doing its job.
 
 **Why:** the manifest is what a client buys, and the validator is what refuses to install a
 configuration that breaks a promise, such as turning the frontier lane on in a build with no cloud
@@ -199,6 +209,14 @@ holds `env` (mode 600), `litellm.yaml`, `services.txt`, and `manifest.json`.
 nobody hand-edits configuration on a server. Secrets are generated once and reused, because
 regenerating the database password would lock the stack out of its own data. That is why the rerun
 is part of the step rather than an afterthought.
+
+**The cloud build renders a different manifest.** `manifests/dev-office.yaml` declares the office
+profile, whose inference is the local lane: llama.cpp on this box, serving the GGUF from 1.2.
+`manifests/dev-cloud.yaml` declares the cloud profile, where every role resolves to Bedrock and
+there is no local lane at all. The same compose file serves both, because the renderer sets
+`COMPOSE_PROFILES` only for a build that has local containers; a cloud render starts Postgres and
+the gateway and leaves llama.cpp out. The cloud smoke test is C0 work and gets its own section once
+it has run.
 
 ### 1.2 Fetch the development model
 

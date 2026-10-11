@@ -110,3 +110,34 @@ def test_the_committed_broken_fixture_is_still_broken(packs):
     assert found, "tests/fixtures/broken-manifest.yaml now validates; CI's gate can no longer fail"
     assert mentions(found, "unknown pack ids"), found
     assert mentions(found, "global"), found
+
+
+def test_our_own_account_is_allowed_for_the_hosted_tier_and_dev_boxes(packs):
+    """The schema has always allowed account_owner: office_inference. The validator demanded
+    "client" and so refused the hosted tier and every development manifest."""
+    manifest = load(STANDARD)
+    manifest["lanes"]["frontier"]["account_owner"] = "office_inference"
+    found = problems(manifest, packs)
+    assert not mentions(found, "account_owner"), found
+
+
+def test_our_own_account_is_refused_with_a_compliance_profile(packs):
+    """The hosted tier is standard-only. A compliance claim means the client's own account,
+    because otherwise regulated data sits in ours."""
+    manifest = load(COMPLIANT)
+    manifest["lanes"]["frontier"]["account_owner"] = "office_inference"
+    found = problems(manifest, packs)
+    assert mentions(found, "standard-only"), found
+
+
+def test_an_unknown_account_owner_is_refused(packs):
+    manifest = load(STANDARD)
+    manifest["lanes"]["frontier"]["account_owner"] = "somebody_else"
+    found = problems(manifest, packs)
+    assert mentions(found, "account_owner"), found
+
+
+def test_the_shipped_dev_cloud_manifest_validates(packs):
+    """The cloud build's smoke-test manifest: no local lane, every role on Bedrock."""
+    manifest = load(ROOT / "manifests" / "dev-cloud.yaml")
+    assert problems(manifest, packs) == []

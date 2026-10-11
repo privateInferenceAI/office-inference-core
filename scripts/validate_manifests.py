@@ -81,14 +81,29 @@ def check(manifest: dict, packs: set[str], path: Path) -> list[str]:
         if not isinstance(entry, dict) or "local" not in entry:
             problems.append(f"models.{role} must declare a local field (may be empty on cloud)")
 
+    # The two compliance profiles that make no regulated-data claim. Read by the account-owner
+    # rule below and by the residency rules after it.
+    unrestricted = ("none", "contractual")
+    compliance_for_residency = (manifest.get("compliance") or {}).get("profile", "none")
+
     frontier = (manifest.get("lanes") or {}).get("frontier") or {}
     if frontier.get("enabled"):
         if profile == "office":
             problems.append("frontier lane enabled on the office profile: requires the hybrid cloud leg")
         if not frontier.get("provider"):
             problems.append("frontier lane enabled without a provider")
-        if frontier.get("account_owner") != "client":
-            problems.append("frontier lane must run in the client's account (account_owner: client)")
+        # The schema has always allowed office_inference, for the hosted tier and for our own
+        # development boxes. Nothing read it: this rule demanded "client" and so refused both.
+        owner = frontier.get("account_owner")
+        if owner not in ("client", "office_inference"):
+            problems.append(
+                "frontier lane needs account_owner: client, or office_inference for the hosted "
+                "tier and our own development boxes")
+        elif owner == "office_inference" and compliance_for_residency not in unrestricted:
+            problems.append(
+                f"frontier lane in our account under compliance profile "
+                f"{compliance_for_residency!r}: the hosted tier is standard-only, so a "
+                "compliance claim belongs in the client's own account")
         allowed = frontier.get("data_classes_allowed") or []
         if not allowed:
             problems.append("frontier lane enabled with no data classes allowed: that allows everything")
@@ -98,8 +113,6 @@ def check(manifest: dict, packs: set[str], path: Path) -> list[str]:
     # Residency. Nearly every frontier model on Bedrock is inference-profile only, and a global
     # profile can route a prompt anywhere AWS operates. The schema carried data_residency and
     # nothing read it; these rules read it.
-    unrestricted = ("none", "contractual")
-    compliance_for_residency = (manifest.get("compliance") or {}).get("profile", "none")
     for role, entry in (manifest.get("models") or {}).items():
         frontier = ((entry or {}).get("frontier") or "")
         if not frontier.startswith("bedrock/"):
