@@ -1131,13 +1131,47 @@ a table in the second column with a price list in dense prose beside it.
     docker run --rm --network ai-net -v /opt/oi-core/tests/fixtures:/fixtures:ro \
       python:3.12-slim python /fixtures/parse_fee_schedule.py
 
-**Expected.** Seven `ok` lines and `GATE PASSED`, with the tables recovered line saying one table, and
-the page count saying one page. The fixture's own generator prints the same seven values, so the
-question and the answer cannot drift apart.
+**Expected.** Seven `ok` lines and `GATE PASSED`. The fixture's own generator prints the same seven
+values, so the question and the answer cannot drift apart.
 
 The fixture has no text layer on purpose, and the generator refuses to write one that does. A parse
 that succeeds by copying characters out of the PDF has proved nothing about OCR, which is why the last
 line of the generator's output is a count of extractable characters and it must be zero.
+
+**The result, 2026-10-11.** Run on the reference instance, parser container, CPU, nothing else
+running:
+
+| | |
+|---|---|
+| Parse time | 9 seconds for the one-page scan, OCR included |
+| Text recovered | 3,321 characters of markdown from a page with no text layer |
+| Graded values | 7 of 7 present and beside the right label |
+| Reading order | Correct. The two columns came back in order, left prose before the right-hand table |
+| Structured output | **None returned.** `json_content` was empty, so no page or table provenance |
+
+Nine seconds a page on CPU is inside the range the research predicted, 3.1 seconds for a text page and
+13 where OCR runs, and it puts a 5,000-page client corpus at about twelve hours of parsing. That is a
+batch job, not a problem, and it is the number any throughput or pricing promise has to be built on.
+
+**Two things this run exposed, both open.**
+
+*The structured output is missing.* The gate asked for `json_content` and got nothing back, while the
+markdown came through completely. That matters beyond tidiness: per-page citations, table cells, and
+the per-page OCR confidence the architecture requires all live in the structured output, not in
+markdown. Markdown alone gives a good answer and no way to prove which page it came from, which is the
+one thing this system sells. The next step is to find out whether the request was wrong or the service
+does not return it in this shape.
+
+*A split table arrives as two tables.* The one logical fee schedule comes back as two markdown tables,
+three rows and then four, because the table is longer than its column and Docling emits one block per
+region. Nothing in the parsed output says they are the same table. The chunker will have to join them,
+or the answer will cite half a fee schedule. The architecture already says never split a table and keep
+a table_id; what this adds is that a table can arrive pre-split by the parser rather than by our own
+chunking, so the joining has to happen before the split rule applies.
+
+One small correction to the fixture itself: it is one page, and a comment in its generator claimed the
+table ran onto a second page. It does not. The split is column-wise. A page-straddling table is a
+different fixture and is not yet covered.
 
 **If it breaks.**
 
