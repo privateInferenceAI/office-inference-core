@@ -36,7 +36,7 @@ our actual failure case.
 | The brief says | We will do | Why |
 |---|---|---|
 | "Qdrant prefetch plus reciprocal rank fusion" | Fusion of our own, `k=60`, deterministic tie-break | Citation determinism, not a version limit. **The Qdrant pin is `v1.19.2`**, digest `b7b0444c` |
-| Rerank 50 to 100 candidates with a cross-encoder | Rerank the top 40 to 50, **behind a flag**, only if three gates pass | Measured CPU cross-encoder latency at that depth is 1.7 to 9.3 seconds per query on BEIR hardware, with a worst case of 12.8. At 25 candidates it is 325 to 434 ms. This is a blocking defect in the brief's plan, and it must be measured on our instance first |
+| Rerank 50 to 100 candidates with a cross-encoder | Rerank the top 40 to 50, **behind a flag**, only if three gates pass | Not a ban: a deferral pending measurement. CPU cross-encoder latency at 50 to 100 candidates is 1.7 to 9.3 seconds per query on BEIR hardware, with a worst case of 12.8; at 25 candidates it is 325 to 434 ms. If the gates pass, it ships. If they fail, the alternatives in order are a 25-candidate pool, Bedrock's `cohere.rerank-3-5:0` on the cloud build through the data-classification gate, or the office build's GPU |
 | Advanced query understanding | A rule-gated rewrite, a corpus-mined acronym glossary, and structured date filters. No HyDE, no multi-query, no decomposition by default | The query-side report labels its own findings as inference, and the latency is ours to pay on a CPU box |
 | Hybrid dense and sparse vectors | Hybrid dense plus **Postgres full-text**, with `pg_trgm` reachable for reranking a candidate set | `word_similarity` matched BM25 on trailing-digit queries (189 of 200) but took 13 seconds a query, so it can only rerank. The `%` operator scored 0 of 60: geometrically hopeless against a 1,300-character chunk |
 | Sixty golden questions in C8 | A fixture corpus and question set in **C2**, the client's own sixty in C8 | C2's decisions need a yardstick. `RET-HYBRID-001` already assumes one: it verifies hybrid on with the same question off |
@@ -46,9 +46,11 @@ our actual failure case.
 - **Late interaction (ColBERT-style).** It ties the cross-encoder on quality and wins on latency, but it
   needs a third serving component and nothing serves our MIT-licensed candidate. Revisit if FastEmbed
   adds `bge-m3`'s late-interaction head, which we already ship and nothing can serve.
-- **A BM25 extension, for now.** The best-engineered option, ParadeDB, is the only engine that scored
-  60 of 60 including *partial* identifiers, and it is AGPL-only with no published price. Its own
-  measurement is the argument for asking: tokeniser choice, not ranking, is what recovered the partials.
+- **A BM25 extension, until the licence question is answered.** ParadeDB is the best-engineered option
+  and the only engine that scored 60 of 60 including *partial* identifiers. It is AGPL, which is a
+  decision rather than a prohibition — see the licence posture above. Its own measurement is the argument
+  for asking: tokeniser choice, not ranking, is what recovered the partials, and that capability is worth
+  paying something for.
 - **A Lucene sidecar, ever.** A second store that can disagree with Postgres means a reconciliation job,
   a second backup and restore procedure, and a second authentication surface, on a box maintained by one
   person for thirty users.
@@ -68,11 +70,37 @@ MiniCheck-Flan-T5-Large (MIT), Qwen3-4B and Qwen3-1.7B (Apache-2.0), Phi-4-mini 
 licence is a README field. At weight-freeze, archive the model card, the frontmatter and the commit hash
 for every model we ship, so counsel gets a document rather than a metadata string.
 
-**Do not ship:** ParadeDB `pg_search` (AGPL-3.0 only), VectorChord-BM25 (AGPL or Elastic Licence v2),
-Elasticsearch (triple-licensed, all branches disqualifying), Typesense (GPL-3.0 conveyance), Meilisearch
-Enterprise (BUSL-1.1), **PyMuPDF and pymupdf4llm (AGPL-3.0)** which is the easiest mistake to make in a
-Python PDF stack, MinerU (bespoke additional terms), Onyx's `ee/` directories, and every Jina embedding,
-reranker and ColBERT model (CC-BY-NC-4.0, no published price).
+**Do not ship without a decision:** Elasticsearch (triple-licensed, all branches disqualifying),
+VectorChord-BM25 (dual AGPL or Elastic Licence v2, and it failed on identifiers anyway), Meilisearch
+Enterprise (BUSL-1.1, non-production only), Mistral and Gemma and Llama research or gated terms,
+`Qwen2.5-3B` (research licence, unlike the Apache-2.0 Qwen3 models), and every Jina embedding, reranker
+and ColBERT model (CC-BY-NC-4.0, no published price).
+
+**Corrected: copyleft is a decision, not a prohibition.** An earlier version of this document listed
+ParadeDB under "do not ship" on the grounds that AGPL is disqualifying. That was wrong, and it was my
+rule rather than a legal conclusion. AGPL-3.0 permits commercial use and redistribution. The obligations
+are to pass on the licence, make the source available and preserve notices, and the network clause only
+engages if we *modify* it and let users interact with the modified version over a network — which we
+would not. Our application talks SQL over a socket, which is the separate-process case.
+
+What actually stands in the way, in order of how much it matters:
+
+1. **Client procurement.** A bank or a health system with a no-copyleft rule refuses it regardless of how
+   clean our compliance is. That is a commercial constraint, not a legal one.
+2. **Obligations that live in the install.** We would ship ParadeDB's source or a written offer with the
+   appliance and preserve notices, on an air-gapped box, as a maintained artifact.
+3. **Cost.** 1.1 GB image against 304 MB for plain Postgres, and one ParadeDB index per relation, which
+   makes the tokeniser one global decision per table.
+
+The reason this matters enough to write down: **ParadeDB was the only engine measured to score 60 of 60
+on partial identifiers, at 3.8 ms.** Our Postgres-core workaround matched BM25 on full identifiers and
+needed `word_similarity` for partials, which took 13 seconds a query and can only rerank a small
+candidate set. For a client whose documents are full of invoice or part numbers, that gap is the product.
+
+**Two actions.** Ask ParadeDB for an Enterprise quote, because a priced licence ends the question. And ask
+a lawyer one bounded question rather than a general one: *we redistribute an unmodified ParadeDB
+Community image inside appliances we sell, our application communicates over a SQL socket, what do we owe,
+and does it change if we build our own Postgres image with the extension compiled in?*
 
 **The structural warning to carry forward:** the late-interaction and listwise-reranking frontier is
 going non-commercial — `jina-colbert-v2`, `jina-reranker-v3` and `Reason-ModernColBERT` are all
@@ -138,6 +166,9 @@ Accuracy-critical first, and **measurements before code**. The full ordering is 
    changes the next architecture review.
 3. **Does the office build get a GPU?** It changes the reranker from a flag to a default, and it changes
    the late-interaction calculus.
-4. **`pg_textsearch` now or later?** It would need a Postgres image we build and a
+4. **ParadeDB.** Ask for the Enterprise quote, and decide whether the partial-identifier capability is
+   worth the copyleft conversation. If it is, it becomes the lexical arm and the Postgres-core work
+   becomes the fallback rather than the plan.
+5. **`pg_textsearch` now or later?** It would need a Postgres image we build and a
    `shared_preload_libraries` change. The identifier column makes that a later index swap rather than a
    redesign, which is the argument for doing the identifier work first.
