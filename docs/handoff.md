@@ -40,10 +40,15 @@ surprises him or errors, he pastes it.
 
 House rules that have earned their place:
 
-- Never commit to `main`. Branch, open a pull request, and check that CI is green before saying it is
-  ready. Anthony merges quickly, sometimes while the agent is still working, so **check whether the
-  pull request is still open before pushing to its branch**, and open a fresh one if it is not. This
-  has cost time twice.
+- Never commit to `main`. Branch first, open a pull request, and check that CI is green before saying
+  it is ready. Anthony merges pull requests himself, with one exception: **during an end-of-phase
+  review round the agent may merge its own pull requests**, so that a reviewer executing on the box is
+  testing the merged code rather than a branch. The agent reports which ones it merged.
+- Anthony merges quickly, sometimes while the agent is still working, so **check whether a pull request
+  is still open before pushing to its branch**, and open a fresh one if it is not. This has cost time
+  twice.
+- A phase is finished when someone who did not write it can run it from the documentation. The review
+  panel and the three-round cap are in `AGENTS.md` under "What finished means".
 - Write down every new mechanism in `docs/`, and record every register change in
   `docs/requirements.yaml` at the same time as the code.
 - Verify on the box before calling something done. Three of the most useful findings in C1 came from

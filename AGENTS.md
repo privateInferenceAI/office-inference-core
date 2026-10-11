@@ -23,9 +23,39 @@ then `docs/service-inventory.md` for the service list and its location tags.
 6. **The frontier lane is off by default and every outbound call is logged.** Any change that
    could send client content off the box needs an explicit gate and an audit record.
 
+## What "finished" means
+
+A phase is not finished when the code works. It is finished when someone who did not write it can
+run it from the documentation, and that has been checked rather than assumed. The order:
+
+1. **Build it**, one step at a time, with the step written into `docs/runbook.md` first: the goal,
+   the commands, the expected output, what it proves, and how it breaks.
+2. **Write the operating page** for anything new, in `docs/manual.md`: what it is for, every command
+   with a real example and its real output, and how to extend it.
+3. **Have it reviewed by agents that did not write it**, at the end of the phase:
+   - an **executor**, which runs every command on the live box and reports where reality differs;
+   - a **cold reader**, which reads the manual with no access to the code and reports what a new
+     operator would get wrong;
+   - a **fidelity checker**, when code changed, which reads the claims against the source.
+4. **Fix everything they find, then have the fixes checked again.** Cap it at three rounds, and stop
+   when a round returns only cosmetics. Require each reviewer to state a verdict, so stopping is a
+   decision rather than a feeling.
+5. **Close the register items** in `docs/requirements.yaml` with the evidence, at the same time.
+
+Within a phase, review only what changed; the full panel runs once, at the end.
+
+Two things this process has already caught, out of many: a documented command that reloaded nothing
+(`up -d` against a mounted config), and an export job that shipped the wrong day. Both were invisible
+to reading and obvious to running.
+
 ## Conventions
 
-- Work on feature branches. Do not commit to `main` directly.
+- Work on feature branches. Do not commit to `main` directly. Create the branch **before** the first
+  commit, because committing on `main` and moving the commit afterwards has happened twice.
+- **Anthony merges pull requests**, with one exception: while an end-of-phase review round is running,
+  the agent may merge its own pull requests from that session, because a reviewer executing on the box
+  needs the box to be running the merged code. The agent says which ones it merged and why. Nothing
+  else is ever pushed to `main`.
 - Secrets never enter the repo. Office builds use SOPS with age keys or systemd credentials.
   Cloud builds use Secrets Manager.
 - Non-GPU validation on a laptop is limited to schema validation, `docker compose config`, and
