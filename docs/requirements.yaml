@@ -201,6 +201,19 @@ items:
       truncate dimension and chunker version are recorded per collection generation, and the read path
       refuses a mismatch rather than returning quietly worse results.
 
+  - id: RET-RERANK-001
+    title: Reranking improves answer quality inside the latency budget
+    tier: [cloud, office, hosted]
+    phase: C2
+    verify: reranking the fused candidate list stays inside the agreed latency budget and improves retrieval and support on the golden set
+    status: open
+    note: >-
+      Agreed 2026-10-11: about five seconds is acceptable for this stage if it buys precision, which makes
+      the reranker a default rather than an experiment. The open work is the depth, set by a measurement
+      on the serving instance rather than by a number from someone else's hardware: scripts/bench_rerank.py
+      reports milliseconds per candidate and the affordable depth follows. The named fallbacks if no depth
+      fits are a shallower pool, Bedrock's reranker on the cloud build, or a GPU on the office build.
+
   - id: RET-EVAL-001
     title: Retrieval changes are measured on a fixed question set, not assumed
     tier: [cloud, office, hosted]
