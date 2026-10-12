@@ -189,6 +189,17 @@ items:
     phase: C2
     verify: a scanned fee-schedule fixture returns correct numbers in a table, and a scanned page returns text rather than nothing
     status: open
+    note: >-
+      First run 2026-10-11 on the reference instance, recorded in docs/runbook.md step 3.4. The halves
+      of the verification separate. The text half passes: a one-page scan with no text layer returned
+      3,321 characters of markdown containing all seven graded values, each beside its own label, in
+      correct two-column reading order, in 9 seconds on CPU. The table half does not pass yet, for two
+      reasons. The structured output came back empty, so there are no page or table structures and
+      therefore no page-level provenance, and page-level citation is the product. And one logical fee
+      schedule arrives as two markdown tables, split where the table exceeds its column, with nothing
+      in the output saying they are the same table. Both are open work on the parser integration
+      rather than on the document, and both must close before the chunker runs, because the chunker's
+      rules are written against structure the parser is not yet delivering.
   - id: RET-EMBED-001
     title: The embedding model and its preprocessing are recorded per collection, and a mismatch is refused
     tier: [cloud, office, hosted]

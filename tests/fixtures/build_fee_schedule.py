@@ -159,9 +159,15 @@ def build_source(path: Path) -> None:
         for text in paragraphs:
             story.append(Paragraph(text, style["body"]))
 
-    # The table starts in the right column of page 1 and, being longer than the column, continues
-    # onto page 2. A table split across a page break is the case the chunker must keep whole, so the
-    # fixture should exercise it from the first parse.
+    # The table sits in the right-hand column and is longer than the remaining column height, which
+    # splits it into two blocks in the parsed output: three rows at the foot of the left column's flow
+    # and four more in the right column. So one logical fee schedule arrives as two tables, which is
+    # the case the chunker has to join rather than treat as two sources.
+    #
+    # This fixture is one page. An earlier comment here claimed the table ran onto page 2, which it
+    # does not: the rasterised output is a single page, so the split is column-wise rather than across
+    # a page break. A page-straddling table is a different fixture and a different case, and it is not
+    # yet covered.
     story.append(Spacer(1, 6))
     story.append(Paragraph("Schedule of rates", style["heading"]))
     table = [[Paragraph(f"<b>{heading}</b>", style["body"]) for heading in ("Item", "Basis", "Rate")]]
