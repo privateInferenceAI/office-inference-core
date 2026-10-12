@@ -138,6 +138,170 @@ Ranked by the quality of the documented evidence.
 - **Textract, Google Document AI, Rossum**: no on-premises option found. Excluded for the in-office
   build.
 
+## Reference: what each service actually exposes
+
+Exact field names, so nobody has to look them up twice.
+
+### AWS Textract
+
+**[V]** One field at every level, `Block.Confidence`, 0 to 100: "The confidence score that Amazon
+Textract has in the accuracy of the recognized text and the accuracy of the geometry points around the
+recognized text."
+<https://docs.aws.amazon.com/textract/latest/APIReference/API_Block.html> It applies to `WORD`, `LINE`,
+`PAGE`, `KEY_VALUE_SET`, `CELL`, `SELECTION_ELEMENT`, `SIGNATURE` and `QUERY_RESULT`. There is no
+document-level score; the nearest thing is `DocumentMetadata.Pages`, a count.
+<https://docs.aws.amazon.com/textract/latest/dg/how-it-works-document-layout.html>
+
+**[V]** Textract's own framing is a probability but is not calibrated: "A confidence score is a number
+between 0 and 100 that indicates the probability that a given prediction is correct."
+<https://aws.amazon.com/textract/faqs/> The only low-confidence guidance in the core docs is
+"detections with a low confidence might need visual confirmation by a human."
+<https://docs.aws.amazon.com/textract/latest/dg/how-it-works-document-layout.html>
+
+**[V]** Geometry is `Geometry.BoundingBox` plus a finer `Geometry.Polygon`: "an axis-aligned, coarse
+bounding box that surrounds the text, and a finer-grain polygon for more accurate spatial information."
+<https://docs.aws.amazon.com/textract/latest/APIReference/API_Block.html> The A2I worker widget takes
+`src` and `initial-value` (raw blocks with confidence and geometry) so a click highlights the region;
+`no-geometry-edit` stops the worker moving the box.
+<https://raw.githubusercontent.com/awsdocs/amazon-sagemaker-developer-guide/b47c09ec0d213ae42ffeb5945f0b830eddd70930/doc_source/a2i-crowd-textract-detection.md>
+**[inf]** That widget is exactly the "key from image" screen this system wants, and it is unusable
+because A2I is closed to new customers. The geometry in the response is enough to rebuild it.
+
+### Azure AI Document Intelligence
+
+**[V]** Word level: "Each word extracted within the document has an associated confidence score. The
+score represents the confidence of the transcription." Field level: "Each labeled field extracted has
+an associated confidence score." Availability is version-gated to the **2024-11-30 (GA)** API for custom
+models, and "Currently, not all document fields return a confidence score."
+<https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/concept/accuracy-confidence?view=doc-intel-4.0.0>
+The SDK shape is `DocumentWord.confidence`, "Confidence of correctly extracting the word".
+<https://learn.microsoft.com/en-us/javascript/api/%40azure/ai-form-recognizer/documentword?view=azure-node-latest>
+
+**[V]** Azure makes the strongest calibration claim of the nine: "a confidence value of 0.95 (95%)
+indicates that the prediction is likely correct 19 out of 20 times", with a recommended target of "80%
+or higher", and "close to 100%" for financial or medical records. Same URL as above. **[inf]** It is
+stated for field confidence and carries no benchmark. If it holds, 0.8 means a 20 percent error rate and
+the whole threshold question is answerable. Treat as a claim until measured on our own scans.
+
+**[V]** `AnalyzeOutputOption` includes `pdf` ("Generate searchable PDF output") and `figures` ("Generate
+cropped images of detected figures"); `DocumentAnalysisFeature` includes `barcodes`, `ocrHighResolution`
+and `formulas`.
+<https://learn.microsoft.com/en-us/rest/api/aiservices/document-models/analyze-document?view=rest-aiservices-v4.0%20(2024-11-30)&tabs=HTTP>
+**[V]** No barcode-versus-field comparison is documented. **[inf]** That cross-check would be ours to
+build, and a barcode is a second reading of the same number from a different physical encoding, which is
+the strongest form of the independent-constraint pattern.
+
+### Google Cloud Document AI
+
+**[V]** `Layout.confidence`, "Range [0, 1]", applies at page, block, paragraph, line and token level
+because `Layout` appears on all of them. `Entity.confidence` covers extracted fields.
+<https://docs.cloud.google.com/document-ai/docs/reference/rest/v1/Document> Calibration is not
+documented anywhere; Google gives the range and nothing about what a value means.
+
+**[V]** Human in the Loop is deprecated in the same table as Document AI Warehouse, both
+"January 16, 2024". <https://docs.cloud.google.com/document-ai/docs/deprecation> **[inf]** The built-in
+review UI is gone; a review loop is ours to write.
+
+**[V]** The validation feature is in private beta behind an allowlist: "You need to be on the allowlist
+to use this product." Rules are CEL expressions over a root `doc`, and per entity only `mention_text`,
+`normalized_value` and `bounding_poly` are exposed. Correction is a documented follow-on step that runs
+"only if at least one validation rule fails".
+<https://docs.cloud.google.com/document-ai/docs/ce-validation>
+<https://docs.cloud.google.com/document-ai/docs/ce-cel-validation>
+
+**[V]** `Page.image` is returned rendered, "preprocessed to remove any skew, rotation, and distortions",
+with `Page.transforms[]` to map back. <https://docs.cloud.google.com/document-ai/docs/reference/rest/v1/Document>
+**[inf]** The cleanest side-by-side mechanism of the nine, and note the trap: the image the human checks
+is not the raw scan, so a defect removed by deskewing is no longer visible.
+
+**[V]** Do not reach for Cloud Vision for per-word confidence. The `TextAnnotation` graph is
+"TextAnnotation -> Page -> Block -> Paragraph -> Word -> Symbol" and the only confidence field in it is
+on `DetectedLanguage`. There is none on `Word`, `Symbol`, `Block` or `Page`.
+<https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/vision/v1/text_annotation.proto>
+
+### ABBYY Vantage and FineReader Engine
+
+**[V]** Vantage fields carry `Value`, `Annotation` (`Confidence`, `RawValue`, `Source`),
+`NeedVerification` and `isVerified`, with confidence as an integer out of 100.
+<https://abbyy.mintlify.app/vantage/getting-started/results> Manual Review is embeddable through a
+`manualReviewLink` that "will expire 168 hours after its creation", and its panes are configurable,
+including `rulesReport` — "Set to `false` to hide the list of rule errors pane" — beside `docEditor`
+("the page image pane") and `formEditor` ("the list of extracted fields pane").
+<https://abbyy.mintlify.app/vantage/developer/integrating-manual-review>
+
+**[V]** FineReader Engine exposes `PlainText.IsSuspicious` per character and `PlainText.GetCharacterData`,
+which is per-character confidence.
+<https://abbyy.mintlify.app/fine-reader/engine/api-reference/text-related-objects/plaintext/issuspicious-property>
+<https://abbyy.mintlify.app/fine-reader/engine/api-reference/text-related-objects/plaintext/getcharacterdata-method>
+**[inf]** `IsSuspicious` is the only per-character doubt flag found in any of the nine, and it is a
+boolean rather than a probability. It is the closest commercial analogue to what this system wanted
+confidence to do.
+
+**[V]** Coordinate frames shift with export format: with JSON only, coordinates are relative to the
+original image; with JSON plus an image format, "relative to the preprocessed image that is exported".
+<https://abbyy.mintlify.app/vantage/developer/output/json/ocr/pages-array-elements> **[inf]** Same trap
+as Google's `Page.image`, and it would silently misplace an overlay.
+
+### Tungsten TotalAgility
+
+**[V]** Fields fail four independent ways, only one of which is confidence: "Poor OCR results", "An
+unconfident or incorrect result", "A value could not be found on the document", and "Incorrect
+classification of the document". The second is explicit that format and range are a parallel gate:
+"Alternatively, the extracted result may not meet the configured criteria, such as being a valid data
+type, or being within a numerical range."
+<https://docshield.tungstenautomation.com/KTA/en_US/8.1.0-rmx0b1ux3q/help/CaptureClient/ValidationActivity/CEBPM_validationactivity_help/t_validatingdocuments.html>
+The Validation activity is the comparison workstation: "See the document in the Image Viewer for the
+correct information", with fields needing attention carrying warning icons and corrections feeding
+online learning. Same URL.
+
+**[V]** The designer ships validation methods including Date, Regular Expression, Single Field Script,
+Multi-field Script and **Invoice Validation**.
+<http://docshield.tungstenautomation.com/kta/en_us/7.10.0-vmhad0mru4/help/transformationdesigner/ProjectBuilder/400_OnlineLearning/c_ConflictManagement.html>
+**[inf]** The method pages were not read; the names are documented, the semantics are not.
+
+### Hyperscience
+
+**[V]** Confidence is per value, 0 to 1, and accuracy is "measured on a field level".
+<https://help.hyperscience.ai/v42/docs/transcription-models-overview>
+<https://help.hyperscience.ai/v42/docs/transcription-accuracy-and-automation> Both quotes about the
+number being uncalibrated and about target-accuracy thresholding are in the sections above.
+
+**[V]** Consensus requires two matching normalized transcriptions, and a field is abandoned "if no
+consensus is reached after 3 human entries".
+<https://help.hyperscience.ai/v42/docs/scoring-transcription-accuracy> **[inf]** Two independent
+readings agreeing is the cheque-industry pattern, shipped as a QA mechanism rather than a runtime one.
+
+### Rossum
+
+**[V]** Confidence is per field, 0 to 1, and each datapoint records which mechanisms validated it:
+`"validation_sources": ["score","checks","history","connector","not_found"]`, where "If the
+`validation_sources` attribute of a datapoint is non-empty, the datapoint can be automated."
+<https://knowledge-base.rossum.ai/docs/automation-rules-overview> The Business Rules Validation
+extension carries `checks[]` with `rule`, `message`, `type` and `automation_blocker`, and the default
+check is `has_value({document_id})`. <https://knowledge-base.rossum.ai/docs/business-rules-validation>
+**[V]** Why a document stopped is queryable through `automation_blocker` over the API and visible in the
+validation screen. <https://knowledge-base.rossum.ai/docs/confident-automation-in-practice>
+<https://knowledge-base.rossum.ai/docs/document-validation-screen-in-rossum>
+
+### Instabase
+
+**[V]** Three confidence levels — classification, field, OCR — reported as percentages, with the
+minimum-across-words aggregation quoted above. Non-OCR confidence "is calculated using log
+probabilities", and "In internal testing, this method proves reliable when compared to benchmarks."
+<https://docs.instabase.com/automate/validating-documents> **[inf]** No published benchmark, so treat
+that as a claim.
+
+### UiPath Document Understanding
+
+**[V]** The Validation Station is "a user interface that can be used to validate and correct data
+extracted from documents", usable attended or through Action Center, and there is a "Validation Station
+widget" for embedding in a custom React app.
+<https://docs.uipath.com/document-understanding/automation-suite/2024.10/classic-user-guide/validation-station>
+<https://docs.uipath.com/document-understanding/automation-cloud/latest/api-guide/create-artifacts-for-extraction-validation>
+**[V]** The taxonomy carries `ruleSet`, `dataSource`, `defaultValue` and `setValues` per field, but the
+rule semantics are not documented on that page. **[inf]** A per-field `ruleSet` is where a cross-field
+check would live. **Unverified.**
+
 ## Unverified, and not to be cited as fact
 
 - Whether Tungsten's multiple recognition engines use disagreement between them as an error signal. The
