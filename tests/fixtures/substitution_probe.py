@@ -20,12 +20,17 @@ confidence at all.
 
 Run it in the parser image, which has both tesseract and the docling stack:
 
-    docker run --rm -v /opt/oi-core/tests/fixtures:/f:ro \
+    docker run --rm --network ai-net -v /opt/oi-core/tests/fixtures:/f:ro \
       --entrypoint python ghcr.io/docling-project/docling-serve-cpu:v1.36.0 /f/substitution_probe.py
+
+The network flag is required: the cell's bounding box is read from the running parser rather than
+transcribed by hand, which is the mistake that made the first version read the wrong region.
 """
 from __future__ import annotations
 
+import json
 import subprocess
+import urllib.request
 import sys
 import tempfile
 from pathlib import Path
@@ -40,11 +45,11 @@ except ImportError:
 SOURCE = Path(sys.argv[1] if len(sys.argv) > 1 else "/f/fee-schedule-scanned.pdf")
 DPI = int(sys.argv[2] if len(sys.argv) > 2 else 400)
 
-# From the parse of this fixture: the "Standard labour, business hours" row of the left-hand table,
-# whose Rate cell reads 145.00. PDF coordinates, BOTTOMLEFT origin, so converted below.
-CELL = {"l": 237.0, "r": 297.0, "t": 668.0, "b": 652.0}
-PAGE_HEIGHT = 792.0
+# The value whose cell this script damages. It is found in the parsed output rather than transcribed,
+# because transcribing it by eye from a probe log is exactly how the first version of this script
+# cropped the wrong region and read "Onbeeen" where the truth was 145.00.
 TRUTH = "145.00"
+PARSER = "http://parser:5001"
 
 
 def render_page() -> Image.Image:
@@ -54,15 +59,61 @@ def render_page() -> Image.Image:
     return pdf[0].render(scale=DPI / 72).to_pil().convert("L")
 
 
-def crop_cell(page: Image.Image) -> Image.Image:
-    """The cell in image coordinates, with a margin so tesseract has context."""
+def parse_document() -> dict:
+    """The parser's structured output, so the cell's box comes from the parser rather than from me."""
+    boundary = "----subprobe"
+    body = bytearray()
+
+    def part(headers: list[str], content: bytes) -> None:
+        body.extend(f"--{boundary}\r\n".encode())
+        for header in headers:
+            body.extend(f"{header}\r\n".encode())
+        body.extend(b"\r\n")
+        body.extend(content)
+        body.extend(b"\r\n")
+
+    part(['Content-Disposition: form-data; name="files"; filename="f.pdf"',
+          "Content-Type: application/pdf"], SOURCE.read_bytes())
+    part(['Content-Disposition: form-data; name="to_formats"'], b"json")
+    body.extend(f"--{boundary}--\r\n".encode())
+    request = urllib.request.Request(
+        PARSER + "/v1/convert/file", data=bytes(body),
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+    with urllib.request.urlopen(request, timeout=900) as response:
+        payload = json.loads(response.read())
+    return (payload.get("document") or {}).get("json_content") or {}
+
+
+def find_cell(document: dict) -> tuple[dict, float]:
+    """The box of the cell whose text is TRUTH, in PDF coordinates, plus the page height."""
+    pages = document.get("pages") or {}
+    heights = [page.get("size", {}).get("height") for page in pages.values()]
+    page_height = heights[0] if heights and heights[0] else 792.0
+    for table in document.get("tables") or []:
+        for cell in (table.get("data") or {}).get("table_cells") or []:
+            if (cell.get("text") or "").strip() == TRUTH:
+                box = cell.get("bbox") or {}
+                if box:
+                    return box, float(page_height)
+    raise SystemExit(f"no cell in the parsed document reads {TRUTH!r}, so there is nothing to damage")
+
+
+def crop_box(page: Image.Image, box: dict, page_height: float, pad_points: float = 6.0) -> Image.Image:
+    """A PDF-coordinate box as an image crop.
+
+    The box is BOTTOMLEFT (docling-parse reports coord_origin BOTTOMLEFT), so its `t` is measured up
+    from the page bottom and has to be flipped. Getting this wrong is silent: the crop is a valid
+    image of the wrong part of the page.
+    """
     scale = DPI / 72
-    pad = 4 * scale
-    left = CELL["l"] * scale - pad
-    right = CELL["r"] * scale + pad
-    top = (PAGE_HEIGHT - CELL["t"]) * scale - pad
-    bottom = (PAGE_HEIGHT - CELL["b"]) * scale + pad
-    return page.crop((int(left), int(top), int(right), int(bottom)))
+    pad = pad_points * scale
+    left = box["l"] * scale - pad
+    right = box["r"] * scale + pad
+    top = (page_height - box["t"]) * scale - pad
+    bottom = (page_height - box["b"]) * scale + pad
+    width, height = page.size
+    return page.crop((int(max(0, left)), int(max(0, top)),
+                      int(min(width, right)), int(min(height, bottom))))
 
 
 def read_cell(image: Image.Image, tmp: Path) -> tuple[str, float | None]:
@@ -113,8 +164,12 @@ def glyph_boxes(cell: Image.Image) -> list[tuple[int, int, int, int]]:
 
 
 def main() -> int:
+    document = parse_document()
+    box, page_height = find_cell(document)
+    print(f"cell {TRUTH!r} found at l={box['l']:.1f} r={box['r']:.1f} "
+          f"t={box['t']:.1f} b={box['b']:.1f}, page height {page_height:.0f}")
     page = render_page()
-    clean_cell = crop_cell(page)
+    clean_cell = crop_box(page, box, page_height)
     with tempfile.TemporaryDirectory() as tmp_name:
         tmp = Path(tmp_name)
         clean_text, clean_conf = read_cell(clean_cell, tmp)
