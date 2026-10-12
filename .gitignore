@@ -27,3 +27,10 @@ models/
 __pycache__/
 *.pyc
 .venv/
+
+# The fixture corpus bytes. Fetched, not committed: they are 3.3 MB of someone else's documents, the
+# lockfile records exactly which bytes a run used, and `fetch_corpus.py --verify` is the check that the
+# bytes on disk are the ones the last run used. The manifest and the lockfile ARE committed, because
+# those are the parts a reader needs.
+fixtures/corpus/*.htm
+fixtures/corpus/*.pdf

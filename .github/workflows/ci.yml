@@ -64,6 +64,9 @@ jobs:
       - name: no manifest names a deprecated model
         run: python3 scripts/check_model_lifecycle.py
 
+      - name: the fixture corpus and its question set agree
+        run: python3 fixtures/corpus/validate_corpus.py
+
       - name: every manifest renders a model list
         run: |
           set -euo pipefail

@@ -1,0 +1,156 @@
+# The fixture question set: what "answerable, with a citation" is measured against.
+#
+# Why hand-written. `docs/evaluation-corpora.md` documents eight biases that generated questions carry,
+# from circularity to lexical leakage to a total absence of unanswerable questions. Its conclusion is
+# that generated questions are a smoke test and the acceptance set has to be written, so this is written.
+# Each entry names the documents it draws on and what it is for, and the six requirements from that
+# document are represented deliberately: paraphrase rather than quotation, unanswerable questions that
+# must produce a refusal, a required page number, a table-cell answer, a two-document answer, and
+# deliberate coverage of the awkward small document rather than only the long one.
+#
+# What is deliberately NOT here yet: `reference_answer` for any question. A reference answer is a claim
+# that a specific fact appears on a specific page, and the only honest way to write one is to read the
+# parsed text and check. Writing them from general knowledge would repeat the mistake this corpus's
+# manifest already caught once, where a licence was described before it was read. The workflow is: ingest
+# the corpus in runbook step 3.6, read the parsed pages, then fill each answer in with the page it came
+# from. Until then a question is a prompt to retrieve, not a graded item.
+#
+# The `expected` blocks below carry two things that CAN be written without reading: whether the question
+# is answerable from this corpus at all, and which document should supply the answer. Both are decisions
+# rather than facts about the text, and a retrieval run can be judged on them immediately.
+
+question_set_version: "fixture-questions-v1"
+corpus_version: "fixture-v1"
+status: questions written, reference answers pending the parsed corpus
+
+# The grading rules, stated once rather than per question.
+rules:
+  citation_required: true          # an answer with no page number fails, whatever it says
+  page_must_be_in_range: true      # the cited page must fall inside the chunk's page range
+  quote_must_be_verbatim: true     # a quoted span must appear in the cited passage after normalisation
+  unanswerable_must_refuse: true   # a question the corpus cannot answer must produce a refusal, not a guess
+
+questions:
+  # ---- answerable from one document, paraphrased so lexical matching alone does not win ----
+  - id: Q01
+    question: How much can an employee earn in 2026 before no social security tax is withheld from them?
+    draws_on: [irs-p15-2026]
+    tests: paraphrase. The document states this as a wage base rather than as earnings a person can make.
+    expected:
+      answerable: true
+      source_document: irs-p15-2026
+      references:
+        reference_answer: null
+        page: null
+
+  - id: Q02
+    question: At what income level does the extra Medicare tax start applying to a single filer?
+    draws_on: [irs-p15-2026]
+    tests: a threshold buried in prose, with a different figure for married filers as a decoy.
+    expected:
+      answerable: true
+      source_document: irs-p15-2026
+      references:
+        reference_answer: null
+        page: null
+
+  - id: Q03
+    question: What is the deadline for sending a new hire's details to the tax authority?
+    draws_on: [irs-p15-2026]
+    tests: a date, phrased as a business would ask it rather than as the document states it.
+    expected:
+      answerable: true
+      source_document: irs-p15-2026
+      references:
+        reference_answer: null
+        page: null
+
+  # ---- a table-cell answer, which is the case the chunker's row entries exist for ----
+  - id: Q04
+    question: In the withholding tables, what is the amount to withhold for a single person paid weekly with taxable wages of 1,000 dollars?
+    draws_on: [irs-p15-2026]
+    tests: a figure that lives inside a table cell. If the cell is not retrievable on its own this fails
+      for a reason that has nothing to do with the model.
+    expected:
+      answerable: true
+      source_document: irs-p15-2026
+      references:
+        reference_answer: null
+        page: null
+
+  # ---- a two-document answer, which is where a single-chunk retriever tends to give half a picture ----
+  - id: Q05
+    question: Both agreements in this set grant something to an employee. What does each one grant, and are the vesting terms the same?
+    draws_on: [apple-ex10-1-2024, apple-ex10-22-2024]
+    tests: two documents, and a comparison rather than a lookup. Also the near-duplicate case, where the two
+      share boilerplate, so retrieving only one produces a confident half-answer.
+    expected:
+      answerable: true
+      source_document: both
+      references:
+        reference_answer: null
+        page: null
+        pages: []
+
+  # ---- the long document, for a figure that appears in more than one place ----
+  - id: Q06
+    question: What did the company report as total net sales for the most recent fiscal year?
+    draws_on: [apple-10k-2024]
+    tests: a headline figure that appears in the income statement and again in the notes, so a citation
+      has to point at one of them and be right about which.
+    expected:
+      answerable: true
+      source_document: apple-10k-2024
+      references:
+        reference_answer: null
+        page: null
+
+  - id: Q07
+    question: How many shares were outstanding at the end of the most recent fiscal year?
+    draws_on: [apple-10k-2024]
+    tests: a figure that appears on the cover page as well as in the statements, at different dates. The
+      citation has to be to the right one, which is a page question rather than an arithmetic one.
+    expected:
+      answerable: true
+      source_document: apple-10k-2024
+      references:
+        reference_answer: null
+        page: null
+
+  # ---- unanswerable, which must produce a refusal rather than a plausible invention ----
+  - id: Q08
+    question: What is the company's policy on paying mileage for employees who drive their own cars to client sites?
+    draws_on: []
+    tests: unanswerable. A 10-K and a tax guide have no expense policy. The failure to watch for is a
+      confident answer assembled from unrelated travel figures.
+    expected:
+      answerable: false
+      source_document: null
+      references:
+        reference_answer: null
+        page: null
+
+  - id: Q09
+    question: Which supplier provided the materials for the most recent quarter, and what did they charge?
+    draws_on: []
+    tests: unanswerable, and shaped like a question a small business would really ask, which makes it the
+      one most likely to draw an invention.
+    expected:
+      answerable: false
+      source_document: null
+      references:
+        reference_answer: null
+        page: null
+
+  # ---- the awkward small document rather than the long one ----
+  - id: Q10
+    question: Under the award agreement, what happens to the award if the person leaves before it has vested?
+    draws_on: [apple-ex10-1-2024]
+    tests: a conditional buried in a numbered clause, in a document of about 27,000 characters. The main
+      risk is that retrieval prefers the much longer 10-K because it has more text to match.
+    expected:
+      answerable: true
+      source_document: apple-ex10-1-2024
+      references:
+        reference_answer: null
+        page: null

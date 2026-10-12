@@ -1,0 +1,45 @@
+{
+  "corpus_version": "fixture-v1",
+  "documents": {
+    "apple-10k-2024": {
+      "bytes": 1503891,
+      "content_type": null,
+      "fetched": "2026-10-12",
+      "licence": "US federal public record. Filed with the SEC and available to the public at no charge; no agreement, fee or gating. Verified 2026-10-12 by reading the filing index page.",
+      "path": "apple-10k-2024.htm",
+      "sha256": "812f766e3cd4f3c5432632b015df2f7ef784c9ba2e8e99f61ccdf08941fd89cb",
+      "source": "SEC EDGAR",
+      "url": "https://www.sec.gov/Archives/edgar/data/320193/000032019324000123/aapl-20240928.htm"
+    },
+    "apple-ex10-1-2024": {
+      "bytes": 57059,
+      "content_type": null,
+      "fetched": "2026-10-12",
+      "licence": "US federal public record.",
+      "path": "apple-ex10-1-2024.htm",
+      "sha256": "c294c7372937287cca8add14e3b20db0e6352426d171e5e21fab0bd7ac0db083",
+      "source": "SEC EDGAR",
+      "url": "https://www.sec.gov/Archives/edgar/data/320193/000032019324000123/a10-kexhibit10199282024.htm"
+    },
+    "apple-ex10-22-2024": {
+      "bytes": 75351,
+      "content_type": null,
+      "fetched": "2026-10-12",
+      "licence": "US federal public record.",
+      "path": "apple-ex10-22-2024.htm",
+      "sha256": "3fd73dc228c283a42d7abfbe5d8a8546c966364df0843296f15af09c932e5ac5",
+      "source": "SEC EDGAR",
+      "url": "https://www.sec.gov/Archives/edgar/data/320193/000032019324000123/a10-kexhibit10229282024.htm"
+    },
+    "irs-p15-2026": {
+      "bytes": 1713916,
+      "content_type": null,
+      "fetched": "2026-10-12",
+      "licence": "US federal public record, read at the source rather than assumed. The IRS copyright notice states verbatim: \"Content on this website that was created or maintained by federal employees in the course of their duties is not subject to copyright and may be freely copied. Credit is requested.\" The same notice adds a condition that matters here: \"If copyrighted material appears on the site, or is reached through a link on this site, the copyright holder must be consulted before the material may be reproduced.\" Source: https://www.irs.gov/about-irs/use-of-content-from-irsgov, read 2026-10-12. An earlier version of this manifest said the PDF's own pages carried a copyright notice. They do not: 6,820 lines of extracted text contain no mention of copyright at all. The claim was written before it was checked, and the check replaced it with the notice above.",
+      "path": "irs-p15.pdf",
+      "sha256": "b46c3622439d8521e3a0faca4cd5b5ece3451b526f65f06a5e38d5c9f804c88b",
+      "source": "Internal Revenue Service",
+      "url": "https://www.irs.gov/pub/irs-pdf/p15.pdf"
+    }
+  }
+}
