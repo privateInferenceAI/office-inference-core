@@ -68,14 +68,27 @@ Decided by Anthony, 2026-10-12. The failure being answered is the worst one this
 misreads a character, so the wrong number is faithful to the document as parsed. Retrieval finds it
 because it matches the question. The model cites it. Layer 1 confirms the number is present in the
 cited passage, because OCR is what put it there. Every check passes and the client receives a confident
-wrong figure with a real citation, and no other layer can see it. The confidence figure is the only
-signal that separates what the document says from what OCR thought it saw.
+wrong figure with a real citation, and no other layer can see it. The confidence figure was going to be
+the signal that separates what the document says from what OCR thought it saw.
 
-The answer is not to refuse. A refusal costs the client an answer they could have had, and it fires on
-correct answers too, because a badly scanned correct number is indistinguishable from a badly scanned
-wrong one. The answer is to ask. Anthony's framing: show the reviewer the original region beside what
-the scan made of it, the way one person asks another to confirm a number they can both see. The score's
-whole job is to tell us which regions are worth asking about.
+**Measured the same day, and it is not.** Two probes, recorded in `docs/runbook.md` step 3.4. Confidence
+tracks blur and ignores speckle completely, and on forty trials that carved defects into a known cell it
+flagged one of the fifteen readings that changed the value. Seven percent. Fourteen wrong numbers passed
+with confidence between 61 and 93, including `145.60`, `146.00` and `145.08`. Confidence reports how sure
+OCR is of its best guess, not whether the guess is right, and no threshold helps at that sensitivity.
+
+The useful split is how a wrong reading is wrong. Nine of the fifteen were malformed, a letter in the
+number or the wrong digit count, and a format check catches those without any confidence figure. Six
+were plausible numbers with a wrong digit, and nothing in this design sees them: the passage and the
+answer agree with each other and disagree with the page. `RET-PARSE-002` carries the numbers and the
+options, and the choice among them is being researched against how established document systems handle
+a confidently wrong reading rather than decided here.
+
+The answer is still not to refuse. A refusal costs the client an answer they could have had, and it fires
+on correct answers too, because a badly scanned correct number is indistinguishable from a badly scanned
+wrong one. The answer is still to ask. Anthony's framing: show the reviewer the original region beside
+what the scan made of it, the way one person asks another to confirm a number they can both see. What
+changed is only what puts a region in front of them, since the confidence score cannot.
 
 That shape is already in this design. The research reached for the same mechanism on the superseded
 document, where every retrieval metric is fine and the answer is still wrong, and named "a review

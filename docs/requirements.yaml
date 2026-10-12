@@ -212,21 +212,33 @@ items:
       is true to the document as parsed, so retrieval finds it, the model cites it, and Layer 1 confirms
       the number is present in the cited passage because OCR put it there. Every check passes and the
       client is handed a confident wrong figure with a real citation. Nothing else in the pipeline can
-      see it. The confidence figure is the only signal that separates what the document says from what
-      OCR thought it saw. Anthony's framing, which is the design: the reviewer is shown the original
-      region beside what the scan made of it, exactly as a person asks a colleague to confirm a number
-      they can both see. That needs three things and only the first is unsolved. Per-page or, better,
-      per-line confidence, which Docling computes internally and does not put on its wire schema, since
-      ConfidenceScores is documented "document-level only". Per-item bounding boxes and the page image,
-      which the structured output already carries for text and table cells, so a crop is a region on a
-      known page. And a review surface, which the brief already plans as the client app's Review tab in
-      C4, so until then the queue is a database query rather than a UI. Two fields in the confidence
-      report are None and neither is a fault: table_score is documented not yet implemented, and
-      parse_score is the 10th percentile of digital text cells, which a pure scan has none of. Two
-      limits worth recording rather than discovering later: confidence cannot see a page that was never
-      scanned, because no image means no recognition and no score, so completeness is a separate gap
-      with no check at all; and a reviewer confirming a number must be able to store that confirmation,
-      or the same page is flagged on every query.
+      see it. Anthony's framing, which is the design: the reviewer is shown the original region beside
+      what the scan made of it, exactly as a person asks a colleague to confirm a number they can both
+      see. Measured the same day, and the measurement took the confidence figure away as the trigger.
+      Two probes, both recorded in docs/runbook.md step 3.4. The first damaged a scan in eight ways and
+      found confidence tracking blur and ignoring speckle entirely: the speckled row came back identical
+      to the clean row, which is what a mechanism that reports certainty of reading rather than quality
+      of scan would do. The second carved bars into the cell whose truth is 145.00, forty trials. Fifteen
+      readings changed the value and confidence flagged one of them, seven percent. Fourteen wrong
+      numbers passed with confidence between 61 and 93, including 145.60, 146.00, 145.08 and 445.00.
+      Nine of the fifteen were malformed, a letter in the number or the wrong digit count, and those
+      need no confidence figure at all: a character-class or length check catches them, and the
+      verifier's literal-identifier assertion is the right shape of tool. Six were plausible numbers
+      with a wrong digit, and nothing in this design sees those, because the passage and the answer
+      agree with each other and disagree with the page. So confidence is a blur detector rather than a
+      correctness detector and cannot carry this item, and no threshold helps at seven percent
+      sensitivity. What the design needs is settled by research into how established document systems
+      handle a confidently wrong reading, which is in progress; the candidate directions are parse-level
+      checks on extracted figures, which cover the malformed half for nothing, a second independent
+      reading of any cited figure compared against the first, which is the only candidate that touches
+      the plausible half, and disclosing which figures were machine-read from a picture rather than from
+      a text layer, which is a product decision. What survives from the earlier note: per-item bounding
+      boxes and the page image are already in the structured output, so a review item is a crop of a
+      known region on a known page; the review surface is the client app's Review tab in C4; a
+      confirmation must be stored or the same page is flagged every time; and confidence cannot see a
+      page that was never scanned, so completeness is a separate gap with no check at all. Sample caveat:
+      the defects were rectangles carved into a rendered page, which is a crude imitation of a bad scan,
+      and it is one synthetic page. The direction is unambiguous; the rate is indicative.
   - id: RET-EMBED-001
     title: The embedding model and its preprocessing are recorded per collection, and a mismatch is refused
     tier: [cloud, office, hosted]
