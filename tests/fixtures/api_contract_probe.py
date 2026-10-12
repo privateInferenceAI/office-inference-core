@@ -27,6 +27,7 @@ Run from the repo root on the box:
 from __future__ import annotations
 
 import json
+import socket
 import sys
 import urllib.error
 import urllib.request
@@ -38,6 +39,14 @@ PROBE_DOC = "contract-probe"
 
 
 def call(url: str, method: str = "GET", body: dict | None = None, timeout: int = 60):
+    """One request, and the failure reason when there is one.
+
+    The first version of this returned None for the status and put the exception in the body slot, then
+    printed only the status, so a probe that reached nothing at all printed a screen of "None" and said
+    nothing about why. That is the same silent-failure shape this project has already been caught by three
+    times: a rejected option, a nulled score, a dropped collection. A diagnostic that cannot say what went
+    wrong is not a diagnostic.
+    """
     data = json.dumps(body).encode() if body is not None else None
     request = urllib.request.Request(
         url, data=data, method=method,
@@ -55,16 +64,51 @@ def call(url: str, method: str = "GET", body: dict | None = None, timeout: int =
             return exc.code, json.loads(raw)
         except json.JSONDecodeError:
             return exc.code, raw[:200].decode(errors="replace")
+    except urllib.error.URLError as exc:
+        # The common one, and the one that matters most: nothing is listening, or the name does not
+        # resolve. Distinguished from a refused connection because the fixes are different, and the
+        # first version of this file could not tell them apart: it printed "None" for both.
+        reason = getattr(exc, "reason", exc)
+        if isinstance(reason, socket.gaierror):
+            return None, f"NAME DOES NOT RESOLVE on ai-net ({reason})"
+        return None, f"CANNOT REACH IT ({reason})"
     except Exception as exc:  # noqa: BLE001 - the point is to report
-        return None, repr(exc)
+        return None, f"{type(exc).__name__}: {exc}"
+
+
+def _show(status, payload) -> str:
+    """The status when there is one, and the reason when there is not."""
+    if status is not None:
+        return str(status)
+    return f"FAILED: {payload}"
+
+
+def preflight() -> None:
+    """Name resolution for the three services, before anything else.
+
+    The first run of this probe printed a screen of "None" against a box where the embedding container was
+    not up, and the reader had to guess which of the three had failed and why. A diagnostic should answer
+    that itself, so this checks each name and says which are missing."""
+    print("=== preflight: can this container see the services? ===")
+    for name, port in (("embeddings", 80), ("vector", 6333), ("parser", 5001)):
+        try:
+            socket.gethostbyname(name)
+            reachable = "resolves"
+        except OSError as exc:
+            reachable = f"DOES NOT RESOLVE ({exc})"
+        print(f"  {name:<12} {reachable}")
+    print("  If a name does not resolve, this container is not on the ai-net network or the service "
+          "is not running. Check with: docker ps")
+    print()
 
 
 def main() -> int:
     findings: dict[str, object] = {}
 
+    preflight()
     print("=== TEI: what the embed service says about itself ===")
     status, info = call(f"{EMBED}/info")
-    print(f"  /info -> {status}")
+    print(f"  GET {EMBED}/info -> {_show(status, info)}")
     if isinstance(info, dict):
         for key in ("model_id", "model_dtype", "max_input_length", "max_client_batch_size"):
             print(f"    {key}: {info.get(key)}")
@@ -91,7 +135,7 @@ def main() -> int:
                 first = data[0]
                 if isinstance(first, dict) and isinstance(first.get("embedding"), list):
                     shape += f", embedding length {len(first['embedding'])}"
-        print(f"  POST {path} {json.dumps(body)[:44]:<46} -> {status}  {shape}")
+        print(f"  POST {path} {json.dumps(body)[:40]:<42} -> {_show(status, payload)}  {shape}")
         findings[f"{path} {list(body.keys())[0]}"] = {"status": status}
 
     print()
@@ -109,12 +153,13 @@ def main() -> int:
             count = len(payload["data"])
             embedding = payload["data"][0].get("embedding") if payload["data"] else None
             dims = len(embedding) if embedding else None
-        print(f"  POST {path} with {len(texts)} inputs -> {status}  vectors {count}, dims {dims}")
+        print(f"  POST {path} with {len(texts)} inputs -> {_show(status, payload)}  "
+              f"vectors {count}, dims {dims}")
 
     print()
     print("=== Qdrant: collection shape and a write that is then removed ===")
     status, collection = call(f"{VECTOR}/collections/{COLLECTION}")
-    print(f"  GET collection -> {status}")
+    print(f"  GET collection -> {_show(status, collection)}")
     if isinstance(collection, dict):
         result = collection.get("result") or {}
         vectors = ((result.get("config") or {}).get("params") or {}).get("vectors") or {}
@@ -142,13 +187,13 @@ def main() -> int:
             }]
         }
         status, response = call(f"{VECTOR}/collections/{COLLECTION}/points?wait=true", "PUT", point)
-        print(f"  PUT one point with a payload -> {status}  {json.dumps(response)[:100]}")
+        print(f"  PUT one point with a payload -> {_show(status, response)}")
 
         status, counted = call(f"{VECTOR}/collections/{COLLECTION}/points/count", "POST",
                                {"filter": {"must": [{"key": "doc_id", "match": {"value": PROBE_DOC}}]},
                                 "exact": True})
         total = (counted or {}).get("result", {}).get("count") if isinstance(counted, dict) else None
-        print(f"  POST count filtered by payload -> {status}, count {total}")
+        print(f"  POST count filtered by payload -> {_show(status, counted)}, count {total}")
 
         status, found = call(f"{VECTOR}/collections/{COLLECTION}/points/scroll", "POST",
                              {"filter": {"must": [{"key": "doc_id", "match": {"value": PROBE_DOC}}]},
@@ -162,7 +207,7 @@ def main() -> int:
 
         status, _ = call(f"{VECTOR}/collections/{COLLECTION}/points/delete?wait=true", "POST",
                          {"filter": {"must": [{"key": "doc_id", "match": {"value": PROBE_DOC}}]}})
-        print(f"  DELETE the probe points -> {status}  (cleanup)")
+        print(f"  DELETE the probe points -> {_show(status, None)}  (cleanup)")
 
     print()
     print("Findings are what the services answered, not what a document said they would.")
