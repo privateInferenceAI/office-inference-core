@@ -98,19 +98,26 @@ def find_cell(document: dict) -> tuple[dict, float]:
     raise SystemExit(f"no cell in the parsed document reads {TRUTH!r}, so there is nothing to damage")
 
 
-def crop_box(page: Image.Image, box: dict, page_height: float, pad_points: float = 6.0) -> Image.Image:
-    """A PDF-coordinate box as an image crop.
+def crop_box(page: Image.Image, box: dict, pad_points: float = 6.0) -> Image.Image:
+    """A box from the parser as an image crop.
 
-    The box is BOTTOMLEFT (docling-parse reports coord_origin BOTTOMLEFT), so its `t` is measured up
-    from the page bottom and has to be flipped. Getting this wrong is silent: the crop is a valid
-    image of the wrong part of the page.
+    The vertical extent is taken as the smaller and larger of `t` and `b` rather than trusted to mean
+    a particular orientation. Two attempts got this wrong in opposite directions. The first hardcoded
+    a flipped box and cropped a paragraph. The second flipped the parser's numbers on the theory that
+    `coord_origin: BOTTOMLEFT` meant they counted up from the page bottom, and inverted a range that
+    was already correct: the failing crop reported t=696.4 b=709.1, and 792 minus those is 95.6 to
+    82.9 from the top, which is where the rate cell actually sits.
+
+    Both mistakes are silent, because a wrong crop is still a valid image. Taking the extremes cannot
+    be wrong in that way, and it removes the need for the page height, which the first version took as
+    an argument and used to do the flipping that caused the second mistake.
     """
     scale = DPI / 72
     pad = pad_points * scale
     left = box["l"] * scale - pad
     right = box["r"] * scale + pad
-    top = (page_height - box["t"]) * scale - pad
-    bottom = (page_height - box["b"]) * scale + pad
+    top = min(box["t"], box["b"]) * scale - pad
+    bottom = max(box["t"], box["b"]) * scale + pad
     width, height = page.size
     return page.crop((int(max(0, left)), int(max(0, top)),
                       int(min(width, right)), int(min(height, bottom))))
@@ -169,7 +176,7 @@ def main() -> int:
     print(f"cell {TRUTH!r} found at l={box['l']:.1f} r={box['r']:.1f} "
           f"t={box['t']:.1f} b={box['b']:.1f}, page height {page_height:.0f}")
     page = render_page()
-    clean_cell = crop_box(page, box, page_height)
+    clean_cell = crop_box(page, box)
     with tempfile.TemporaryDirectory() as tmp_name:
         tmp = Path(tmp_name)
         clean_text, clean_conf = read_cell(clean_cell, tmp)
