@@ -200,33 +200,45 @@ items:
       pieces of follow-up work came out of the run and are recorded rather than folded in: the split
       table now belongs to the chunker in 3.5, and the per-page OCR confidence gap is RET-PARSE-002.
   - id: RET-PARSE-002
-    title: An uncertain read is confirmed by a person, against the original image
+    title: A confidently wrong read is caught by redundancy, or disclosed, rather than trusted
     tier: [cloud, office, hosted]
     phase: C2
-    verify: a deliberately degraded scan produces a low confidence figure that raises a review item, a clean scan does not, and confirming the item stores the correction so the same question is not asked twice
+    verify: a damaged figure is caught by a format or arithmetic check, a figure that passes every check is disclosed as machine-read when cited, and a flagged figure can be confirmed against the original image with the correction stored
     status: open
     note: >-
-      Opened 2026-10-12 from the run in docs/runbook.md step 3.4, then decided the same day by Anthony:
-      the answer to an uncertain read is human confirmation, not refusal. The failure it addresses is
-      specific and is the one this product can least afford. OCR misreads a character, the wrong number
-      is true to the document as parsed, so retrieval finds it, the model cites it, and Layer 1 confirms
-      the number is present in the cited passage because OCR put it there. Every check passes and the
-      client is handed a confident wrong figure with a real citation. Nothing else in the pipeline can
-      see it. The confidence figure is the only signal that separates what the document says from what
-      OCR thought it saw. Anthony's framing, which is the design: the reviewer is shown the original
-      region beside what the scan made of it, exactly as a person asks a colleague to confirm a number
-      they can both see. That needs three things and only the first is unsolved. Per-page or, better,
-      per-line confidence, which Docling computes internally and does not put on its wire schema, since
-      ConfidenceScores is documented "document-level only". Per-item bounding boxes and the page image,
-      which the structured output already carries for text and table cells, so a crop is a region on a
-      known page. And a review surface, which the brief already plans as the client app's Review tab in
-      C4, so until then the queue is a database query rather than a UI. Two fields in the confidence
-      report are None and neither is a fault: table_score is documented not yet implemented, and
-      parse_score is the 10th percentile of digital text cells, which a pure scan has none of. Two
-      limits worth recording rather than discovering later: confidence cannot see a page that was never
-      scanned, because no image means no recognition and no score, so completeness is a separate gap
-      with no check at all; and a reviewer confirming a number must be able to store that confirmation,
-      or the same page is flagged on every query.
+      Decided by Anthony 2026-10-12, after four research angles, and recorded in full in
+      docs/search-architecture.md under "An uncertain read". The short version: do it the way the
+      profession does it, and not by putting eyes on every document. The failure being answered is the
+      worst this product has. OCR misreads a character, the wrong number is faithful to the document as
+      parsed, so retrieval finds it, the model cites it, and Layer 1 confirms the number is present in
+      the cited passage because OCR is what put it there. Every check passes and the client receives a
+      confident wrong figure with a real citation. Measured in docs/runbook.md step 3.4: forty trials
+      carving defects into a cell whose truth is 145.00 produced fifteen wrong readings and confidence
+      flagged one, seven percent, with fourteen wrong numbers passing at confidence 61 to 93. Four
+      research angles, in docs/research/, then established that nobody detects this. No open-source
+      project catches it, no vendor claims to, calibration cannot because rescaling is monotone, and the
+      trades that need a right number never trusted one reading: a cheque carries its amount twice and
+      both are read independently, and accounting reconciles against a bank feed rather than
+      proofreading. So the controls, in order: format, range and checksum checks, whose honest ceiling is
+      the malformed quarter of misreads and nothing else; cross-field arithmetic where a document has the
+      relationships, line items to subtotal and subtotal plus tax to total; a second independent reading
+      of any cited figure, as an escalation gate and never a vote, varying the stage as well as the engine
+      because two engines over the same pixels make correlated errors; human review of what the controls
+      flag, on the key-from-image screen, one field with the source fragment beside it; the override
+      recorded as machine value against human value; and disclosure, where a figure that passed no
+      arithmetic check and had no second source is cited as machine-read rather than implied correct. What
+      this is not: a refusal, which fires on correct answers too; or a review of every document, since
+      every page is read without a person and most documents get no review at all. Still open, and the
+      first is the only one that changes what gets built: whether two independently staged engines
+      disagree usefully on these documents, since the only measurement found was on synthetic Telugu
+      characters and the number for damaged printed English digits does not exist; how large the review
+      queue actually is, which decides whether it is a database query or a product surface; whether the
+      client's own records can serve as the second source, which is later work; and per-page confidence
+      for triage, which Docling computes and does not expose, now less urgent because triage is a weaker
+      job than detection. Two limits recorded rather than discovered later: confidence cannot see a page
+      that was never scanned, so completeness has no check anywhere in this design; and a confirmation
+      must be stored, or the same figure is flagged on every question.
+
   - id: RET-EMBED-001
     title: The embedding model and its preprocessing are recorded per collection, and a mismatch is refused
     tier: [cloud, office, hosted]

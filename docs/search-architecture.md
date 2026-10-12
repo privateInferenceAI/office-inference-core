@@ -62,46 +62,110 @@ our actual failure case.
 - **Consolidating onto `pgvector` to remove Qdrant.** Qdrant's filtered-search recall and its quantisation
   are features we would have to rebuild, and the measured filter behaviour is a reason to keep it.
 
-## An uncertain read goes to a person, not to a refusal
+## An uncertain read: do it the way the profession does it
 
-Decided by Anthony, 2026-10-12. The failure being answered is the worst one this system has. OCR
-misreads a character, so the wrong number is faithful to the document as parsed. Retrieval finds it
-because it matches the question. The model cites it. Layer 1 confirms the number is present in the
-cited passage, because OCR is what put it there. Every check passes and the client receives a confident
-wrong figure with a real citation, and no other layer can see it. The confidence figure is the only
-signal that separates what the document says from what OCR thought it saw.
+Anthony's decision, 2026-10-12, after four research angles: **the standard professional control set, and
+not a person looking at every document.** The evidence for it is in `docs/research/`, principally
+`ocr-confidence-synthesis.md`, with the four angle reports beside it.
 
-The answer is not to refuse. A refusal costs the client an answer they could have had, and it fires on
-correct answers too, because a badly scanned correct number is indistinguishable from a badly scanned
-wrong one. The answer is to ask. Anthony's framing: show the reviewer the original region beside what
-the scan made of it, the way one person asks another to confirm a number they can both see. The score's
-whole job is to tell us which regions are worth asking about.
+### The failure being answered
 
-That shape is already in this design. The research reached for the same mechanism on the superseded
-document, where every retrieval metric is fine and the answer is still wrong, and named "a review
-queue in the UI". The brief already plans the surface: the client app's Review tab in C4.
+OCR misreads a character, so the wrong number is faithful to the document as parsed. Retrieval finds it
+because it matches the question. The model cites it. Layer 1 confirms the number is present in the cited
+passage, because OCR is what put it there. Every check passes and the client receives a confident wrong
+figure with a real citation.
 
-What it needs, in order:
+Measured on this system, in `docs/runbook.md` step 3.4: forty trials carving defects into a cell whose
+truth is `145.00` produced fifteen wrong readings, and confidence flagged **one**. Seven percent.
+Fourteen wrong numbers passed at confidence between 61 and 93, among them `145.60`, `146.00` and
+`145.08`. Nine of the fifteen were malformed, a letter in the number or the wrong digit count; six were
+plausible numbers with a wrong digit.
 
-- **Per-page confidence, or better per-line.** Not yet available; see `RET-PARSE-002`. This is the one
-  unsolved piece.
-- **Per-item bounding boxes and the page image.** Already in the structured output for text and table
-  cells, so a review item is a crop of a known region on a known page.
-- **A place to put the answer.** The Review surface in C4, and a database query before that.
+### What the research found, and why it settles the design
 
-Two limits, recorded now so they are not discovered later. **Confidence cannot see a page that was
-never scanned**: no image means no recognition and no score, so a misfeed or a missing page is
-invisible to this mechanism and has no check anywhere in the design. **A confirmation has to be stored**,
-or the same page is flagged on every query and the client learns to ignore the flag.
+Nobody solves this by detecting it. No open-source project catches a confidently wrong reading, every
+confidence gate in that landscape is a deletion gate below 0.5, and two commercial vendors say in print
+that their score is not a probability and should not be read as one. Calibration cannot help, because
+rescaling is monotone and therefore cannot make a confidently wrong reading rank as suspicious.
 
-**How much machinery it gets is a measurement, not a decision.** Anthony, 2026-10-12: this is tunable as
-we go, and the first question is how many documents actually come out needing a person. If it is one
-page a month, a query over the database is the whole feature and C4 can present it whenever it is built.
-If it is hundreds, the queue is a product surface with triage, bulk actions and a way to clear it, and
-that is a different piece of work. So the order is: get a per-line confidence figure, run it over the
-fixture corpus, and count. The count decides the build.
+What the trades that need a right number actually do is make the error not matter. A cheque carries its
+amount twice and both readings are taken independently, because a defect cannot corrupt both at once.
+Accounting reconciles against the bank feed rather than proofreading the invoice. Six of nine commercial
+vendors ship an independent constraint that runs whatever the confidence says. Confidence is used to
+decide **what a human looks at**, never as evidence that a number is right.
 
-### The reranker runs on someone else's silicon, so it carries two rules
+### The controls, in the order they run
+
+1. **Format, range and checksum checks** on every extracted figure. Nearly free, and the citation
+   verifier's literal check is already this shape. Honest ceiling: the literature puts only 24.39 percent
+   of misreads outside known error patterns, so this catches the malformed quarter and nothing else.
+2. **Cross-field arithmetic**, where a document has the relationships to check: line items to subtotal,
+   subtotal plus tax to total. This is the invoice world's version of the cheque's two amounts and the
+   pattern with the most vendor agreement. A misread digit breaks the equation.
+3. **A second independent reading of any figure that gets cited**, as an escalation gate and never as a
+   vote. Design constraint from the research: vary the **stage** as well as the engine, because two
+   engines over the same preprocessed pixels make correlated errors and will agree on the wrong answer.
+   Disagreement asks for a person; it never picks a winner, because in the one measured case 26.8 percent
+   of disagreements were both-wrong and the ensemble recovered under 57 percent of them.
+4. **Human review of what the controls flag**, on the screen the capture industry has shipped for years:
+   one field at a time, the source fragment beside the proposed value, keyboard driven, ordered by risk.
+   Risk means a low score, a high value, or a failed check.
+5. **Record the override**: machine-proposed value against human-accepted value, who and when. This is
+   how the real error rate becomes knowable rather than estimated.
+6. **Disclose what passed nothing.** Where a figure came off a picture, passed no arithmetic check and had
+   no second source, the citation says it is machine-read. That is the audit-and-sampling pattern
+   translated to a business with one person doing the checking, and it is the honest answer to the
+   residual rather than a pretence that it was verified.
+
+### What this is not
+
+Not a refusal. A refusal costs the client an answer they could have had, and it fires on correct answers
+too, because a badly scanned correct number is indistinguishable from a badly scanned wrong one.
+
+Not a review of every document. Every page is read without a person; most documents get no review at all,
+because most numbers are not flawed. What arrives at the client is a short list of figures to confirm,
+not a stack of paper.
+
+Not a confident claim of correctness. `145.60` from a clean scan of a cell with no totals to check it
+against is not catchable by any mechanism found in the research, and the design says so in the citation
+rather than covering for it.
+
+### Two traps the research names
+
+**Do not tune a threshold on the same set the error rate is reported from.** Score-refit leakage made a
+reported bound wrong in 95 percent of splits in the one study that diagnosed it, and document clustering
+gives an effective sample much smaller than the field count. Split fitting from reporting, and sample per
+document rather than per field.
+
+**Do not swap the pipeline to a vision-language model on current evidence.** The comparison that would
+justify it, a VLM against Tesseract on genuinely damaged scans of printed numbers, does not appear to
+exist; the closest study disclaims simulating real degradation. And fabrication is worse than a misread
+digit, because it carries neither a confidence penalty nor a format-check penalty.
+
+### What is still open
+
+- **Whether two independently staged engines disagree usefully on these documents.** The only measurement
+  found was on synthetic Telugu characters, so the number for damaged printed English digits does not
+  exist. Until it does, the second reading is a design intention rather than a costed feature.
+- **How large the review queue actually is.** It decides whether the queue is a database query or a
+  product surface with triage and bulk actions. Anthony's position, same day: this is tunable as we go,
+  and the first question is how many documents come out needing a person.
+- **Whether the client's own records can serve as the second source.** The bank feed is the control that
+  dominates accounting practice and this system is connected to nothing. That is later work.
+- **Per-page or per-line confidence for triage**, which Docling computes internally and does not put on
+  its wire schema. `RET-PARSE-002` carries it. Triage is a weaker job than detection, so this is no
+  longer urgent, but it is still the signal that decides what reaches a human.
+
+### Two limits, recorded rather than discovered later
+
+**Confidence cannot see a page that was never scanned.** No image means no recognition and no score, so a
+misfeed or a missing page is invisible to every control above and has no check anywhere in this design.
+Completeness is a separate gap.
+
+**A confirmation has to be stored**, or the same page is flagged on every question and the client learns
+to ignore the flag.
+
+## The reranker runs on someone else's silicon, so it carries two rules
 
 **The data-classification gate.** On the cloud build the reranked passages leave the box, because the
 rerank call is a frontier call. Only chunks whose data class permits a frontier call may be sent. When
@@ -133,6 +197,17 @@ VectorChord-BM25 (dual AGPL or Elastic Licence v2, and it failed on identifiers 
 Enterprise (BUSL-1.1, non-production only), Mistral and Gemma and Llama research or gated terms,
 `Qwen2.5-3B` (research licence, unlike the Apache-2.0 Qwen3 models), and every Jina embedding, reranker
 and ColBERT model (CC-BY-NC-4.0, no published price).
+
+**Newly flagged 2026-10-12, and all three reachable through Docling's own presets.** That is the
+mechanism worth noting rather than the individual cases: a preset list is how an unresolved licence
+enters this stack without anyone choosing it. **MinerU**, through the `mineru2_pro` preset, has a
+weights card that says `agpl-3.0` and a repository `LICENSE.md` that says Apache-2.0 with a commercial
+threshold above 100M monthly active users or USD 20M revenue. Unresolved, and this project rejects AGPL,
+so treat it as not cleared until the maintainers confirm in writing. **Nanonets-OCR-s and OCR2**,
+through the `nanonets_ocr2` preset, declare no licence on the model card, ship no `LICENSE` file, and
+the organisation's repository reports no licence at all: treat as all-rights-reserved. And Docling's
+**`deepseek_ocr` preset is documented as API-only**, with Transformers and MLX both unsupported, which
+an air-gapped build cannot use at all. The preset list should be pinned rather than left open.
 
 **Corrected: copyleft is a decision, not a prohibition.** An earlier version of this document listed
 ParadeDB under "do not ship" on the grounds that AGPL is disqualifying. That was wrong, and it was my
