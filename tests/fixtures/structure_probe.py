@@ -21,6 +21,13 @@ body.extend(f"--{b}--\r\n".encode())
 req = urllib.request.Request(B + "/v1/convert/file", data=bytes(body),
                              headers={"Content-Type": f"multipart/form-data; boundary={b}"})
 r = json.loads(urllib.request.urlopen(req, timeout=900).read())
+print("=== TOP LEVEL OF THE RESPONSE ===")
+print("keys:", sorted(r.keys()))
+for k, v in r.items():
+    if k != "document":
+        print(f"  {k} = {str(v)[:400]}")
+print()
+
 jc = (r.get("document") or {}).get("json_content") or {}
 
 print("=== PAGES ===")
