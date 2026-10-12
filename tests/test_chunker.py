@@ -226,3 +226,48 @@ def test_labelling_survives_the_parser_emitting_cells_in_any_order():
             assert match, f"seed {seed}: no row for {item}"
             assert f"Basis: {basis}" in match[0], f"seed {seed}: {match[0]!r}"
             assert f"Rate: {rate}" in match[0], f"seed {seed}: {match[0]!r}"
+
+
+def test_a_single_item_larger_than_the_budget_is_split_not_appended():
+    """The bug this test exists for.
+
+    The first version tested only whether adding the NEXT item would overflow. An item already over the
+    budget therefore went in whole and the chunk came out past the ceiling, which on a dense page is
+    exactly what the ceiling exists to prevent: something the next stage has to reject. A real page of
+    800-token prose would have produced an unembeddable-by-budget chunk while every test passed.
+    """
+    huge = "This is a sentence about fees and schedules. " * 90      # well over 512 tokens
+    document = {
+        "body": {"children": [{"$ref": "#/texts/0"}]},
+        "texts": [{"self_ref": "#/texts/0", "label": "paragraph", "text": huge,
+                   "prov": [{"page_no": 1, "bbox": {"l": 53, "t": 700, "b": 660}}]}],
+        "tables": [],
+    }
+    chunks = chunker.chunk_document(document, "doc", "sha")
+    assert len(chunks) > 1, "an oversized page must become more than one chunk"
+    for chunk in chunks:
+        assert chunker.estimate_tokens(chunk.text) <= chunker.MAX_TOKENS, (
+            f"a chunk came out over the ceiling at {chunker.estimate_tokens(chunk.text)} tokens")
+
+
+def test_splitting_happens_at_sentence_boundaries():
+    """A citation that quotes half a sentence reads as a misquote, so a split lands between sentences."""
+    paragraph = "The rate is 67 cents per mile. " * 60
+    pieces = chunker.split_oversized(paragraph, [], 1, {})
+    assert len(pieces) > 1
+    for piece in pieces[:-1]:
+        assert piece.rstrip().endswith("."), f"split mid-sentence: {piece[-40:]!r}"
+
+
+def test_a_page_that_fits_stays_one_chunk():
+    """The ceiling is a ceiling, not a target. Padding a short page up to 384 tokens would mean
+    inventing text, and splitting a page that fits would cost a citation its context."""
+    document = {
+        "body": {"children": [{"$ref": "#/texts/0"}]},
+        "texts": [{"self_ref": "#/texts/0", "label": "paragraph", "text": "A short policy note.",
+                   "prov": [{"page_no": 1, "bbox": {"l": 53, "t": 700, "b": 660}}]}],
+        "tables": [],
+    }
+    chunks = chunker.chunk_document(document, "doc", "sha")
+    assert len(chunks) == 1
+    assert chunker.estimate_tokens(chunks[0].text) < chunker.MIN_TOKENS
