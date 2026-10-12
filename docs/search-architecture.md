@@ -62,6 +62,45 @@ our actual failure case.
 - **Consolidating onto `pgvector` to remove Qdrant.** Qdrant's filtered-search recall and its quantisation
   are features we would have to rebuild, and the measured filter behaviour is a reason to keep it.
 
+## An uncertain read goes to a person, not to a refusal
+
+Decided by Anthony, 2026-10-12. The failure being answered is the worst one this system has. OCR
+misreads a character, so the wrong number is faithful to the document as parsed. Retrieval finds it
+because it matches the question. The model cites it. Layer 1 confirms the number is present in the
+cited passage, because OCR is what put it there. Every check passes and the client receives a confident
+wrong figure with a real citation, and no other layer can see it. The confidence figure is the only
+signal that separates what the document says from what OCR thought it saw.
+
+The answer is not to refuse. A refusal costs the client an answer they could have had, and it fires on
+correct answers too, because a badly scanned correct number is indistinguishable from a badly scanned
+wrong one. The answer is to ask. Anthony's framing: show the reviewer the original region beside what
+the scan made of it, the way one person asks another to confirm a number they can both see. The score's
+whole job is to tell us which regions are worth asking about.
+
+That shape is already in this design. The research reached for the same mechanism on the superseded
+document, where every retrieval metric is fine and the answer is still wrong, and named "a review
+queue in the UI". The brief already plans the surface: the client app's Review tab in C4.
+
+What it needs, in order:
+
+- **Per-page confidence, or better per-line.** Not yet available; see `RET-PARSE-002`. This is the one
+  unsolved piece.
+- **Per-item bounding boxes and the page image.** Already in the structured output for text and table
+  cells, so a review item is a crop of a known region on a known page.
+- **A place to put the answer.** The Review surface in C4, and a database query before that.
+
+Two limits, recorded now so they are not discovered later. **Confidence cannot see a page that was
+never scanned**: no image means no recognition and no score, so a misfeed or a missing page is
+invisible to this mechanism and has no check anywhere in the design. **A confirmation has to be stored**,
+or the same page is flagged on every query and the client learns to ignore the flag.
+
+**How much machinery it gets is a measurement, not a decision.** Anthony, 2026-10-12: this is tunable as
+we go, and the first question is how many documents actually come out needing a person. If it is one
+page a month, a query over the database is the whole feature and C4 can present it whenever it is built.
+If it is hundreds, the queue is a product surface with triage, bulk actions and a way to clear it, and
+that is a different piece of work. So the order is: get a per-line confidence figure, run it over the
+fixture corpus, and count. The count decides the build.
+
 ### The reranker runs on someone else's silicon, so it carries two rules
 
 **The data-classification gate.** On the cloud build the reranked passages leave the box, because the
@@ -178,6 +217,9 @@ Accuracy-critical first, and **measurements before code**. The full ordering is 
 
 - **`bge-m3`'s CPU throughput.** The 28-hours-for-50k-pages figure is arithmetic, not measurement, and it
   could be wrong by three times either way. It gates any client-facing throughput or pricing promise.
+- **Whether a confidence figure can be had per line.** `RET-PARSE-002`. The review design depends on
+  it, and the cheapest route is the OCR engine the container already carries rather than a different
+  parser. Worth one measurement before it shapes the ingestion record.
 - **Whether reranking improves retrieval on our documents.** The latency question is settled and
   recorded in `docs/runbook.md` step 3.3. What the latency number cannot say is whether reordering the
   fused list actually moves a citation onto the right page, which is the only reason to pay for the
