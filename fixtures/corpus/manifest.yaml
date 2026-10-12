@@ -1,0 +1,88 @@
+# The fixture corpus: real business documents from Tier 1 sources, with the licence read at the source.
+#
+# Why these and not a downloaded dataset. `docs/evaluation-corpora.md` lists what we may use and records
+# that nothing had been downloaded when it was written. Two of its named sources, DocLayNet and the CUAD
+# QA form, are distributed as `datasets`-library loaders rather than as files, which means fetching them
+# needs the Hub client and access to upstream archives. These four are direct HTTP files from SEC EDGAR
+# and the IRS, so a client box can fetch them with curl and no credentials.
+#
+# What each one is for, mapped to the brief's six hard cases:
+#
+#   * narrative prose with real page structure       -> the IRS publication, and both exhibits
+#   * financial tables                                -> the 10-K itself, dozens of them
+#   * contract clauses with real legal numbering      -> the two EX-10 exhibits
+#   * a long document, for chunk-count and timing     -> the 10-K, about 90 pages as filed
+#
+# What is NOT here, and why, so nobody assumes coverage we do not have:
+#
+#   * a scanned document with no text layer. SEC and IRS serve text and HTML, so nothing here exercises
+#     OCR. The parser's scanned-document gate is proved separately in runbook step 3.4, against a fixture
+#     this project authored, and the two are complementary: 3.4 proves a scan can be read, this proves
+#     real documents can be retrieved from and cited.
+#   * a spreadsheet, an email thread, and slide decks. Those need sources whose licence has been read
+#     first; `docs/evaluation-corpora.md` records the spreadsheet route as SpreadsheetBench Verified
+#     (CC BY-SA 4.0) and the email route as Enron through the CC BY 3.0 EnronData.org distribution.
+
+corpus_version: "fixture-v1"
+
+# A declared User-Agent is required by SEC's access terms, and it is the polite thing to do for the IRS.
+# Read the terms at https://www.sec.gov/os/accessing-edgar-data, which caps requests at 10 per second.
+user_agent: "oi-core-fixture/0.1 (anthony.stachowitz@gmail.com)"
+request_delay_seconds: 0.5
+
+documents:
+  - id: apple-10k-2024
+    path: apple-10k-2024.htm
+    url: https://www.sec.gov/Archives/edgar/data/320193/000032019324000123/aapl-20240928.htm
+    title: Apple Inc. Annual Report on Form 10-K for the fiscal year ended 28 September 2024
+    source: SEC EDGAR
+    source_url: https://www.sec.gov/Archives/edgar/data/320193/000032019324000123/
+    licence: US federal public record. Filed with the SEC and available to the public at no charge; no
+      agreement, fee or gating. Verified 2026-10-12 by reading the filing index page.
+    fetched: 2026-10-12
+    what_it_tests: the long-document case and the table case. Financial statements with real figures,
+      many of them repeated across notes, which is where a wrong citation is easiest to miss.
+
+  - id: apple-ex10-1-2024
+    path: apple-ex10-1-2024.htm
+    url: https://www.sec.gov/Archives/edgar/data/320193/000032019324000123/a10-kexhibit10199282024.htm
+    title: Exhibit 10.1 to the Apple Inc. Form 10-K, a material contract
+    source: SEC EDGAR
+    source_url: https://www.sec.gov/Archives/edgar/data/320193/000032019324000123/
+    licence: US federal public record.
+    fetched: 2026-10-12
+    what_it_tests: the contract case. Numbered clauses, defined terms and cross-references, which is the
+      shape that makes naive chunking produce a clause with no idea which agreement it belongs to.
+
+  - id: apple-ex10-22-2024
+    path: apple-ex10-22-2024.htm
+    url: https://www.sec.gov/Archives/edgar/data/320193/000032019324000123/a10-kexhibit10229282024.htm
+    title: Exhibit 10.22 to the Apple Inc. Form 10-K, a material contract
+    source: SEC EDGAR
+    source_url: https://www.sec.gov/Archives/edgar/data/320193/000032019324000123/
+    licence: US federal public record.
+    fetched: 2026-10-12
+    what_it_tests: the second contract, and the near-duplicate case. Two agreements from the same filer
+      share boilerplate, so retrieving the right one is a real test rather than a formality.
+
+  - id: irs-p15-2026
+    path: irs-p15.pdf
+    url: https://www.irs.gov/pub/irs-pdf/p15.pdf
+    title: IRS Publication 15, Employer's Tax Guide
+    source: Internal Revenue Service
+    source_url: https://www.irs.gov/forms-instructions
+    licence: >-
+      US federal public record, read at the source rather than assumed. The IRS copyright notice states
+      verbatim: "Content on this website that was created or maintained by federal employees in the
+      course of their duties is not subject to copyright and may be freely copied. Credit is requested."
+      The same notice adds a condition that matters here: "If copyrighted material appears on the site,
+      or is reached through a link on this site, the copyright holder must be consulted before the
+      material may be reproduced."
+      Source: https://www.irs.gov/about-irs/use-of-content-from-irsgov, read 2026-10-12.
+      An earlier version of this manifest said the PDF's own pages carried a copyright notice. They do
+      not: 6,820 lines of extracted text contain no mention of copyright at all. The claim was written
+      before it was checked, and the check replaced it with the notice above.
+    fetched: 2026-10-12
+    what_it_tests: the dense policy prose case, and the one a small business would plausibly ask
+      questions about. Rate tables and percentage methods, which are the figures where a wrong reading
+      produces a wrong answer with a real citation.

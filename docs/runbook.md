@@ -1347,6 +1347,83 @@ for it uses a page of 800-token prose, which is what a real schedule's dense pag
 - A fee reported as appearing in a page chunk as well as the table: the body-children walk is not
   excluding table references, and the same figures now sit in two retrievable places.
 
+### 3.6 The fixture corpus and the question set
+
+**Goal.** Real business documents to measure against, with the licence for each read at the source, and a
+hand-written question set over them. C2's decisions need a yardstick, and this is it.
+
+**Commands.**
+
+    cd /opt/oi-core
+    python3 fixtures/corpus/fetch_corpus.py
+    python3 fixtures/corpus/fetch_corpus.py --verify
+    python3 fixtures/corpus/validate_corpus.py
+
+**Expected.** Four documents fetched with a sha256 each, then `ok` for all four on the verify pass, then
+`both files agree with each other and with the lockfile`.
+
+    fetch apple-10k-2024         https://www.sec.gov/Archives/...
+          1503891 bytes  sha256 812f766e3cd4f3c5
+    ...
+    fetched 4, already present or verified 0, documents in the corpus 4
+
+**What just happened.** The corpus is four public documents fetched directly over HTTP: a 10-K, two
+contract exhibits from the same filing, and an IRS publication. `docs/evaluation-corpora.md` had already
+decided the licence policy and named the sources; what this step adds is the actual bytes and the record
+of which bytes.
+
+**Why files from EDGAR and the IRS rather than one of the named datasets.** Two of that document's named
+sources, DocLayNet and the CUAD QA form, are distributed as `datasets`-library loaders rather than as
+files. Fetching them needs the Hub client and access to upstream archives, which a client box may not
+have. SEC EDGAR and the IRS serve files directly, so this corpus fetches with the standard library and
+nothing to install. The named datasets are not rejected, they are deferred, and the manifest says which
+case each would cover that this one does not.
+
+**The lockfile is the part that makes this a fixture.** `corpus.lock.json` records the URL, the fetch
+date, the size and the sha256 for each document. A corpus whose bytes can change under it is not a
+fixture: the same questions applied to different bytes are a different test. So the fetcher refuses to
+use a file whose hash does not match, and `--force` refetches while reporting that the source moved.
+When a result moves and nobody changed the code, the lockfile is the first file to diff.
+
+**What the corpus covers, and the two cases it does not.**
+
+| Case | Covered by |
+|---|---|
+| long document, dozens of real tables | the 10-K |
+| contract clauses with legal numbering | the two EX-10 exhibits |
+| dense policy prose with rate tables | the IRS publication |
+| near-duplicate documents | the two exhibits, which share boilerplate |
+| **a scanned document with no text layer** | **not here.** EDGAR and the IRS serve text and HTML |
+| **a spreadsheet, an email thread, slide decks** | **not here.** Both need a source whose licence is read first |
+
+The scanned case is proved separately, in step 3.4, against a fixture this project authored. The two are
+complementary and neither substitutes for the other: 3.4 proves a scan can be read, this proves real
+documents can be retrieved from and cited.
+
+**The question set is written, and its answers are not.** Ten questions, eight answerable and two that
+must produce a refusal. The six requirements from `docs/evaluation-corpora.md` are represented
+deliberately: paraphrase rather than quotation, unanswerable questions, a required page number, a
+table-cell answer, a two-document answer, and coverage of the smallest document rather than only the
+largest.
+
+Every `reference_answer` is null, and that is deliberate rather than unfinished. A reference answer is a
+claim that a specific fact appears on a specific page, and the only honest way to write one is to read
+the parsed text. This corpus's own manifest caught that mistake once already, where a licence was
+described before it was read and the description was wrong. So the questions are mine and the answers get
+filled in from the parsed pages, in the ingestion step, and the validator refuses to let the set claim
+completeness while they are missing.
+
+**If it breaks.**
+
+- A fetch fails with 403 from `sec.gov`: the User-Agent is missing or does not identify a contact. SEC's
+  access terms require a declared agent and cap requests at 10 per second, which is what
+  `request_delay_seconds` in the manifest is for.
+- `refusing to use ... its hash does not match the lockfile`: a source has changed the bytes at a URL
+  that looked permanent. That is a finding about the corpus, not a hiccup. Re-run with `--force` to
+  accept the new bytes and see what moved, and record why in the manifest.
+- The validator reports a question drawing on a document that is not in the manifest: the two files have
+  drifted. That is what the check is for, and CI runs it on every pull request.
+
 ## Phase 4 — Assistant API  *(outline)*
 
 The single surface the client app talks to: ask, tasks, approvals, activity, settings.
