@@ -1138,36 +1138,55 @@ The fixture has no text layer on purpose, and the generator refuses to write one
 that succeeds by copying characters out of the PDF has proved nothing about OCR, which is why the last
 line of the generator's output is a count of extractable characters and it must be zero.
 
-**The result, 2026-10-11.** Run on the reference instance, parser container, CPU, nothing else
-running:
+**The result, 2026-10-11 and 2026-10-12.** Run on the reference instance, parser container, CPU,
+nothing else running:
 
 | | |
 |---|---|
-| Parse time | 9 seconds for the one-page scan, OCR included |
+| Parse time | 9 seconds for the one-page scan, OCR included; `processing_time` 4.98s |
 | Text recovered | 3,321 characters of markdown from a page with no text layer |
 | Graded values | 7 of 7 present and beside the right label |
 | Reading order | Correct. The two columns came back in order, left prose before the right-hand table |
-| Structured output | **None returned.** `json_content` was empty, so no page or table provenance |
+| Structured output | One page, two tables, 12 cells each, per-cell bounding boxes, all on page 1 |
+| Confidence | Document level: OCR 0.989, mean 0.939 (excellent), low 0.894 (good) |
 
 Nine seconds a page on CPU is inside the range the research predicted, 3.1 seconds for a text page and
 13 where OCR runs, and it puts a 5,000-page client corpus at about twelve hours of parsing. That is a
 batch job, not a problem, and it is the number any throughput or pricing promise has to be built on.
 
-**Two things this run exposed, both open.**
+**Three things this run exposed. One was mine, one is chunker work, one is a real gap.**
 
-*The structured output is missing.* The gate asked for `json_content` and got nothing back, while the
-markdown came through completely. That matters beyond tidiness: per-page citations, table cells, and
-the per-page OCR confidence the architecture requires all live in the structured output, not in
-markdown. Markdown alone gives a good answer and no way to prove which page it came from, which is the
-one thing this system sells. The next step is to find out whether the request was wrong or the service
-does not return it in this shape.
+*The structured output was never missing.* The first run reported none, and the cause was the request:
+the options were sent nested under a single `convert_options` field, which the service ignored in
+silence. It fell back to markdown only and answered `status: success`. Sent as top-level form fields,
+`json_content` arrives with everything the architecture needs. Worth remembering as a shape: a
+successful status on a request the service quietly reinterpreted, whose symptom is indistinguishable
+from the feature not existing.
 
-*A split table arrives as two tables.* The one logical fee schedule comes back as two markdown tables,
-three rows and then four, because the table is longer than its column and Docling emits one block per
-region. Nothing in the parsed output says they are the same table. The chunker will have to join them,
-or the answer will cite half a fee schedule. The architecture already says never split a table and keep
-a table_id; what this adds is that a table can arrive pre-split by the parser rather than by our own
-chunking, so the joining has to happen before the split rule applies.
+*The split table is joinable.* One logical fee schedule arrives as two tables because it is longer than
+its column. Both carry `prov` with `page_no: 1` and adjacent bounding boxes, table 0 at x 53 to 297 and
+table 1 at x 315 to 559, with table 1's cells at the top of the page and table 0's lower down. Two
+columns, one page, adjacent. So the split is recoverable from provenance and the joining belongs to the
+chunker in step 3.5. The architecture already says never split a table; what this adds is that a table
+can arrive pre-split by the parser, so the join has to happen before the split rule applies.
+
+*The OCR confidence is document-level only, and that is a real gap.* The number exists and it is good:
+OCR 0.989 on a page nobody could read without OCR. But Layer 0's confidence gate is specified to refuse
+a claim from a poorly-read page, and Docling's own source says what is available:
+
+    class ConfidenceScores(BaseModel):
+        """JSON-safe snapshot of docling confidence scores. ...
+        Document-level only. A per-page breakdown can be added later as an
+        optional ``pages`` field without breaking this shape."""
+
+Per-page confidence is computed inside Docling, where it is stored in the `pages` field of its own
+`ConfidenceReport`, and it does not survive into the service's wire schema. So the gate as written
+cannot be built on this output. A document-level average cannot say which page was read badly, and on a
+multi-page scan the low score that matters is on one page.
+
+Two other fields in that report are `None`, and neither is a fault. `table_score` is documented "not yet
+implemented", and `parse_score` is the 10th percentile of *digital* text cells, which a pure scan has
+none of. Neither should be read as a zero.
 
 One small correction to the fixture itself: it is one page, and a comment in its generator claimed the
 table ran onto a second page. It does not. The split is column-wise. A page-straddling table is a

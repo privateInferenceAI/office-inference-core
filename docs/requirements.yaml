@@ -188,18 +188,37 @@ items:
     tier: [cloud, office, hosted]
     phase: C2
     verify: a scanned fee-schedule fixture returns correct numbers in a table, and a scanned page returns text rather than nothing
+    status: verified
+    note: >-
+      Verified 2026-10-12 on the reference instance, recorded in docs/runbook.md step 3.4. A one-page
+      scan with no text layer returned 3,321 characters of markdown containing all seven graded
+      values, each beside its own label, in correct two-column reading order, in 9 seconds on CPU. The
+      structured output carries one page and two tables of 12 cells each with row and column indices
+      and per-cell bounding boxes, so citations can point at a cell rather than a page. The first run
+      reported no structured output at all and that was our request, not the service: the options were
+      nested under one convert_options field, which the service ignored while answering success. Two
+      pieces of follow-up work came out of the run and are recorded rather than folded in: the split
+      table now belongs to the chunker in 3.5, and the per-page OCR confidence gap is RET-PARSE-002.
+  - id: RET-PARSE-002
+    title: A page that OCR read badly is known, so a claim from it can be refused
+    tier: [cloud, office, hosted]
+    phase: C2
+    verify: a deliberately degraded scan produces a low confidence figure that the verifier can act on, and a clean scan does not
     status: open
     note: >-
-      First run 2026-10-11 on the reference instance, recorded in docs/runbook.md step 3.4. The halves
-      of the verification separate. The text half passes: a one-page scan with no text layer returned
-      3,321 characters of markdown containing all seven graded values, each beside its own label, in
-      correct two-column reading order, in 9 seconds on CPU. The table half does not pass yet, for two
-      reasons. The structured output came back empty, so there are no page or table structures and
-      therefore no page-level provenance, and page-level citation is the product. And one logical fee
-      schedule arrives as two markdown tables, split where the table exceeds its column, with nothing
-      in the output saying they are the same table. Both are open work on the parser integration
-      rather than on the document, and both must close before the chunker runs, because the chunker's
-      rules are written against structure the parser is not yet delivering.
+      Opened 2026-10-12 from the run recorded in docs/runbook.md step 3.4. Layer 0's confidence gate is
+      specified to refuse a numeric or identifier claim whose page OCR read badly, so it needs the
+      figure per page. Docling computes confidence per page, in the pages field of its own
+      ConfidenceReport, but the service's wire schema does not carry it. Docling's source is explicit:
+      ConfidenceScores is a "JSON-safe snapshot" that is "document-level only", with a per-page
+      breakdown named as something that "can be added later". What we receive is one report per
+      document: on the fixture, OCR 0.989, mean 0.939 graded excellent, low 0.894 graded good. A
+      document-level average cannot say which page was read badly, and on a multi-page scan that is the
+      only thing the gate needs to know. Options, none chosen: read the page-level scores through a
+      Docling path other than this endpoint, take confidence from a different OCR engine, or narrow the
+      requirement. Two fields in the report are None and neither is a fault: table_score is documented
+      not yet implemented, and parse_score is the 10th percentile of digital text cells, which a pure
+      scan has none of.
   - id: RET-EMBED-001
     title: The embedding model and its preprocessing are recorded per collection, and a mismatch is refused
     tier: [cloud, office, hosted]
