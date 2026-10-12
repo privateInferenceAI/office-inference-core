@@ -1192,6 +1192,56 @@ One small correction to the fixture itself: it is one page, and a comment in its
 table ran onto a second page. It does not. The split is column-wise. A page-straddling table is a
 different fixture and is not yet covered.
 
+### 3.4b What a confidently wrong read is, and what the profession does about it
+
+**Goal.** Settle what to do when OCR reads a number wrongly and reports high confidence. The gate above
+proves the parser works; this is about the one failure the parser cannot see in itself.
+
+**The measurement, 2026-10-12.** Forty trials carving defects into the cell whose truth is `145.00`.
+Fifteen readings changed the value and the confidence score flagged **one**. Fourteen wrong numbers
+passed at confidence 61 to 93, among them `145.60`, `146.00` and `145.08`. Then two engines, the
+parser's own RapidOCR and Tesseract:
+
+| | |
+|---|---|
+| rapidocr wrong | 4 of 40 |
+| tesseract wrong | 15 of 40 |
+| tesseract caught, of rapidocr's 4 failures | 2 |
+| still unflagged with both engines reading | 2 |
+| both engines wrong and agreeing | 2 |
+
+The two failures that beat both engines were both **truncated readings**, `14600` and `1450` for
+`14500`, which a digit-count check catches for nothing.
+
+**What that settles.** Confidence is a certainty-of-reading signal, not a correctness one, and
+calibration cannot change that because rescaling is monotone. The engine question is settled too:
+RapidOCR, which the pipeline already runs, is the strong reader here, and Tesseract earns its place as a
+checker rather than an equal.
+
+**Four research angles, in `docs/research/`.** Open-source stacks: no project catches this, and every
+confidence gate in that landscape deletes text below 0.5, which for a number is worse than nothing.
+Commercial vendors: none claims to catch it, and two say in print that their score is not a probability.
+Verification practice: the cheque industry has never trusted one reading at any confidence, and requires
+two, while accounting reconciles against a bank feed rather than proofreading. The literature: Tesseract's
+value is an affine compression of an unnormalised score, the result matching this measurement was
+published in 2009, and the pattern prescribed is redundancy the defect cannot corrupt twice.
+
+**The decision, recorded in `docs/search-architecture.md`.** Do it the way the profession does it, and
+not by putting eyes on every document. Six controls in order: format, range and checksum checks on every
+extracted figure; cross-field arithmetic where a document has the relationships, line items to subtotal
+and subtotal plus tax to total; a second independent reading of any cited figure as an escalation gate
+and never a vote; human review of what those flag, one field with the source fragment beside it; the
+override recorded as machine value against human value; and disclosure where a figure passed no check
+and had no second source.
+
+**The queue is the one number still unknown.** It decides whether the review surface is a database query
+or a product with triage and bulk actions, and it depends on the client's actual paper rather than on
+synthetic damage. That is a fixture-corpus question, and it does not block the chunker.
+
+**What the plan gets wrong if this is skipped.** `RET-PARSE-001` closes on the gate and looks like the
+end of parsing. It is not: the gate proves the parser reads a clean scan correctly, and says nothing
+about the failure that reaches a client as a wrong number with a real citation.
+
 **If it breaks.**
 
 - `docker compose` reports no such service: the compose file on the box is older than the pull. Check

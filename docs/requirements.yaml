@@ -235,9 +235,15 @@ items:
       queue actually is, which decides whether it is a database query or a product surface; whether the
       client's own records can serve as the second source, which is later work; and per-page confidence
       for triage, which Docling computes and does not expose, now less urgent because triage is a weaker
-      job than detection. Two limits recorded rather than discovered later: confidence cannot see a page
-      that was never scanned, so completeness has no check anywhere in this design; and a confirmation
-      must be stored, or the same figure is flagged on every question.
+      job than detection; and how large the review queue is, which depends on a client's real paper
+      rather than on synthetic damage and is therefore a fixture-corpus question. The engine question is
+      settled by measurement in docs/runbook.md step 3.4b: over forty damaged readings of a known cell,
+      RapidOCR was wrong on four and Tesseract on fifteen, Tesseract caught two of RapidOCR's four, and
+      two failures beat both engines. Both of those were truncated readings, 14600 and 1450 for 14500,
+      so a digit-count check catches them for nothing and belongs with the format control above. Two
+      limits recorded rather than discovered later: confidence cannot see a page that was never scanned,
+      so completeness has no check anywhere in this design; and a confirmation must be stored, or the
+      same figure is flagged on every question.
 
   - id: RET-EMBED-001
     title: The embedding model and its preprocessing are recorded per collection, and a mismatch is refused
