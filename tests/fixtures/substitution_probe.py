@@ -54,10 +54,27 @@ TRUTH = "145.00"
 PARSER = "http://parser:5001"
 LOW_CONFIDENCE = 60.0
 
-# What "the reading changed" means for a rate cell. Punctuation and a gridline caught in the margin are
-# not changes; the digits are.
 def value_of(text: str) -> str:
+    """The digits of a reading, which is what a rate cell's value is.
+
+    Punctuation is ignored, because a comma read as a period is not a changed value and a gridline
+    caught in the margin is not either. What is left is compared whole: an earlier version asked
+    whether the truth appeared anywhere in the read, which reported '145100' as unchanged although a
+    digit had been inserted. Two of forty trials were misclassified that way.
+    """
     return "".join(character for character in text if character.isdigit())
+
+
+def is_malformed(reading: str) -> bool:
+    """Whether a changed reading is broken in a way something other than confidence could notice.
+
+    A letter in a number, or a digit count that does not match the original, is a mechanical fault: a
+    length check or a character-class check catches it without any confidence figure. A wrong digit in
+    the right place is not, and that distinction turned out to matter more than the confidence scores.
+    """
+    if any(character.isalpha() for character in reading):
+        return True
+    return len(value_of(reading)) != len(value_of(TRUTH))
 
 
 def parse_document() -> dict:
@@ -179,6 +196,8 @@ def main() -> int:
     rng = random.Random(SEED)
     buckets = {"same-confident": 0, "same-low": 0, "changed-low": 0, "changed-confident": 0,
                "unreadable": 0}
+    changed_malformed = 0
+    changed_plausible = 0
     print()
     print(f"{TRIALS} trials, low-confidence line at {LOW_CONFIDENCE:.0f}")
     print(f"{'#':>3}  {'read':>10} {'value':>7} {'conf':>6}  what changed")
@@ -195,6 +214,10 @@ def main() -> int:
                 bucket = "same-confident" if confidence >= LOW_CONFIDENCE else "same-low"
             else:
                 bucket = "changed-low" if confidence < LOW_CONFIDENCE else "changed-confident"
+                if is_malformed(text):
+                    changed_malformed += 1
+                else:
+                    changed_plausible += 1
             buckets[bucket] += 1
             shown = "n/a" if confidence is None else format(confidence, ".0f")
             marker = ""
@@ -210,11 +233,27 @@ def main() -> int:
     print(f"read CHANGED, low confidence:   {buckets['changed-low']:>3}   (caught)")
     print(f"read CHANGED, still confident:  {buckets['changed-confident']:>3}   (missed)")
     print(f"unreadable:                     {buckets['unreadable']:>3}")
+    changed = buckets["changed-low"] + buckets["changed-confident"]
+    print()
+    print("Where a threshold would and would not help:")
+    print(f"  a wrong reading that confidence flagged:   {buckets['changed-low']:>3}")
+    print(f"  a wrong reading that confidence passed:    {buckets['changed-confident']:>3}")
+    print(f"  a clean reading that confidence flagged:   {buckets['same-low']:>3}   (cost of a threshold)")
+    print()
+    if changed:
+        print(f"  sensitivity: {buckets['changed-low']} of {changed} wrong readings caught "
+              f"({100 * buckets['changed-low'] / changed:.0f}%)")
+    print("Of the wrong readings, how they were wrong:")
+    print(f"  malformed, so a length or character check catches it: {changed_malformed:>3}")
+    print(f"  a plausible number with a wrong digit:                {changed_plausible:>3}")
     print()
     if buckets["changed-confident"]:
-        print("Confidence is not sufficient. A defect changed the value and OCR reported the change with")
-        print("the confidence of a clean read, so a threshold would pass a wrong number through. The")
-        print("review design needs a second signal for substitution, not only for blur.")
+        print("Confidence is not sufficient on its own. Defects changed the value and OCR reported the")
+        print("change with the confidence of a clean read, so a threshold passes wrong numbers through.")
+        if changed_plausible:
+            print("The malformed ones are catchable by parsing the value: a letter in a number, or the")
+            print("wrong count of digits, needs no confidence figure at all. The plausible ones are the")
+            print("hard case, and no layer in this design currently sees them.")
     else:
         print("Every changed reading came with a confidence drop in this sample, so a threshold would")
         print("have caught them. Small sample, so treat it as a direction rather than a rate.")
