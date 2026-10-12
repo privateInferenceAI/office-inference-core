@@ -261,16 +261,18 @@ def main() -> int:
     print(f"BOTH WRONG AND AGREEING:         {stats['both_wrong_agree']:>3} of {total}"
           f"   ({100 * stats['both_wrong_agree'] / total:.0f} percent)")
     print()
-    both_wrong = stats["both_wrong_agree"] + (stats["disagree"] - stats["t_right_r_wrong"]
-                                              - stats["r_right_t_wrong"])
     # The counter that matters is per engine, because the design names one engine as primary and the
-    # other as the checker. An earlier version of this summary compared counts that did not belong
-    # together and printed "750 percent of them", which is how the error was caught.
-    t_wrong = total - stats["both_right"] - stats["r_right_t_wrong"]
-    r_wrong = total - stats["both_right"] - stats["t_right_r_wrong"]
+    # other as the checker. Two earlier versions of this summary were wrong in different ways. The
+    # first printed "750 percent of them", a ratio over the wrong denominator. The second had these
+    # two totals swapped, so it reported rapidocr wrong on 15 trials and tesseract on 4, which is the
+    # exact inverse of the run and reads perfectly coherently. That is the more dangerous kind of
+    # wrong, because nothing about it invites a second look.
+    #
+    # The keys name which engine was right, so t_right_r_wrong is a trial tesseract read correctly and
+    # rapidocr did not: it counts a RAPIDOCR failure.
+    t_wrong = total - stats["both_right"] - stats["t_right_r_wrong"]
+    r_wrong = total - stats["both_right"] - stats["r_right_t_wrong"]
     caught = stats["t_right_r_wrong"]
-    both_wrong = t_wrong + r_wrong - (stats["t_right_r_wrong"] + stats["r_right_t_wrong"]) \
-        + stats["both_wrong_agree"]
     print(f"tesseract wrong on:  {t_wrong:>3} of {total}")
     print(f"rapidocr  wrong on:  {r_wrong:>3} of {total}")
     print()
