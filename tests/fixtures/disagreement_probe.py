@@ -191,6 +191,38 @@ def main() -> int:
         "both_right": 0, "disagree": 0, "both_wrong_agree": 0,
         "t_right_r_wrong": 0, "r_right_t_wrong": 0,
     }
+
+    # The control, and it has to vary something to measure anything. Reading one clean cell twice
+    # through the same path is deterministic and would only ever report zero. What varies in the
+    # design is the STAGE, which is the research's own warning: two engines over one identically
+    # prepared crop share a failure mode. So the control stages each engine differently and asks
+    # whether they still agree on an undamaged cell.
+    #
+    # Two stagings, both defensible on their own: as rendered, and at double resolution, which is what
+    # a pipeline does when a figure looks small. If the engines disagree on a clean cell under a
+    # staging change, then staging noise is part of every disagreement this run reports and the gate
+    # is weaker than the damaged-cell numbers alone suggest.
+    stagings = {"as-rendered": 1.0, "upscaled x2": 2.0}
+    print("clean-cell control, engines staged differently:")
+    staging_disagreements = 0
+    with tempfile.TemporaryDirectory() as tmp_name:
+        tmp = Path(tmp_name)
+        for label, factor in stagings.items():
+            w, h = clean_cell.size
+            scaled = clean_cell.resize((int(w * factor), int(h * factor)), Image.LANCZOS)
+            t_value = value_of(read_with_tesseract(scaled, tmp))
+            r_value = value_of(read_with_rapidocr(scaled, tmp))
+            agree = t_value == r_value == truth
+            staging_disagreements += not agree
+            print(f"  {label:<14} tesseract {t_value!r} rapidocr {r_value!r} "
+                  f"{'agree' if agree else 'DISAGREE'}")
+    if staging_disagreements:
+        print("  a staging change alone moves a reading, so part of every disagreement below is the")
+        print("  staging rather than the document, and the gate needs that noise floor subtracted")
+    else:
+        print("  both stagings read the clean cell correctly on both engines, so the noise floor of the")
+        print("  signal is low and the damaged-cell disagreements below carry information")
+    print()
     print()
     print(f"{TRIALS} trials on damaged copies of the clean cell")
     print(f"{'#':>3}  {'tesseract':>10} {'rapidocr':>10}  {'verdict':<26} what changed")
@@ -231,18 +263,25 @@ def main() -> int:
     print()
     both_wrong = stats["both_wrong_agree"] + (stats["disagree"] - stats["t_right_r_wrong"]
                                               - stats["r_right_t_wrong"])
-    both_wrong_disagreed = stats["disagree"] - stats["t_right_r_wrong"] - stats["r_right_t_wrong"]
-    if both_wrong:
-        escalated = stats["disagree"]
-        print(f"Engines failed on {both_wrong} of {total} trials.")
-        print(f"  Disagreement flagged {escalated} of those failures, so an escalation gate would have")
-        print(f"  sent {100 * escalated / both_wrong:.0f} percent of them to a person.")
-        print(f"  Of the {escalated} flagged, the correct value was recoverable in "
-              f"{stats['t_right_r_wrong'] + stats['r_right_t_wrong']}, because one engine was right.")
-        print(f"  In {both_wrong_disagreed} of them BOTH engines were wrong and disagreement could only")
-        print(f"  say so, not which answer to trust. That is why disagreement escalates and never votes.")
-    else:
-        print("No trial defeated both engines, so this sample cannot separate the strategies.")
+    # The counter that matters is per engine, because the design names one engine as primary and the
+    # other as the checker. An earlier version of this summary compared counts that did not belong
+    # together and printed "750 percent of them", which is how the error was caught.
+    t_wrong = total - stats["both_right"] - stats["r_right_t_wrong"]
+    r_wrong = total - stats["both_right"] - stats["t_right_r_wrong"]
+    caught = stats["t_right_r_wrong"]
+    both_wrong = t_wrong + r_wrong - (stats["t_right_r_wrong"] + stats["r_right_t_wrong"]) \
+        + stats["both_wrong_agree"]
+    print(f"tesseract wrong on:  {t_wrong:>3} of {total}")
+    print(f"rapidocr  wrong on:  {r_wrong:>3} of {total}")
+    print()
+    print("A second reading with rapidocr primary and tesseract as the checker:")
+    print(f"  rapidocr alone leaves {r_wrong} wrong figures unflagged.")
+    print(f"  tesseract catches {caught} of those {r_wrong}, so "
+          f"{r_wrong - caught} would still go unflagged.")
+    print(f"  cost: {caught} correct readings escalated to a reviewer, on damaged cells only.")
+    print()
+    print(f"Both engines wrong AND agreeing: {stats['both_wrong_agree']} of {total}. These are the")
+    print("failures no second reader can see, and the number to watch as this measurement grows.")
     print()
     print("Read the clean line above before trusting any of this: if the engines disagree on a clean")
     print("scan, every disagreement in the archive is a coin toss and the gate is noise.")
