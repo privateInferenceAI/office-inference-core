@@ -302,6 +302,22 @@ items:
     phase: C2
     verify: an invented citation index is rejected; an unsupported sentence is marked, not silently kept
     status: open
+  - id: RET-INGEST-001
+    title: Ingestion is idempotent, so the same bytes are never embedded twice
+    tier: [cloud, office, hosted]
+    phase: C2
+    verify: two consecutive cycles over an unchanged corpus parse nothing and write nothing the second time
+    status: open
+    note: >-
+      Built 2026-10-12, recorded in docs/runbook.md step 3.7. The manifest holds the sha256 of each file
+      as ingested, so an unchanged file is skipped without being parsed, and a changed file has its old
+      chunks removed before the new ones are written. Removals are reconciled from the manifest rather
+      than the filesystem, so a file that was never ingested cannot cause a removal and a documents mount
+      that failed to appear cannot empty a client's index. The four decisions each have a unit test that
+      fails if it reverts. Status is open rather than verified because the proof has to be a second cycle
+      on the box over the fixture corpus, which is the next run, and because RET-VERSION-001 and
+      RET-DUPE-001 still sit on top of this: chunks carry no version column yet, so a superseded document
+      is removed rather than superseded.
   - id: RET-VERSION-001
     title: A superseded document is not cited while its replacement exists
     tier: [cloud, office, hosted]

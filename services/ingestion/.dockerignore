@@ -1,0 +1,7 @@
+# The build context is this directory, so this is small on purpose. service.yaml is the declaration a
+# renderer or a human reads; the container does not need it, and neither does it need the bytecode of a
+# module it recompiles on every start.
+__pycache__
+*.pyc
+service.yaml
+Dockerfile

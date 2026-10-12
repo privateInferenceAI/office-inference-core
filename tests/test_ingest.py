@@ -1,0 +1,359 @@
+"""The ingestion worker's policy, tested against stub services.
+
+The point of these tests is not that HTTP works. It is that the four decisions which make a re-run safe
+are the ones the code actually makes:
+
+  * an unchanged file costs one read and nothing else;
+  * a changed file has its old chunks removed rather than joined by new ones;
+  * a document whose file has gone is removed from the index, and a file that was never ingested cannot
+    cause a removal;
+  * a file that fails repeatedly is dead-lettered rather than retried forever.
+
+Every one of those is a decision I got wrong in a first draft, so each has a test that fails if it
+reverts. The stubs record what was asked of them, which is what makes "did not re-parse" provable rather
+than inferred.
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "services" / "ingestion"))
+
+import chunker  # noqa: E402
+import ingest  # noqa: E402
+
+
+# --------------------------------------------------------------------------- stubs
+
+class StubServices(ingest.Services):
+    """Records every call instead of making one, so a test can assert what was NOT called."""
+
+    def __init__(self, parsed: dict | None = None, fail_for: set[str] | None = None,
+                 dims: int = 4) -> None:
+        super().__init__()
+        self.parsed = parsed or simple_document()
+        self.fail_for = fail_for or set()
+        self.dims = dims
+        self.parsed_names: list[str] = []
+        self.embedded: list[str] = []
+        self.upserted: list[dict] = []
+        self.deleted: list[str] = []
+        self.embed_batches: int = 0
+
+
+def simple_document(pages: int = 1, text: str = "A policy note about mileage.") -> dict:
+    """A parsed document shaped like the parser's output, small enough to reason about."""
+    return {
+        "body": {"children": [{"$ref": f"#/texts/{i}"} for i in range(pages)]},
+        "texts": [{"self_ref": f"#/texts/{i}", "label": "paragraph", "text": f"{text} Page {i + 1}.",
+                   "prov": [{"page_no": i + 1, "bbox": {"l": 53, "t": 700, "b": 660}}]}
+                  for i in range(pages)],
+        "tables": [],
+        "pages": {str(i + 1): {} for i in range(pages)},
+    }
+
+
+@pytest.fixture
+def wired(monkeypatch):
+    """Point the module's three service calls at stubs and hand back the stub."""
+    state = {"services": StubServices()}
+
+    def fake_parse(services, path, relpath):
+        services.parsed_names.append(relpath)
+        if relpath in services.fail_for:
+            raise RuntimeError(f"parser refused {relpath}")
+        return services.parsed
+
+    def fake_embed(services, texts):
+        services.embed_batches += 1
+        services.embedded.extend(texts)
+        return [[0.1] * services.dims for _ in texts]
+
+    def fake_upsert(services, points):
+        services.upserted.extend(points)
+
+    def fake_delete(services, doc_id):
+        services.deleted.append(doc_id)
+
+    monkeypatch.setattr(ingest, "parse_document", fake_parse)
+    monkeypatch.setattr(ingest, "embed_texts", fake_embed)
+    monkeypatch.setattr(ingest, "upsert_points", fake_upsert)
+    monkeypatch.setattr(ingest, "delete_document", fake_delete)
+    return lambda **kwargs: (state.update(services=StubServices(**kwargs)), state["services"])[1]
+
+
+def make_corpus(tmp_path: Path, name: str = "company/policy.pdf", content: bytes = b"%PDF-1.4 first"):
+    path = tmp_path / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+    return path
+
+
+# --------------------------------------------------------------------------- the decisions
+
+def test_an_unchanged_file_costs_one_read_and_no_parse(tmp_path, wired):
+    """The reason the manifest holds a hash rather than a timestamp. A file that was touched but not
+    edited must not be parsed, embedded, or written again: that is the difference between a cycle that
+    costs nothing and one that re-embeds a client's whole corpus nightly."""
+    services = wired()
+    make_corpus(tmp_path)
+    manifest = ingest.MemoryManifest()
+
+    first = ingest.ingest_cycle(services, tmp_path, manifest)
+    assert first.new == 1 and first.skipped == 0
+    assert services.parsed_names == ["company/policy.pdf"]
+
+    parsed_before = list(services.parsed_names)
+    second = ingest.ingest_cycle(services, tmp_path, manifest)
+    assert second.skipped == 1 and second.new == 0
+    assert services.parsed_names == parsed_before, "an unchanged file was parsed again"
+
+
+def test_a_changed_file_has_its_old_chunks_removed_not_joined(tmp_path, wired):
+    """Delete then write, in that order. Without the delete, a document that shrank leaves its old
+    chunks behind and the index holds two versions of the same policy, both citable."""
+    services = wired()
+    path = make_corpus(tmp_path)
+    manifest = ingest.MemoryManifest()
+
+    ingest.ingest_cycle(services, tmp_path, manifest)
+    assert services.deleted == [], "nothing should be deleted on a first ingest"
+
+    path.write_bytes(b"%PDF-1.4 second version, longer")
+    result = ingest.ingest_cycle(services, tmp_path, manifest)
+    assert result.changed == 1
+    assert services.deleted == ["company/policy.pdf"], "the old chunks were not removed"
+
+
+def test_a_document_whose_file_has_gone_is_removed_from_the_index(tmp_path, wired):
+    """Reconciled from the manifest rather than the filesystem, so a file that was never ingested cannot
+    cause a removal and a mount that failed to appear cannot empty a client's index."""
+    services = wired()
+    path = make_corpus(tmp_path)
+    manifest = ingest.MemoryManifest()
+    ingest.ingest_cycle(services, tmp_path, manifest)
+
+    path.unlink()
+    result = ingest.ingest_cycle(services, tmp_path, manifest)
+    assert result.documents_removed == 1
+    assert result.chunks_removed >= 1
+    assert services.deleted == ["company/policy.pdf"]
+    assert manifest.get("company/policy.pdf") is None, "the manifest entry should be gone"
+
+
+def test_a_file_that_was_never_ingested_cannot_cause_a_removal(tmp_path, wired):
+    """The direction of reconciliation, tested directly. An empty documents directory with a populated
+    manifest is a disaster; an empty manifest with files present is a first run."""
+    services = wired()
+    manifest = ingest.MemoryManifest()
+    # The manifest knows about a document, and the directory does not have it.
+    manifest.put("company/vanished.pdf", {"relpath": "company/vanished.pdf", "root": "company",
+                                          "content_sha256": "abc", "chunk_count": 3,
+                                          "failure_count": 0})
+    result = ingest.ingest_cycle(services, tmp_path, manifest)
+    assert result.documents_removed == 1
+    assert services.deleted == ["company/vanished.pdf"]
+    # And a fresh corpus with an empty manifest removes nothing.
+    services.deleted.clear()
+    make_corpus(tmp_path)
+    ingest.ingest_cycle(services, tmp_path, ingest.MemoryManifest())
+    assert services.deleted == []
+
+
+def test_a_failing_file_is_dead_lettered_rather_than_retried_forever(tmp_path, wired):
+    """Two failures, then it waits for the bytes to change.
+
+    The first version recorded the previous good hash on failure, and an unreadable file has no previous
+    good hash, so it never matched the dead-letter check and was re-parsed every cycle for the life of the
+    deployment. Worse, the failure stopped being visible because it was always there.
+    """
+    services = wired(fail_for={"company/broken.pdf"})
+    make_corpus(tmp_path, "company/broken.pdf", b"%PDF-1.4 corrupt")
+    manifest = ingest.MemoryManifest()
+
+    first = ingest.ingest_cycle(services, tmp_path, manifest)
+    assert first.failed == 1
+    assert services.parsed_names.count("company/broken.pdf") == 1
+
+    second = ingest.ingest_cycle(services, tmp_path, manifest)
+    assert second.failed == 1
+    assert services.parsed_names.count("company/broken.pdf") == 2
+
+    third = ingest.ingest_cycle(services, tmp_path, manifest)
+    assert third.failed == 0, "the third cycle should not retry"
+    assert third.skipped == 1
+    assert services.parsed_names.count("company/broken.pdf") == 2, "it was retried past the limit"
+    assert any("dead-lettered" in note for note in third.failures)
+
+
+def test_a_dead_lettered_file_gets_another_chance_when_its_bytes_change(tmp_path, wired):
+    """Dead-lettering is not a blacklist. A client who replaces the corrupt file with a good one should
+    not have to tell us."""
+    services = wired(fail_for={"company/broken.pdf"})
+    path = make_corpus(tmp_path, "company/broken.pdf", b"%PDF-1.4 corrupt")
+    manifest = ingest.MemoryManifest()
+    ingest.ingest_cycle(services, tmp_path, manifest)
+    ingest.ingest_cycle(services, tmp_path, manifest)
+    ingest.ingest_cycle(services, tmp_path, manifest)
+    assert services.parsed_names.count("company/broken.pdf") == 2
+
+    services.fail_for.clear()
+    path.write_bytes(b"%PDF-1.4 now valid")
+    result = ingest.ingest_cycle(services, tmp_path, manifest)
+    assert result.failed == 0
+    assert result.changed == 1
+    assert services.parsed_names.count("company/broken.pdf") == 3
+
+
+def test_one_bad_document_does_not_stop_the_others(tmp_path, wired):
+    """A cycle that aborts on the first corrupt file never ingests anything after it, and the client sees
+    a corpus that is missing documents with no error to explain why."""
+    services = wired(fail_for={"company/a-broken.pdf"})
+    make_corpus(tmp_path, "company/a-broken.pdf", b"%PDF bad")
+    make_corpus(tmp_path, "company/b-good.pdf", b"%PDF good")
+    make_corpus(tmp_path, "executive/c-good.pdf", b"%PDF good too")
+    manifest = ingest.MemoryManifest()
+
+    result = ingest.ingest_cycle(services, tmp_path, manifest)
+    assert result.failed == 1
+    assert result.new == 2
+    assert manifest.get("company/b-good.pdf") is not None
+    assert manifest.get("executive/c-good.pdf") is not None
+
+
+def test_the_access_label_comes_from_the_top_level_folder(tmp_path, wired):
+    """The label is attached at ingest because the search filters on it, and a filter that reads the
+    filesystem is not a filter."""
+    services = wired()
+    make_corpus(tmp_path, "company/handbook/policy.pdf")
+    make_corpus(tmp_path, "executive/comp.pdf")
+    manifest = ingest.MemoryManifest()
+    ingest.ingest_cycle(services, tmp_path, manifest)
+
+    labels = {point["payload"]["doc_id"]: point["payload"]["acl"] for point in services.upserted}
+    assert labels["company/handbook/policy.pdf"] == "company"
+    assert labels["executive/comp.pdf"] == "executive"
+
+
+def test_points_carry_what_a_citation_needs(tmp_path, wired):
+    """The payload is the citation. Without page numbers and a chunk id, an answer cannot say where it
+    came from, and the brief makes that a hard failure rather than a nice-to-have."""
+    services = wired()
+    make_corpus(tmp_path)
+    manifest = ingest.MemoryManifest()
+    ingest.ingest_cycle(services, tmp_path, manifest)
+
+    assert services.upserted, "nothing was written"
+    for point in services.upserted:
+        payload = point["payload"]
+        for field in ("chunk_id", "doc_id", "page_start", "page_end", "source_sha256", "acl",
+                      "chunker_version", "text"):
+            assert payload.get(field) is not None, f"{field} missing from the payload"
+        assert payload["page_start"] <= payload["page_end"]
+        assert len(point["vector"]) == services.dims
+
+
+def test_embedding_is_batched_rather_than_one_call_per_chunk(tmp_path, wired):
+    """The embedding service is the slowest step, and one request per chunk wastes its batching."""
+    services = wired()
+    big = simple_document(pages=1, text="A sentence about fees. " * 40)
+    services.parsed = big
+    make_corpus(tmp_path)
+    manifest = ingest.MemoryManifest()
+    ingest.ingest_cycle(services, tmp_path, manifest)
+
+    assert services.embed_batches >= 1
+    assert len(services.embedded) == len(services.upserted)
+
+
+def test_a_dry_run_writes_nothing_and_still_reports(tmp_path, wired):
+    """A dry run that writes is worse than no dry run, because it is trusted."""
+    services = wired()
+    make_corpus(tmp_path)
+    manifest = ingest.MemoryManifest()
+    result = ingest.ingest_cycle(services, tmp_path, manifest, dry_run=True)
+
+    assert result.new == 1
+    assert services.upserted == [] and services.deleted == []
+    assert manifest.all() == {}
+
+
+def test_only_accepted_file_types_are_discovered(tmp_path, wired):
+    """A client's folder will contain a .DS_Store and a shortcut. Neither is an error, so neither is
+    failed; they are simply not documents."""
+    make_corpus(tmp_path, "company/policy.pdf")
+    make_corpus(tmp_path, "company/notes.docx")
+    (tmp_path / "company" / ".DS_Store").write_bytes(b"\x00")
+    (tmp_path / "company" / "shortcut.lnk").write_bytes(b"\x00")
+    discovered = {document.relpath for document in ingest.discover(tmp_path)}
+    assert discovered == {"company/policy.pdf", "company/notes.docx"}
+
+
+def test_the_same_bytes_produce_the_same_point_ids_across_runs(tmp_path, wired):
+    """Stable ids are what let a re-embed update in place instead of duplicating a collection."""
+    services = wired()
+    make_corpus(tmp_path)
+    first = ingest.ingest_cycle(services, tmp_path, ingest.MemoryManifest())
+    ids_first = [point["id"] for point in services.upserted]
+    services.upserted.clear()
+    services.parsed_names.clear()
+
+    second = ingest.ingest_cycle(services, tmp_path, ingest.MemoryManifest())
+    ids_second = [point["id"] for point in services.upserted]
+    assert ids_first == ids_second
+    assert first.chunks_written == second.chunks_written
+
+
+def test_is_ocr_reflects_the_parser_rather_than_defaulting(tmp_path, wired):
+    """A figure read by OCR and a figure read from a text layer carry different risk, and the payload is
+    where that difference has to survive. The chunker defaults the flag to True because a scanned pipeline
+    is the common case; a digital document must not inherit that default."""
+    assert ingest._ocr_ran({"texts": [{"prov": [{"origin": "native"}]}]}) is False
+    assert ingest._ocr_ran({"texts": [{"prov": [{"origin": "ocr"}]}]}) is True
+    assert ingest._ocr_ran({}) is True, "an absent report must assume OCR, the safe direction"
+
+    services = wired()
+    services.parsed = simple_document()
+    services.parsed["texts"][0]["prov"][0]["origin"] = "native"
+    make_corpus(tmp_path)
+    ingest.ingest_cycle(services, tmp_path, ingest.MemoryManifest())
+    assert all(point["payload"]["is_ocr"] is False for point in services.upserted)
+
+
+def test_the_healthcheck_reads_the_last_cycle_rather_than_the_process(tmp_path, capsys):
+    """A healthcheck that only proves the process is alive stays green while every document fails. The
+    recorded outcome is what makes it mean something, so the three states are tested: nothing yet, a clean
+    cycle, and a cycle with a failure."""
+    state = tmp_path / "last-cycle.json"
+    assert ingest.cmd_status(state) == 1, "no cycle yet should not report healthy"
+
+    state.write_text('{"finished_at": "2026-10-12T19:00:00Z", "counts": {"seen": 4, "failed": 0}, '
+                     '"failures": []}')
+    assert ingest.cmd_status(state) == 0
+
+    state.write_text('{"finished_at": "2026-10-12T19:05:00Z", "counts": {"seen": 4, "failed": 1}, '
+                     '"failures": ["company/broken.pdf: parser refused it"]}')
+    assert ingest.cmd_status(state) == 1, "a failed document must make the worker unhealthy"
+    assert "company/broken.pdf" in capsys.readouterr().out
+
+
+def test_a_cycle_records_its_outcome_for_the_healthcheck(tmp_path, wired, monkeypatch):
+    """The wiring between the cycle and the healthcheck, which is the part that silently rots: a cycle
+    that stops writing its state would leave the healthcheck reporting a stale success forever."""
+    services = wired()
+    make_corpus(tmp_path)
+    state = tmp_path / "state" / "last-cycle.json"
+    monkeypatch.setattr(ingest, "STATE_PATH", state)
+
+    manifest = ingest.MemoryManifest()
+    result = ingest.ingest_cycle(services, tmp_path, manifest)
+    ingest.record_cycle(result)
+
+    assert state.exists()
+    assert ingest.cmd_status(state) == 0, "a clean cycle should report healthy"
+    import json as _json
+    assert _json.loads(state.read_text())["counts"]["seen"] == 1

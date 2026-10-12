@@ -1,0 +1,43 @@
+name: ingestion
+location: either
+# A local build rather than a published image, because this worker is the part of the pipeline that is
+# ours: parsing is Docling's, embedding is TEI's, storage is Qdrant's, and the policy that makes a
+# re-run safe is this repository's.
+build: .
+packs: [document-chat]
+depends_on: [parser, embeddings, vector]
+ports: {}
+healthcheck:
+  # It has no listening socket by design, so health is "the last cycle completed without a failure",
+  # recorded by the cycle itself and read back by this subcommand. A worker that reported healthy because
+  # its process was alive would report healthy while every document failed, which is the failure mode
+  # worth catching.
+  exec: ["python3", "/app/ingest.py", "--status", "--state", "/state/last-cycle.json"]
+  interval_seconds: 300
+gpu:
+  required: false
+# Documents are the client's, and this worker holds them in memory mid-parse. Same class as the parser:
+# it sees the original bytes, so it lives on the confidential side of the boundary.
+data_class: confidential
+config_schema:
+  interval_seconds:
+    type: integer
+    default: 900
+    description: How often a cycle runs. A cycle with no changes costs one read per file.
+  embed_batch:
+    type: integer
+    default: 16
+    description: Chunks per embedding request. The service advertises a client batch limit of 32.
+  max_failures:
+    type: integer
+    default: 2
+    description: Failures before a document is dead-lettered until its bytes change.
+substrate:
+  office:
+    notes: >-
+      Runs on the same box as everything else and reads a bind-mounted documents directory. The corpus
+      never leaves the building, which is the constraint this whole build exists to satisfy.
+  cloud:
+    notes: >-
+      Runs on the reference instance against the same three services over the private network. In the
+      cloud build the documents directory is the client's own storage, mounted the same way.

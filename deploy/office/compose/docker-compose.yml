@@ -173,6 +173,68 @@ services:
       retries: 5
       start_period: 300s
 
+  # The ingestion worker: a document on disk becomes chunks in the vector store, once.
+  #
+  # Built from this repository rather than pulled, because this is the part of the pipeline that is ours.
+  # Parsing is Docling's, embedding is TEI's, storage is Qdrant's, and the policy that makes a re-run safe
+  # is the module this container runs.
+  ingestion:
+    build:
+      # The context is the service directory so the image carries two files rather than the repository.
+      context: ../../../services/ingestion
+      dockerfile: Dockerfile
+    image: oi-core/ingestion:local
+    container_name: ingestion
+    restart: unless-stopped
+    environment:
+      # The manifest, so an unchanged document is skipped rather than re-embedded. Without this the worker
+      # falls back to an in-memory manifest and re-ingests everything every cycle, which it says out loud
+      # in its output rather than doing quietly.
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      PARSER_URL: http://parser:5001
+      EMBED_URL: http://embeddings:80
+      VECTOR_URL: http://vector:6333
+      COLLECTION: documents
+      # Every 15 minutes. A cycle with no changes costs one read per file, so the interval is cheap and
+      # the delay before a new document is retrievable is what it buys.
+      INGEST_INTERVAL_SECONDS: "900"
+      INGEST_EMBED_BATCH: "16"
+      INGEST_MAX_FAILURES: "2"
+      INGEST_STATE_PATH: /state/last-cycle.json
+    volumes:
+      # Read-only. This worker never writes to a client's documents, and a mount that cannot be written to
+      # is the cheapest way to keep that true.
+      - ${OI_ROOT}/documents:/documents:ro
+      # The cycle record the healthcheck reads. A named volume rather than a bind mount, because it is
+      # this container's own state and nothing else has business reading it.
+      - ingestion-state:/state
+    networks:
+      - ai-net
+    depends_on:
+      - postgres
+      - parser
+      - embeddings
+      - vector
+    # A shell loop rather than a scheduler, because the schedule is one interval and a scheduler would be
+    # a second thing to configure and to monitor. The cycle is the command; the loop is when it runs.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          python3 /app/ingest.py --documents /documents --json || echo "cycle exited non-zero"
+          sleep "$${INGEST_INTERVAL_SECONDS:-900}"
+        done
+    healthcheck:
+      # Reads the last cycle's outcome rather than checking that the process is alive. This worker has no
+      # listening socket, so "is it up" is not a question it can answer, and a healthcheck that only
+      # proves the process exists stays green while every document fails.
+      test: ["CMD", "python3", "/app/ingest.py", "--status", "--state", "/state/last-cycle.json"]
+      interval: 300s
+      timeout: 30s
+      retries: 3
+      # Long, because a first cycle on a client's corpus parses every document through OCR.
+      start_period: 3600s
+
   # The vector store: chunks, their embeddings, and the access labels the search filters on.
   # Qdrant v1.19.2, current release line as of 2026-10-11.
   vector:
@@ -308,3 +370,9 @@ networks:
   # Created on the host during Phase 0 and shared by every deployment on this box.
   ai-net:
     external: true
+
+volumes:
+  # The ingestion worker's own state: the last cycle's outcome, which its healthcheck reads. A named
+  # volume because it is that container's business and nothing else reads it. The client's documents are
+  # a bind mount and read-only, because this worker has no reason to write to them.
+  ingestion-state:
