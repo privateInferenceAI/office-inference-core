@@ -24,6 +24,7 @@ given client's archive will need review. That needs real scans, which is a C2 fi
 from __future__ import annotations
 
 import glob
+import shutil
 import statistics
 import subprocess
 import sys
@@ -31,6 +32,11 @@ import tempfile
 from pathlib import Path
 
 from PIL import Image, ImageEnhance, ImageFilter
+
+try:
+    import pypdfium2 as pdfium
+except ImportError:  # the fallback is the poppler CLI, if the image happens to have it
+    pdfium = None
 
 SOURCE = Path(sys.argv[1] if len(sys.argv) > 1 else "/f/fee-schedule-scanned.pdf")
 DPI = int(sys.argv[2] if len(sys.argv) > 2 else 300)
@@ -52,18 +58,33 @@ VARIANTS = (
 )
 
 
-def render(variant: dict, out_dir: Path) -> Path:
-    """Rasterise the page, apply the variant's damage, and return the PNG."""
+def first_page(out_dir: Path) -> Image.Image:
+    """The page as a grayscale image.
+
+    pypdfium2 first, because it is what Docling itself renders with and therefore what the parser
+    image already carries. The first attempt at this used pdftoppm, which is not in that image: it
+    installed tesseract and GL libraries and no poppler CLI, so the probe died on its first variant
+    after printing a header.
+    """
+    if pdfium is not None:
+        pdf = pdfium.PdfDocument(str(SOURCE))
+        return pdf[0].render(scale=DPI / 72).to_pil().convert("L")
     subprocess.run(["pdftoppm", "-r", str(DPI), "-gray", "-png", str(SOURCE),
                     str(out_dir / "page")], check=True)
-    png = Path(sorted(glob.glob(str(out_dir / "page*.png")))[0])
-    image = Image.open(png).convert("L")
+    png = sorted(glob.glob(str(out_dir / "page*.png")))[0]
+    return Image.open(png).convert("L")
+
+
+def render(variant: dict, out_dir: Path) -> Path:
+    """Rasterise the page, apply the variant's damage, and return the PNG."""
+    image = first_page(out_dir)
     if "blur" in variant:
         image = image.filter(ImageFilter.GaussianBlur(variant["blur"]))
     if "contrast" in variant:
         image = ImageEnhance.Contrast(image).enhance(variant["contrast"])
     if "rotate" in variant:
-        image = image.rotate(variant["rotate"], resample=Image.BICUBIC, fillcolor=255)
+        image = image.rotate(variant["rotate"], resample=Image.BICUBIC, fillcolor=255,
+                             expand=False)
     if "speckle" in variant:
         pixels = image.load()
         width, height = image.size
@@ -106,7 +127,11 @@ def main() -> int:
     if not SOURCE.exists():
         print(f"missing {SOURCE}")
         return 1
-    print(f"{SOURCE.name} at {DPI} dpi, tesseract psm {PSM}")
+    renderer = "pypdfium2" if pdfium is not None else "pdftoppm"
+    print(f"{SOURCE.name} at {DPI} dpi via {renderer}, tesseract psm {PSM}")
+    if pdfium is None and not shutil.which("pdftoppm"):
+        print("neither pypdfium2 nor pdftoppm is available, so no page can be rendered")
+        return 1
     print(f"{'variant':<24} {'lines':>5} {'min':>6} {'p05':>6} {'med':>6} "
           + " ".join(f"{'<'+str(t):>7}" for t in THRESHOLDS))
     for label, variant in VARIANTS:
