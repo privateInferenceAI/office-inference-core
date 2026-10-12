@@ -62,7 +62,15 @@ OPTIONS = {
 
 
 def post_multipart(url: str, field: str, path: Path, payload: dict, timeout: int = 600) -> dict:
-    """A multipart POST with the options as a JSON form field, which is the shape the API wants."""
+    """A multipart POST with each option as its own form field.
+
+    The options are top-level fields, one per option. The first version of this sent them nested
+    under a single `convert_options` JSON field, which the service ignored in silence: it fell back
+    to its default of markdown only, so the call returned `status: success` and the structured output
+    simply was not there. The symptom was indistinguishable from the service being unable to emit
+    JSON at all, which it can. Each option is emitted separately now, and the caller checks for the
+    content it asked for rather than trusting the status.
+    """
     boundary = "----oicoreboundary"
     body = bytearray()
 
@@ -76,8 +84,12 @@ def post_multipart(url: str, field: str, path: Path, payload: dict, timeout: int
 
     part([f'Content-Disposition: form-data; name="{field}"; filename="{path.name}"',
           "Content-Type: application/pdf"], path.read_bytes())
-    part(['Content-Disposition: form-data; name="convert_options"', "Content-Type: application/json"],
-         json.dumps(payload).encode())
+    for key, value in payload.items():
+        values = value if isinstance(value, list) else [value]
+        for item in values:
+            if isinstance(item, bool):
+                item = str(item).lower()
+            part([f'Content-Disposition: form-data; name="{key}"'], str(item).encode())
     body.extend(f"--{boundary}--\r\n".encode())
 
     request = urllib.request.Request(
