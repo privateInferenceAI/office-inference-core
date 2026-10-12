@@ -1268,6 +1268,64 @@ about the failure that reaches a client as a wrong number with a real citation.
   output rather than re-running it. A number attached to the wrong row is worse than a missing one,
   because it produces a confidently cited wrong figure, so this is a stop-and-look.
 
+### 3.5 The chunker, and the table the parser split in two
+
+**Goal.** A parsed document becomes retrievable chunks, with the page kept intact as the citation unit
+and a table kept whole even when the parser handed it over in pieces.
+
+**Commands.** The rules are unit-tested, so the box only has to prove they hold on real parser output:
+
+    cd /opt/oi-core
+    python3 -m pytest tests/test_chunker.py -q
+    docker run --rm --network ai-net -v /opt/oi-core:/w -w /w \
+      --entrypoint python ghcr.io/docling-project/docling-serve-cpu:v1.36.0 \
+      /w/tests/fixtures/chunk_fee_schedule.py
+
+**Expected.** Eleven unit tests pass, and the fixture run ends with `PASSED` naming seven row entries
+covering all seven fees, one joined table, no fee duplicated into a page chunk, and stable ids.
+
+**What just happened.** The chunker is `services/ingestion/chunker.py`, and it is a module rather than a
+step inside a worker because it is the only place where a decision made today, about what a citation
+points at, becomes permanent. A chunk that spans two pages or carries half a fee schedule cannot be
+repaired by the retriever or the verifier afterwards.
+
+The rules come from the architecture's stage 2: page-bounded and structure-aware, 384 to 512 tokens,
+overlap of zero to 32 tokens and zero preferred, the page stored as a **range** rather than a single
+page, and a table that fits never split.
+
+Two of those rules were written against an assumption this step had to correct, both found by measuring
+the parser in 3.4.
+
+*A table arrives already split.* The parser emits one table per column region, so the fixture's single
+fee schedule comes back as two tables whose cell extents are x 54 to 297 and x 316 to 558 on one page.
+"Never split a table" is meaningless until the fragments are one table again, so joining happens first
+and the grouping is by page and horizontal adjacency, using the widest cell extent in each fragment
+because a fragment's own box can be drawn tighter than its cells.
+
+*A continuation fragment has no header row.* The second fragment starts at its own first data row, so
+its rows would serialise as bare values with no column names, and a row retrieved alone has to say what
+its number is. The header is found by repetition: it is the top row shared by the most fragments, and a
+fragment whose top row is that row is treated as carrying it. The rest have their header skipped, and
+only those.
+
+**What the numbers are not.** The token count is estimated from word count rather than measured with the
+embedding model's tokenizer, and the estimate is named in the module so it can be replaced. It bounds a
+chunk size and must never be used to assert one.
+
+**If it breaks.**
+
+- A test failing on row labelling: the column names are being paired with the wrong cells. This has now
+  happened three ways, and only the third survived review, so treat it as the live risk in this module.
+  Pairing names positionally without sorting the cells by column first gives `per callout: Item`. Looking
+  the name up by the cell's own column index gives a rotated row, because a continuation fragment does
+  not share the first fragment's column numbering. And taking row zero as the header gives a data row's
+  text as the column names. Sorted position is the reliable key; column index is only a sort key.
+- `PASSED` not printed and two table chunks instead of one: the join is not firing. Print the cell
+  extents and check the horizontal gap against the tolerance in `join_column_splits`. On the fixture the
+  gap is 19 points, so a tolerance below that will not join them.
+- A fee reported as appearing in a page chunk as well as the table: the body-children walk is not
+  excluding table references, and the same figures now sit in two retrievable places.
+
 ## Phase 4 — Assistant API  *(outline)*
 
 The single surface the client app talks to: ask, tasks, approvals, activity, settings.
