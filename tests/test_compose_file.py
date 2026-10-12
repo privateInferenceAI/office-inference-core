@@ -193,3 +193,42 @@ def test_the_cpu_reranker_is_a_bench_instrument_not_a_serving_component(services
     )
 
 
+
+
+def test_the_ingestion_worker_mounts_documents_read_only(services):
+    """This worker reads a client's documents and never writes to them. A read-only mount is the cheapest
+    way to keep that true: a bug that tried to rewrite a source file would fail at the filesystem rather
+    than silently editing what the client gave us."""
+    mounts = services["ingestion"].get("volumes") or []
+    documents = [str(mount) for mount in mounts if "/documents" in str(mount)]
+    assert documents, "the ingestion worker has no documents mount"
+    for mount in documents:
+        assert mount.endswith(":ro"), f"the documents mount must be read-only: {mount}"
+
+
+def test_the_ingestion_healthcheck_reads_the_cycle_not_the_process(services):
+    """A worker with no listening socket cannot be asked whether it is well. A healthcheck that only
+    proves the process exists stays green while every document fails, which is the failure mode worth
+    catching, so the test is that the check consults the recorded outcome."""
+    check = services["ingestion"]["healthcheck"]["test"]
+    joined = " ".join(str(part) for part in check)
+    assert "--status" in joined, f"the healthcheck must read the last cycle: {check}"
+    assert "/state/last-cycle.json" in joined
+
+
+def test_the_ingestion_worker_waits_for_what_it_calls(services):
+    """Every call it makes is to a service, and starting before them turns the first cycle into a pile of
+    connection errors that look like a code fault."""
+    depends = services["ingestion"].get("depends_on") or []
+    for required in ("postgres", "parser", "embeddings", "vector"):
+        assert required in depends, f"ingestion should wait for {required}"
+
+
+def test_the_ingestion_state_volume_is_declared(services, compose):
+    """A named volume used but not declared makes the compose file invalid, and it is the kind of error
+    that only appears on the box. Caught here instead."""
+    volumes = compose.get("volumes") or {}
+    assert "ingestion-state" in volumes, "the ingestion state volume is used but not declared"
+    # And it must not be nested under networks, which is where it landed the first time.
+    assert "ingestion-state" not in (compose.get("networks") or {}), (
+        "the volume declaration ended up inside the networks block")

@@ -921,20 +921,34 @@ citations, and every citation is checked three ways before a client sees it.
 | 3.1 | The vector store | A point round-trips: written, indexed, and found by a query |
 | 3.2 | Embeddings on the box | Text becomes a 1024-dimension vector, deterministically, without a network call |
 | 3.3 | The reranker | A pair's order changes by relevance, which is what makes top-10 worth reading |
-| 3.4 | Ingestion | A scanned, table-bearing PDF becomes chunks carrying page numbers and a content hash |
-| 3.5 | Access labels | A role cannot retrieve a chunk its label excludes, because the filter is inside the search |
-| 3.6 | Hybrid search | An exact identifier that the vector arm misses is found by the lexical arm and surfaces |
-| 3.7 | Versioning and duplicates | A superseded document is not cited while its replacement exists; a near-duplicate is flagged at ingest |
-| 3.8 | Citations, three checks | A citation that is fabricated, on the wrong page, or unsupported by its chunk is refused |
-| 3.9 | Redaction before the frontier | A test shows the outbound payload carries no PII, and the record says what was redacted |
-| 3.10 | Injection resistance | A document containing instructions cannot change the lane or the answer's provenance |
-| 3.11 | Document retention | A client-requested purge removes content everywhere; a legal hold blocks it |
-| 3.12 | Verification | The brief's acceptance test, run end to end, with the outputs recorded here |
+| 3.4 | The parser | A scanned, table-bearing PDF becomes structured text with page numbers and cell boxes |
+| 3.4b | The confidence question | A confidently wrong read is caught by redundancy or disclosed, not trusted |
+| 3.5 | The chunker | A page becomes chunks that keep the page intact as a citation unit, and a table the parser split in two is joined before it is chunked |
+| 3.6 | The fixture corpus | Real business documents with their licences read at the source, and a hand-written question set |
+| 3.7 | The ingestion worker | A document on disk becomes chunks in the vector store once, and a re-run costs one read per file |
+| 3.8 | Access labels | A role cannot retrieve a chunk its label excludes, because the filter is inside the search |
+| 3.9 | Hybrid search | An exact identifier that the vector arm misses is found by the lexical arm and surfaces |
+| 3.10 | Versioning and duplicates | A superseded document is not cited while its replacement exists; a near-duplicate is flagged at ingest |
+| 3.11 | Citations, three checks | A citation that is fabricated, on the wrong page, or unsupported by its chunk is refused |
+| 3.12 | Redaction before the frontier | A test shows the outbound payload carries no PII, and the record says what was redacted |
+| 3.13 | Injection resistance | A document containing instructions cannot change the lane or the answer's provenance |
+| 3.14 | Document retention | A client-requested purge removes content everywhere; a legal hold blocks it |
+| 3.15 | Verification | The brief's acceptance test, run end to end, with the outputs recorded here |
+
+**The table grew during the build, and the numbering follows the sections below rather than the plan.**
+Four steps were added once measurement showed they were separate jobs: the parser (3.4) because
+extraction is where a confidently wrong read is born; the confidence question (3.4b) because it is a
+decision about what to do with a bad read rather than a parsing task; the chunker (3.5) because the
+citation unit is decided there and nowhere else; and the fixture corpus (3.6) because the evaluation
+policy requires a corpus and questions before anything can be measured. Step 3.7 absorbs what the plan
+called ingestion.
 
 **Order matters.** 3.1 to 3.3 build the floor and have nothing to do with documents yet; they are
 proved with hand-made input, which keeps a retrieval bug from hiding inside a parsing bug. 3.4 is the
-first step that needs a real document. 3.5 comes before 3.6 because a filter bolted on after the
-search returns results is the mistake this phase exists to avoid.
+first step that needs a real document, and 3.4b is the first that asks what happens when a real
+document is read wrongly. 3.7 comes before 3.8 because a filter bolted on after the search returns
+results is the mistake this phase exists to avoid, and because the label is attached at ingest, so
+there has to be an ingest before there is a label.
 
 **Two things not to confuse.** The content modes from C1 decide what the *record* keeps; 3.9 is about
 what leaves the building for a frontier model, and the record's pattern-based redactor is not a
@@ -1423,6 +1437,104 @@ completeness while they are missing.
   accept the new bytes and see what moved, and record why in the manifest.
 - The validator reports a question drawing on a document that is not in the manifest: the two files have
   drifted. That is what the check is for, and CI runs it on every pull request.
+
+### 3.7 The ingestion worker
+
+**Goal.** A document on disk becomes chunks in the vector store, once, and a second run costs one read
+per file rather than a re-embed. This is the step that makes the fixture corpus an actual test.
+
+**Commands.** First the contract probe, because this worker makes three HTTP calls and a wrong request
+shape looks like a missing feature rather than a malformed request. That has already cost this project one
+round trip on the parser.
+
+    cd /opt/oi-core
+    git pull
+    docker run --rm --network ai-net -v /opt/oi-core:/w -w /w \
+      --entrypoint python ghcr.io/docling-project/docling-serve-cpu:v1.36.0 \
+      /w/tests/fixtures/api_contract_probe.py
+
+Then the migration, the container, and the cycle:
+
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      --profile tools run --rm audit migrate
+    oi up -d --build ingestion
+    oi ps
+    docker logs ingestion --tail 30
+
+**Expected, from the probe.** The embedding service reports which endpoint answers and whether a batch
+returns one vector per input, the collection's vector config and dimension, and a written point that is
+found by a payload filter and then removed. Read the endpoint it found against what `embed_texts` tries
+first.
+
+**Expected, from the run.** The migration applies `007_ingest_manifest.sql`. Then `ingestion` appears in
+`oi ps` and reaches `healthy` — which for this container means the last cycle finished with no failures,
+not that the process is alive. The first cycle reads the four corpus documents, which takes minutes because the
+10-K and the IRS publication go through the parser:
+
+    ingesting apple-10k-2024.htm  (new, 1503891 bytes)
+      214 chunks, 42 pages
+    ingesting irs-p15.pdf  (new, 1713916 bytes)
+      ...
+
+    seen 4, new 4, changed 0, skipped 0, failed 0
+    chunks written 1183, chunks removed 0, documents removed 0
+
+Run it a second time and the whole cycle should be `skipped 4` with nothing written:
+
+    docker exec ingestion python3 /app/ingest.py --documents /documents
+
+**What just happened.** The worker walked the documents directory, and for each file hashed the bytes
+before doing anything else. That hash is the whole design. A file whose bytes are unchanged is skipped
+without being parsed, so a cycle over a client's corpus costs one read per document rather than a parse
+and an embed per document. A file whose bytes changed gets new chunk ids, because the id covers the
+content, and its old chunks are removed before the new ones are written so a document that shrank cannot
+leave orphans behind.
+
+**Four decisions, each of which has a test that fails if it reverts.**
+
+*Skip on the hash.* The manifest holds the sha256 of the file as ingested, not a modification time. A
+file that was touched but not edited costs nothing.
+
+*Delete then write, when a document changed.* The order matters. Writings first would leave two versions
+of the same policy in the index, both citable, and the wrong one would look exactly as confident as the
+right one.
+
+*Reconcile removals from the manifest, not the filesystem.* A document the manifest knows about whose file
+has gone is removed from the index. A file that was never ingested cannot cause a removal, and a
+documents mount that failed to appear cannot empty a client's index while the container restarts.
+
+*Dead-letter after two failures, until the bytes change.* The first version recorded the previous good
+hash on failure, and an unreadable file has no previous good hash, so it was re-parsed every cycle for the
+life of the deployment. Worse, its failure stopped being visible because it was always there. The hash
+recorded on failure is now the hash of the bytes that failed, so the check works and a replaced file gets
+another chance without anyone being told.
+
+**The healthcheck reads the last cycle, not the process.** This worker has no listening socket by design,
+so "is it up" is not a question it can answer. A healthcheck that only proved the process existed would
+stay green while every document failed. The cycle writes its outcome to `/state/last-cycle.json` and
+`ingest.py --status` reads it back, exiting non-zero when the last cycle had a failure.
+
+**What the label is, and where it comes from.** Each chunk carries `acl` set to the top-level folder it
+was found under, so `company/handbook/policy.pdf` becomes `company`. It is attached at ingest rather than
+derived at query time because the search filters on it, and a filter that reads the filesystem is not a
+filter. Step 3.8 is what enforces it.
+
+**What is not done here.** The chunks are written with no version column yet, so a superseded document is
+removed rather than superseded; that is step 3.10. The parser's per-page confidence is not stored, and
+step 3.4b records why it cannot be read from this service's output anyway.
+
+**If it breaks.**
+
+- The worker re-ingests everything every cycle: the manifest is in memory, which happens when
+  `DATABASE_URL` is unset or the database is unreachable. It says so at the top of its output rather than
+  doing it quietly. Check `docker exec ingestion env | grep DATABASE_URL` and that `postgres` is healthy.
+- `the parser returned no structured output`: the same failure step 3.4 spent a round trip on. The options
+  are sent as separate multipart fields and an empty `json_content` means they were not accepted.
+- Chunk counts far higher than expected: the parser found more documents to split than the file has
+  pages, which usually means OCR read a page as several regions. Compare against the page count the run
+  prints.
+- A cycle exits non-zero but the log shows no failure: the exit code is non-zero when any document failed,
+  deliberately, so a scheduled run surfaces a bad file. `--status` names it.
 
 ## Phase 4 — Assistant API  *(outline)*
 
