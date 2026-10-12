@@ -1310,7 +1310,28 @@ only those.
 
 **What the numbers are not.** The token count is estimated from word count rather than measured with the
 embedding model's tokenizer, and the estimate is named in the module so it can be replaced. It bounds a
-chunk size and must never be used to assert one.
+chunk size and must never be used to assert one. Step 3.6's embedding contract is where the real
+tokenizer belongs.
+
+**Why a ceiling at all, since it costs two things.** Anthony asked, 2026-10-12, and the answer is
+engineering rather than quality. Three constraints. The embedding model takes at most 8,192 tokens, and a
+chunk past that cannot be embedded at all. The reranker costs 2.5 to 3 ms per token of candidate text,
+measured in 3.3, so an 800-token chunk spends two and a half seconds of a five-second budget before any
+other chunk is scored. And the prompt has to hold several chunks at once, so an unbounded one crowds out
+the question. What the ceiling is not is a measured optimum: the chunking research says there is no
+universal size, that published optima span 200 to 1,024 tokens, and that the page-versus-token accuracy
+difference is noise. The architecture row now says so instead of stating 384 to 512 as though it were
+settled.
+
+The ceiling costs something real on our own fixture. Page 1 parses to about 825 tokens, so the prose is
+split where the page boundary rule alone would have kept it whole. That is the right trade: a chunk that
+cannot be embedded, or that eats half the reranking budget, is worse than a citation that points at part
+of a page.
+
+**The bug the ceiling exposed.** The first version tested only whether adding the NEXT passage would
+overflow, so a passage already over the budget went in whole and the chunk came out past the ceiling.
+On a dense page that is precisely the outcome the ceiling exists to prevent. It is fixed, and the test
+for it uses a page of 800-token prose, which is what a real schedule's dense page looks like.
 
 **If it breaks.**
 

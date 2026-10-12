@@ -492,12 +492,49 @@ def chunk_document(document: dict, doc_id: str, source_sha256: str,
     return chunks
 
 
+def split_oversized(text: str, headings: list[str], page_no: int, bbox: dict) -> list[str]:
+    """A passage too large for the budget, cut at sentence boundaries.
+
+    Why a hard ceiling rather than a preference. Three constraints, all of them engineering rather than
+    taste: the embedding model takes at most 8,192 tokens and a chunk past that cannot be embedded at
+    all; the reranker costs 2.5 to 3 ms per token of candidate text, measured in step 3.3, so a chunk of
+    800 tokens costs two and a half seconds of a five-second budget; and the prompt has to hold several
+    chunks, so an unbounded one crowds out the question.
+
+    What the ceiling is NOT is a measured quality optimum. The chunking research says plainly that there
+    is no universal size and that published optima span 200 to 1,024 tokens, and it calls the
+    page-versus-token accuracy difference noise. So 384 to 512 is a working range chosen to keep chunks
+    embeddable, affordable to rerank and specific enough to match a question, not a law.
+
+    Sentences rather than characters, because a citation that quotes half a sentence reads as a
+    misquote.
+    """
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    pieces: list[str] = []
+    buffer: list[str] = []
+    for sentence in sentences:
+        candidate = " ".join(buffer + [sentence])
+        if buffer and estimate_tokens(candidate) > MAX_TOKENS:
+            pieces.append(" ".join(buffer))
+            buffer = [sentence]
+        else:
+            buffer.append(sentence)
+    if buffer:
+        pieces.append(" ".join(buffer))
+    return pieces
+
+
 def _group_prose(items: list[tuple[int, str, dict, list[str]]]) -> Iterable[tuple[int, str, dict, list[str]]]:
-    """Prose into page-bounded chunks no larger than the budget.
+    """Prose into page-bounded chunks, none larger than the budget.
 
     A page is never crossed, because the page is the citation unit. A page whose prose exceeds the
-    budget becomes several chunks and a page that runs short stays short, which is the honest outcome
-    of preferring the page boundary to the size target.
+    budget becomes several chunks; a page that runs short stays short, which is the honest outcome of
+    preferring the page boundary to the size target.
+
+    A single item larger than the whole budget is split rather than appended. The earlier version tested
+    only whether adding the NEXT item would overflow, so an item that was already too big went in whole
+    and the chunk came out over the ceiling. On a dense page that is exactly the failure the ceiling
+    exists to prevent: something the next stage has to reject.
     """
     if not items:
         return
@@ -512,13 +549,24 @@ def _group_prose(items: list[tuple[int, str, dict, list[str]]]) -> Iterable[tupl
         return current_page, "\n\n".join(buffer), first_bbox, headings
 
     for page_no, text, bbox, item_headings in items:
-        if page_no != current_page or estimate_tokens("\n\n".join(buffer + [text])) > MAX_TOKENS:
+        if page_no != current_page:
             if buffer:
                 yield emit()
-            buffer = []
-            current_page = page_no
-            first_bbox = bbox
-            headings = item_headings
+            buffer, current_page, first_bbox, headings = [], page_no, bbox, item_headings
+        elif estimate_tokens("\n\n".join(buffer + [text])) > MAX_TOKENS:
+            if buffer:
+                yield emit()
+            buffer, first_bbox, headings = [], bbox, item_headings
+
+        if estimate_tokens(text) > MAX_TOKENS:
+            # Too big on its own, so it cannot be fixed by where the boundary falls. Split it, and do
+            # not start a new chunk with the leftovers if one is already open.
+            for piece in split_oversized(text, headings, page_no, bbox):
+                if estimate_tokens("\n\n".join(buffer + [piece])) > MAX_TOKENS and buffer:
+                    yield emit()
+                    buffer, first_bbox, headings = [], bbox, item_headings
+                buffer.append(piece)
+            continue
         buffer.append(text)
     if buffer:
         yield emit()
