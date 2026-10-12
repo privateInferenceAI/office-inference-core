@@ -89,6 +89,19 @@ def _post(url: str, body: dict, timeout: int, method: str = "POST") -> dict:
     return json.loads(raw) if raw else {}
 
 
+def _get(url: str, timeout: int) -> dict | None:
+    """A GET, where 404 is an answer rather than an error. Returns None when the thing is not there."""
+    request = urllib.request.Request(url, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read()
+        return json.loads(raw).get("result", {}) if raw else {}
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise
+
+
 def _multipart(url: str, filename: str, payload: bytes, options: dict, timeout: int) -> dict:
     """A multipart POST with each option as its own form field.
 
@@ -186,6 +199,83 @@ def embed_texts(services: Services, texts: list[str]) -> list[list[float]]:
             last_error = exc
             continue
     raise RuntimeError(f"no embedding endpoint answered. Last error: {last_error}")
+
+
+def _get_vector_size(services: Services) -> int:
+    """How many dimensions the embedding service actually produces.
+
+    Measured rather than declared, because the number that matters is the model's, and a constant in this
+    file is a second place for it to be wrong. The probe confirmed 1024 for bge-m3 on this deployment.
+    """
+    for path in ("/embed", "/v1/embeddings"):
+        try:
+            if path == "/v1/embeddings":
+                payload = _post(f"{services.embed_url}{path}",
+                                {"input": ["dimension probe"], "model": "bge-m3"}, services.timeout)
+                vector = (payload.get("data") or [{}])[0].get("embedding")
+            else:
+                payload = _post(f"{services.embed_url}{path}", {"inputs": "dimension probe"},
+                                services.timeout)
+                if isinstance(payload, dict):
+                    vector = ((payload.get("data") or [{}])[0] or {}).get("embedding")
+                elif isinstance(payload, list) and payload and isinstance(payload[0], list):
+                    vector = payload[0]
+                elif isinstance(payload, list) and payload and isinstance(payload[0], dict):
+                    vector = payload[0].get("embedding")
+                else:
+                    vector = None
+            if vector:
+                return len(vector)
+        except Exception:  # noqa: BLE001 - try the next shape, and report if none work
+            continue
+    raise RuntimeError(
+        "could not measure the embedding dimension: no endpoint returned a vector. Without it a "
+        "collection cannot be created correctly, and creating one at a guessed size is worse than "
+        "failing, because every write would be rejected later with a message about vector size rather "
+        "than about this.")
+
+
+def ensure_collection(services: Services) -> int:
+    """Make sure the collection exists with the embedding model's dimension, and say what was found.
+
+    Why the worker does this rather than a manual step. The collection is a dependency of every write,
+    and the first run of this worker against a fresh vector store failed every document with a 404 while
+    its container reported healthy. A manual step that lives in a runbook is one the next person does not
+    know about, and the failure it leaves behind is a per-document error that reads like a parsing
+    problem.
+
+    It refuses to reconcile a mismatch. A collection built at a different size than the model produces
+    means either the model changed or the collection did, and both are decisions rather than accidents:
+    silently recreating it would delete a client's index, and silently using it would reject every write.
+    The error says which.
+    """
+    existing = _get(f"{services.vector_url}/collections/{services.collection}",
+                    services.timeout)
+    measured = _get_vector_size(services)
+
+    if existing is None:
+        _post(f"{services.vector_url}/collections/{services.collection}",
+              {"vectors": {"size": measured, "distance": "Cosine"}}, services.timeout,
+              method="PUT")
+        print(f"created collection {services.collection} at {measured} dimensions, cosine distance")
+        return measured
+
+    params = ((existing.get("config") or {}).get("params") or {}).get("vectors") or {}
+    size = params.get("size")
+    distance = params.get("distance")
+    if size != measured:
+        raise RuntimeError(
+            f"collection {services.collection} holds {size}-dimension vectors and the embedding model "
+            f"produces {measured}. This is a decision, not a repair: recreating the collection deletes "
+            f"every chunk in it, and using it as it is rejects every write. Decide which side is wrong, "
+            f"then either re-embed the corpus or restore the model that matched.")
+    if distance and distance != "Cosine":
+        raise RuntimeError(
+            f"collection {services.collection} uses {distance} distance and this pipeline expects Cosine. "
+            f"Search results would be ordered differently from every measurement taken so far.")
+    print(f"collection {services.collection}: {size} dimensions, {distance}, "
+          f"{existing.get('points_count')} points")
+    return measured
 
 
 def upsert_points(services: Services, points: list[dict]) -> None:
@@ -605,6 +695,14 @@ def main(argv: list[str] | None = None) -> int:
     documents_root = Path(args.documents)
     if not documents_root.exists():
         print(f"no documents directory at {documents_root}")
+        return 1
+
+    # Before the first document, so a missing or wrong-sized collection is one clear failure at the start
+    # of a cycle rather than one identical error per document.
+    try:
+        ensure_collection(services)
+    except Exception as exc:  # noqa: BLE001
+        print(f"cannot use the vector store: {exc}")
         return 1
 
     run_id = None if args.dry_run else manifest.start_run()

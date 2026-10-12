@@ -1322,6 +1322,22 @@ its number is. The header is found by repetition: it is the top row shared by th
 fragment whose top row is that row is treated as carrying it. The rest have their header skipped, and
 only those.
 
+**The collection is established by the worker, not by remembering step 3.1.** On the first real run the
+collection did not exist, because the `vector` container was new and its data directory with it, and every
+document failed with a 404 from Qdrant while the ingestion container reported healthy. A dependency that
+lives in a runbook is one the next person does not know about, so `ingest.py` now asks the embedding
+service how many dimensions it produces and creates the collection at that size, with cosine distance,
+when it is missing.
+
+It refuses to reconcile a mismatch rather than repairing one. A collection built at 768 dimensions against
+a model producing 1024 means either the model changed or the collection did, and both are decisions:
+recreating it deletes every chunk in it, and using it rejects every write. The error names both numbers and
+stops, because the alternative is a silent choice between two bad outcomes.
+
+This makes step 3.1's manual collection creation a diagnostic rather than a prerequisite. Running it
+against an existing collection is a no-op; running it against a fresh store is how you check the store
+before the worker gets there.
+
 **What the numbers are not.** The token count is estimated from word count rather than measured with the
 embedding model's tokenizer, and the estimate is named in the module so it can be replaced. It bounds a
 chunk size and must never be used to assert one. Step 3.6's embedding contract is where the real
@@ -1476,6 +1492,7 @@ not that the process is alive. The first cycle reads the four corpus documents, 
     ingesting irs-p15.pdf  (new, 1713916 bytes)
       ...
 
+    collection documents: 1024 dimensions, Cosine, 0 points     <- first run, created or reported
     seen 4, new 4, changed 0, skipped 0, failed 0
     chunks written 1183, chunks removed 0, documents removed 0
 

@@ -79,6 +79,9 @@ def wired(monkeypatch):
     def fake_delete(services, doc_id):
         services.deleted.append(doc_id)
 
+    # ensure_collection is a separate concern with its own tests; stub it here so a cycle test never
+    # reaches for a network.
+    monkeypatch.setattr(ingest, "ensure_collection", lambda services: services.dims)
     monkeypatch.setattr(ingest, "parse_document", fake_parse)
     monkeypatch.setattr(ingest, "embed_texts", fake_embed)
     monkeypatch.setattr(ingest, "upsert_points", fake_upsert)
@@ -357,3 +360,90 @@ def test_a_cycle_records_its_outcome_for_the_healthcheck(tmp_path, wired, monkey
     assert ingest.cmd_status(state) == 0, "a clean cycle should report healthy"
     import json as _json
     assert _json.loads(state.read_text())["counts"]["seen"] == 1
+
+
+# --------------------------------------------------------------------------- the collection
+
+def test_the_worker_creates_a_missing_collection_at_the_measured_size(monkeypatch):
+    """The gap that made the first real run fail every document with a 404 while reporting healthy.
+
+    The collection is a dependency of every write, and it was created by a manual step in the runbook that
+    a fresh vector store does not have. The worker now establishes it, at the size the embedding service
+    actually produces rather than a constant in the file."""
+    calls = {"put": [], "get": []}
+
+    monkeypatch.setattr(ingest, "_get", lambda url, timeout: calls["get"].append(url) or None)
+    monkeypatch.setattr(ingest, "_post",
+                        lambda url, body, timeout, method="POST":
+                        calls["put"].append((url, body, method)) or {})
+    monkeypatch.setattr(ingest, "_get_vector_size", lambda services: 1024)
+
+    size = ingest.ensure_collection(ingest.Services())
+    assert size == 1024
+    assert len(calls["put"]) == 1
+    url, body, method = calls["put"][0]
+    assert url.endswith("/collections/documents")
+    assert method == "PUT"
+    assert body == {"vectors": {"size": 1024, "distance": "Cosine"}}
+
+
+def test_a_collection_of_the_wrong_size_is_refused_not_reconciled(monkeypatch):
+    """Recreating it would delete a client's index; using it would reject every write. Both are decisions
+    rather than repairs, so the error names the mismatch and stops."""
+    monkeypatch.setattr(ingest, "_get", lambda url, timeout: {
+        "config": {"params": {"vectors": {"size": 768, "distance": "Cosine"}}}, "points_count": 0})
+    monkeypatch.setattr(ingest, "_get_vector_size", lambda services: 1024)
+    monkeypatch.setattr(ingest, "_post",
+                        lambda *a, **k: pytest.fail("a mismatched collection must not be modified"))
+
+    with pytest.raises(RuntimeError) as raised:
+        ingest.ensure_collection(ingest.Services())
+    message = str(raised.value)
+    assert "768" in message and "1024" in message
+    assert "deletes every chunk" in message, "the error should say why it will not fix it"
+
+
+def test_a_collection_using_the_wrong_distance_is_refused(monkeypatch):
+    """Cosine is what every measurement so far was taken under. A collection built with another metric
+    would return results in a different order and nothing would say so."""
+    monkeypatch.setattr(ingest, "_get", lambda url, timeout: {
+        "config": {"params": {"vectors": {"size": 1024, "distance": "Euclid"}}}, "points_count": 5})
+    monkeypatch.setattr(ingest, "_get_vector_size", lambda services: 1024)
+    monkeypatch.setattr(ingest, "_post", lambda *a, **k: pytest.fail("must not modify"))
+    with pytest.raises(RuntimeError) as raised:
+        ingest.ensure_collection(ingest.Services())
+    assert "Euclid" in str(raised.value)
+
+
+def test_an_existing_correct_collection_is_left_alone(monkeypatch):
+    """The idempotent case, which is what every cycle after the first hits."""
+    monkeypatch.setattr(ingest, "_get", lambda url, timeout: {
+        "config": {"params": {"vectors": {"size": 1024, "distance": "Cosine"}}}, "points_count": 1183})
+    monkeypatch.setattr(ingest, "_get_vector_size", lambda services: 1024)
+    monkeypatch.setattr(ingest, "_post", lambda *a, **k: pytest.fail("nothing should be created"))
+    assert ingest.ensure_collection(ingest.Services()) == 1024
+
+
+def test_the_dimension_comes_from_the_service_not_a_constant(monkeypatch):
+    """The probe found /embed first and /v1/embeddings also working, and /embeddings refused with 422.
+    The measurement tries the shapes that answer and reports rather than guessing a size."""
+    def fake_post(url, body, timeout, method="POST"):
+        if url.endswith("/embed"):
+            return [[0.0] * 1024]
+        raise AssertionError("should not reach the second shape when the first answers")
+    monkeypatch.setattr(ingest, "_post", fake_post)
+    assert ingest._get_vector_size(ingest.Services()) == 1024
+
+    def openai_shape(url, body, timeout, method="POST"):
+        if url.endswith("/embed"):
+            raise RuntimeError("this deployment refuses /embed")
+        return {"data": [{"embedding": [0.0] * 768}]}
+    monkeypatch.setattr(ingest, "_post", openai_shape)
+    assert ingest._get_vector_size(ingest.Services()) == 768
+
+    def nothing_works(url, body, timeout, method="POST"):
+        raise RuntimeError("refused")
+    monkeypatch.setattr(ingest, "_post", nothing_works)
+    with pytest.raises(RuntimeError) as raised:
+        ingest._get_vector_size(ingest.Services())
+    assert "guess" in str(raised.value).lower()
