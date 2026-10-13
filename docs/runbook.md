@@ -1006,6 +1006,57 @@ asked for. Creating a 1024-long vector by hand is not worth typing; step 3.2 pro
   to join that network. Forgetting `--network ai-net` is the common mistake, and the error reads like
   the service is down.
 
+### 3.2 Embeddings on the box
+
+**Goal.** Text becomes a vector the collection can hold, deterministically, from a service on the private
+network that makes no call out of the building.
+
+**Commands.**
+
+    cd /opt/oi-core
+    docker run --rm --network ai-net curlimages/curl -sS http://embeddings:80/info
+
+    docker run --rm --network ai-net -v /opt/oi-core:/w:ro -v /tmp/embed_verify.py:/e.py:ro -w /w \
+      --entrypoint python ghcr.io/docling-project/docling-serve-cpu:v1.36.0 /e.py
+
+**Expected.** The service reports `BAAI/bge-m3`, and the measurement reports 1024 dimensions, two calls on
+the same text being identical, a unit L2 norm, and a batch whose vectors match the same texts embedded one
+at a time.
+
+**What just happened, measured 2026-10-13.**
+
+| | |
+|---|---|
+| model | `BAAI/bge-m3`, float32 |
+| dimensions | **1024**, which is what the collection is built for |
+| L2 norm | 1.0000, so the vectors are normalised and cosine is a dot product |
+| determinism | two calls on the same text are byte-identical |
+| batch order | a batch of three matches three solo calls, each to its own text |
+| discrimination | 0.41 cosine against an unrelated sentence, so equal vectors do not stand for anything |
+
+**Why each of those matters rather than being a formality.** The dimension is what the collection's shape
+depends on, and a model change that altered it would be rejected by Qdrant at write time rather than
+silently producing a second kind of vector. Determinism is what makes a re-ingest idempotent: the same bytes
+give the same vector, so a re-run updates a point rather than creating a second one that ranks alongside it.
+Order is what lets the worker zip vectors back onto chunks by position, which is the one assumption in the
+ingestion path that nothing else checks. And the normalisation is why the collection uses cosine.
+
+**What this step does not measure, and it is a real gap.** bge-m3's throughput on this box. The
+28-hours-for-50,000-pages figure in the architecture is arithmetic, not measurement, and it could be wrong by
+three times either way. It gates any client-facing throughput or pricing promise, and it is recorded in
+`docs/search-architecture.md` under what is still unverified rather than being estimated here.
+
+**If it breaks.**
+
+- `no embedding endpoint answered`: the walk in `embed_texts` tries `/embed` then `/v1/embeddings`. Both
+  work on this service; `/embeddings` is the older shape and answers 422. A 422 on all of them means the
+  request body is wrong rather than the endpoint missing.
+- Dimensions not 1024: the model the container was started with is not the one the collection expects.
+  `docker logs embeddings | grep model` names what it loaded.
+- The first call takes a minute: the warmup, bounded by `MAX_WARMUP_SEQUENCE_LENGTH` and
+  `MAX_WARMUP_BATCH_SIZE` in the compose file, which is what turns a ten-minute first boot into twenty
+  seconds.
+
 ### 3.3 The reranker, measured
 
 **Goal.** Answer one question with a number rather than an opinion: **can a reranker on this box serve
