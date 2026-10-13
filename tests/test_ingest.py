@@ -447,3 +447,95 @@ def test_the_dimension_comes_from_the_service_not_a_constant(monkeypatch):
     with pytest.raises(RuntimeError) as raised:
         ingest._get_vector_size(ingest.Services())
     assert "guess" in str(raised.value).lower()
+
+
+def test_an_unreferenced_body_is_recovered_rather_than_lost(tmp_path, wired):
+    """The shape that produced 0 chunks on the first real corpus run, at the chunker's layer.
+
+    The body's children are the traversal, so a text item not referenced from there was invisible however
+    much content it held. Two HTML contract exhibits went into the index as empty documents that looked
+    retrievable. The chunker now falls back to every text item when the walk finds nothing, so the first
+    line of defence is recovery rather than refusal.
+    """
+    services = wired()
+    # Body references no items, and the text is present. This is what the exhibits did.
+    services.parsed = {"body": {"children": []},
+                       "texts": [{"self_ref": "#/texts/0", "label": "paragraph",
+                                  "text": "A clause that must be retrievable.",
+                                  "prov": [{"page_no": 1, "bbox": {"l": 53, "t": 700, "b": 660}}]}],
+                       "tables": [], "pages": {"1": {}}}
+    make_corpus(tmp_path, "company/contract.htm", b"<html>a contract</html>")
+    result = ingest.ingest_cycle(services, tmp_path, ingest.MemoryManifest())
+
+    assert result.new == 1, "the text was there and should have been recovered"
+    assert len(services.upserted) == 1
+    assert "retrievable" in services.upserted[0]["payload"]["text"]
+
+
+def test_a_document_with_no_text_at_all_is_refused_rather_than_recorded(tmp_path, wired):
+    """The second line of defence, and the case recovery cannot help with.
+
+    A scanned page the OCR could not read, or an HTML page whose content is entirely an image. A failed
+    document is visible and retried; an empty one sits in the index looking retrievable and answers
+    nothing, with no error anywhere to explain why."""
+    services = wired()
+    services.parsed = {"body": {"children": []}, "texts": [], "tables": [], "pages": {"1": {}}}
+    make_corpus(tmp_path, "company/blank.htm", b"<html></html>")
+    result = ingest.ingest_cycle(services, tmp_path, ingest.MemoryManifest())
+    assert result.failed == 1
+    assert services.upserted == []
+
+
+# --------------------------------------------------------------------------- retries
+
+def test_a_gateway_timeout_is_retried(monkeypatch):
+    """The first real corpus run lost a 60-page PDF to a 504 while parsing, and the stage behind it
+    genuinely takes minutes on CPU. The parse is idempotent, so trying again costs time and nothing else.
+    A run that gives up on the first 5xx fails on the documents that take longest to read."""
+    import urllib.error
+
+    attempts = {"n": 0}
+
+    def flaky():
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            raise urllib.error.HTTPError("http://parser", 504, "Gateway Timeout", {}, None)
+        return {"ok": True}
+
+    monkeypatch.setattr(ingest, "RETRY_BACKOFF_SECONDS", 0)
+    assert ingest._with_retries("parsing x", flaky) == {"ok": True}
+    assert attempts["n"] == 3
+
+
+def test_a_client_error_is_not_retried(monkeypatch):
+    """A 4xx will fail the same way, and retrying it turns a clear error into a slow one. The parser's 422
+    for a malformed request is the case that matters: retrying it three times hides the real problem."""
+    import urllib.error
+
+    attempts = {"n": 0}
+
+    def refused():
+        attempts["n"] += 1
+        raise urllib.error.HTTPError("http://parser", 422, "Unprocessable Entity", {}, None)
+
+    monkeypatch.setattr(ingest, "RETRY_BACKOFF_SECONDS", 0)
+    with pytest.raises(urllib.error.HTTPError):
+        ingest._with_retries("parsing x", refused)
+    assert attempts["n"] == 1, "a 422 must not be retried"
+
+
+def test_retries_give_up_rather_than_looping_forever(monkeypatch):
+    """Three attempts and then the error, so a permanently broken service surfaces as a failed document
+    rather than a cycle that never finishes."""
+    import urllib.error
+
+    attempts = {"n": 0}
+
+    def always_down():
+        attempts["n"] += 1
+        raise urllib.error.HTTPError("http://parser", 503, "Unavailable", {}, None)
+
+    monkeypatch.setattr(ingest, "RETRY_BACKOFF_SECONDS", 0)
+    with pytest.raises(urllib.error.HTTPError):
+        ingest._with_retries("parsing x", always_down)
+    assert attempts["n"] == ingest.RETRY_ATTEMPTS

@@ -23,6 +23,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -78,6 +79,40 @@ class Services:
     # Discovered once per run, because the embedding service has had more than one batch endpoint and
     # asking which one answers is cheaper than being wrong about it on every chunk.
     embed_path: str | None = None
+
+
+# Statuses worth trying again. A 5xx from a gateway in front of a slow stage is the transient case that
+# matters here: parsing a 60-page PDF on CPU takes minutes, and a proxy in front of the parser gave up
+# with a 504 on the first real corpus run. A 4xx is not retried, because the same request will fail the
+# same way and retrying it turns a clear error into a slow one.
+RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+RETRY_ATTEMPTS = 3
+RETRY_BACKOFF_SECONDS = 5
+
+
+def _with_retries(describe: str, call) -> dict:
+    """Run one request, retrying the failures that are worth retrying.
+
+    Said out loud when it retries, because a run that silently takes three times as long is harder to
+    diagnose than one that says why it is waiting.
+    """
+    last: Exception | None = None
+    for attempt in range(1, RETRY_ATTEMPTS + 1):
+        try:
+            return call()
+        except urllib.error.HTTPError as exc:
+            if exc.code not in RETRY_STATUSES or attempt == RETRY_ATTEMPTS:
+                raise
+            last = exc
+        except (urllib.error.URLError, TimeoutError) as exc:
+            if attempt == RETRY_ATTEMPTS:
+                raise
+            last = exc
+        wait = RETRY_BACKOFF_SECONDS * attempt
+        print(f"  {describe} failed with {last}; retrying in {wait}s "
+              f"(attempt {attempt} of {RETRY_ATTEMPTS})")
+        time.sleep(wait)
+    raise RuntimeError(f"{describe} failed after {RETRY_ATTEMPTS} attempts: {last}")
 
 
 def _post(url: str, body: dict, timeout: int, method: str = "POST") -> dict:
@@ -137,12 +172,19 @@ def _multipart(url: str, filename: str, payload: bytes, options: dict, timeout: 
 
 
 def parse_document(services: Services, path: Path, relpath: str) -> dict:
-    """The parser's structured output for one file."""
-    payload = _multipart(
-        f"{services.parser_url}/v1/convert/file", path.name, path.read_bytes(),
-        {"to_formats": "json", "do_ocr": True, "do_table_structure": True,
-         "table_mode": "accurate", "image_export_mode": "placeholder"},
-        services.timeout)
+    """The parser's structured output for one file.
+
+    Retried, because this is the slow stage and the first real corpus run lost a 60-page PDF to a 504 from
+    whatever sits in front of the parser. The parse itself is idempotent, so trying again costs time and
+    nothing else.
+    """
+    payload = _with_retries(
+        f"parsing {relpath}",
+        lambda: _multipart(
+            f"{services.parser_url}/v1/convert/file", path.name, path.read_bytes(),
+            {"to_formats": "json", "do_ocr": True, "do_table_structure": True,
+             "table_mode": "accurate", "image_export_mode": "placeholder"},
+            services.timeout))
     document = (payload.get("document") or {}).get("json_content") or {}
     if not document:
         raise RuntimeError(
@@ -336,6 +378,18 @@ def ingest_document(services: Services, document: Document, content_sha256: str,
     parsed = parse_document(services, document.path, document.relpath)
     chunks = chunker.chunk_document(parsed, doc_id=document.relpath, source_sha256=content_sha256)
     pages = len(parsed.get("pages") or {}) or None
+
+    # Refuse to record a document that produced nothing. The first real corpus run wrote two contract
+    # exhibits as zero chunks and reported success, which put two documents in the index that look
+    # retrievable and contain no text. A failure would have been visible; this was not. The check is here
+    # rather than in the chunker because the parser's output is what is being judged, and the same empty
+    # result can come from a document that genuinely has no text.
+    if not chunks:
+        raise RuntimeError(
+            f"the parser returned a document with no retrievable text for {document.relpath}: "
+            f"{len(parsed.get('texts') or [])} text items, {len(parsed.get('tables') or [])} tables, "
+            f"and the chunker produced no chunks. An empty document is worse than a failed one, because "
+            f"it looks retrievable.")
 
     # Whether OCR actually produced this text is a fact this worker knows and the chunker cannot. The
     # chunker defaults the flag to True, which is the safe direction for a scanned-document pipeline and
