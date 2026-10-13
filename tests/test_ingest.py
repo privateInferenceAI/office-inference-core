@@ -865,3 +865,38 @@ def test_a_document_with_no_per_page_report_falls_back_to_the_rollup(tmp_path, w
     ingest.ingest_cycle(services, tmp_path, ingest.MemoryManifest())
     assert all(point["payload"]["is_ocr"] is True for point in services.upserted)
     assert all(point["payload"]["ocr_page_count"] == 0 for point in services.upserted)
+
+
+def test_a_format_the_scorer_did_not_look_at_is_not_labelled_ocr():
+    """The corpus's two HTML contract exhibits, which came back from the service labelled as machine-read.
+
+    The parser runs its scoring stages over PDFs and returns a full set of nulls with both grades set to
+    "unspecified" for a format it does not score. That is not an empty report, so testing only for
+    emptiness fell through to the parse_score branch, where a null parse_score means "no digital text
+    cells, therefore OCR" — true for a scan, wrong for HTML, which has no pages to have read either way.
+
+    The direction matters: text that nothing performed recognition on was being presented as machine-read,
+    so a reader would distrust a contract's plain text for no reason.
+    """
+    unspecified = {"parse_score": None, "layout_score": None, "table_score": None, "ocr_score": None,
+                   "mean_score": None, "low_score": None,
+                   "mean_grade": "unspecified", "low_grade": "unspecified"}
+    assert ingest._ocr_ran({}, unspecified) is False
+
+    # And a scan still reads as OCR, because its scorer ran and found no digital text cells.
+    scanned = {"parse_score": None, "layout_score": 0.889, "table_score": None, "ocr_score": 0.989,
+               "mean_score": 0.939, "low_score": 0.894,
+               "mean_grade": "excellent", "low_grade": "good"}
+    assert ingest._ocr_ran({}, scanned) is True
+
+    # A text PDF still reads as not-OCR.
+    text_pdf = {"parse_score": 1.0, "layout_score": 0.930, "table_score": None, "ocr_score": 0.828,
+                "mean_score": 0.964, "low_score": 0.933,
+                "mean_grade": "excellent", "low_grade": "excellent"}
+    assert ingest._ocr_ran({}, text_pdf) is False
+
+    # An all-null report with no grade at all is the same situation.
+    assert ingest._ocr_ran({}, {name: None for name in
+                                ("parse_score", "layout_score", "ocr_score")}) is False
+    # And no report at all still assumes the safe direction.
+    assert ingest._ocr_ran({}, None) is True
