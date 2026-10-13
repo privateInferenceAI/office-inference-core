@@ -386,6 +386,14 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       VECTOR_URL: http://vector:6333
       COLLECTION: ${COLLECTION:-documents}
+      # Where the client's files are. Retention destroys those as well as the indexes, because a period running
+      # out means there is no document, and a run that cleared the indexes and left the file would report
+      # success while the thing the client asked to be destroyed sat in their documents directory.
+      DOCUMENTS_ROOT: /documents
+    volumes:
+      # Read-write, because retention unlinks the client's files. Read-only would make every destruction fail on
+      # the unlink after the stores were already cleared, which is the unrecoverable order.
+      - ${OI_ROOT}/documents:/documents
     depends_on:
       postgres:
         condition: service_healthy
