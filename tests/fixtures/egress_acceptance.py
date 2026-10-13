@@ -123,7 +123,12 @@ def main() -> int:
     # Written through the deployment's own CLI rather than by an insert this probe wrote for itself. The audit
     # module is the single writer path for the hash chain, and an event inserted around it would be a row the
     # chain does not cover, which is exactly the property the sink exists to have.
-    request_id = f"egress-acceptance-{os.getpid()}"
+    # Unique per run, and the first version was not: it used the process id, which is 1 inside a container, so
+    # the second run collided with the first row, the insert was refused by the unique index, and the read-back
+    # returned the PREVIOUS run's event. The probe then reported four failures that were all about a stale row
+    # rather than about the code, which is a diagnostic lying about what it inspected.
+    import time
+    request_id = f"egress-acceptance-{int(time.time())}-{os.getpid()}"
     audit_cli = os.environ.get("AUDIT_CLI", "/w/services/audit/audit.py")
     command = [
         sys.executable, audit_cli, "record", "--dev",
@@ -147,6 +152,13 @@ def main() -> int:
     if written.returncode != 0:
         problems.append(f"the audit CLI refused the event, so there is nothing in the sink to check: "
                         f"{written.stderr.strip()[:200]}")
+        print("  the write was refused, so nothing below is read. Reporting on a row this run did not write "
+              "would describe an earlier run.")
+        print()
+        print("FAILED: the audit event could not be recorded, so the second half of the requirement is unproven")
+        for problem in problems:
+            print(f"  - {problem}")
+        return 1
 
     try:
         import psycopg
