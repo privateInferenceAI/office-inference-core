@@ -146,3 +146,19 @@ def test_reranking_can_be_turned_off_for_a_comparison():
     fused order without a reranker in it."""
     source = (ROOT / "services" / "retrieval" / "retriever.py").read_text()
     assert "rerank_passages: bool = True" in source
+
+
+def test_the_tool_image_carries_the_sdk_the_reranker_signs_with():
+    """Found by running the reranker acceptance on the box: `No module named 'botocore'`.
+
+    The retriever imports the reranker, so any image that runs a retrieval needs the AWS SDK in it, and the tool
+    image did not have it. The unit tests passed because they run in the source tree where every module resolves,
+    which is the same gap as the worker's Dockerfile missing `contract.py`: **an image is a set of files and
+    nothing was checking that the set was complete.**
+    """
+    dockerfile = (ROOT / "services" / "eval" / "Dockerfile").read_text()
+    assert "botocore" in dockerfile, (
+        "the tool image runs the retriever, which imports the reranker, which signs through botocore")
+    # And the module that needs it says so rather than assuming the environment has it.
+    source = (ROOT / "services" / "retrieval" / "rerank.py").read_text()
+    assert "import botocore.session" in source
