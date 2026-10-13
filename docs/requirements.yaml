@@ -203,7 +203,7 @@ items:
     title: A confidently wrong read is caught by redundancy, or disclosed, rather than trusted
     tier: [cloud, office, hosted]
     phase: C2
-    verify: a damaged figure is caught by a format or arithmetic check, a figure that passes every check is disclosed as machine-read when cited, and a flagged figure can be confirmed against the original image with the correction stored
+    verify: a damaged figure is caught by a format or arithmetic check, a figure that passes every check is disclosed as machine-read when cited, and a chunk read from a scanned page is labelled as such while one from a digital page is not
     status: open
     note: >-
       Decided by Anthony 2026-10-12, after four research angles, and recorded in full in
@@ -234,9 +234,14 @@ items:
       characters and the number for damaged printed English digits does not exist; how large the review
       queue actually is, which decides whether it is a database query or a product surface; whether the
       client's own records can serve as the second source, which is later work; and per-page confidence
-      for triage, which Docling computes and does not expose, now less urgent because triage is a weaker
-      job than detection; and how large the review queue is, which depends on a client's real paper
-      rather than on synthetic damage and is therefore a fixture-corpus question. The engine question is
+      for triage, which Docling computes and does not expose. That one is RESOLVED as of 2026-10-13:
+      docling-serve serialised only the document-level rollup, so services/parser now wraps the same image
+      and returns the per-page report, and the worker labels each chunk from the pages it covers. Verified
+      on the reference instance: the 59-page publication reports pages 1 and 8 as OCR'd and 320 of its 358
+      chunks as not, while the three HTML documents report no OCR at all. The document-level signal could
+      not express that, which is why a mixed filing was labelled one way in full. Still open: how large the
+      review queue is, which depends on a client's real paper rather than on synthetic damage and is
+      therefore a fixture-corpus question. The engine question is
       settled by measurement in docs/runbook.md step 3.4b: over forty damaged readings of a known cell,
       RapidOCR was wrong on four and Tesseract on fifteen, Tesseract caught two of RapidOCR's four, and
       two failures beat both engines. Both of those were truncated readings, 14600 and 1450 for 14500,
