@@ -2,32 +2,32 @@
   "corpus_version": "fixture-v1",
   "documents": {
     "apple-10k-2024": {
-      "bytes": 1503891,
+      "bytes": 1503898,
       "content_type": null,
       "fetched": "2026-10-12",
       "licence": "US federal public record. Filed with the SEC and available to the public at no charge; no agreement, fee or gating. Verified 2026-10-12 by reading the filing index page.",
       "path": "apple-10k-2024.htm",
-      "sha256": "812f766e3cd4f3c5432632b015df2f7ef784c9ba2e8e99f61ccdf08941fd89cb",
+      "sha256": "147973a09b33b00f6f9ef5e53357aa8dc01415cb013f5269bd983d7970670476",
       "source": "SEC EDGAR",
       "url": "https://www.sec.gov/Archives/edgar/data/320193/000032019324000123/aapl-20240928.htm"
     },
     "apple-ex10-1-2024": {
-      "bytes": 57059,
+      "bytes": 57066,
       "content_type": null,
       "fetched": "2026-10-12",
       "licence": "US federal public record.",
       "path": "apple-ex10-1-2024.htm",
-      "sha256": "c294c7372937287cca8add14e3b20db0e6352426d171e5e21fab0bd7ac0db083",
+      "sha256": "d93389624c2f5d93f640bf7fb2a12a0fd05533ed452608d78275d1e121002c01",
       "source": "SEC EDGAR",
       "url": "https://www.sec.gov/Archives/edgar/data/320193/000032019324000123/a10-kexhibit10199282024.htm"
     },
     "apple-ex10-22-2024": {
-      "bytes": 75351,
+      "bytes": 75358,
       "content_type": null,
       "fetched": "2026-10-12",
       "licence": "US federal public record.",
       "path": "apple-ex10-22-2024.htm",
-      "sha256": "3fd73dc228c283a42d7abfbe5d8a8546c966364df0843296f15af09c932e5ac5",
+      "sha256": "885181cfc1b3fb35334d4ac76cb0aa054020174572daefe7f1a45322bdc864d5",
       "source": "SEC EDGAR",
       "url": "https://www.sec.gov/Archives/edgar/data/320193/000032019324000123/a10-kexhibit10229282024.htm"
     },
