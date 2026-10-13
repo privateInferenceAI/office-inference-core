@@ -19,6 +19,7 @@ Run from the repo root on the box:
 """
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -40,6 +41,12 @@ QUESTIONS = [
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--denial", choices=[m.value for m in retriever.DenialMode], default=None,
+                        help="override the configured denial mode, so both behaviours can be seen on the "
+                             "box rather than taken from a unit test")
+    args = parser.parse_args()
+
     services = ingest.Services()
     problems: list[str] = []
 
@@ -59,22 +66,34 @@ def main() -> int:
                 "no executive points are indexed, so every test below would pass against a retriever with "
                 "no filter at all. Install the fixture and re-ingest.")
 
+    print(f"denial mode: {args.denial or retriever.denial_mode().value} "
+          f"(configured {retriever.denial_mode().value})")
     print()
     for role in ("staff", "executive"):
         print(f"=== role: {role} ===")
         for question in QUESTIONS:
-            result = retriever.search(services, question, role=role, limit=5)
+            result = retriever.search(services, question, role=role, limit=5, denial=args.denial)
             texts = [p.text for p in result.passages]
             leaked = [figure for figure in RESTRICTED_FIGURES
                       if any(figure in text for text in texts)]
-            print(f"  {question[:52]:<54} passages {len(result.passages):>2}  "
-                  f"withheld {result.withheld:>2}  denied {result.denied}")
+            print(f"  {question[:50]:<52} passages {len(result.passages):>2}  "
+                  f"denied {str(result.denied):<5} withheld {result.withheld:>2}  "
+                  f"restricted_best {result.restricted_best_score}")
             for passage in result.passages[:2]:
-                print(f"      {passage.doc_id} p{passage.page_start} {passage.text[:56]!r}")
-            if leaked:
-                problems.append(f"{role} received restricted figures {leaked} for {question!r}")
+                print(f"      {passage.doc_id} p{passage.page_start} {passage.text[:54]!r}")
+            if result.disclosure is not None:
+                print(f"      DISCLOSURE[{result.disclosure.mode}]: {result.disclosure.message}")
+            elif result.denied:
+                print(f"      DISCLOSURE: none, which is the silent policy working")
+            # Only the role that may NOT see the figures is checked for receiving them. The first version of
+            # this probe checked every role, so the executive role was reported as leaking what it is
+            # permitted to read, and the run ended in FAILED with the permissions actually correct.
+            if role == "staff" and leaked:
+                problems.append(f"staff received restricted figures {leaked} for {question!r}")
             if role == "staff" and any(p.acl != "company" for p in result.passages):
                 problems.append(f"a staff query returned a passage outside company for {question!r}")
+            if role == "executive" and not result.passages:
+                problems.append(f"an executive query returned nothing for {question!r}")
         print()
 
     print("=== the direct test: does a staff query reach the restricted document at all? ===")

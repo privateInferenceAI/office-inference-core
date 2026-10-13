@@ -140,11 +140,45 @@ class Result:
     denied: bool = False
     reason: str = ""
     disclosure: Disclosure | None = None
+    # The best score found among passages this role may not see, kept for the record rather than shown to a
+    # user. It is what makes "the answer may be incomplete" a measured statement rather than a guess.
+    restricted_best_score: float | None = None
 
 
 def embed_query(services: ingest.Services, texts: list[str]) -> list[list[float]]:
     """The query's vector. A seam of its own so a test can watch what is embedded."""
     return ingest.embed_texts(services, texts)
+
+
+def _restricted_best_score(services: ingest.Services, vector: list[float],
+                           roots: frozenset[str]) -> float | None:
+    """The best score among passages this role may NOT see, or None if there are none.
+
+    This exists because the obvious design does not work. The first version inferred a denial from the
+    passages the store returned that the role could not see, which means it only ever fired when the store
+    misbehaved: the filter is in the query and the store honours it, so nothing restricted comes back, so the
+    count stayed zero and the denial never fired. The client's whole policy on what a denied user is told was
+    dead code in normal operation, and the probe run that found it is the one that reported `withheld 0` on
+    every question.
+
+    The requirement is that a staff query for executive content returns a denial, which needs knowing whether
+    restricted content WOULD have answered. So this runs a second search against the complement of the role's
+    roots and takes its best score.
+
+    Two things keep it from being a leak. `with_payload` is false, so no restricted text leaves the store:
+    only a number does. And only the SCORE is compared, never the content, so what comes back is "something
+    you may not see matched better than anything you can", which is exactly what a denial has to say and no
+    more. The point id Qdrant returns anyway is a uuid5 over the document id, so it does not name a file.
+    """
+    forbidden = {"must_not": [{"key": "acl", "match": {"any": sorted(roots)}}]}
+    hits = _search(services, {"vector": vector, "limit": 1, "with_payload": False,
+                             "filter": forbidden})
+    if not hits:
+        return None
+    try:
+        return float(hits[0].get("score") or 0.0)
+    except (TypeError, ValueError):
+        return None
 
 
 def _search(services: ingest.Services, body: dict) -> list[dict]:
@@ -202,13 +236,13 @@ def _disclose(mode: DenialMode, role: str, withheld: int) -> Disclosure | None:
     if mode is DenialMode.COUNTED:
         return Disclosure(
             mode=mode.value,
-            message=(f"{withheld} passage(s) matched but are not available to the {role!r} role. The answer "
-                     f"below may be incomplete."),
-            count=withheld)
+            message=(f"Documents that answer this more directly exist and are not available to the {role!r} "
+                     f"role. The answer below is drawn from what you can see and may be incomplete."),
+            count=withheld or None)
     return Disclosure(
         mode=mode.value,
-        message=(f"Some documents that may answer this are not available to the {role!r} role. The answer "
-                 f"below may be incomplete."),
+        message=(f"Documents that answer this more directly exist and are not available to the {role!r} "
+                 f"role. The answer below is drawn from what you can see and may be incomplete."),
         count=None)
 
 
@@ -254,11 +288,28 @@ def search(services: ingest.Services, question: str, role: str, limit: int = 10,
             continue
         result.passages.append(Passage.from_payload(payload, float(item.get("score") or 0.0)))
 
-    if result.withheld:
-        # The facts, which are accurate in every mode and belong to the record.
-        result.denied = True
-        result.reason = (
-            f"{result.withheld} passage(s) were restricted and not available to the {role!r} role.")
-        # The disclosure, which is governed by the client's policy and is the only part a user sees.
-        result.disclosure = _disclose(mode, role, result.withheld)
+    # Whether content the role may not see would have answered BETTER than anything it can see. This runs in
+    # every mode, including silent, because the record has to be able to report that a partial answer was
+    # returned — that is precisely what an auditor asks about, and a silent organisation is the one most
+    # likely to be asked.
+    best_permitted = max((p.score for p in result.passages), default=None)
+    restricted_best = _restricted_best_score(services, vectors[0], roots)
+
+    result.restricted_best_score = restricted_best
+    if restricted_best is not None:
+        # Only a BETTER match counts. A weak match exists for almost any question, and denying on one would
+        # train users to ignore a warning that fires constantly, which costs the disclosure its only job.
+        if best_permitted is None or restricted_best > best_permitted:
+            result.denied = True
+            # The facts, which are accurate in every mode and belong to the record.
+            if result.withheld:
+                result.reason = (
+                    f"{result.withheld} passage(s) were returned that the {role!r} role may not see, which "
+                    f"means the store did not apply the filter.")
+            else:
+                result.reason = (
+                    f"a passage the {role!r} role may not see matched this question better than any passage "
+                    f"it may see, so the answer drawn from what is available is incomplete by construction.")
+            # The disclosure, which is governed by the client's policy and is the only part a user sees.
+            result.disclosure = _disclose(mode, role, result.withheld)
     return result

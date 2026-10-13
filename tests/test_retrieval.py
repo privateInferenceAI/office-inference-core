@@ -182,7 +182,7 @@ def test_a_staff_result_reports_that_something_was_withheld(wired):
     assert result.denied is True
     assert result.withheld == 1
     assert result.role == "staff"
-    assert "restricted" in result.reason.lower() or "not available" in result.reason.lower()
+    assert "may not see" in result.reason.lower(), result.reason
 
 
 def test_an_executive_gets_the_passage_and_no_denial(wired):
@@ -267,7 +267,7 @@ def test_the_record_keeps_the_fact_in_every_mode(wired):
     assert result.disclosure is None
     assert result.denied is True, "the system still knows something was withheld"
     assert result.withheld == 1
-    assert "restricted" in result.reason.lower(), "the internal reason stays accurate"
+    assert "may not see" in result.reason.lower(), "the internal reason stays accurate"
 
 
 def test_no_withholding_means_no_disclosure_in_any_mode(wired):
@@ -301,3 +301,102 @@ def test_the_mode_comes_from_the_environment_when_not_passed(monkeypatch):
     finally:
         monkeypatch.delenv("ACCESS_DENIAL_MODE", raising=False)
         importlib.reload(retriever)
+
+
+# --------------------------------------------------------------------------- the denial that fires in practice
+
+def test_a_better_restricted_match_denies_even_though_the_store_filtered_correctly(wired):
+    """The bug the deployed probe found, and it made the whole client policy dead code.
+
+    The first version inferred a denial from the passages the store returned that the role could not see. The
+    filter is in the query and the store honours it, so nothing restricted comes back, so that count stayed
+    zero on every question and `denied` was never true. The client's setting for what a denied user is told
+    would never have applied to anything, and the unit tests passed because their stub returned restricted
+    passages to prove the second line worked.
+
+    The requirement is that a staff query for executive content returns a denial. That needs knowing whether
+    restricted content WOULD have answered, which needs a second search — so the stub now answers the two
+    searches differently, the way the real store does.
+    """
+    services = wired(hits=[hit("company/irs-p15.pdf", "company", "A general note about expenses.")])
+    # The permitted search returns one weak company passage; the complement search returns a strong
+    # restricted one. A stub with a single answer cannot express this, which is why the earlier version
+    # passed while the behaviour was broken.
+    calls = {"n": 0}
+    real_search = retriever._search
+
+    def two_answers(services_, body):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return [{"id": "a", "score": 0.42,
+                     "payload": hit("company/irs-p15.pdf", "company", "A general note.")["payload"]}]
+        return [{"id": "b", "score": 0.81}]           # no payload: the store is asked for none
+
+    import pytest as _pytest
+    with _pytest.MonkeyPatch.context() as patch:
+        patch.setattr(retriever, "_search", two_answers)
+        result = retriever.search(services, "what is the ceo base salary", role="staff",
+                                  denial="counted")
+    assert calls["n"] == 2, "a denial needs a second search to know what it is denying"
+    assert result.denied is True, "a better restricted match must deny"
+    assert result.restricted_best_score == 0.81
+    assert result.disclosure is not None and result.disclosure.mode == "counted"
+
+
+def test_a_weaker_restricted_match_does_not_deny(wired):
+    """The other half, and the reason the comparison exists rather than a bare hit test.
+
+    A weak restricted match exists for almost any question, because every corpus has something loosely
+    related to everything. Denying on one would put a warning on most answers, and a warning that fires
+    constantly is one users learn to ignore, which costs the disclosure the only job it has.
+    """
+    services = wired()
+    calls = {"n": 0}
+
+    def two_answers(services_, body):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return [{"id": "a", "score": 0.88,
+                     "payload": hit("company/irs-p15.pdf", "company", "A strong company match.")["payload"]}]
+        return [{"id": "b", "score": 0.31}]           # restricted, but a worse match
+
+    import pytest as _pytest
+    with _pytest.MonkeyPatch.context() as patch:
+        patch.setattr(retriever, "_search", two_answers)
+        result = retriever.search(services, "mileage rate", role="staff")
+    assert result.denied is False, "a worse restricted match is not a denial"
+    assert result.disclosure is None
+    assert result.restricted_best_score == 0.31, "the score is still recorded for the record"
+
+
+def test_the_complement_search_takes_no_payload(wired):
+    """The line between detecting a denial and leaking one.
+
+    The complement search runs against content the role may not see, so it must not bring any back: only a
+    score crosses that boundary. A version that fetched payloads to compare them would be the
+    filter-afterwards anti-pattern wearing a second search, and the restricted text would be in memory,
+    countable and one log statement from a disclosure.
+    """
+    services = wired(hits=[hit("company/irs-p15.pdf", "company", "A note.")])
+    seen: list[dict] = []
+    real_search = retriever._search
+
+    def watching(services_, body):
+        seen.append(body)
+        return real_search(services_, body)
+
+    import pytest as _pytest
+    with _pytest.MonkeyPatch.context() as patch:
+        patch.setattr(retriever, "_search", watching)
+        retriever.search(services, "anything", role="staff")
+
+    assert len(seen) == 2, "one permitted search and one complement search"
+    complement = seen[1]
+    assert complement["with_payload"] is False, (
+        "the complement search must not bring restricted text back into this process")
+    assert complement["limit"] == 1, "only the best score is needed"
+    assert "must_not" in complement["filter"], (
+        "the complement is expressed as everything the role may not see, so a folder nobody declared is "
+        "still counted as restricted rather than silently omitted")
+    # And the permitted search still carries the positive filter.
+    assert "must" in seen[0]["filter"]
