@@ -2240,10 +2240,24 @@ passages `ask.py` retrieved, which is why the passage numbers in your answer mus
 It is the same verifier section 13c documents, so a claim can also be refused for being `superseded` when the
 figures are right.
 
-**The exit codes are the contract**, because this is the only piece of the C2 path a script can call:
-`0` when something was returned, **`0` when the role was denied** — a denial is the control working, not a
-failure — `1` when nothing was returned, and `2` when the role is unknown. A monitoring script that
-treated a denial as an error would page someone every time the access filter did its job.
+**The exit codes are the contract**, because this is the only piece of the C2 path a script can call. There
+are three of them and they key off whether anything came back, not off whether the answer was denied:
+
+| Exit | When |
+|---|---|
+| `0` | passages were returned. **This includes a denied search that still returned what the role may see**, which is the common case |
+| `1` | nothing was returned at all, or a json-mode run found no passages |
+| `2` | the role is not one of the two the retriever knows, so nothing was searched |
+
+**A denial is not an error and must not be treated as one.** In `counted` and `denied` modes the retriever
+still returns the passages the role may see and marks the result `denied: True` with a disclosure beside
+it, so a script sees exit 0 and a populated result. Exiting non-zero on `denied` would page someone every
+time the access filter did its job. If you want to act on a denial, read the `denied` field from `--json`
+rather than the exit code.
+
+**A role that may see nothing is a configuration error rather than an empty result.**
+`permitted_roots()` raises for a role whose permission set is empty, and `ask.py` catches that and exits 2
+with the reason on stderr, so a mistyped role and a corpus that came back empty are distinguishable.
 
 **What this probe is not.** It does not call a model. Handing these passages to one, with the citation
 rules and the confidence gate attached, is the steps in section 13c; putting that behind an API that a

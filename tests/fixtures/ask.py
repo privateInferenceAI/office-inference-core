@@ -21,10 +21,11 @@ The `eval` image rather than the ingestion one because this imports the retrieve
 botocore through the reranker. `--env-file rendered/env` supplies DATABASE_URL for the lexical arm and
 the rerank settings; without it the lexical arm is skipped and the output says so.
 
-Exit codes: 0 when the question returned something, 1 when it returned nothing, and 2 when the role is
-not one the retriever knows. A refusal is not an error — a role that is denied an answer has been served
-correctly, and the exit code says 0 for that, because a script that treated a denial as a failure would
-page someone every time the control worked.
+Exit codes: 0 when passages came back, 1 when nothing did, and 2 when the role is not one the retriever
+knows. A denial is deliberately NOT an error exit: a denied search still returns the passages the role may
+see, so it exits 0 with `denied: True` in the output. A script that wants to act on a denial reads that
+field rather than the exit code, because treating the control working as a failure would page someone
+every time it worked.
 """
 from __future__ import annotations
 
