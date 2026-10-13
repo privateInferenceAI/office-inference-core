@@ -2527,6 +2527,87 @@ and never the passage. **A record holding the content would be a copy of what th
 - The refusal appears and the passage was still sent: `assemble` builds one string and returns it. Check that the
   caller is using `assembled.user` rather than the passages it passed in.
 
+### 3.14 Retention
+
+**Goal.** Three requirements and one of them is the work: `DATA-PURGE-001`, a client-requested purge deletes
+content everywhere it is stored including the vector index; `DATA-HOLD-001`, a legal hold blocks a purge;
+`DATA-EXIT-001`, termination destroys client data and produces evidence that it happened.
+
+**`EVERYWHERE` is the requirement.** The vector index is named because it is the obvious one. The one that gets
+forgotten is whichever store was added most recently, and in this build that is **the lexical index from step
+3.9** — a second copy of every document, added six steps after the first. A purge that clears the vector store
+and not that one still answers the question it was purged for, **with a correct citation to a document that no
+longer exists.** That is worse than an error, because the answer looks right.
+
+**So the stores are a list, and the list is checked against the writers.** `STORES` in
+`services/retention/retention.py` enumerates them, and a test reads the ingestion worker's write paths and
+asserts a purge store exists for each. **A new store added in a later step without a purge path fails that test
+rather than failing in a client's question six months later.**
+
+**A store that reports zero is recorded, not skipped.** The result is per store rather than a total, so a store
+that was never wired in is visible instead of looking like a store that had nothing to do. A total of forty
+cannot show that one of three stores contributed nothing, and **"did nothing" is the shape of the bug**.
+
+**A purge that cannot reach a store is not a purge.** The record says `complete: false` and the command exits
+non-zero. Reporting success because the reachable stores succeeded is how a client is told their data is gone
+while it is not.
+
+**The hold covers documents added later.** A deployment-scope hold has no document list, so a document uploaded
+after the hold was placed is covered by it. **A hold that only covered what existed at the time is a hold with a
+gap in it, and the gap is where the document that matters ends up.** The hold is checked in **one query** before
+any store is touched, because checking it per store means a hold obeyed by the store somebody remembered and
+ignored by the one they did not, which from the client's side is the same as no hold at all.
+
+**The destruction record is hashed, and the hash is of the record.** The client keeps the file; the hash is what
+lets them show later that it is the one we produced, and neither side has to trust the other's copy.
+
+**The audit chain is deliberately not destroyed**, and the record says so. It says which documents existed and
+that they were destroyed, which is what lets the destruction be checked by someone who does not trust us.
+Destroying it would leave the client unable to show anyone that we did what we said. The stored payloads are
+cleared; the events are kept.
+
+**Commands.**
+
+    cd /opt/oi-core
+    git pull
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      --profile tools run --rm audit migrate
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      --profile tools run --rm retention --holds
+
+    # A document, with a reason that goes in the record.
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      --profile tools run --rm retention --purge company/invoice-2024.pdf --reason "client asked"
+
+    # A hold, then the hold refusing the purge, then the release.
+    ... retention --hold company/tax.pdf --reason "litigation in progress"
+    ... retention --purge company/tax.pdf --reason "client asked"     # refused, exits non-zero
+    ... retention --holds
+    ... retention --release-hold 1
+
+    # The end of a contract.
+    ... retention --destroy-all --reason "contract terminated 2026-11-30"
+
+**Expected on the acceptance run.** A hold refuses the purge and **changes nothing**; after the release the
+purge clears the vector index, the lexical index and the manifest; and **the same question asked before and
+after returns the document the first time and not the second.** That last pair is the requirement: a check that
+only asked afterwards could pass on a corpus that never held the document.
+
+**If it breaks.**
+
+- The document still answers after a purge: ask `select doc_id, count(*) from chunk_index group by doc_id`.
+  The lexical arm is the usual answer, and the fix is a store in `STORES` rather than a larger delete in one
+  place.
+- `complete: false`: read the store that carries the error. Nothing is deleted from the stores that succeeded
+  until the failed one is fixed? **No such rollback exists**, and that is worth being plain about: a purge that
+  fails part way leaves the document partly gone. The record says which stores confirmed, and the fix is to run
+  it again once the store is reachable, which is safe because every delete is by filter rather than by a list of
+  ids.
+- A purge is refused and no hold is visible: check `select * from legal_holds where released_at is null`. The
+  deployment-scope hold is the one that catches everything and is the one people forget they placed.
+- The destruction record fails its own hash: the record travels with the hash, so a mismatch means the file was
+  edited. Do not try to reconcile it; the hash is the point.
+
 ## Phase 4 — Assistant API  *(outline)*
 
 The single surface the client app talks to: ask, tasks, approvals, activity, settings.

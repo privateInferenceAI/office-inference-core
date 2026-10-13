@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""The retention commands: purge a document, hold one, and destroy everything at the end.
+
+Kept as a separate entry point from the audit service because it deletes from stores the audit service does not
+know about, and a command that clears the vector index should not live inside the thing that records what
+happened.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+
+import retention
+
+
+def connect():
+    import psycopg
+    return psycopg.connect(os.environ["DATABASE_URL"], autocommit=True)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Purge a client's document everywhere it is stored.")
+    parser.add_argument("--purge", metavar="DOC_ID",
+                        help="delete this document from every store. Refused if a hold covers it.")
+    parser.add_argument("--reason", help="why, in the client's words. Recorded.")
+    parser.add_argument("--actor", default="retention-job", help="who or what is asking")
+    parser.add_argument("--hold", metavar="DOC_ID", nargs="?", const="",
+                        help="place a hold. With no document, the hold covers the whole deployment and every "
+                             "document added later.")
+    parser.add_argument("--release-hold", metavar="HOLD_ID", type=int, help="release a hold by id")
+    parser.add_argument("--holds", action="store_true", help="list the holds in force")
+    parser.add_argument("--purges", action="store_true", help="list what has been purged")
+    parser.add_argument("--destroy-all", action="store_true",
+                        help="destroy every document in every store and write a destruction record")
+    parser.add_argument("--vector-url", default=os.environ.get("VECTOR_URL", "http://vector:6333"))
+    parser.add_argument("--collection", default=os.environ.get("COLLECTION", "documents"))
+    args = parser.parse_args()
+
+    if not os.environ.get("DATABASE_URL"):
+        print("DATABASE_URL is not set, so there is nothing to connect to", file=sys.stderr)
+        return 1
+
+    if args.holds:
+        with connect() as connection, connection.cursor() as cur:
+            cur.execute("""select id, scope, coalesce(doc_id, '(whole deployment)'), reason, placed_by,
+                                  placed_at
+                           from legal_holds where released_at is null order by id""")
+            rows = cur.fetchall()
+        if not rows:
+            print("no holds in force")
+        for row in rows:
+            print(f"  {row[0]}  {row[1]:<11} {row[2]:<40} {row[3]!r} by {row[4]} at {row[5]}")
+        return 0
+
+    if args.purges:
+        with connect() as connection, connection.cursor() as cur:
+            cur.execute("""select doc_id, complete, purged_at, stores from purge_records
+                           order by id desc limit 20""")
+            rows = cur.fetchall()
+        if not rows:
+            print("nothing has been purged")
+        for doc_id, complete, when, stores in rows:
+            mark = "complete" if complete else "INCOMPLETE"
+            print(f"  {when}  {mark:<11} {doc_id}")
+            print(f"      {json.dumps(stores, sort_keys=True)}")
+        return 0
+
+    if args.hold is not None:
+        if not args.reason:
+            print("--hold needs --reason: a hold nobody can explain is one nobody can release", file=sys.stderr)
+            return 1
+        with connect() as connection:
+            hold_id = retention.place_hold(connection, args.reason, args.actor,
+                                           args.hold or None)
+        where = args.hold or "the whole deployment, including documents added later"
+        print(f"hold {hold_id} placed on {where}: {args.reason!r}")
+        print("A purge of anything it covers is refused and the refusal is recorded.")
+        return 0
+
+    if args.release_hold:
+        with connect() as connection:
+            released = retention.release_hold(connection, args.release_hold, args.actor)
+        if released:
+            print(f"hold {args.release_hold} released by {args.actor}")
+            return 0
+        print(f"hold {args.release_hold} is not in force, so there was nothing to release", file=sys.stderr)
+        return 1
+
+    if args.destroy_all:
+        if not args.reason:
+            print("--destroy-all needs --reason", file=sys.stderr)
+            return 1
+        with connect() as connection:
+            record = retention.destroy_all(connection, args.reason, args.actor,
+                                           args.vector_url, args.collection)
+        print(json.dumps(record, indent=2, sort_keys=True))
+        print()
+        print("Keep that file. Its hash is what lets you show later that it is the record we produced.")
+        return 0 if record["complete"] else 1
+
+    if args.purge:
+        if not args.reason:
+            print("--purge needs --reason: the record of a deletion without a reason is one nobody can review",
+                  file=sys.stderr)
+            return 1
+        with connect() as connection:
+            result = retention.purge(connection, args.purge, args.reason, args.actor,
+                                     args.vector_url, args.collection)
+        print(json.dumps(result.as_record(), indent=2, sort_keys=True))
+        if result.refused:
+            print()
+            print(f"REFUSED: {result.refusal_reason}")
+            return 1
+        if not result.complete:
+            print()
+            print("INCOMPLETE: at least one store did not confirm. The document is NOT purged, whatever the "
+                  "other stores reported.")
+            return 1
+        print()
+        print(f"purged from {len(result.stores)} store(s), {result.total_deleted} object(s) reported removed")
+        return 0
+
+    parser.print_help()
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
