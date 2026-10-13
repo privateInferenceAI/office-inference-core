@@ -263,3 +263,18 @@ def test_a_store_that_counts_does_not_report_that_it_deleted():
     assert 'verb="still_stored"' in source, "the audit store reports a count under the wrong word"
     # And nothing claims the audit store was cleared.
     assert '"audit_payload": {"deleted"' not in source
+
+
+def test_the_teardown_is_incomplete_when_content_survives_in_the_audit_record():
+    """The same situation the single-document purge reports, reported the same way.
+
+    The deployed teardown left 34 audit records holding content and reported `complete: true`, while a
+    single-document purge in the same position reports incomplete. A destruction record saying complete beside a
+    store saying 34 records still hold content is a record telling a client their data is gone when it is not,
+    and this record is the one they keep and check years later.
+    """
+    source = _purge_source()
+    teardown = source[source.index("def destroy_all"):]
+    assert "audit_left" in teardown, "the teardown does not consider what it could not clear"
+    assert 'and audit_left == 0' in teardown, "the teardown reports complete while content survives"
+    assert "still_stored" in source
