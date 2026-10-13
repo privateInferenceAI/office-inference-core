@@ -399,6 +399,18 @@ services:
       # out means there is no document, and a run that cleared the indexes and left the file would report
       # success while the thing the client asked to be destroyed sat in their documents directory.
       DOCUMENTS_ROOT: /documents
+    # Runs as the operator, like every other tool here, and **this line is what makes destruction
+    # possible at all.** The image ships its own unprivileged user (uid 10002) and the documents mount
+    # belongs to the operator (uid 1000), so without this the container can read a client's files and
+    # cannot unlink one: the image user has no write bit on the documents directory, and unlinking needs
+    # one on the DIRECTORY rather than on the file.
+    #
+    # It failed as `PermissionError: [Errno 13]` on the first real retention run ever attempted on a
+    # deployment, after the failure above it was fixed. Both were invisible for the same reason: every
+    # rehearsal returns before the deletion happens, so a dry run tested the dry run. An operator who
+    # ran the rehearsal, saw it pass, and scheduled the real thing would have had a job that reported
+    # INCOMPLETE every night and never destroyed anything.
+    user: "${HOST_UID}:${HOST_GID}"
     volumes:
       # Read-write, because retention unlinks the client's files. Read-only would make every destruction fail on
       # the unlink after the stores were already cleared, which is the unrecoverable order.
