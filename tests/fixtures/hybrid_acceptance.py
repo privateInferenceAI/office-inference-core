@@ -17,12 +17,46 @@ Run from the repo root on the box:
 """
 from __future__ import annotations
 
-import json
+import os
 import sys
-import urllib.request
+from pathlib import Path
 
 sys.path.insert(0, "/w/services/retrieval")
 sys.path.insert(0, "/w/services/ingestion")
+
+
+def load_rendered_env(path: Path = Path("/w/rendered/env")) -> int:
+    """Take DATABASE_URL from the deployment's own rendered env when the container has none.
+
+    This probe runs in the parser image, which has no database credentials of its own, so the first run
+    stopped with "DATABASE_URL is not set" and said, correctly, that nothing below it would have meant
+    anything. Reading the file the deployment already reads is better than passing a password on a command
+    line, where it would be visible to anything that lists processes, and better than asking an operator to
+    copy a credential by hand.
+    """
+    if os.environ.get("DATABASE_URL"):
+        return 0
+    if not path.exists():
+        print(f"no DATABASE_URL in the environment and no {path} to read it from")
+        return 0
+    loaded = 0
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key, value = key.strip(), value.strip().strip('"').strip("'")
+        if key == "DATABASE_URL" and value:
+            os.environ["DATABASE_URL"] = value
+            loaded += 1
+    if loaded:
+        # The host is rewritten because the deployment's env names `postgres`, which resolves on ai-net and
+        # this container is on it.
+        print("DATABASE_URL taken from rendered/env")
+    return loaded
+
+
+load_rendered_env()
 
 import ingest  # noqa: E402
 import retriever  # noqa: E402
