@@ -34,6 +34,15 @@ def main() -> int:
     parser.add_argument("--purges", action="store_true", help="list what has been purged")
     parser.add_argument("--destroy-all", action="store_true",
                         help="destroy every document in every store and write a destruction record")
+    parser.add_argument("--set-retention", metavar="DATASET",
+                        help="set the period for a dataset: documents or conversations")
+    parser.add_argument("--days", type=int, help="how many days to keep, with --set-retention")
+    parser.add_argument("--legal-basis", help="why that period, in the client's or their regulator's words")
+    parser.add_argument("--enforce", metavar="DATASET",
+                        help="destroy what the period has run out on. Refuses if no policy is set.")
+    parser.add_argument("--documents-root", default=os.environ.get("DOCUMENTS_ROOT", "/documents"),
+                        help="where the client's files are, because retention destroys those too")
+    parser.add_argument("--retention-runs", action="store_true", help="what retention has done")
     parser.add_argument("--vector-url", default=os.environ.get("VECTOR_URL", "http://vector:6333"))
     parser.add_argument("--collection", default=os.environ.get("COLLECTION", "documents"))
     args = parser.parse_args()
@@ -41,6 +50,51 @@ def main() -> int:
     if not os.environ.get("DATABASE_URL"):
         print("DATABASE_URL is not set, so there is nothing to connect to", file=sys.stderr)
         return 1
+
+    if args.set_retention:
+        if not args.days:
+            print("--set-retention needs --days. A period is the whole point.", file=sys.stderr)
+            return 1
+        import policy as policy_module
+        with connect() as connection:
+            policy_module.set_policy(connection, args.set_retention, args.days, args.legal_basis)
+        print(f"{args.set_retention} retained for {args.days} days"
+              + (f": {args.legal_basis!r}" if args.legal_basis else ""))
+        print("Nothing is destroyed on a schedule until a policy exists, and this is now one.")
+        return 0
+
+    if args.enforce:
+        import policy as policy_module
+        from pathlib import Path as _Path
+        with connect() as connection:
+            run = policy_module.enforce(connection, args.enforce, _Path(args.documents_root),
+                                        retention.purge, actor=args.actor, dry_run=args.dry_run)
+        print(json.dumps(run.as_record(), indent=2, sort_keys=True))
+        if run.retain_days == 0:
+            print()
+            print(f"NO POLICY for {args.enforce}, so nothing was destroyed. Set one with --set-retention.")
+            return 1
+        if not run.complete:
+            print()
+            print(f"INCOMPLETE: {run.failed} document(s) failed. The run is recorded and re-running is safe.")
+            return 1
+        print()
+        print(f"destroyed {run.destroyed}, held {run.held}, failed {run.failed}"
+              + (" (dry run, nothing was changed)" if run.dry_run else ""))
+        return 0
+
+    if args.retention_runs:
+        with connect() as connection, connection.cursor() as cur:
+            cur.execute("""select dataset, started_at, retain_days, examined, destroyed, held, failed, dry_run
+                           from retention_runs order by id desc limit 20""")
+            rows = cur.fetchall()
+        if not rows:
+            print("retention has never run")
+        for row in rows:
+            mark = "dry run " if row[7] else "        "
+            print(f"  {row[1]}  {row[0]:<14}{mark}period {row[2]}d  examined {row[3]}  destroyed {row[4]}  "
+                  f"held {row[5]}  failed {row[6]}")
+        return 0
 
     if args.holds:
         with connect() as connection, connection.cursor() as cur:
