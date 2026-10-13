@@ -27,7 +27,8 @@ class Passage:
 
 def q(**overrides) -> harness.Question:
     base = dict(id="Q01", question="how much?", category="fact", answerable=True,
-                source_document="irs-p15", reference_answer="184,500 dollars", page=29)
+                source_document="irs-p15", reference_answer="184,500 dollars",
+                reference_figure="184,500", page=29)
     base.update(overrides)
     return harness.Question(**base)
 
@@ -58,16 +59,16 @@ def test_a_figure_matches_however_either_side_punctuated_it():
     substring match on the answer string would score correct retrieval as a miss."""
     for written in ("391,035", "391035", "391 035", "391.035"):
         passages = [Passage("company/apple-10k-2024.htm", f"Total net sales | {written} | 2 | %")]
-        outcome = harness.grade(q(reference_answer="391,035 million dollars", source_document="apple-10k-2024"),
-                                passages, k=10)
+        outcome = harness.grade(q(reference_answer="391,035 million dollars", reference_figure="391,035",
+                                  source_document="apple-10k-2024"), passages, k=10)
         assert outcome.supported, f"did not match {written!r}"
 
 
 def test_a_figure_that_is_not_there_is_not_support():
     """The other direction, so the number matching is not simply always true."""
     passages = [Passage("company/apple-10k-2024.htm", "Total net sales | 383,285 | (3) | %")]
-    outcome = harness.grade(q(reference_answer="391,035 million dollars", source_document="apple-10k-2024"),
-                            passages, k=10)
+    outcome = harness.grade(q(reference_answer="391,035 million dollars", reference_figure="391,035",
+                              source_document="apple-10k-2024"), passages, k=10)
     assert not outcome.supported, "matched a different year's figure"
 
 
@@ -189,7 +190,7 @@ def test_a_success_on_a_pageless_document_is_recorded_as_not_having_tested_the_p
     # never set: the first version of this test left the helper's default answer in place and asserted a count
     # of one against a question that had not been supported at all.
     net_sales = dict(id="Q06", source_document="apple-10k-2024", category="table-cell",
-                     reference_answer="391,035 million dollars")
+                     reference_answer="391,035 million dollars", reference_figure="391,035")
     report = harness.run([q(**net_sales)],
                          lambda _: [Pageless("company/apple-10k-2024.htm", "Total net sales 391,035")], k=10)
     assert report.supported_on_nominal_pages == 1
@@ -200,28 +201,41 @@ def test_a_success_on_a_pageless_document_is_recorded_as_not_having_tested_the_p
     assert paged.supported_on_nominal_pages == 0
 
 
-def test_support_is_graded_on_the_answers_most_specific_figure():
-    """Found by running the harness on the real corpus.
+def test_support_is_graded_on_the_figure_the_question_states():
+    """The correction, kept with the reason the inference was removed.
 
-    The reference answers were written by reading the corpus and explaining what was found, so many are a
-    paragraph. Requiring every figure in one to appear in a single passage scored Q06 and Q07 as misses while the
-    retriever had put the right table in front of the model: Q06's answer names the sales figure, the fiscal year
-    and the year-end date, and no single chunk of a financial table holds all three.
+    The harness used to take the longest digit run in the reference answer and grade on it. The deployed run
+    showed what that produces: Q05 graded on `10.19`, an exhibit reference number rather than an answer, and Q10
+    graded on `31`, which appears in almost any document. Both scored a support match, so two of six questions
+    reported a measurement that had not been made and the corpus-wide rate read 100 percent.
 
-    The longest digit run is the specific one. `391,035` is what the question asks for; `2024` is how the answer
-    situates it and belongs in the explanation rather than in the test.
+    The figure is a decision somebody makes when writing the question. A regex inferring it from a paragraph
+    produces a number that looks like a measurement, which is worse than reporting the question as ungradable.
     """
-    assert harness.primary_figure("391,035 million dollars of total net sales for fiscal 2024, ended 28 Sep") \
-        == "391,035"
-    assert harness.primary_figure("15,115,823,000 shares as of October 18, 2024") == "15,115,823,000"
-    assert harness.primary_figure("no figures here at all") is None
-
-    answer = "391,035 million dollars of total net sales for fiscal 2024, the year ended 28 September 2024"
     passage = [Passage("company/apple-10k-2024.htm", "Total net sales | 391,035 | 2 | % | 383,285")]
-    outcome = harness.grade(q(reference_answer=answer, source_document="apple-10k"),
-                            passage, k=10)
-    assert outcome.supported, outcome.detail
-    assert "matched the figure" in outcome.detail
+    stated = harness.grade(
+        q(reference_answer="391,035 million dollars for fiscal 2024", reference_figure="391,035",
+          source_document="apple-10k"), passage, k=10)
+    assert stated.supported, stated.detail
+    assert "391,035" in stated.detail
+
+    # A figure that is not in the passage is a miss, however long the answer is.
+    # A figure the passage does not contain, which is the substituted-digit case.
+    missed = harness.grade(
+        q(reference_answer="391,035 million dollars for fiscal 2024", reference_figure="395,031",
+          source_document="apple-10k"), passage, k=10)
+    assert not missed.supported
+
+
+def test_an_exhibit_number_is_not_a_figure_to_grade_on():
+    """Q05's failure, as a shape rather than as a value. `10.19` is how the answer cites the filing, and the
+    document contains it everywhere, so grading on it reports a match on every question about that document."""
+    answer = "Exhibit 10.1 (filed as Exhibit 10.19) grants a time-based award"
+    # The question states no figure, so support is not measured, and the exhibit number cannot become one.
+    outcome = harness.grade(q(reference_answer=answer, reference_figure=None), [
+        Passage("company/apple-ex10-1-2024.htm", "filed as Exhibit 10.19 with the Commission")], k=10)
+    assert not outcome.supported
+    assert outcome.support_measurable is False
 
 
 def test_support_is_not_estimated_from_shared_vocabulary():
@@ -240,12 +254,13 @@ def test_support_is_not_estimated_from_shared_vocabulary():
     passage = [Passage("company/apple-ex10-1-2024.htm",
                        "any unvested RSUs shall terminate on the Severance Date and the Participant will have "
                        "no right to the terminated RSUs")]
-    outcome = harness.grade(q(reference_answer=answer, source_document="apple-ex10-1"), passage, k=10)
+    outcome = harness.grade(q(reference_answer=answer, reference_figure=None,
+                              source_document="apple-ex10-1"), passage, k=10)
     assert not outcome.supported, "nothing was measured, so nothing was supported"
     assert outcome.support_measurable is False
     assert "needs entailment" in outcome.detail
 
-    report = harness.run([q(reference_answer=answer)], lambda _: passage, k=10)
+    report = harness.run([q(reference_answer=answer, reference_figure=None)], lambda _: passage, k=10)
     assert report.support_rate is None, "no measurable question means no rate, not a zero"
     assert report.support_not_measurable == 1
     assert "not measurable on 1" in report.render()
@@ -253,8 +268,9 @@ def test_support_is_not_estimated_from_shared_vocabulary():
 
 def test_a_rate_that_excludes_a_question_says_so():
     """A rate whose denominator is invisible reads as though it covered everything."""
-    measurable = q(id="Q01", reference_answer="184,500 dollars")
-    unmeasurable = q(id="Q10", reference_answer="the units are forfeited on termination")
+    measurable = q(id="Q01", reference_answer="184,500 dollars", reference_figure="184,500")
+    unmeasurable = q(id="Q10", reference_answer="the units are forfeited on termination",
+                     reference_figure=None)
     report = harness.run([measurable, unmeasurable],
                          lambda _: [Passage("company/irs-p15.pdf", "184,500 dollars")], k=10)
     assert report.support_rate == 1.0, "one of one measurable question, not one of two"
