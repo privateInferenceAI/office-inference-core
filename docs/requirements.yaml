@@ -432,7 +432,23 @@ items:
     tier: [cloud, office, hosted]
     phase: C2
     verify: a query against a collection built by a different model or preprocessing is refused, not answered
-    status: open
+    note: >-
+      VERIFIED 2026-10-13 against the deployed store. The contract in force is recorded and readable: model_id
+      BAAI/bge-m3, pooling cls, 1024 dimensions, chunker-v1, model_sha null. A contract with pooling moved from cls to
+      mean is REFUSED, and the refusal NAMES the field rather than reporting that two hashes differ; a dimension
+      change is refused too, so the new check subsumes the one that existed. The read path checks as well as the write
+      path. THE DEPLOYED RUN FOUND TWO FAULTS AND BOTH WERE MINE. The first: the contract included dimension and
+      embed_path, which are things the checking process computes about ITSELF rather than properties of the vectors,
+      so the writer's contract and the reader's described the same model and still differed in two fields. The check
+      then refused EVERY search, and the eval harness reported all ten questions as misses with the reason sitting in
+      a detail field on every line: a contract that refuses everything and a corpus that answers nothing produce the
+      same summary. The second: the comparison used .get() on both sides, so a field present with a null value and a
+      field missing entirely read the same while the fingerprints over the dictionaries differed, and the refusal
+      named nothing. Both are now tests. A change to the contract's SHAPE is re-recorded in place at the same
+      generation, because starting a new one would say the vectors were built under a different contract and they were
+      not. OPEN DEPENDENCY: model_sha is null on this build, so the model revision is unverifiable and the contract
+      records the null rather than omitting the field.
+    status: verified
     note: >-
       The research's reversibility contract. Changing an embedding model means re-embedding every chunk,
       so the model id, revision, sha256, dimension, pooling, normalisation, query and passage prefixes,
@@ -466,7 +482,23 @@ items:
     tier: [cloud, office, hosted]
     phase: C2
     verify: the harness reports retrieval and support rates with per-category counts, and two configurations can be compared on the same questions
-    status: open
+    note: >-
+      VERIFIED 2026-10-13 against the deployed store. The harness reports retrieval 100 percent (6/6) and support 100
+      percent (4/4), with two answerable questions excluded and counted beside the rate because their answers carry no
+      figure and support for prose needs entailment. Per-category counts report n/a rather than zero where nothing
+      could be measured. THREE FAULTS WERE FOUND BY RUNNING IT AND ALL THREE WERE THE HARNESS. Support required every
+      figure in a paragraph to appear in one chunk, so Q06 and Q07 were scored as misses while the retriever had put
+      the right table in front of the model. The question set named a publication, irs-p15-2026, where the corpus
+      holds company/irs-p15.pdf, and the harness compared the two directly; the corpus validator settled which side
+      was wrong by refusing a source that is not a manifest id. And the fallback for an answer with no figure counted
+      shared vocabulary and reported 60 percent of it as support, which made two questions grade on numbers that are
+      not answers, an exhibit reference and a two-digit value, and the support rate read 100 percent. The figure is
+      now stated by whoever writes the question. GROUND TRUTH RECORDED: the unanswerable questions' top scores overlap
+      the answerable ones, 0.673 against a weakest answerable 0.621, so no confidence threshold separates them and a
+      refusal has to come from somewhere other than the top score. One of four supported answers came from a document
+      with no real pages, where the page rule is satisfied trivially and has not been tested. And Q07's figure was
+      found at rank 10, the edge of the window.
+    status: verified
     note: >-
       C2 decides the embedding model, the fusion and the chunking, and RET-HYBRID-001 already verifies
       hybrid on with the same question off, so a yardstick has to exist before those decisions. A fixture
@@ -610,7 +642,19 @@ items:
     tier: [cloud, office, hosted]
     phase: C2
     verify: one file of each format is ingested and answerable
-    status: open
+    note: >-
+      VERIFIED 2026-10-13 against the deployed store. One file of each format is ingested and answerable, each found
+      by its own fact, a figure appearing nowhere else in the corpus: email at rank 1, spreadsheet at rank 2, slides
+      at rank 1. What the parser does with each was measured rather than assumed. The spreadsheet comes back with zero
+      texts and three tables, so its content is table-only and the chunker's table handling is what makes it
+      retrievable at all. The deck comes back as seven texts over two slides. The email comes back with its headers
+      parsed into the text, which matters because who sent a message and when are facts a business relies on that a
+      body-only reader loses, and it is pageless, which the chunker already handled by giving it a nominal page. THE
+      BUILD WAS ONE LINE: .eml was missing from ACCEPTED_SUFFIXES, and the other two were accepted and had never been
+      exercised because the corpus is public filings and tax publications. .msg is deliberately not added: it is a
+      compound binary format rather than RFC 822 and whether the parser reads it is unverified, and adding a suffix to
+      that set is a promise that files with it are ingested.
+    status: verified
 
   # ---------------------------------------------------------------- inference and serving
   - id: INF-ROLE-001

@@ -2627,6 +2627,103 @@ only asked afterwards could pass on a corpus that never held the document.
 - The destruction record fails its own hash: the record travels with the hash, so a mismatch means the file was
   edited. Do not try to reconcile it; the hash is the point.
 
+### 3.15 The yardstick, and what it says
+
+**Three requirements closed together, and the order matters: RET-EVAL-001 is the harness the other two are
+measured with.**
+
+    cd /opt/oi-core
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      --profile tools build eval
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      --profile tools run --rm -v /opt/oi-core:/w eval
+
+**The result, against the deployed store on 2026-10-13.**
+
+    configuration: fused   k=10   n=10
+      retrieval  100% (6/6)
+      support    100% (4/4)
+      support was not measurable on 2 answerable question(s): no figure in the reference answer
+
+      category                  n   retr    supp
+      paraphrase                1   100%     n/a
+      single-fact-prose         2   100%    100%
+      table-cell                2   100%    100%
+      two-document              1   100%     n/a
+      unanswerable              2     0%     n/a
+
+      supported answers from documents with no real pages: 1 of 4
+      unanswerable top scores reaching into the answerable range: True
+        answerable   [0.684, 0.659, 0.655, 0.641, 0.633, 0.621]
+        unanswerable [0.673, 0.607, 0.558, 0.524]
+
+**Two rates, and the difference is the point.** Retrieval counts the document holding the answer among the
+passages returned. Support counts a passage containing the answer's own value, which is much stricter: **a long
+document is easy to be near**, and a system returning page 1 of the right filing for every question would score
+well on the first and badly on the second.
+
+**Writing the reference answers changed three of the ten questions.** The question set's own header says the only
+honest way to write one is to read the parsed text and check, and doing it found that Q03 and Q04 were marked
+answerable and are not:
+
+- **Q03** asks for the deadline for reporting a new hire. Publication 15 gives the obligation, the addressee and
+  the definition of a new employee, and **no deadline**, because the deadline is state law.
+- **Q04** asks for a weekly withholding figure. Page 4 says verbatim that the Percentage Method and Wage Bracket
+  tables are in **Publication 15-T**, which this corpus does not contain. **A corpus-selection failure, not a
+  chunker failure.**
+- **Q07** was re-scoped rather than flipped: the cover page states a share count as of October 2024 and the
+  balance sheet states a different one in thousands at fiscal year end, so the answer gives both and says which
+  is which rather than silently picking one.
+
+**Q08 is a trap worth knowing about.** The corpus **does** contain a `0.67 per mile` mileage rate, in all three
+fee schedules. It is what the company **charges a client**. There is no employee reimbursement policy anywhere, so
+answering "67 cents per mile" is exactly the failure the question was written to catch: **a plausible number from
+the wrong document is harder to refuse than no number at all.**
+
+**Four structural findings from the same reading.**
+
+- **Six of the ten questions draw on HTML filings whose every chunk reports page 1.** The rule that a cited page
+  must fall inside the chunk's range is **satisfied trivially** for them. The harness counts supported answers
+  from pageless documents and says the rule has not been tested on those.
+- **Q02's answer sentence straddles the page 29/30 boundary**: page 29 ends "you must withhold a" and page 30
+  opens with the threshold.
+- **The unanswerable questions' top scores overlap the answerable ones**, 0.673 against a weakest answerable
+  0.621. **No confidence threshold separates them**, so a refusal has to come from somewhere other than the top
+  score. That is the measurement a refusal would be built on and the answer is that this one will not work.
+- **The employer withholding threshold Publication 15 states cannot distinguish a single filer from a married
+  one**, which Q02's premise assumed it could.
+
+**Three faults found by running it, all of them the harness rather than the retriever.** Worth listing because
+each one produced a number that looked like a measurement:
+
+1. **Support required every figure in a paragraph to appear in one chunk.** The answers explain what they found,
+   so Q06's names the sales figure, the fiscal year and the year-end date, and no single chunk of a financial
+   table holds all three. **Q06 and Q07 were scored as misses while the retriever had put the right table in
+   front of the model.**
+2. **The question set named a publication where the corpus holds a filename.** `irs-p15-2026` against
+   `company/irs-p15.pdf`, and `apple-10k-2024` only escaped because the filename contains the id. My first fix
+   changed the question set and **the corpus validator refused it**, which settled that the manifest ids are the
+   contract and the filenames are how the corpus was assembled.
+3. **The fallback for an answer with no figure counted shared vocabulary** and reported 60 percent of it as
+   support. That number was arbitrary and the mechanism is weak in a way no number fixes: a paraphrase question
+   and its source legitimately share almost no wording. It made **Q05 grade on `10.19`, an exhibit reference
+   number, and Q10 on `31`**, and the support rate read 100 percent. **The figure is now stated by whoever writes
+   the question**, and a question without one is excluded from the rate and counted beside it.
+
+**A rate at ten questions is not a quality claim.** The research says the same about its own gate at sixty, where
+the interval around 55/60 is 0.80 to 0.95. Ten questions can catch a search that is broken, which is what this
+does, and the client's own sixty arrive in C8 under `QLT-GOLDEN-001`.
+
+**If it breaks.**
+
+- Both rates read 0 percent and every question reports the same error: read one detail line. A mechanism failing
+  closed and a corpus that answers nothing produce identical summaries, and only the detail tells them apart.
+  This happened twice in this step.
+- A category shows `n/a` for support: nothing in it could be measured. That is a coverage statement, not a
+  failure, and the count of unmeasurable questions is printed above the table.
+- A figure question misses: check the figure is stated on the question and that it appears in the corpus at all.
+  `select doc_id, page_start from chunk_index where text ilike '%391,035%'`.
+
 ## Phase 4 — Assistant API  *(outline)*
 
 The single surface the client app talks to: ask, tasks, approvals, activity, settings.
