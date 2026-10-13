@@ -484,7 +484,25 @@ items:
     tier: [cloud, office, hosted]
     phase: C2
     verify: reranking the fused candidate list stays inside the agreed latency budget and improves retrieval and support on the golden set
-    status: open
+    note: >-
+      VERIFIED 2026-10-13 against the deployed store, and the two halves of the verify line landed differently.
+      LATENCY IS MEASURED AND WITHIN BUDGET: ten of ten questions reranked, slowest 428 ms and average 344 ms against
+      a five-second budget, which agrees with the third-of-a-second figure recorded in the architecture for a fifty-
+      candidate pool. THE QUALITY HALF IS AT CEILING AND THEREFORE SHOWS NO MOVEMENT: retrieval and support were
+      already 100 percent without the reranker on this question set, so there is nothing for it to improve and the
+      comparison reports +0 percent. THE EVIDENCE THAT IT WORKS IS IN THE RANKS RATHER THAN THE RATES. Q07 moved from
+      rank 10 to rank 1, which is the case the requirement is about: a passage the fusion barely kept inside the
+      window became the top passage, and at rank 10 it was one place from being dropped. Q01 and Q06 each moved from
+      rank 1 to rank 2, so the reranker also demotes. A ten-question set cannot resolve a reranker's benefit when both
+      rates are already at their maximum, and the client's sixty questions in C8 under QLT-GOLDEN-001 are where the
+      second half becomes measurable. Recorded as a ceiling rather than as a pass, because reporting +0 percent as
+      though it were evidence of no benefit is the same mistake this phase has spent its time removing. BLOCKED AND
+      THEN UNBLOCKED: the model needed a paid AWS Marketplace subscription at 0.002 dollars per search unit, which is
+      one query against up to 100 documents and therefore one unit per question at our depth of 50. Anthony completed
+      it. The first attempt failed with a 403 whose body named the missing actions, and the mechanism under test
+      REPORTED ITS OWN ABSENCE rather than falling back to the fused order, which is why the cause was findable at
+      all.
+    status: verified
     note: >-
       Depth measured and decided for the cloud build, 2026-10-11, recorded in docs/runbook.md step 3.3
       and in docs/search-architecture.md. A CPU reranker costs about 2.5 to 3 ms per token of candidate
