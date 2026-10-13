@@ -394,7 +394,12 @@ def test_the_complement_search_takes_no_payload(wired):
     complement = seen[1]
     assert complement["with_payload"] is False, (
         "the complement search must not bring restricted text back into this process")
-    assert complement["limit"] == 1, "only the best score is needed"
+    # The limit rose from 1 to 50 when `counted` needed a number, and the property that matters is not the limit
+    # but `with_payload`. **Raising how many hits are counted does not bring back one character of restricted
+    # text**, because the store returns ids and scores and no payload at any limit. Asserting the limit was
+    # asserting a coincidence of the old design rather than the property the test is named for.
+    assert complement["limit"] > 1, "the count needs more than one hit to count"
+    assert complement.get("with_payload") is False, "and still no payload, at any limit"
     assert "must_not" in complement["filter"], (
         "the complement is expressed as everything the role may not see, so a folder nobody declared is "
         "still counted as restricted rather than silently omitted")
@@ -520,3 +525,41 @@ def test_a_lexical_arm_that_is_down_does_not_take_retrieval_with_it(wired, monke
     result = retriever.search(services, "anything", role="staff")
     assert result.passages, "the dense arm still answers"
     assert result.arms["lexical"] == 0
+
+
+def test_the_counted_mode_reports_a_number_because_withheld_is_always_zero(wired, monkeypatch):
+    """The gap the deployed run found, as a test.
+
+    `counted` is the mode whose whole purpose is to say how many passages were withheld, and the number it
+    carried was `withheld`, which is honestly zero on every question: the access filter is in the query and the
+    store honours it, so nothing restricted is ever returned to be counted. The mode was silent about its number
+    in exactly the case it was written for.
+
+    It now counts how many restricted passages matched, which is the fact the user is being told about: not what
+    was filtered out of this answer, but how much exists that would have answered.
+    """
+    services = wired()
+    monkeypatch.setattr(retriever, "lexical_search", lambda s, q, r, limit=500: [])
+    monkeypatch.setattr(retriever, "embed_query", lambda s, t: [[0.1] * 4 for _ in t])
+
+    calls = {"n": 0}
+
+    def two_answers(services_, body):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return [{"id": "c1", "score": 0.30,
+                     "payload": {"doc_id": "company/a.md", "acl": "company", "text": "a note",
+                                 "chunk_id": "c1", "page_start": 1}}]
+        # The complement: three restricted passages matched, and the best of them beats the permitted one.
+        return [{"id": f"r{i}", "score": 0.9 - i / 100} for i in range(3)]
+
+    monkeypatch.setattr(retriever, "_search", two_answers)
+    result = retriever.search(services, "the chief executive's salary", role="staff", denial="counted")
+
+    assert result.denied is True
+    assert result.withheld == 0, "the filter works, so nothing restricted was returned"
+    assert result.restricted_matched == 3
+    assert result.disclosure.count == 3, "and the disclosure carries the number rather than None"
+    assert "At least 3 passage(s)" in result.disclosure.message
+    # The wording says "at least", because the count is over the search's limit rather than a total.
+    assert "at least" in result.disclosure.message.lower()
