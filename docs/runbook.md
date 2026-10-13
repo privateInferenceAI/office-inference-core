@@ -2417,6 +2417,19 @@ adds the four, new rows are version 2, and **nothing is rewritten**.
 `verify` reports no problems: the rows written before the change still verify under version 1 and the rows
 written after it verify under version 2, in one file. The export before this change had 50 rows at version 1.
 
+**The result, 2026-10-13, on the reference instance.** 38 rows at version 1 and 1 at version 2 after the fix.
+The export of the day holds rows 48 and 50 at version 1 and row 51 at version 2 **in one file**, and `verify`
+reports `chain intact`. No row was rewritten.
+
+**And the positive test, because a verifier that passes everything has proved nothing.** A copy of that export
+with the version 2 row's redaction summary erased, its count zeroed and its egress decision cleared:
+
+    FAIL /tampered/audit-events.jsonl
+      - line 3: row_hash does not match the row contents
+
+Before this change that edit left the hash valid and the verifier reported the record intact. **Both directions
+are now shown: the untouched history still verifies, and the edit that used to be invisible is caught.**
+
 **What to look for, and it is the whole point.** `select chain_version, count(*) from audit_events group by 1`
 must show version 1 rows beside version 2 rows, and `verify` must pass on the file holding both. **A fix that
 made the whole history verify by rewriting it would have destroyed the property the chain exists for.**
@@ -2439,6 +2452,59 @@ does the most damage.
   treating it as a break, which is what the message says.
 - The old rows fail and the new ones pass: the version branch is not being read per row. Check that the export
   carries `chain_version`, because a verifier that cannot see it reads every row as version 1.
+
+### 3.13 Injection resistance
+
+**Goal.** Prompt injection from document content cannot change the lane or the answer's boundary.
+`SEC-INJECT-001`, whose verify line asks that a document containing an instruction to reveal other documents
+produces a refusal.
+
+**Four controls, and only one of them is a detector.** The order matters because three of them are structural
+and hold regardless of what a passage says, while the fourth recognises attempts and is a signal.
+
+*The lane is decided before any content is assembled.* It is a property of the request, read from the manifest,
+and **there is no code path from retrieved text to `data_class`.** That absence is the control: not a check that
+recognises an attempt, but no route for one to take. There is a test asserting the absence, because a behaviour
+test would not notice the day somebody added a route.
+
+*The boundary is the access filter at retrieval.* Retrieval has already happened and was already filtered by the
+role's permitted roots, and it is **not re-run because a passage asked for something.** So an injection in a
+passage a role can see cannot reach another passage: the only material it can reach is material already in front
+of it. That limits the damage to what the role was allowed to see, which is what the requirement asks for, and
+it holds whatever the model does.
+
+*The content is data and is presented as data.* `assemble` puts retrieved text inside `<<<DOCUMENT ... DOCUMENT>>>`
+after the instruction, never concatenated into it. This is the difference between a document that says "ignore
+your instructions" and a document that **is** one, and it is decided by where the text sits rather than by what
+it says. It therefore holds for a passage no detector would flag, which is the case no detector can help with.
+
+*And the detector, which is a signal.* A passage carrying text aimed at the assistant rather than at a reader is
+quarantined: excluded from the request, refused, and recorded. The signals are weighted, the threshold is four,
+and the weakest signal is three, so **naming the assistant once is not enough.**
+
+**The detector is shaped around its false positives, because that is what gets one turned off.** A policy
+document telling employees not to share passwords is imperative, contains "must not" and "do not" and
+"confidential", and is exactly the kind of document a client has. The signals aim at **second-person address to
+an assistant** and at **attempts to change its behaviour**, not at imperative language, and there are tests
+asserting that a fee schedule, an employee policy and a document about assistants all pass untouched.
+
+**The honest bound.** Detection is not a guarantee and is not presented as one. A passage written to look like
+ordinary prose while steering the model is not caught by any pattern, and the controls that hold in that case
+are the structural three, which do not depend on recognising anything.
+
+**The refusal names the passage by the index the citations will use**, so a reviewer reading "passage 2 was
+quarantined" can find passage 2, and the record carries the signal names, the score and a 120-character excerpt
+and never the passage. **A record holding the content would be a copy of what the quarantine kept out.**
+
+**If it breaks.**
+
+- A legitimate document is quarantined: read the signal names in the record. If they are `assistant_address` or
+  `override_behaviour` on ordinary prose, the pattern is too broad; if they are `restricted_target`, the document
+  legitimately names a restricted folder and the pattern needs the second-person context it currently lacks.
+- Nothing is quarantined and the passage came back: the text is prose that steers without instructing. **This is
+  the known bound**, and the structural three are what is holding. Do not answer by adding patterns to catch it.
+- The refusal appears and the passage was still sent: `assemble` builds one string and returns it. Check that the
+  caller is using `assembled.user` rather than the passages it passed in.
 
 ## Phase 4 — Assistant API  *(outline)*
 
