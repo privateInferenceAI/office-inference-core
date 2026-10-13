@@ -99,7 +99,31 @@ items:
     verify: a manifest declaring silent produces no disclosure, denied produces one without a count, and
       counted produces one with it; an unrecognised mode is refused rather than defaulted; and in every
       mode the record still reports what was withheld
-    status: open
+    note: >-
+      VERIFIED 2026-10-13 against the deployed store, all four parts of the verify line. silent produces no disclosure
+      at all (None rather than an empty one, so a caller that forgets to check the mode has nothing to render). denied
+      produces a disclosure naming the role and no count. counted produces one WITH a count. An unrecognised mode is
+      REFUSED with a message saying a typo must not silently choose the more disclosing behaviour. And in every mode
+      the record still reports what was withheld. THE DEPLOYED RUN FOUND THE COUNTED MODE CARRYING NO NUMBER, and the
+      reason is the design that made the denial work: the access filter is in the query and the store honours it, so
+      nothing restricted is ever returned and withheld is honestly zero on every question. A mode whose whole purpose
+      is to say how many passages were withheld was therefore always silent about its number, in exactly the case it
+      was written for, and it printed a sentence that looked complete. It now counts how many restricted passages
+      MATCHED, which is the fact the user is being told about, and the message says at least because the count is over
+      the search's limit rather than a total.
+    note: >-
+      VERIFIED 2026-10-13 against the deployed store, all four parts of the verify line. silent produces no disclosure
+      at all, None rather than an empty one, so a caller that forgets to check the mode has nothing to render. denied
+      produces a disclosure naming the role and no count. counted produces one WITH a count. An unrecognised mode is
+      REFUSED with a message saying a typo must not silently choose the more disclosing behaviour. And in every mode
+      the record still reports what was withheld. THE DEPLOYED RUN FOUND THE COUNTED MODE CARRYING NO NUMBER, and the
+      reason is the design that made the denial work at all: the access filter is in the query and the store honours
+      it, so nothing restricted is ever returned and withheld is honestly zero on every question. A mode whose whole
+      purpose is to say how many passages were withheld was therefore always silent about its number, in exactly the
+      case it was written for, and it printed a sentence that looked complete. It now counts how many restricted
+      passages MATCHED, which is the fact the user is being told about rather than what was filtered out of this
+      answer, and the message says at least because the count is over the search's limit rather than a total.
+    status: verified
     note: >-
       Anthony's decision 2026-10-13: this is something a client turns on or off rather than a behaviour we
       choose for them. Declared in the manifest as access.denial with three modes, because the trade has
