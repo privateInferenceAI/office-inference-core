@@ -26,8 +26,10 @@ gone while it is not.
 from __future__ import annotations
 
 import json
+import os
 import urllib.request
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass
@@ -59,6 +61,9 @@ class PurgeResult:
     stores: dict[str, dict] = field(default_factory=dict)
     refused: str | None = None
     refusal_reason: str | None = None
+    # Whether this was a rehearsal. It is part of the record because a reader of `--purges` has to be able to
+    # tell a purge that happened from one that was counted, and because the CLI's summary line keys off it.
+    dry_run: bool = False
 
     def record(self, name: str, **counts) -> None:
         self.stores[name] = counts
@@ -73,7 +78,8 @@ class PurgeResult:
 
     def as_record(self) -> dict:
         return {"doc_id": self.doc_id, "complete": self.complete, "stores": self.stores,
-                "refused": self.refused, "refusal_reason": self.refusal_reason}
+                "refused": self.refused, "refusal_reason": self.refusal_reason,
+                "dry_run": self.dry_run}
 
 
 # --------------------------------------------------------------------------- holds
@@ -117,27 +123,90 @@ def release_hold(connection, hold_id: int, actor: str) -> bool:
 
 # --------------------------------------------------------------------------- deletion
 
+def _count_in_vector(vector_url: str, collection: str, doc_id: str, timeout: int) -> int:
+    """How many points in the collection carry this document's id.
+
+    Pulled out of the delete path so the rehearsal and the real run count the same way. Two counts that
+    disagree would make the dry run worse than useless: it is the number an operator decides on.
+    """
+    body = {"filter": {"must": [{"key": "doc_id", "match": {"value": doc_id}}]}, "exact": True}
+    request = urllib.request.Request(
+        f"{vector_url}/collections/{collection}/points/count",
+        data=json.dumps(body).encode(), method="POST",
+        headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read()).get("result", {}).get("count", 0)
+
+
+def _report_what_would_be_destroyed(connection, doc_id: str, vector_url: str, collection: str,
+                                    result: PurgeResult, timeout: int,
+                                    documents_root: str | None = None) -> None:
+    """Count what a purge would remove, and remove nothing.
+
+    The counts are reported under `would_delete` rather than `deleted`, so a machine reading the record cannot
+    mistake a rehearsal for a purge. The file is checked too, because a document with no index entries and no
+    file is a name that matches nothing and the operator should be told that rather than shown four zeroes.
+    """
+    try:
+        result.record("vector", would_delete=_count_in_vector(vector_url, collection, doc_id, timeout))
+    except Exception as exc:  # noqa: BLE001
+        result.fail("vector", f"{type(exc).__name__}: {exc}")
+
+    for store, sql in (("lexical", "select count(*) from chunk_index where doc_id = %s"),
+                       ("manifest", "select count(*) from ingest_manifest where relpath = %s")):
+        try:
+            with connection.cursor() as cur:
+                cur.execute(sql, (doc_id,))
+                result.record(store, would_delete=cur.fetchone()[0])
+        except Exception as exc:  # noqa: BLE001
+            result.fail(store, f"{type(exc).__name__}: {exc}")
+
+    try:
+        with connection.cursor() as cur:
+            cur.execute("select count(*) from audit_events where payload::text like %s", (f"%{doc_id}%",))
+            quoted = cur.fetchone()[0]
+        # Reported for the same reason the real run reports it: content in the append-only record cannot be
+        # purged, so a rehearsal that hid this would let an operator believe a purge would be complete.
+        result.record("audit_payload", would_delete=0, quoting_the_document=quoted)
+        if quoted:
+            result.complete = False
+            result.stores["audit_payload"]["note"] = (
+                f"{quoted} audit record(s) quote this document and cannot be cleared: the audit table is "
+                f"append-only and the hash chain covers the stored payload. A real purge would be INCOMPLETE "
+                f"for this reason.")
+    except Exception as exc:  # noqa: BLE001
+        result.fail("audit_payload", f"{type(exc).__name__}: {exc}")
+
+    # The path is only knowable when a root is given, and reporting "the file is not there" from an unset root
+    # would be a false negative on the one store that holds the client's own copy. Absent root, the store is
+    # reported as unknown rather than as zero.
+    root = documents_root or os.environ.get("DOCUMENTS_ROOT")
+    if root:
+        path = Path(root) / doc_id
+        result.record("file", would_delete=1 if path.exists() else 0, path=str(path))
+    else:
+        result.record("file", would_delete=None,
+                      note="no documents root given, so whether the client's own copy would be destroyed is "
+                           "unknown. Pass --documents-root or set DOCUMENTS_ROOT to find out.")
+
+    if not any(int(v.get("would_delete") or 0) for v in result.stores.values()):
+        result.stores["note"] = (
+            "nothing matches this document in any store, so a real purge would remove nothing. Check the "
+            "path against ingest_manifest: a misspelled document id purges silently and reports success.")
+
+
 def _delete_from_vector(vector_url: str, collection: str, doc_id: str, timeout: int) -> int:
     """Delete by filter rather than by id, because the point is to delete what is there.
 
     Deleting by a list of ids means the ids have to be enumerated first, and anything added between the
     enumeration and the delete survives. A filter is computed by the store at the moment of deletion.
     """
-    def matching() -> int:
-        count_body = {"filter": {"must": [{"key": "doc_id", "match": {"value": doc_id}}]}, "exact": True}
-        count_request = urllib.request.Request(
-            f"{vector_url}/collections/{collection}/points/count",
-            data=json.dumps(count_body).encode(), method="POST",
-            headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(count_request, timeout=timeout) as response:
-            return json.loads(response.read()).get("result", {}).get("count", 0)
-
     # Counted BEFORE the delete, which is where the number is. The first version counted after it, where the
     # only two outcomes are zero or a raised error, and then returned a hard-coded 1: **every purge reported
     # exactly one object removed from the vector store, whether it cleared one chunk or a thousand, and a purge
     # that removed nothing reported one too.** A per-store count that is a constant is worse than no count,
     # because the page's whole claim is that a store which contributed nothing is visible.
-    before = matching()
+    before = _count_in_vector(vector_url, collection, doc_id, timeout)
     body = {"filter": {"must": [{"key": "doc_id", "match": {"value": doc_id}}]}, "wait": True}
     request = urllib.request.Request(
         f"{vector_url}/collections/{collection}/points/delete?wait=true",
@@ -146,21 +215,26 @@ def _delete_from_vector(vector_url: str, collection: str, doc_id: str, timeout: 
     with urllib.request.urlopen(request, timeout=timeout) as response:
         json.loads(response.read())
     # And counted after as well, because the delete being acknowledged is not the delete having happened.
-    remaining = matching()
+    remaining = _count_in_vector(vector_url, collection, doc_id, timeout)
     if remaining:
         raise RuntimeError(f"{remaining} point(s) still match {doc_id!r} after the delete")
     return before
 
 
 def purge(connection, doc_id: str, reason: str, actor: str, vector_url: str, collection: str,
-          timeout: int = 60) -> PurgeResult:
+          timeout: int = 60, dry_run: bool = False, documents_root: str | None = None) -> PurgeResult:
     """Delete a document from every store, or refuse because a hold covers it.
 
     The hold is checked first and in one place. Checking it per store would mean a hold that is obeyed by the
     store somebody remembered and ignored by the one they did not, which from the client's side is the same as
     no hold at all.
+
+    `dry_run` reports what the purge would destroy and destroys nothing. **It exists because the manual
+    documented it and the CLI accepted the flag while this function had no such parameter**, so
+    `--purge <doc> --dry-run` walked the deletion path and destroyed the document for real. A rehearsal that
+    runs the real thing is worse than no rehearsal, because it is the command a careful operator runs first.
     """
-    result = PurgeResult(doc_id=doc_id)
+    result = PurgeResult(doc_id=doc_id, dry_run=dry_run)
 
     hold = active_hold(connection, doc_id)
     if hold:
@@ -179,6 +253,14 @@ def purge(connection, doc_id: str, reason: str, actor: str, vector_url: str, col
         # Recorded before returning, which is the whole point: this branch used to return past the insert, so a
         # refused purge left no row and no audit event, and nothing could answer whether anyone had tried.
         _record_purge(connection, result, reason, actor)
+        return result
+
+    # The rehearsal. It counts what each store holds for this document without removing anything, and it is
+    # deliberately AFTER the hold check: a dry run against a hold should report the refusal, because that is the
+    # outcome the real run would have and it is what a cautious operator is checking for.
+    if dry_run:
+        _report_what_would_be_destroyed(connection, doc_id, vector_url, collection, result, timeout,
+                                        documents_root=documents_root)
         return result
 
     # The vector index first: it is what a query reaches first, so it is the one whose survival is most

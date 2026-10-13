@@ -143,9 +143,29 @@ def check(manifest: dict, packs: set[str], path: Path) -> list[str]:
                 "compliance claim belongs in the client's own account")
         allowed = frontier.get("data_classes_allowed") or []
         if not allowed:
-            problems.append("frontier lane enabled with no data classes allowed: that allows everything")
+            # The message used to read "that allows everything", which was true when this was the field the
+            # gate read. It is not: `services/egress/lane.py` reads `FRONTIER_CLASSES`, rendered from
+            # `access.egress.frontier_classes`. So an empty list here cannot allow anything — it is an intent
+            # check, and the dangerous case is the reverse one, which is why the rule below exists.
+            problems.append(
+                "frontier lane enabled with an empty data_classes_allowed: the lane declares no intent about "
+                "which classes may leave. Note the gate reads access.egress.frontier_classes, so this field "
+                "alone does not govern egress")
         if profile == "cloud" and frontier.get("redaction") is False and "regulated" in allowed:
             problems.append("regulated data allowed through the frontier lane without redaction")
+
+        # The rule that closes the silent failure. The gate renders `FRONTIER_CLASSES` from
+        # `access.egress.frontier_classes`, and an absent block renders an EMPTY string, which the gate reads as
+        # a permission set with nothing in it and refuses every request. A manifest that says three classes are
+        # allowed then sends nothing, validation passes, and the first symptom is a model call that will not go
+        # out. Three of the shipped example manifests had exactly this shape.
+        egress = (manifest.get("access") or {}).get("egress") or {}
+        if not (egress.get("frontier_classes") or []):
+            problems.append(
+                "the frontier lane is enabled but access.egress.frontier_classes is absent or empty. The gate "
+                "reads that field and renders it to FRONTIER_CLASSES, so this manifest would refuse every "
+                "frontier call while appearing to permit the classes in lanes.frontier.data_classes_allowed. "
+                "Declare access.egress.frontier_classes with the classes you intend, or switch the lane off")
 
     # A cloud build has no local lane, so switching the frontier lane off leaves it with no models at
     # all. The renderer used to emit frontier entries regardless on a cloud profile, which quietly

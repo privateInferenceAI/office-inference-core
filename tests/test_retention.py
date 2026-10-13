@@ -309,3 +309,126 @@ def test_a_refused_purge_is_recorded(tmp_path):
     # Three occurrences of the name and two of them are calls: the definition is one.
     assert code.count("_record_purge(connection") == 3, "the definition plus two call sites"
     assert code.count("    _record_purge(connection") == 2, "both paths call it"
+
+
+# --------------------------------------------------------------------------- the rehearsal
+
+class _FakeCursor:
+    """Enough of a cursor for the purge path, and it refuses to delete when it should not.
+
+    The point of these tests is the difference between `--dry-run` and the real thing, so a cursor that
+    silently accepted a DELETE during a rehearsal would let the bug they exist to catch pass.
+    """
+
+    def __init__(self, store, deletes):
+        self.store = store
+        self.deletes = deletes
+        self.rowcount = 0
+        self._row = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, sql, params=None):
+        lowered = " ".join(sql.split()).lower()
+        if lowered.startswith("delete"):
+            self.deletes.append(lowered.split()[2])
+            self._row = None
+            return
+        if "select count(*) from chunk_index" in lowered:
+            self._row = (4,)
+        elif "select count(*) from ingest_manifest" in lowered:
+            self._row = (1,)
+        elif "audit_events" in lowered:
+            self._row = (0,)
+        else:
+            self._row = (None,)
+
+    def fetchone(self):
+        return self._row
+
+
+class _FakeConnection:
+    def __init__(self, cursor_cls):
+        self.cursor_cls = cursor_cls
+
+    def cursor(self):
+        return self.cursor_cls(None, _DELETES)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+_DELETES: list[str] = []
+
+
+def _purge_module(monkeypatch):
+    import retention
+    monkeypatch.setattr(retention, "active_hold", lambda conn, doc_id: None)
+    monkeypatch.setattr(retention, "_count_in_vector", lambda url, coll, doc, timeout: 7)
+    monkeypatch.setattr(retention, "_delete_from_vector", lambda url, coll, doc, timeout: 7)
+    return retention
+
+
+def test_purge_dry_run_counts_and_deletes_nothing(monkeypatch):
+    """**The documented rehearsal used to destroy the document.**
+
+    `--dry-run` was accepted by argparse, documented in the manual's command table, and read by nothing on the
+    purge path: `retention.purge()` had no such parameter, so the CLI called the real thing and a careful
+    operator running the rehearsal first lost the document. The manual promised "report what a run would
+    destroy without destroying it".
+
+    The counts are asserted as well as the absence of deletes, because a rehearsal that reported zeroes would
+    be safe and useless: the number is what the operator decides on.
+    """
+    retention = _purge_module(monkeypatch)
+    _DELETES.clear()
+
+    result = retention.purge(_FakeConnection(_FakeCursor), "company/x.pdf", "rehearsal", "tester",
+                             "http://vector:6333", "documents", dry_run=True,
+                             documents_root="/nonexistent-root")
+
+    assert result.dry_run is True
+    assert _DELETES == [], f"a dry run issued deletes against {_DELETES}"
+    # Reported under `would_delete` rather than `deleted`, so a machine reading the record cannot mistake a
+    # rehearsal for a purge.
+    assert result.stores["vector"]["would_delete"] == 7
+    assert result.stores["lexical"]["would_delete"] == 4
+    assert result.stores["manifest"]["would_delete"] == 1
+    assert "deleted" not in result.stores["vector"]
+
+
+def test_purge_without_dry_run_still_deletes(monkeypatch):
+    """The other half, because a fix that made every purge a no-op would pass the test above.
+
+    This project has already shipped a safety flag that silently disabled the thing it guarded, so the pair is
+    the assertion: the rehearsal changes nothing and the real run still destroys.
+    """
+    retention = _purge_module(monkeypatch)
+    _DELETES.clear()
+
+    result = retention.purge(_FakeConnection(_FakeCursor), "company/x.pdf", "for real", "tester",
+                             "http://vector:6333", "documents", dry_run=False,
+                             documents_root="/nonexistent-root")
+
+    assert result.dry_run is False
+    assert "chunk_index" in _DELETES
+    assert "ingest_manifest" in _DELETES
+
+
+def test_the_cli_passes_dry_run_through(monkeypatch):
+    """The flag has to reach the function, which is where the original bug lived.
+
+    A correct `purge(dry_run=...)` is worth nothing if the CLI drops the argument on the way, which is exactly
+    what it did: the branch called `retention.purge(connection, doc_id, reason, actor, url, collection)` and
+    never mentioned the flag.
+    """
+    source = (ROOT / "services" / "retention" / "cli.py").read_text()
+    purge_branch = source.split("if args.purge:", 1)[1]
+    assert "dry_run=args.dry_run" in purge_branch, "the purge branch does not forward --dry-run"

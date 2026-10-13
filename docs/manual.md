@@ -127,7 +127,7 @@ proves and, more usefully, what it does not.
 
 | Piece | What it is | In this deployment |
 |---|---|---|
-| The machine | One AWS EC2 instance running Docker. No GPU: the generation models live at the provider, and the embedding and reranking work is done on CPU | `i-096bebd46308d1673`, an m7i.4xlarge: 16 vCPU, 64 GB RAM, 200 GB disk, Ubuntu 24.04. Check it with `nproc` and `free -g` rather than trusting this row on a deployment you did not build |
+| The machine | One AWS EC2 instance running Docker. No GPU: the generation models live at the provider, and embedding runs on CPU here. **Reranking does not** — this build reranks at Bedrock, and the local reranker container sits behind a bench profile because CPU reranking cannot meet the latency budget | `i-096bebd46308d1673`, an m7i.4xlarge: 16 vCPU, 64 GB RAM, 200 GB disk, Ubuntu 24.04. Check it with `nproc` and `free -g` rather than trusting this row on a deployment you did not build |
 | `postgres` | The database. Holds the gateway's keys and spend, and our own audit record | A container, on the box |
 | `litellm` | The gateway. Every AI call goes through it. It authenticates the caller, checks the role's budget and model permissions, calls the model, and writes down what it cost | A container, on the box |
 | `audit` | The tool that writes and checks the audit record. Runs when you call it, not as a service | A container, started on demand |
@@ -343,7 +343,7 @@ cd /opt/oi-core
 docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env ps
 ```
 
-You should see six services running, five of them healthy. Compose prints seven columns; the sample below
+You should see six services running, four of them healthy. Compose prints seven columns; the sample below
 keeps them all, because two of them carry information the others do not. `IMAGE` is where a digest-pinned
 image shows whether the box is running what the repository says it should, and `PORTS` shows the exposed
 ports with no host binding, which is how you confirm from the outside that nothing is reachable:
@@ -588,11 +588,11 @@ error: 005_content_modes.sql was applied but has changed since. Applied 6ed11a69
 Write a new migration instead of editing an applied one.
 ```
 
-**The count is `16 files, 15 recorded`, and the difference is not an off-by-one.** The numbering starts at
-`002` because `001` was folded into the service before it shipped, and `schema_migrations` itself is
-created by `audit migrate` rather than by a migration file. So the table's row count is one less than the
-number of files in `db/migrations/`. Both numbers are in the output above if you read it closely, and the
-summary line reports the row count.
+**The count is `15 files, 15 recorded`, one row per file.** The numbering starts at `002` because `001` was
+folded into the service before it shipped, and `schema_migrations` itself is created by `audit migrate` rather
+than by a migration file. So the highest number is `016` while the file count is fifteen, which is the
+off-by-one worth knowing about: **sixteen was never the file count.** On a fresh machine the summary line reads
+`15 migration(s) applied, 0 already present`.
 
 ### Adding a migration
 
@@ -1639,22 +1639,23 @@ takes two minutes. It catches a corpus laid out under the wrong root, a parser t
 client's format, and a role map that does not match what was agreed:
 
 ```
-docker run --rm --network ai-net -v /opt/oi-core:/w:ro -w /w \
-  --env-file rendered/env --entrypoint python oi-core/eval:local \
-  /w/tests/fixtures/ask.py -q "<a question the client says must work>" --role staff
+docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+  run --rm --entrypoint python eval /w/tests/fixtures/ask.py \
+  -q "<a question the client says must work>" --role staff
 
-docker run --rm --network ai-net -v /opt/oi-core:/w:ro -w /w \
-  --env-file rendered/env --entrypoint python oi-core/eval:local \
-  /w/tests/fixtures/ask.py -q "<a restricted question>" --role staff
+docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+  run --rm --entrypoint python eval /w/tests/fixtures/ask.py \
+  -q "<a restricted question>" --role staff
 ```
 
 The first should return passages from the root you expect. The second should return nothing, or return a
 denial naming how many passages were withheld — and **if it returns restricted content, stop.** That is
 the access filter failing, not a corpus problem, and section 13d's troubleshooting is where to go.
 
-**Five: set the retention period before there is anything to retain.** The manifest records the contract's
-period and the deployment holds it in `retention_policies`. Both have to agree, and the policy is what
-`retention --enforce` reads:
+**Five: set the retention period before there is anything to retain.** The period lives in the database, in
+`retention_policies`, and `--set-retention` is the only thing that writes it. **The manifest has no field for
+the documents period** — `compliance.audit_retention_days` is the audit record's retention and a different
+thing — so there is nothing to keep in agreement, and the policy is what `retention --enforce` reads:
 
 ```
 oi run --rm retention --set-retention documents --days <the period the client agreed> \
@@ -1729,7 +1730,7 @@ $ find /opt/oi-core/documents -type f | head -4
 /opt/oi-core/documents/executive/executive-compensation.md
 ```
 
-Three rules and nothing else:
+Four rules and nothing else:
 
 1. **The file goes under a top-level folder**, and that folder's name is its access label. There is no
    separate place to declare the label, and no way to label a file individually. A file sitting directly
@@ -2018,17 +2019,23 @@ The last two lines are the measurement a refusal threshold would be built on, an
 at this corpus size: the strongest unanswerable question scores 0.641 and the weakest answerable one 0.535,
 so no cutoff on the top score separates a question the corpus answers from one it does not. A refusal has to
 come from the citation layer instead. The line about pageless documents is a coverage statement rather than a
-result, and it is the one number here worth understanding rather than reading. **Six of the ten questions draw
-on documents whose every chunk reports page 1**, so the rule that a cited page must fall inside its chunk's
-range is satisfied trivially for them — 1 is inside 1..1 — and has not been tested there. The six are `Q05`,
-`Q06`, `Q07` and `Q10` against the Apple exhibits, `Q01` against the 10-K, and one of the two-document
-questions; the only question drawing on a document with real page numbers is `Q02`, from the IRS publication.
+result, and it is the one number here worth reading carefully, because the obvious gloss of it is wrong.
 
-Measured from the index, which is how to check this rather than by reading the question set: of the twelve
-ingested documents, `irs-p15.pdf` and `rate-card-2026.xlsx` report real pages on every chunk, three others are
-mixed, and the rest are nominal throughout. So `1 of 4` says that four supported answers were measured and
-only one of them came from a document with real pages — which is the honest ceiling on what this run proves
-about the page rule.
+**The measurement is about the passage that supported the answer, not about the document the question names.**
+`page_is_nominal` is read from the supporting chunk's own payload, and a document can be mixed: of the twelve
+ingested, `irs-p15.pdf`, `rate-card-2026.xlsx` and `dispatch-review-q1.pptx` report real pages on every chunk,
+`apple-10k-2024.htm` and all three fee schedules are mixed, and the rest are nominal throughout.
+
+So `1 of 4` means: four answerable questions had their support measured, and **one of those four was supported
+by a passage from a pageless chunk**. For that question the question set's rule — a cited page must fall inside
+its chunk's range — is satisfied trivially, because 1 is inside 1..1, and the rule has not really been tested.
+For the other three it was tested and passed. That is the honest ceiling on what this run proves about page
+checking, and it is a stronger result than the inversion of it would be.
+
+**Which questions are affected is not a fixed fact about the question set**, since a rerun can support the same
+question from a different chunk. Six of the ten questions draw on the pageless filings — `Q01`, `Q05`, `Q06`,
+`Q07` and `Q10`, with `Q05` drawing on two of them — so a change to ranking is enough to move the number, which
+is why the harness reports it per run rather than recording it as a property of the corpus.
 
 **Then one line per question**, and this is the part worth reading rather than skimming. Each carries the
 question's category, the rank the answering passage was found at, and — for a question the corpus cannot
@@ -2046,13 +2053,16 @@ answer — a paragraph saying what is missing and what an answer would have had 
 wrote /tmp/eval-report.json
 ```
 
-**Two of the ten questions come back `NOT ANSWERABLE from this corpus` while the fixture still records them
-as `answerable: true`.** `Q03` asks for a new-hire reporting deadline that Publication 15 does not state, and
-`Q04` asks for a withholding-table cell that lives in Pub. 15-T, which is not in the corpus. The retrieval
-rate is unaffected — an unanswerable question is scored on whether anything came back, and the tool says so
-rather than counting it as a retrieval failure — but those two questions are now measuring the wrong thing,
-and the fixture is what needs fixing. **A question set that records an answerable question as unanswerable is
-a yardstick with a bend in it**, and the paragraphs above are how it was caught.
+**Two of the ten questions come back `NOT ANSWERABLE from this corpus`, and that is the fixture having been
+corrected rather than a failure to fix.** `Q03` was written as answerable and asks for a new-hire reporting
+deadline that Publication 15 does not state; `Q04` asks for a withholding-table cell that lives in Pub. 15-T,
+which is not in the corpus. Writing their reference answers is what showed both are unanswerable, the question
+set now records them as `answerable: false`, and **the paragraph printed under each question is the note that
+records why.** Reading those two paragraphs is the useful part of a run: they say what the corpus does not
+contain and what an answer would have had to invent.
+
+The rates are computed over the answerable questions only, so neither dilutes them, and both categories show
+`0%` retrieval because nothing is expected to be found.
 
 `Q08` is the one worth reading in full, because it is a near miss doing its job: the corpus does contain a
 mileage figure, but it is the company's own client-facing rate of 0.67 per mile, and the question asks about
@@ -2077,9 +2087,19 @@ the mounted checkout carries everything the harness calls.
 Ten questions can catch a search that is broken. They cannot support a quality claim, and the client's own
 sixty arrive in C8.
 
-**What each arm contributed.** The retriever's result carries `arms`, a count per arm. `lexical: 0` means the
-arm ran and found nothing, and a missing key means it did not run at all, which are different faults. The
-acceptance probe prints that dictionary under each verdict:
+**What each arm contributed.** The retriever's result carries `arms`, a count per arm. **Read it with one
+caveat, because it cost a review a blocking finding:** `lexical: 0` is ambiguous. It is recorded both when the
+lexical arm ran and matched nothing and when the arm could not run at all, because `lexical_search` returns an
+empty list when `DATABASE_URL` is unset and the count is taken from that list. **The key is always present.**
+So `lexical: 0` on a deployment whose documents contain identifiers the dense arm misses is more likely a
+missing `DATABASE_URL` than an empty index, and the way to tell them apart is to check the environment rather
+than the count:
+
+```
+oi run --rm --entrypoint python eval -c "import os; print('DATABASE_URL set:', bool(os.environ.get('DATABASE_URL')))"
+```
+
+The acceptance probe prints the dictionary under each verdict:
 
 ```
 docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
@@ -2088,7 +2108,7 @@ docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
   /w/tests/fixtures/hybrid_acceptance.py
 ```
 
-The recorded run, against the deployed store on 2026-10-13, with the lexical index holding 1060 rows and 435
+The recorded run, against the deployed store on 2026-10-13, with the lexical index holding 1131 rows and 445
 of them carrying identifiers:
 
 | Reference | hybrid on | hybrid off | verdict |
@@ -2160,28 +2180,44 @@ today. Section 25 records the gap.
 
 ```
 cd /opt/oi-core
-docker run --rm --network ai-net -v /opt/oi-core:/w:ro -w /w \
-  --env-file rendered/env --entrypoint python oi-core/eval:local \
-  /w/tests/fixtures/ask.py --question "What is the emergency callout rate for 2026?" --role staff
+docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+  run --rm --entrypoint python eval /w/tests/fixtures/ask.py \
+  -q "What is the standard labour rate per hour?" --role staff
 ```
 
+**Run it through `compose run`, not a bare `docker run`, and the difference is not cosmetic.** The probe needs
+`DATABASE_URL` for the lexical arm and for the supersession marking, and `rendered/env` does not hold it:
+the DSN is assembled by the compose file from `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB`, because
+the host and port belong to the compose network rather than to the deployment. **A bare `docker run` with
+`--env-file rendered/env` therefore starts the probe with no database at all**, and the two consequences are
+silent rather than loud:
+
+- `lexical: 0` in the output, which reads exactly like an arm that ran and found nothing. It did not run.
+- **No passage is marked `** NOT CURRENT`, so a claim resting on a superseded document is certified as
+  supported.** Supersession is a database fact, and with no database every document looks current.
+
+Both were found by a review comparing the two invocations, and neither shows up as an error. If you must use
+`docker run`, pass the DSN explicitly with `-e DATABASE_URL="$(grep '^POSTGRES_USER=' rendered/env | cut -d= -f2-):…"`,
+or accept that you are testing the dense arm alone and read the output knowing that.
+
 ```
-question: What is the emergency callout rate for 2026?
+question: What is the standard labour rate per hour?
 role:     staff   roots: ['company']
-arms:     {'dense': 15, 'lexical': 0}
-rerank:   {'reranked': True, 'rerank_depth': 15, 'rerank_ms': 283.1, 'rerank_budget_ms': 5000,
+arms:     {'dense': 15, 'lexical': 3}
+rerank:   {'reranked': True, 'rerank_depth': 15, 'rerank_ms': 251.8, 'rerank_budget_ms': 5000,
            'rerank_within_budget': True, 'rerank_model': 'cohere.rerank-v3-5:0', 'rerank_reason': None}
 withheld: 0   denied: False   restricted matched: 0
 
-[1] company/callout-rate-approval.eml  pages 1-1  acl=company  score=0.7354
-    From: R. Okafor <r.okafor@meridian.example>
-    …
-[2] company/rate-card-2026.xlsx  pages 1-1  acl=company  score=0.5584
-    Meridian Facilities | Rate card 2026
-    Service | Unit | Rate | Notes
-    Emergency callout | per visit | 8,475.50 | Outside contracted hours
+[1] company/fee-schedule-2025.md  pages 1-1  acl=company  score=0.7549  ** NOT CURRENT, superseded by None
+    Schedule of Fees and Reimbursable Rates
+    Item | Basis | Rate
+    Standard labour, business hours | per hour | 132.00
     …
 ```
+
+**`lexical` is a real number here, and that is the point.** `lexical: 3` means the lexical arm ran and returned
+three ids. Compare it against the sample above whenever you run this probe on a new deployment: `lexical: 0` is
+ambiguous, and the ambiguity is the failure described a few lines up.
 
 Five things that output tells you, and each one is a line you would otherwise have to guess at:
 
@@ -2666,7 +2702,7 @@ against the manifest first, because a typo here is invisible in the output:
 ```
 docker exec ingestion python3 /app/ingest.py --status
 docker exec postgres psql -U oicore -d oicore -c \
-  'select relpath, is_current, superseded_by from document_versions order by relpath'
+  'select doc_id, is_current, superseded_by from document_versions order by doc_id'
 ```
 
 The same caution applies to `--by`: nothing checks that the replacement exists either, so a declaration can
@@ -2898,8 +2934,8 @@ usual answer to a purge that was refused with no obvious reason.
 
 **Releasing a hold, and the mistake this page used to make.** Hold ids are assigned by the database and are
 **not** a sequence you can predict from this manual. An earlier version of the example below said
-`--release-hold 1`, which on the reference deployment releases nothing at all, because ids start at 2 and the
-first row was already released. The command exits 1 and prints:
+`--release-hold 1`, which on the reference deployment releases nothing at all, because the ids on that deployment had already
+been used and released, and the rows shown are 3 and 4. The command exits 1 and prints:
 
 ```
 hold 1 is not in force, so there was nothing to release
@@ -2909,11 +2945,11 @@ So the sequence is: **list, read the id, then release it.** Never guess the numb
 
 ```
 $ oi run --rm retention --holds
-id 3  document   company/tax.pdf    litigation in progress   placed 2026-10-13 19:45
-id 4  deployment (every document)   litigation in progress   placed 2026-10-13 19:45
+  3  document    company/tax.pdf                          'litigation in progress' by retention-job at 2026-10-13 19:45:36.569158+00:00
+  4  deployment  (whole deployment)                        'litigation in progress' by retention-job at 2026-10-13 19:45:40.977896+00:00
 
 $ oi run --rm retention --release-hold 4
-hold 4 released
+hold 4 released by retention-job
 ```
 
 **The second thing that trips people up: `--hold` with no document is easy to type by accident and it covers
@@ -3221,7 +3257,7 @@ the manual also asks you to type.
 | `oi run --rm retention --holds` | List the legal holds in force. Section 13f |
 | `oi run --rm retention --purge DOC_ID [--dry-run]` | Delete one document from every store. Refused if a hold covers it |
 | `oi run --rm retention --enforce DATASET [--dry-run]` | Destroy what a retention period has run out on. Needs a policy to exist |
-| `docker run … oi-core/eval:local /w/tests/fixtures/ask.py -q "…" --role staff` | **Ask one question against the corpus.** The whole command is in section 13b |
+| `oi run --rm --entrypoint python eval /w/tests/fixtures/ask.py -q "…" --role staff` | **Ask one question against the corpus.** The whole command is in section 13b, and the `compose run` form is required rather than cosmetic |
 | `./deploy/cloud/ship/oi-core-ship.sh anchors\|exports` | Ship an artifact and prove it arrived |
 | `systemctl list-timers 'oi-core-*'` | The shipping schedule |
 | `journalctl -u oi-core-anchor.service -n 40` | What the anchor job did |
@@ -3297,10 +3333,12 @@ you point a tool at another deployment: `LITELLM_URL` (default `http://litellm:4
 ### Settings that are read from the environment but written by nothing
 
 There is a third category, and until now the manual named these variables in prose without saying where
-they come from or what happens if you do not set them. **None of them is in `rendered/env`, none is in the
-manifest, and no script writes them** — a service reads each one from its own environment with a default
-compiled into the code. So they are set by editing the compose file, and the defaults are what this
-deployment runs because nothing overrides them.
+they come from or what happens if you do not set them. **A service reads each one from its own environment with
+a default compiled into the code, and no script writes it** — so they are set by editing the compose file, and
+the defaults are what this deployment runs because nothing overrides them. **The one exception is named in the
+table below:** `ACCESS_DENIAL_MODE` is rendered into `rendered/env` from the manifest's `access.denial`, which
+is exactly why it is listed here as well, since a reader comparing the two needs to know the rendered value
+wins.
 
 | Variable | Default | What it decides | Read by |
 |---|---|---|---|

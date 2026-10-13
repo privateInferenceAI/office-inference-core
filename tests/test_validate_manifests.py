@@ -335,3 +335,42 @@ def test_a_cloud_build_cannot_switch_off_the_frontier_lane(packs):
     manifest["lanes"]["frontier"]["enabled"] = False
     found = problems(manifest, packs)
     assert mentions(found, "needs the frontier lane enabled"), found
+
+
+def test_a_frontier_lane_without_an_egress_block_is_refused(packs):
+    """**The silent failure this rule exists for.**
+
+    The egress gate renders `FRONTIER_CLASSES` from `access.egress.frontier_classes` and reads an empty list as
+    a permission set with nothing in it, so it refuses every request. A manifest that declares classes under
+    `lanes.frontier.data_classes_allowed` and no `access` block therefore validates, then sends nothing, and the
+    first symptom is a model call that will not go out.
+
+    Three of the shipped example manifests had exactly this shape before the rule was added: they named three
+    classes in the lane block and rendered an empty gate list.
+    """
+    manifest = load(ROOT / "manifests" / "dev-cloud.yaml")
+    manifest.pop("access", None)
+    assert manifest["lanes"]["frontier"]["enabled"] is True
+    # The lane block still declares classes, so the older rule is satisfied and only the new one fires.
+    assert manifest["lanes"]["frontier"]["data_classes_allowed"]
+    found = problems(manifest, packs)
+    assert mentions(found, "access.egress.frontier_classes"), found
+
+
+def test_an_empty_egress_class_list_is_refused(packs):
+    """Declaring the block and leaving the list empty is the same failure with more typing."""
+    manifest = load(ROOT / "manifests" / "dev-cloud.yaml")
+    manifest["access"]["egress"]["frontier_classes"] = []
+    found = problems(manifest, packs)
+    assert mentions(found, "access.egress.frontier_classes"), found
+
+
+def test_an_office_build_with_no_frontier_lane_needs_no_egress_block(packs):
+    """The rule is about an ENABLED lane, and an office build's is off.
+
+    `dev-office.yaml` declares an empty `frontier_classes` on purpose, which is that build's policy rather than
+    an oversight: it has no frontier lane, so nothing may leave. The rule must not turn that into a failure.
+    """
+    manifest = load(ROOT / "manifests" / "dev-office.yaml")
+    assert manifest["lanes"]["frontier"]["enabled"] is False
+    assert problems(manifest, packs) == []

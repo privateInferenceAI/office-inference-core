@@ -168,12 +168,23 @@ def main() -> int:
             return 1
         with connect() as connection:
             result = retention.purge(connection, args.purge, args.reason, args.actor,
-                                     args.vector_url, args.collection)
+                                     args.vector_url, args.collection,
+                                     dry_run=args.dry_run, documents_root=args.documents_root)
         print(json.dumps(result.as_record(), indent=2, sort_keys=True))
+        # The rehearsal exits 0 and says what it would do, after the refusal check, because a refusal is a
+        # refusal whether or not the run was real and it is the outcome a careful operator is checking for.
         if result.refused:
             print()
             print(f"REFUSED: {result.refusal_reason}")
             return 1
+        if result.dry_run:
+            total = sum(int(v.get("would_delete") or 0) for v in result.stores.values())
+            print()
+            print(f"DRY RUN, nothing was changed. A real purge would remove {total} object(s) across "
+                  f"{len([k for k, v in result.stores.items() if int(v.get('would_delete') or 0)])} store(s).")
+            if not result.complete:
+                print("It would be INCOMPLETE for the reason recorded under audit_payload.")
+            return 0
         if not result.complete:
             print()
             print("INCOMPLETE: at least one store did not confirm. The document is NOT purged, whatever the "
