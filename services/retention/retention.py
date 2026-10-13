@@ -123,6 +123,21 @@ def _delete_from_vector(vector_url: str, collection: str, doc_id: str, timeout: 
     Deleting by a list of ids means the ids have to be enumerated first, and anything added between the
     enumeration and the delete survives. A filter is computed by the store at the moment of deletion.
     """
+    def matching() -> int:
+        count_body = {"filter": {"must": [{"key": "doc_id", "match": {"value": doc_id}}]}, "exact": True}
+        count_request = urllib.request.Request(
+            f"{vector_url}/collections/{collection}/points/count",
+            data=json.dumps(count_body).encode(), method="POST",
+            headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(count_request, timeout=timeout) as response:
+            return json.loads(response.read()).get("result", {}).get("count", 0)
+
+    # Counted BEFORE the delete, which is where the number is. The first version counted after it, where the
+    # only two outcomes are zero or a raised error, and then returned a hard-coded 1: **every purge reported
+    # exactly one object removed from the vector store, whether it cleared one chunk or a thousand, and a purge
+    # that removed nothing reported one too.** A per-store count that is a constant is worse than no count,
+    # because the page's whole claim is that a store which contributed nothing is visible.
+    before = matching()
     body = {"filter": {"must": [{"key": "doc_id", "match": {"value": doc_id}}]}, "wait": True}
     request = urllib.request.Request(
         f"{vector_url}/collections/{collection}/points/delete?wait=true",
@@ -130,18 +145,11 @@ def _delete_from_vector(vector_url: str, collection: str, doc_id: str, timeout: 
         headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(request, timeout=timeout) as response:
         json.loads(response.read())
-    # Qdrant reports the operation, not a count. Counted afterwards so the record carries a number rather than
-    # an acknowledgement, because "the store said ok" is what a purge says when it did nothing.
-    count_body = {"filter": {"must": [{"key": "doc_id", "match": {"value": doc_id}}]}, "exact": True}
-    count_request = urllib.request.Request(
-        f"{vector_url}/collections/{collection}/points/count",
-        data=json.dumps(count_body).encode(), method="POST",
-        headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(count_request, timeout=timeout) as response:
-        remaining = json.loads(response.read()).get("result", {}).get("count", 0)
+    # And counted after as well, because the delete being acknowledged is not the delete having happened.
+    remaining = matching()
     if remaining:
         raise RuntimeError(f"{remaining} point(s) still match {doc_id!r} after the delete")
-    return 1
+    return before
 
 
 def purge(connection, doc_id: str, reason: str, actor: str, vector_url: str, collection: str,
@@ -160,10 +168,17 @@ def purge(connection, doc_id: str, reason: str, actor: str, vector_url: str, col
         result.refusal_reason = (
             f"a {hold['scope']} hold is in force, placed by {hold['placed_by']} because {hold['reason']!r}. "
             f"Release it with --release-hold {hold['id']} before purging.")
-        # The refusal is recorded as a store result too, so the row exists and says why rather than the purge
-        # appearing never to have been attempted.
+        # The refusal is recorded as a store result too, so the row says why rather than the purge appearing
+        # never to have been attempted. **The comment used to claim the row exists. It did not**: this branch
+        # returned before the `insert into purge_records` at the end of the function, so a refused purge left no
+        # trace at all. Measured on the deployed store: purge_records 2 before and 2 after, 0 rows naming the
+        # document, audit_events 40 before and 40 after. A client asking "did anyone try to delete this while
+        # the hold was on" had nothing to read, and the manual said the refusal was recorded.
         result.record("hold", refused=1, hold_id=hold["id"], scope=hold["scope"])
         result.complete = False
+        # Recorded before returning, which is the whole point: this branch used to return past the insert, so a
+        # refused purge left no row and no audit event, and nothing could answer whether anyone had tried.
+        _record_purge(connection, result, reason, actor)
         return result
 
     # The vector index first: it is what a query reaches first, so it is the one whose survival is most
@@ -224,15 +239,25 @@ def purge(connection, doc_id: str, reason: str, actor: str, vector_url: str, col
     except Exception as exc:  # noqa: BLE001
         result.fail("audit_payload", f"{type(exc).__name__}: {exc}")
 
+    _record_purge(connection, result, reason, actor)
+    return result
+
+
+def _record_purge(connection, result: PurgeResult, reason: str, actor: str) -> None:
+    """Write the purge record. One writer, because two would drift.
+
+    A refusal is recorded like any other attempt, with the reason and the hold that stopped it. A purge that was
+    blocked is a fact about the deployment that somebody will ask about, and a record that only exists for
+    purges that succeeded cannot answer the question.
+    """
     with connection.cursor() as cur:
         cur.execute("select row_hash from audit_events order by id desc limit 1")
         head = cur.fetchone()
         cur.execute("""
             insert into purge_records (doc_id, reason, actor, stores, complete, chain_head)
             values (%s, %s, %s, %s, %s, %s)""",
-            (doc_id, reason, actor, json.dumps(result.stores, sort_keys=True), result.complete,
+            (result.doc_id, reason, actor, json.dumps(result.stores, sort_keys=True), result.complete,
              head[0] if head else None))
-    return result
 
 
 # --------------------------------------------------------------------------- destruction
