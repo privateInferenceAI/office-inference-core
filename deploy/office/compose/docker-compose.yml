@@ -345,6 +345,26 @@ services:
       - ${OI_ROOT}/rendered:/app/rendered
     networks: [ai-net]
 
+  retention:
+    # The commands that delete a client's document and, at the end, everything. A tool rather than a service,
+    # like the audit sink, because it runs when called and exits.
+    #
+    # A separate image from the audit service even though both are tools, because this one reaches stores the
+    # audit service does not know about. A command that clears the vector index should not live inside the thing
+    # that records what happened, or the recorder becomes a component that can delete the record.
+    build:
+      context: ${OI_ROOT}/services/retention
+    image: oi-core/retention:local
+    profiles: ["tools"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      VECTOR_URL: http://vector:6333
+      COLLECTION: ${COLLECTION:-documents}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [ai-net]
+
   audit:
     # The audit sink, as a tool rather than a service: it runs when called and exits. It is
     # where every other component will record model calls, tool calls, and approvals, so the

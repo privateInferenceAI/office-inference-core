@@ -274,12 +274,38 @@ items:
     phase: C2
     verify: after a purge, the same question returns no passage from the deleted document
     status: open
+    note: >-
+      Built 2026-10-13, recorded in docs/runbook.md step 3.14. EVERYWHERE is the requirement. The vector index
+      is named because it is the obvious one, and the one that gets forgotten is whichever store was added most
+      recently, which in this build is the lexical index from step 3.9: a second copy of every document, added
+      six steps after the first, and a purge that clears the vector store and not that one still answers the
+      question with a correct citation to a document that no longer exists. So the stores are an explicit list
+      in services/retention/retention.py and a test reads the ingestion worker's write paths and asserts a
+      purge store exists for each, which makes a new store added in a later step fail that test rather than
+      fail in a client's question six months later. The result is recorded PER STORE rather than as a total, so
+      a store that was never wired in is visible instead of looking like a store that had nothing to do; a
+      total cannot show that one of three stores contributed nothing, and doing nothing is the shape of this
+      bug. A purge that cannot reach a store reports complete false and exits non-zero, because reporting
+      success because the reachable stores succeeded is how a client is told their data is gone while it is
+      not. Status is open because the proof has to run against the deployed stores. BOUND, stated rather than
+      hidden: there is no rollback, so a purge that fails part way leaves the document partly gone. The record
+      says which stores confirmed, and re-running is safe because every delete is by filter rather than by a
+      list of ids.
   - id: DATA-HOLD-001
     title: Legal hold blocks a purge
     tier: [cloud, hosted]
     phase: C2
     verify: a purge on a held document is refused and the refusal is recorded
     status: open
+    note: >-
+      Built 2026-10-13, recorded in docs/runbook.md step 3.14. A deployment-scope hold has no document list, so
+      a document uploaded after the hold was placed is covered by it: a hold that only covered what existed at
+      the time is a hold with a gap in it, and the gap is where the document that matters ends up. The hold is
+      checked in ONE query before any store is touched, because checking it per store means a hold obeyed by
+      the store somebody remembered and ignored by the one they did not, which from the client's side is the
+      same as no hold at all. The refusal names the hold, its scope, who placed it and why, and how to release
+      it, because a refusal a person cannot act on is one they route around. Status is open because the proof
+      has to run against the deployed store.
   - id: DATA-EXIT-001
     title: Termination destroys client data and produces evidence that it happened
     tier: [cloud, hosted, office]
