@@ -2131,16 +2131,23 @@ share is over the **smaller** document: a five-chunk summary of a hundred-chunk 
 it, and an overlap over the larger would read as 5 percent while one over the smaller reads as 100. Neither is
 "these are the same document", which is why the pair is recorded and a person decides.
 
-**The first version of this compared chunk ids and could never have fired.** An id is
+**Two faults, both found by running it rather than reading it.** The first version of this compared chunk ids
+and could never have fired. An id is
 `uuid5(doc_id, source_sha256, chunker_version, ordinal, content_hash)`, so it contains the document it belongs
 to: two byte-identical files produce ids that all differ, the overlap is structurally zero, and an exact copy
 in the corpus is reported as no duplicate at all. Its unit test passed because the fixture supplied shared ids
 by hand, which is a fixture agreeing with itself rather than modelling the data. The test now derives ids the
 way the chunker does and compares text hashes, so a regression to id comparison fails it.
 
+    docker exec ingestion python3 /app/ingest.py --scan-duplicates
     docker exec ingestion python3 /app/ingest.py --versions
     docker exec ingestion python3 /app/ingest.py --distinct company/policy-copy.pdf \
       --note "a separate policy, not a copy"
+
+**`--scan-duplicates` exists because detection otherwise runs only when a file arrives.** A corpus ingested
+before the check existed is never examined: both copies are already indexed, every cycle skips them, and the
+comparison never runs. That is exactly what the first deployed test found, and it is not a rare case, because
+every corpus becomes an old corpus the moment the feature ships.
 
 **Two things this deliberately does not do.** It does not delete the second copy, because losing a document a
 client put in a folder deliberately is worse than keeping two. And it does not drop a superseded passage from
@@ -2156,12 +2163,18 @@ Step 3.11 is what refuses on it.
 
 - `--versions` prints nothing: no document has a declaration, which is the default state and not a fault.
   Every document is current until somebody says otherwise.
-- A duplicate pair is not flagged: the comparison needs both documents in `chunk_index` and at least five
-  chunks on each side, so two one-chunk documents that agree are not evidence of anything. Check
-  `select count(*) from chunk_index where doc_id = '...'`.
+- A duplicate pair is not flagged: run `--scan-duplicates` first, because detection normally runs only when a
+  file arrives and an existing corpus is never examined. If it still reports nothing, the identical text is
+  under the floor: `DUPLICATE_MIN_SHARED_CHARS` is 500, so two documents sharing a cover line or a form header
+  are deliberately not compared. Check with
+  `select doc_id, count(*), sum(length(text)) from chunk_index group by doc_id`.
 - A pair is flagged that is genuinely two documents: resolve it with `--distinct`, which records the decision
   and clears the flag without superseding anything. The flag is the feature working, not a false positive: the
   system cannot tell two policies apart from one policy stored twice, and it is not supposed to try.
+- A one-page document exported twice is not flagged: the floor is measured in characters, not chunks, so a
+  single-page fee schedule clears it and a shared cover line does not. If it is under 500 characters of
+  identical text it will not be reported, which is the intended behaviour and the number to change if a
+  client's documents are smaller than that.
 - The same pair appears twice: it cannot, because the pair is stored ordered with a unique constraint. If it
   does, the ordering in `near_duplicates` has been changed.
 
