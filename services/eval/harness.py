@@ -139,6 +139,9 @@ class Outcome:
     # page must fall inside the chunk's range is satisfied trivially for them: 1 is inside 1..1. Recording it
     # stops that rule being quoted as though it had been tested on those six.
     page_is_nominal: bool = False
+    # Whether support could be measured at all. False for a reference answer with no figure in it, because
+    # support for prose needs entailment and this layer does not have it.
+    support_measurable: bool = True
     detail: str = ""
 
 
@@ -169,7 +172,16 @@ class Report:
 
     @property
     def support_rate(self) -> float | None:
-        return self._rate(self.answerable, "supported")
+        """Over the questions support CAN be measured on, which is fewer than the answerable ones.
+
+        A rate that counted an unmeasurable question as a miss would be a measure of how many questions have a
+        figure in their answer, reported as a measure of retrieval quality.
+        """
+        return self._rate([o for o in self.answerable if o.support_measurable], "supported")
+
+    @property
+    def support_not_measurable(self) -> int:
+        return sum(1 for o in self.answerable if not o.support_measurable)
 
     def by_category(self) -> dict[str, dict]:
         """Per-category counts, because one rate over ten questions hides which kind is failing.
@@ -241,9 +253,18 @@ class Report:
 
     def render(self) -> str:
         lines = [f"configuration: {self.configuration}   k={self.k}   n={len(self.outcomes)}"]
-        for label, rate in (("retrieval", self.retrieval_rate), ("support", self.support_rate)):
-            shown = "n/a" if rate is None else f"{rate:.0%} ({sum(1 for o in self.answerable if getattr(o, label == 'retrieval' and 'retrieved_document' or 'supported'))}/{len(self.answerable)})"
-            lines.append(f"  {label:<10} {shown}")
+        for label, rate, attribute in (("retrieval", self.retrieval_rate, "retrieved_document"),
+                                       ("support", self.support_rate, "supported")):
+            if rate is None:
+                lines.append(f"  {label:<10} n/a")
+                continue
+            denominator = len(self.answerable) if label == "retrieval" else (
+                len(self.answerable) - self.support_not_measurable)
+            count = sum(1 for o in self.answerable if getattr(o, attribute))
+            lines.append(f"  {label:<10} {rate:.0%} ({count}/{denominator})")
+        if self.support_not_measurable:
+            lines.append(f"  support was not measurable on {self.support_not_measurable} answerable question(s): "
+                         f"no figure in the reference answer, so it needs entailment")
         lines.append("")
         lines.append(f"  {'category':<18}{'n':>3}{'retr':>7}{'supp':>7}")
         for name, bucket in self.by_category().items():
@@ -311,29 +332,34 @@ def grade(question: Question, passages: list, k: int) -> Outcome:
         # scored Q06 and Q07 as misses while the retriever had put the right table in front of the model: the
         # reference answers explain what they found, so they carry the fiscal year and a date beside the figure.
         figure = primary_figure(question.reference_answer)
-        wanted_text = normalise(question.reference_answer)
-        # The words a paraphrase question turns on. Length five and up, because shorter ones are articles and
-        # prepositions that any passage contains.
-        wanted_words = {word.strip(".,;:()") for word in wanted_text.split() if len(word) >= 5}
+        if not figure:
+            # Support is NOT measured for an answer with no figure, and this is a decision rather than a gap.
+            #
+            # The first version fell back to counting shared words and needed 60 percent of them. That number
+            # was arbitrary and the mechanism is weak in a way no number fixes: a paraphrase question and its
+            # source legitimately share almost no wording, so "forfeited on termination" against "shall
+            # terminate on the Severance Date" matched on two stems out of seven and was scored a miss while the
+            # passage said exactly that. Counting shared vocabulary measures vocabulary and reports it as
+            # support, which is a number that means nothing dressed as one that means something.
+            #
+            # Support for prose needs entailment, which is Layer 1 and arrives with the answer layer. Until then
+            # the honest report says this question's support was not measured, excludes it from the rate rather
+            # than counting it as a miss, and prints the count so the rate's coverage is visible beside it.
+            outcome.support_measurable = False
+            outcome.detail = ("no figure in the reference answer, so support needs entailment and is not "
+                              "measurable at this layer. Excluded from the support rate rather than counted "
+                              "as a miss.")
+            return outcome
+
         for rank, passage in enumerate(passages[:k], start=1):
             text = getattr(passage, "text", "") or ""
-            flat = normalise(text)
-            if figure and re.sub(r"\D", "", figure) in re.sub(r"\D", "", text):
+            if re.sub(r"\D", "", figure) in re.sub(r"\D", "", text):
                 outcome.supported, outcome.rank = True, rank
                 outcome.detail = f"matched the figure {figure}"
                 outcome.page_is_nominal = bool(getattr(passage, "page_is_nominal", False))
                 break
-            if not figure and wanted_words:
-                present = {word for word in wanted_words if word in flat}
-                if len(present) >= max(1, int(len(wanted_words) * 0.6)):
-                    outcome.supported, outcome.rank = True, rank
-                    outcome.detail = (f"matched {len(present)} of {len(wanted_words)} distinctive words; no "
-                                      f"figure in the answer to match on")
-                    outcome.page_is_nominal = bool(getattr(passage, "page_is_nominal", False))
-                    break
         if not outcome.supported:
-            wanted = f"the figure {figure}" if figure else f"{len(wanted_words)} distinctive words"
-            outcome.detail = f"no passage among the top {k} contains {wanted}"
+            outcome.detail = f"no passage among the top {k} contains the figure {figure}"
     else:
         outcome.detail = (outcome.detail + " | " if outcome.detail else "") + \
             "no reference answer, so support is not measurable"

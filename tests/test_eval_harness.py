@@ -224,18 +224,42 @@ def test_support_is_graded_on_the_answers_most_specific_figure():
     assert "matched the figure" in outcome.detail
 
 
-def test_an_answer_with_no_figure_is_graded_on_its_distinctive_words():
-    """A paraphrase question's answer shares no figure with the passage, because the whole point of the question
-    is that the agreement's wording and the question's wording have nothing in common. Grading it on figures
-    would score it unmeasurable; grading it on the whole answer string would score every answer a miss."""
+def test_support_is_not_estimated_from_shared_vocabulary():
+    """The decision this replaced a guess with, found by running the harness on the real corpus.
+
+    The first version fell back to counting shared words and needed 60 percent of them. That number was
+    arbitrary and the mechanism is weak in a way no number fixes: a paraphrase question and its source
+    legitimately share almost no wording. "Forfeited on termination" against "shall terminate on the Severance
+    Date" matched on two stems out of seven and was scored a miss while the passage said exactly that.
+
+    Counting shared vocabulary measures vocabulary and reports it as support, which is a number that means
+    nothing dressed as one that means something. Support for prose needs entailment, which is Layer 1, so until
+    then the question is excluded from the rate and the exclusion is printed beside it.
+    """
     answer = "The unvested units are forfeited on termination of service, with disability pro-rated"
     passage = [Passage("company/apple-ex10-1-2024.htm",
                        "any unvested RSUs shall terminate on the Severance Date and the Participant will have "
                        "no right to the terminated RSUs")]
-    outcome = harness.grade(q(reference_answer=answer, source_document="apple-ex10-1"),
-                            passage, k=10)
-    assert outcome.supported, outcome.detail
-    assert "distinctive words" in outcome.detail
+    outcome = harness.grade(q(reference_answer=answer, source_document="apple-ex10-1"), passage, k=10)
+    assert not outcome.supported, "nothing was measured, so nothing was supported"
+    assert outcome.support_measurable is False
+    assert "needs entailment" in outcome.detail
+
+    report = harness.run([q(reference_answer=answer)], lambda _: passage, k=10)
+    assert report.support_rate is None, "no measurable question means no rate, not a zero"
+    assert report.support_not_measurable == 1
+    assert "not measurable on 1" in report.render()
+
+
+def test_a_rate_that_excludes_a_question_says_so():
+    """A rate whose denominator is invisible reads as though it covered everything."""
+    measurable = q(id="Q01", reference_answer="184,500 dollars")
+    unmeasurable = q(id="Q10", reference_answer="the units are forfeited on termination")
+    report = harness.run([measurable, unmeasurable],
+                         lambda _: [Passage("company/irs-p15.pdf", "184,500 dollars")], k=10)
+    assert report.support_rate == 1.0, "one of one measurable question, not one of two"
+    assert report.retrieval_rate == 1.0
+    assert "not measurable on 1" in report.render()
 
 
 def test_a_document_named_by_its_publication_identity_does_not_match_its_filename():
