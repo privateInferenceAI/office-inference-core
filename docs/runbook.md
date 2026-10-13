@@ -1673,6 +1673,23 @@ Check and fix before it bites:
     ls -ld /opt/oi-core/db /opt/oi-core/db/migrations 2>/dev/null
     sudo chown -R "$USER":"$USER" /opt/oi-core/db
 
+`documents/` joins that list at step 3.7, and it bites the same way. The ingestion worker mounts
+`${OI_ROOT}/documents` read-only, and Docker creates a missing bind path as root, so a first `up -d`
+before the directory exists leaves a root-owned `documents/` that the operator cannot copy anything into:
+
+    mkdir: cannot create directory 'documents/company': Permission denied
+
+The fix is to create it as the operator, before compose ever sees it, and to put the corpus inside:
+
+    cd /opt/oi-core
+    mkdir -p documents/company
+    python3 fixtures/corpus/fetch_corpus.py
+    cp fixtures/corpus/*.htm fixtures/corpus/*.pdf documents/company/
+
+If it has already gone wrong, the repair is the same as for `db/`:
+
+    sudo chown -R "$USER":"$USER" /opt/oi-core/documents
+
 **Do not chown the whole tree.** `data/` and `exports/` are root-owned on purpose, because Docker made
 them for volumes.
 
