@@ -301,7 +301,27 @@ items:
     tier: [cloud, office, hosted]
     phase: C2
     verify: a document past its retention is gone from Qdrant, from the object store, and from the answer
-    status: open
+    note: >-
+      VERIFIED 2026-10-13 against the deployed store, and the verify line's three places all hold. A fixture aged 800
+      days: after the real run the vector index reports 0 points, the lexical index 0 rows, the manifest 0 rows, and
+      the client's own file is GONE, and asking a question about it returns no passage from it. The object store is
+      the half a job built by reusing the purge would miss, because DATA-PURGE-001 deliberately LEAVES the file: a
+      client asking us to stop holding a copy still has their document, and a period running out means there is no
+      document. THREE BEHAVIOURS PROVED BESIDE THE DESTRUCTION, and each is a way the mechanism could be wrong in the
+      direction that cannot be undone. NO POLICY DESTROYS NOTHING: with no row in retention_policies the run examined
+      0 and destroyed 0, because a default period invented here would delete a client's documents on a number they
+      never agreed to. A HOLD BEATS A PERIOD: with a hold in force the run examined 1, destroyed 0 and counted 1 held.
+      And A DRY RUN CHANGES NOTHING: examined 1, expired 1, destroyed 0, file still present, which matters because a
+      rehearsal whose output does not match the real thing rehearses a different operation. AGE IS MEASURED FROM
+      ingested_at AND NOT FROM THE FILE'S DATE, which is a fact about the client's filesystem rather than about the
+      obligation: copying a folder resets every mtime, and a document whose date was reset would be retained for
+      another period without anybody deciding to. The stores are cleared before the file is removed, and only one of
+      those orders is recoverable: a failure between them leaves a file with no index, which re-ingesting fixes, while
+      the other order leaves an index pointing at a file that is gone, which is a passage the system will cite and
+      nobody can open. CONVERSATIONS ARE DEFINED but minimal: the table exists so the requirement's second half has
+      something to bind to, and the assistant API that writes it arrives in Phase 4. Inventing its schema now would be
+      inventing decisions about a component that does not exist.
+    status: verified
   - id: DATA-PURGE-001
     title: A client-requested purge deletes content everywhere it is stored, including the vector index
     tier: [cloud, office, hosted]
