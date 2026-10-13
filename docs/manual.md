@@ -1663,11 +1663,11 @@ client's format, and a role map that does not match what was agreed:
 
 ```
 docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
-  run --rm --entrypoint python eval /w/tests/fixtures/ask.py \
+  run --rm --entrypoint python -v /opt/oi-core:/w:ro -w /w eval /w/tests/fixtures/ask.py \
   -q "<a question the client says must work>" --role staff
 
 docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
-  run --rm --entrypoint python eval /w/tests/fixtures/ask.py \
+  run --rm --entrypoint python -v /opt/oi-core:/w:ro -w /w eval /w/tests/fixtures/ask.py \
   -q "<a restricted question>" --role staff
 ```
 
@@ -2204,16 +2204,19 @@ today. Section 25 records the gap.
 ```
 cd /opt/oi-core
 docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
-  run --rm --entrypoint python eval /w/tests/fixtures/ask.py \
+  run --rm --entrypoint python -v /opt/oi-core:/w:ro -w /w eval /w/tests/fixtures/ask.py \
   -q "What is the standard labour rate per hour?" --role staff
 ```
 
-**Run it through `compose run`, not a bare `docker run`, and the difference is not cosmetic.** The probe needs
-`DATABASE_URL` for the lexical arm and for the supersession marking, and `rendered/env` does not hold it:
-the DSN is assembled by the compose file from `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB`, because
-the host and port belong to the compose network rather than to the deployment. **A bare `docker run` with
-`--env-file rendered/env` therefore starts the probe with no database at all**, and the two consequences are
-silent rather than loud:
+**Two parts of that command are load-bearing, and both were wrong in an earlier draft of this page.** The
+`compose run` form supplies the environment; the `-v /opt/oi-core:/w:ro -w /w` supplies the code. Neither is
+cosmetic.
+
+**Why `compose run` and not a bare `docker run`.** The probe needs `DATABASE_URL` for the lexical arm and for
+the supersession marking, and `rendered/env` does not hold it: the DSN is assembled by the compose file from
+`POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB`, because the host and port belong to the compose network
+rather than to the deployment. **A bare `docker run` with `--env-file rendered/env` therefore starts the probe
+with no database at all**, and the two consequences are silent rather than loud:
 
 - `lexical: 0` in the output, which reads exactly like an arm that ran and found nothing. It did not run.
 - **No passage is marked `** NOT CURRENT`, so a claim resting on a superseded document is certified as
@@ -2223,6 +2226,13 @@ Both were found by a review comparing the two invocations, and neither shows up 
 `docker run`, pass the DSN explicitly with `-e DATABASE_URL="$(grep '^POSTGRES_USER=' rendered/env | cut -d= -f2-):…"`,
 or accept that you are testing the dense arm alone and read the output knowing that.
 
+**Why the `-v` and `-w` are needed even on `compose run`.** The `eval` service does not mount the checkout: its
+compose definition sets `RETRIEVAL_PATH` and `INGESTION_PATH` to paths under `/w` but declares no volume, on the
+assumption that whoever runs it passes one. `oi run --rm eval` does that for the plain harness invocation, and
+**overriding the entrypoint drops it**, so this probe arrives at a container with no `/w` and stops with
+`can't open file '/w/tests/fixtures/ask.py': [Errno 2] No such file or directory`. Mount it explicitly, as the
+command above does. The same applies to every probe in this manual run with `--entrypoint`.
+
 ```
 question: What is the standard labour rate per hour?
 role:     staff   roots: ['company']
@@ -2231,7 +2241,7 @@ rerank:   {'reranked': True, 'rerank_depth': 15, 'rerank_ms': 251.8, 'rerank_bud
            'rerank_within_budget': True, 'rerank_model': 'cohere.rerank-v3-5:0', 'rerank_reason': None}
 withheld: 0   denied: False   restricted matched: 0
 
-[1] company/fee-schedule-2025.md  pages 1-1  acl=company  score=0.7549  ** NOT CURRENT, superseded by None
+[1] company/fee-schedule-2025.md  pages 1-1  acl=company  score=0.7549  ** NOT CURRENT, superseded by company/fee-schedule-2026.md
     Schedule of Fees and Reimbursable Rates
     Item | Basis | Rate
     Standard labour, business hours | per hour | 132.00
@@ -3321,7 +3331,7 @@ the manual also asks you to type.
 | `oi run --rm retention --holds` | List the legal holds in force. Section 13f |
 | `oi run --rm retention --purge DOC_ID [--dry-run]` | Delete one document from every store. Refused if a hold covers it |
 | `oi run --rm retention --enforce DATASET [--dry-run]` | Destroy what a retention period has run out on. Needs a policy to exist |
-| `oi run --rm --entrypoint python eval /w/tests/fixtures/ask.py -q "…" --role staff` | **Ask one question against the corpus.** The whole command is in section 13b, and the `compose run` form is required rather than cosmetic |
+| `docker compose … run --rm --entrypoint python -v /opt/oi-core:/w:ro -w /w eval /w/tests/fixtures/ask.py -q "…" --role staff` | **Ask one question against the corpus.** The whole command is in section 13b, and both the `compose run` form and the `-v` mount are required rather than cosmetic |
 | `./deploy/cloud/ship/oi-core-ship.sh anchors\|exports` | Ship an artifact and prove it arrived |
 | `systemctl list-timers 'oi-core-*'` | The shipping schedule |
 | `journalctl -u oi-core-anchor.service -n 40` | What the anchor job did |
