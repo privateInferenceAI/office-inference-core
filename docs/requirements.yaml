@@ -350,24 +350,27 @@ items:
     tier: [cloud, office, hosted]
     phase: C2
     verify: a golden question containing an exact reference retrieves the right passage with the lexical arm on and fails with it off
-    status: open
+    status: verified
     note: >-
-      Built 2026-10-13, recorded in docs/runbook.md step 3.9. Measured before building, and the measurement
-      changed the design twice. Seven identifier questions went to the deployed vector arm: it missed Form
-      W-3SS and Pub. 515 entirely, though the corpus holds 2 and 14 chunks mentioning them, and found every
-      common identifier. The failures are the rare ones, which is the opposite of harmless because a person
-      types an exact reference precisely when it is unusual enough that they had to look it up. Plain Postgres
-      full-text matched none of the seven: plainto_tsquery ANDs every term of a natural question, and the
-      parser splits Form W-4 into 'w' & '-4'. So references are normalised by a shared extractor rather than
-      matched by a text-search configuration, with a small alias table closing the Pub./Publication gap. The
-      store is a chunk_index table with a generated tsvector for prose and a normalised identifiers array for
-      references, both GIN indexed. Fusion is our own reciprocal rank, k=60, tie-broken on chunk id, because
-      the architecture keeps it out of the database for determinism. The lexical arm carries the access clause
-      in its own query, since a second copy of every document without a filter is the leak step 3.8 closed
-      arriving by a new road, and a test asserts the clause rather than the results. Status is open because the
-      acceptance test has to run on the deployed store: a unit test can assert the query is built and only the
-      store can show it returns the right chunk. Still open for the same item: the fusion has not been measured
-      against a reranker, so whether the fused order is better than either arm alone is unproven.
+      Measured before building, and the measurement was wrong twice in ways worth recording. The first version
+      used one phrasing per reference and concluded the vector arm misses rare references; two probes then
+      disagreed about Pub. 515 because they asked different questions, "What does Pub. 515 cover?" being found
+      at rank 7 and "What is in Pub. 515?" not at all. Asking each reference five ways gives the real finding:
+      the spread WITHIN one reference is as wide as the spread between them, so what the lexical arm fixes is
+      phrasing rather than rarity, and the bare reference -- "Pub. 515" typed on its own, which is the form a
+      person uses -- is missed every time. Plain Postgres full-text matched none of the seven phrasings:
+      plainto_tsquery ANDs every term of a natural question, and the parser splits Form W-4 into 'w' & '-4'. So
+      references are normalised by a shared extractor rather than matched by a text-search configuration, with
+      a small alias table closing the Pub./Publication gap. The store is a chunk_index table with a generated
+      tsvector for prose and a normalised identifiers array for references, both GIN indexed. Fusion is our own
+      reciprocal rank, k=60, tie-broken on chunk id, because the architecture keeps it out of the database for
+      determinism. The lexical arm carries the access clause in its own query, since a second copy of every
+      document without a filter is the leak step 3.8 closed arriving by a new road, and a test asserts the
+      clause rather than the results. VERIFIED 2026-10-13 against the deployed store: chunk_index held 1060
+      rows with 435 carrying identifiers, and hybrid on against hybrid off through the real code path found
+      Pub. 515, Form W-3SS and Pub. 519 with the lexical arm and missed all three without it, while Form W-4
+      and Pub. 15 were found either way as controls. Still open for the same item: the fusion has not been
+      measured against a reranker, so whether the fused order beats either arm alone is unproven.
   - id: RET-CITE-001
     title: Every citation is verified against the retrieved set, the page, and entailment
     tier: [cloud, office, hosted]

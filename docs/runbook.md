@@ -2007,9 +2007,26 @@ full-text, before anything was built.
 | Form W-2 | 36 | found | **missed** |
 | Form W-4 | 32 | found | **missed** |
 
-**The vector arm misses the rare identifiers**, which is the opposite of harmless: a person types an exact
-reference precisely because it is unusual enough that they had to look it up. Everything common is found and
-everything uncommon is not.
+**That table was read wrongly the first time, and the correction matters.** It has one question per
+reference, and it was taken to mean the vector arm misses rare references. Two probes then disagreed about
+`Pub. 515`, which turned out to be because they asked different questions: *"What does Pub. 515 cover?"* is
+found at rank 7, and *"What is in Pub. 515?"* is not found at all.
+
+Asking each reference five ways gives the real finding:
+
+| Reference | bare form | "tell me about ..." | best phrasing | spread |
+|---|---|---|---|---|
+| `Pub. 515` | **missed** | **missed** | #5 | #5 to #75 |
+| `Form W-3SS` | **missed** | **missed** | #0 | #0 to #23 |
+| `Pub. 519` | **missed** | **missed** | #3 | #3 to #85 |
+
+**The spread within one reference is as wide as the spread between references.** So what the lexical arm
+fixes is *phrasing*, not rarity: the vector arm finds a reference only when the words around it happen to
+point at the right passage, and it found `Form W-3SS` at rank 0 for one question and not in 200 for another.
+
+**And the bare reference is missed every single time**, which is the form a person uses. Someone looking
+something up types the thing they want, not a sentence about it. That case is what the arm exists for, and it
+is a stronger reason to build it than the rarity claim was.
 
 **And plain full-text matched none of the seven.** Two faults, both read from the database rather than
 guessed:
@@ -2034,6 +2051,21 @@ pulled `is67` out of "the mileage rate is 67 cents per mile", which would have m
 numeral. And normalisation alone could not match `Pub. 515` to a document saying `Publication 515`, so a small
 alias table expands the abbreviation. That is the same corpus-mined glossary the architecture calls for on the
 query side.
+
+**The acceptance test, verified on the deployed store.** `chunk_index: 1060 rows, 435 carrying identifiers`.
+Hybrid on against hybrid off, through the real code path with the lexical arm pointed at an empty result:
+
+| Reference | hybrid on | hybrid off | verdict |
+|---|---|---|---|
+| `Pub. 515` | found | **missed** | **HYBRID WINS** |
+| `Form W-3SS` | found | **missed** | **HYBRID WINS** |
+| `Pub. 519` | found | **missed** | **HYBRID WINS** |
+| `Form W-4` | found | found | both, as expected |
+| `Pub. 15` | found | found | both, as expected |
+
+Three references the lexical arm is what finds, and two controls where the vector arm already did, so the test
+shows the arm helping where it should rather than disturbing what worked. The bare form is deliberate: a test
+built on a phrasing the vector arm happens to handle would prove nothing.
 
 **The store.** `010_chunk_index.sql` adds a table with the chunk text, the access label, a generated `tsvector`
 for prose, and a normalised `identifiers text[]` with a GIN index. The worker writes it beside the vectors, and

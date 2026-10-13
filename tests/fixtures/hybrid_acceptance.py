@@ -2,18 +2,35 @@
 """The acceptance test for hybrid search, on the deployed store: hybrid on against hybrid off.
 
 RET-HYBRID-001 asks for a question containing an exact reference that succeeds with the lexical arm and fails
-without it. That is a claim about the deployed store rather than about the code, because the lexical arm
-returned nothing at all for all seven identifiers before it existed, and only the store can show that has
-changed.
+without it. Getting that test right needed a correction to the measurement that opened the step.
 
-Hybrid off is simulated by pointing the lexical arm at a function that returns nothing, which is what the
-module does when it cannot reach Postgres. Using the real code path rather than a flag means the comparison
-exercises the same fusion, the same filters and the same passage construction that a deployment does.
+The first measurement used one phrasing per reference and concluded that the vector arm misses rare
+references. Two probes then disagreed about the same reference, which turned out to be because they asked
+different questions: "What does Pub. 515 cover?" is found at rank 7 by the vector arm, and "What is in Pub.
+515?" is not found at all. So the finding is about PHRASING rather than rarity, and the corrected measurement
+asks each reference five ways.
+
+What it shows is stronger than the original claim:
+
+    reference      bare form     "tell me about"    best phrasing
+    Pub. 515       MISSED        MISSED             #5
+    Form W-3SS     MISSED        MISSED             #0
+    Pub. 519       MISSED        MISSED             #3
+
+The bare reference is missed every single time, and that is the form a person uses when they are looking
+something up: they type the thing they want. So this test asks the bare form, because a test built on a
+phrasing the vector arm happens to handle would prove nothing.
+
+Hybrid off is simulated by pointing the lexical arm at an empty result, which is what the module does when it
+cannot reach Postgres. Using the real code path means the comparison exercises the same fusion, filters and
+passage construction a deployment does.
 
 Run from the repo root on the box:
 
-    docker run --rm --network ai-net -v /opt/oi-core:/w:ro -v /tmp:/probe:ro -w /w \\
-      --entrypoint python ghcr.io/docling-project/docling-serve-cpu:v1.36.0 /probe/hybrid_acceptance.py
+    cd /opt/oi-core
+    docker run --rm --network ai-net --user "$(id -u):$(id -g)" \\
+      -v /opt/oi-core:/w:ro -v /tmp:/probe:ro -w /w \\
+      --entrypoint python oi-core/ingestion:local /tmp/hybrid_acceptance.py
 """
 from __future__ import annotations
 
@@ -24,26 +41,22 @@ from pathlib import Path
 sys.path.insert(0, "/w/services/retrieval")
 sys.path.insert(0, "/w/services/ingestion")
 
-
 ENV_PATH = Path("/w/rendered/env")
 
 
 def read_env(path: Path = ENV_PATH) -> dict[str, str]:
-    """The deployment's rendered environment, as a dictionary.
+    """The deployment's rendered environment.
 
-    Two failures led here. The first run stopped with "DATABASE_URL is not set", which was correct and useful:
-    it said nothing below it would have meant anything. The second stopped with PermissionError, because this
-    file holds the database password and is therefore mode 600 owned by the operator, while the container runs
-    as uid 1001. Both are the probe being wrong about how a deployment stores a credential, and neither is
-    something an operator should have to work out from a traceback.
+    rendered/env holds the database password and is mode 600 owned by the operator, so this container has to
+    run as that user. The PermissionError case says which flag to add rather than printing a traceback, since
+    the fix is a docker flag and not a code change.
     """
     try:
         text = path.read_text()
     except PermissionError:
-        print(
-            f"cannot read {path}: it holds the database password, so it is mode 600 owned by the operator\n"
-            f"while this container runs as another user. Run the probe as the file's owner:\n\n"
-            f"    --user \"$(id -u):$(id -g)\"\n")
+        print(f"cannot read {path}: it holds the database password, so it is mode 600 owned by the operator\n"
+              f"while this container runs as another user. Run the probe as the file's owner:\n\n"
+              f"    --user \"$(id -u):$(id -g)\"\n")
         return {}
     except OSError as exc:
         print(f"cannot read {path}: {exc}")
@@ -59,12 +72,11 @@ def read_env(path: Path = ENV_PATH) -> dict[str, str]:
 
 
 def database_url() -> str:
-    """The DSN, from the environment or assembled the way compose assembles it.
+    """The DSN, assembled the way compose assembles it.
 
-    rendered/env does not contain DATABASE_URL. It holds POSTGRES_USER, POSTGRES_PASSWORD and POSTGRES_DB, and
-    the compose file builds the connection string from them at run time. Reading a key that is not there was
-    the second way this probe was wrong about the deployment, and assembling it here means the probe reads the
-    same three values compose reads rather than needing a fourth thing to exist.
+    rendered/env has no DATABASE_URL: it holds POSTGRES_USER, POSTGRES_PASSWORD and POSTGRES_DB, and the
+    compose file builds the connection string from those at run time. Each part is quoted because a generated
+    password is hex and safe and a client supplying their own is not obliged to keep it that way.
     """
     if os.environ.get("DATABASE_URL"):
         return os.environ["DATABASE_URL"]
@@ -76,8 +88,6 @@ def database_url() -> str:
         print("rendered/env has no DATABASE_URL and not all of POSTGRES_USER, POSTGRES_PASSWORD and "
               "POSTGRES_DB either, so there is nothing to connect with")
         return ""
-    # The password is quoted because a generated one is hex and safe, but a client who supplies their own is
-    # not obliged to keep it that way and an unencoded separator would silently truncate the DSN.
     from urllib.parse import quote
     dsn = (f"postgresql://{quote(env['POSTGRES_USER'], safe='')}:"
            f"{quote(env['POSTGRES_PASSWORD'], safe='')}@postgres:5432/{env['POSTGRES_DB']}")
@@ -89,15 +99,17 @@ def database_url() -> str:
 database_url()
 
 import ingest  # noqa: E402
+import identifiers  # noqa: E402
 import retriever  # noqa: E402
 
-# The two the vector arm missed entirely, and two it found, so the test shows the arm helping where it should
-# and not disturbing what already worked.
+# The bare reference, which is the form a person uses and the form the measurement shows the vector arm
+# missing every time. The fourth column is what the lexical extractor should produce from it.
 CASES = [
-    ("Pub. 515", "What does Pub. 515 cover?", True),
-    ("Form W-3SS", "When must Form W-3SS be filed?", True),
-    ("Pub. 15", "What does Pub. 15 say about withholding?", False),
-    ("Form W-4", "How long must I keep a Form W-4?", False),
+    ("Pub. 515", True),
+    ("Form W-3SS", True),
+    ("Pub. 519", True),
+    ("Form W-4", False),      # common enough that the vector arm handles the bare form too
+    ("Pub. 15", False),
 ]
 
 
@@ -126,30 +138,37 @@ def main() -> int:
         return 1
 
     print()
-    print(f"{'reference':<13}{'hybrid on':>11}{'hybrid off':>12}  verdict")
-    for token, question, must_need_lexical in CASES:
-        on = retriever.search(services, question, role="staff", limit=10)
-        on_hit = any(token.lower() in p.text.lower() for p in on.passages)
+    print(f"{'reference':<13}{'tokens':<26}{'hybrid on':>10}{'hybrid off':>12}  verdict")
+    for reference, must_need_lexical in CASES:
+        tokens = identifiers.extract(reference)
+        on = retriever.search(services, reference, role="staff", limit=10)
+        on_hit = any(reference.lower() in p.text.lower() for p in on.passages)
 
         original = retriever.lexical_search
         try:
             retriever.lexical_search = lambda *a, **k: []
-            off = retriever.search(services, question, role="staff", limit=10)
+            off = retriever.search(services, reference, role="staff", limit=10)
         finally:
             retriever.lexical_search = original
-        off_hit = any(token.lower() in p.text.lower() for p in off.passages)
+        off_hit = any(reference.lower() in p.text.lower() for p in off.passages)
 
         if must_need_lexical:
-            verdict = "HYBRID WINS" if (on_hit and not off_hit) else (
-                "no difference" if on_hit == off_hit else "unexpected")
-            if not (on_hit and not off_hit):
-                problems.append(f"{token}: expected hybrid on to find it and hybrid off to miss it, got "
-                                f"on={on_hit} off={off_hit}")
+            # The acceptance condition: the lexical arm has to be what makes the difference, not the fusion
+            # alone and not a phrasing the vector arm happens to handle.
+            ok = on_hit and not off_hit
+            verdict = "HYBRID WINS" if ok else (
+                "no difference" if on_hit == off_hit else "lexical arm hurt")
+            if not ok:
+                problems.append(
+                    f"{reference}: expected hybrid on to find it and hybrid off to miss it, got "
+                    f"on={on_hit} off={off_hit}. The vector arm handles this phrasing, so this reference "
+                    f"does not test the lexical arm.")
         else:
-            verdict = "both find it, as expected" if on_hit else "REGRESSION: on misses what off found"
-            if not on_hit:
-                problems.append(f"{token}: hybrid on should still find what the vector arm found")
-        print(f"{token:<13}{str(on_hit):>11}{str(off_hit):>12}  {verdict}")
+            ok = on_hit
+            verdict = "both find it, as expected" if ok else "REGRESSION: on misses what off found"
+            if not ok:
+                problems.append(f"{reference}: hybrid on should still find what the vector arm found")
+        print(f"{reference:<13}{str(tokens):<26}{str(on_hit):>10}{str(off_hit):>12}  {verdict}")
         print(f"    arms on: {on.arms}")
 
     print()
@@ -158,7 +177,8 @@ def main() -> int:
         for problem in problems:
             print(f"  - {problem}")
         return 1
-    print("PASSED: the lexical arm finds references the vector arm cannot, and the fusion keeps what it found")
+    print("PASSED: a bare reference is found with the lexical arm and missed without it, and the fusion keeps "
+          "what the vector arm already found")
     return 0
 
 
