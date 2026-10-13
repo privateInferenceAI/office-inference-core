@@ -88,6 +88,12 @@ class Passage:
     # The fused score, kept for ordering and for a caller that wants to see why something ranked where it did.
     fused_score: float = 0.0
     is_ocr: bool = False
+    # The parser's own confidence in the page this chunk came from. It is stored in the payload by the worker and
+    # was NOT copied here, which meant `citations.verify_claim` read `getattr(passage, "parse_score", None)`,
+    # always got None, and skipped every passage. **The confidence gate never refused anything on the path a real
+    # question takes**, and only its unit tests supplied the attribute. A check that succeeds while doing nothing
+    # is worse than no check, because it is reported as one.
+    parse_score: float | None = None
     page_is_nominal: bool = False
     table_id: str | None = None
     row_index: int | None = None
@@ -113,6 +119,8 @@ class Passage:
             score=score,
             fused_score=fused_score,
             is_ocr=bool(payload.get("is_ocr")),
+            parse_score=(float(payload["parse_score"])
+                         if payload.get("parse_score") is not None else None),
             page_is_nominal=bool(payload.get("page_is_nominal")),
             table_id=payload.get("table_id"),
             row_index=payload.get("row_index"),
