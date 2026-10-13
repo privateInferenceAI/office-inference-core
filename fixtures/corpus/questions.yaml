@@ -51,6 +51,7 @@ questions:
       answerable: true
       source_document: irs-p15-2026
       references:
+        reference_figure: "184,500"
         reference_answer: >-
           184,500 dollars, the 2026 social security wage base limit (the rate of social security tax
           on taxable wages is 6.2% each for the employer and the employee)
@@ -72,6 +73,7 @@ questions:
       answerable: true
       source_document: irs-p15-2026
       references:
+        reference_figure: "200,000"
         reference_answer: >-
           200,000 dollars of wages in a calendar year: the employer must withhold the 0.9%
           Additional Medicare Tax from wages paid in excess of that amount, and there is no employer
@@ -194,6 +196,7 @@ questions:
       answerable: true
       source_document: apple-10k-2024
       references:
+        reference_figure: "391,035"
         reference_answer: >-
           391,035 million dollars of total net sales for fiscal 2024, the year ended 28 September
           2024
@@ -219,6 +222,7 @@ questions:
       answerable: true
       source_document: apple-10k-2024
       references:
+        reference_figure: "15,115,823,000"
         reference_answer: >-
           15,115,823,000 shares of common stock were issued and outstanding as of October 18, 2024,
           the only per-share count the cover page states. The balance sheet and the shareholders'

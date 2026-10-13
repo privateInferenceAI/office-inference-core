@@ -45,6 +45,9 @@ class Question:
     answerable: bool = True
     source_document: str | None = None
     reference_answer: str | None = None
+    # The figure this question is graded on, stated by whoever wrote the question rather than inferred from the
+    # answer's prose. See `grade` for why the inference was wrong.
+    reference_figure: str | None = None
     page: int | None = None
     pages: list[int] = field(default_factory=list)
     # Why a question is unanswerable, or what to look for instead. Written when the set was checked against the
@@ -91,6 +94,7 @@ def load_questions(path: str | Path) -> list[Question]:
             answerable=bool(expected.get("answerable", True)),
             source_document=expected.get("source_document"),
             reference_answer=refs.get("reference_answer"),
+            reference_figure=refs.get("reference_figure"),
             page=refs.get("page"),
             pages=list(refs.get("pages") or []),
             note=refs.get("reference_note") or expected.get("reference_note") or raw.get("note"),
@@ -107,23 +111,15 @@ def normalise(text: str) -> str:
     return re.sub(r"\s+", " ", text or "").strip().lower()
 
 
-def primary_figure(value: str) -> str | None:
-    """The most specific figure in a reference answer, which is the fact the question is about.
-
-    Needed because the reference answers were written by reading the corpus and explaining what they found, so
-    many are a paragraph rather than a number. Requiring every figure in a paragraph to appear in one passage
-    scores a correct retrieval as a miss: Q06's answer names the fiscal year and the year-end date as well as
-    the sales figure, and no single chunk of a financial table holds all three.
-
-    The longest digit run is the specific one. `391,035` is what the question asks for; `2024` and `29` are how
-    the answer situates it, and they belong in the explanation rather than in the test.
-    """
-    runs = re.findall(r"\d[\d,.]*\d|\d", value or "")
-    cleaned = [(re.sub(r"\D", "", run), run) for run in runs]
-    cleaned = [(digits, run) for digits, run in cleaned if len(digits) >= 2]
-    if not cleaned:
-        return None
-    return max(cleaned, key=lambda pair: len(pair[0]))[1]
+# `primary_figure` was here. It took the longest digit run in a reference answer and used it as the fact to
+# grade on, and the deployed run showed what that produces. Q05 graded on `10.19`, which is an exhibit reference
+# number rather than an answer, and Q10 graded on `31`, which appears in almost any document. Both scored a
+# support match, so two of the six questions reported a measurement that had not been made, and the corpus-wide
+# support rate read 100 percent.
+#
+# The figure being graded on is a decision somebody makes when writing the question. A regex inferring it from a
+# paragraph produces a number that looks like a measurement and is not, which is worse than reporting that the
+# question cannot be graded at this layer.
 
 
 def number_forms(value: str) -> set[str]:
@@ -364,7 +360,7 @@ def grade(question: Question, passages: list, k: int, document_paths: dict[str, 
         # when it does not. The first version required every figure in the answer to appear in one passage and
         # scored Q06 and Q07 as misses while the retriever had put the right table in front of the model: the
         # reference answers explain what they found, so they carry the fiscal year and a date beside the figure.
-        figure = primary_figure(question.reference_answer)
+        figure = question.reference_figure
         if not figure:
             # Support is NOT measured for an answer with no figure, and this is a decision rather than a gap.
             #
@@ -379,9 +375,9 @@ def grade(question: Question, passages: list, k: int, document_paths: dict[str, 
             # the honest report says this question's support was not measured, excludes it from the rate rather
             # than counting it as a miss, and prints the count so the rate's coverage is visible beside it.
             outcome.support_measurable = False
-            outcome.detail = ("no figure in the reference answer, so support needs entailment and is not "
-                              "measurable at this layer. Excluded from the support rate rather than counted "
-                              "as a miss.")
+            outcome.detail = ("the question states no reference figure, so support needs entailment and is "
+                              "not measurable at this layer. Excluded from the support rate rather than "
+                              "counted as a miss.")
             return outcome
 
         for rank, passage in enumerate(passages[:k], start=1):
