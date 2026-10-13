@@ -928,15 +928,19 @@ def test_a_payload_rule_change_re_derives_a_document_whose_bytes_did_not_change(
     # An unchanged file under the current rules is still skipped.
     assert ingest.ingest_cycle(services, tmp_path, manifest).skipped == 1
 
-    # Now the rules change, the way they did when is_ocr was corrected. The bytes are identical.
+    # Now the rules change, the way they did when is_ocr was corrected and again when the lexical store was
+    # added. The fake version is derived from the real one rather than written out, because a literal stops
+    # being a change the moment the real value catches up with it: this test passed for the wrong reason for
+    # exactly as long as it took PAYLOAD_VERSION to reach the string it named.
+    changed_rules = ingest.PAYLOAD_VERSION + "-test"
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(ingest, "PAYLOAD_VERSION", "payload-v3")
+        patch.setattr(ingest, "PAYLOAD_VERSION", changed_rules)
         services.parsed_names.clear()
         result = ingest.ingest_cycle(services, tmp_path, manifest)
     assert result.skipped == 0, "an unchanged file under older rules must be re-derived"
     assert result.changed == 1
     assert services.parsed_names == ["company/policy.pdf"], "it must be parsed again to re-derive the payload"
-    assert manifest.get("company/policy.pdf")["payload_version"] == "payload-v3"
+    assert manifest.get("company/policy.pdf")["payload_version"] == changed_rules
 
 
 def test_a_record_from_before_the_version_existed_is_also_re_derived(tmp_path, wired):

@@ -83,7 +83,12 @@ STATE_PATH = Path(os.environ.get("INGEST_STATE_PATH", "/state/last-cycle.json"))
 # manifest agree with the code that is running. It is deliberately separate from the chunker's version: a
 # payload change does not change a chunk's text or its id, and forcing a re-parse for a labelling fix would
 # hide the difference between the two.
-PAYLOAD_VERSION = "payload-v2"
+#
+# **Bump it when a new store is added, not only when a field changes.** Step 3.9 added the lexical index and
+# did not bump this, so the cycle skipped all four documents, the new write path never ran, and the acceptance
+# probe found an empty chunk_index with no error anywhere. Nothing was wrong with the code: the corpus had
+# simply been ingested under rules that did not include the new store. v3 is that bump.
+PAYLOAD_VERSION = "payload-v3"
 
 # File types the pipeline accepts. Anything else is ignored rather than failed, because a client's
 # document folder will contain a .DS_Store and a shortcut sooner or later, and neither is an error.

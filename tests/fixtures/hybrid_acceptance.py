@@ -25,38 +25,68 @@ sys.path.insert(0, "/w/services/retrieval")
 sys.path.insert(0, "/w/services/ingestion")
 
 
-def load_rendered_env(path: Path = Path("/w/rendered/env")) -> int:
-    """Take DATABASE_URL from the deployment's own rendered env when the container has none.
+ENV_PATH = Path("/w/rendered/env")
 
-    This probe runs in the parser image, which has no database credentials of its own, so the first run
-    stopped with "DATABASE_URL is not set" and said, correctly, that nothing below it would have meant
-    anything. Reading the file the deployment already reads is better than passing a password on a command
-    line, where it would be visible to anything that lists processes, and better than asking an operator to
-    copy a credential by hand.
+
+def read_env(path: Path = ENV_PATH) -> dict[str, str]:
+    """The deployment's rendered environment, as a dictionary.
+
+    Two failures led here. The first run stopped with "DATABASE_URL is not set", which was correct and useful:
+    it said nothing below it would have meant anything. The second stopped with PermissionError, because this
+    file holds the database password and is therefore mode 600 owned by the operator, while the container runs
+    as uid 1001. Both are the probe being wrong about how a deployment stores a credential, and neither is
+    something an operator should have to work out from a traceback.
     """
-    if os.environ.get("DATABASE_URL"):
-        return 0
-    if not path.exists():
-        print(f"no DATABASE_URL in the environment and no {path} to read it from")
-        return 0
-    loaded = 0
-    for line in path.read_text().splitlines():
+    try:
+        text = path.read_text()
+    except PermissionError:
+        print(
+            f"cannot read {path}: it holds the database password, so it is mode 600 owned by the operator\n"
+            f"while this container runs as another user. Run the probe as the file's owner:\n\n"
+            f"    --user \"$(id -u):$(id -g)\"\n")
+        return {}
+    except OSError as exc:
+        print(f"cannot read {path}: {exc}")
+        return {}
+    out: dict[str, str] = {}
+    for line in text.splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
-        key, value = key.strip(), value.strip().strip('"').strip("'")
-        if key == "DATABASE_URL" and value:
-            os.environ["DATABASE_URL"] = value
-            loaded += 1
-    if loaded:
-        # The host is rewritten because the deployment's env names `postgres`, which resolves on ai-net and
-        # this container is on it.
+        out[key.strip()] = value.strip().strip('"').strip("'")
+    return out
+
+
+def database_url() -> str:
+    """The DSN, from the environment or assembled the way compose assembles it.
+
+    rendered/env does not contain DATABASE_URL. It holds POSTGRES_USER, POSTGRES_PASSWORD and POSTGRES_DB, and
+    the compose file builds the connection string from them at run time. Reading a key that is not there was
+    the second way this probe was wrong about the deployment, and assembling it here means the probe reads the
+    same three values compose reads rather than needing a fourth thing to exist.
+    """
+    if os.environ.get("DATABASE_URL"):
+        return os.environ["DATABASE_URL"]
+    env = read_env()
+    if env.get("DATABASE_URL"):
         print("DATABASE_URL taken from rendered/env")
-    return loaded
+        return env["DATABASE_URL"]
+    if not all(env.get(key) for key in ("POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB")):
+        print("rendered/env has no DATABASE_URL and not all of POSTGRES_USER, POSTGRES_PASSWORD and "
+              "POSTGRES_DB either, so there is nothing to connect with")
+        return ""
+    # The password is quoted because a generated one is hex and safe, but a client who supplies their own is
+    # not obliged to keep it that way and an unencoded separator would silently truncate the DSN.
+    from urllib.parse import quote
+    dsn = (f"postgresql://{quote(env['POSTGRES_USER'], safe='')}:"
+           f"{quote(env['POSTGRES_PASSWORD'], safe='')}@postgres:5432/{env['POSTGRES_DB']}")
+    print("DATABASE_URL assembled from rendered/env the way compose does")
+    os.environ["DATABASE_URL"] = dsn
+    return dsn
 
 
-load_rendered_env()
+database_url()
 
 import ingest  # noqa: E402
 import retriever  # noqa: E402
@@ -85,10 +115,14 @@ def main() -> int:
     services = ingest.Services()
     problems: list[str] = []
     if not services.database_url:
-        print("DATABASE_URL is not set, so the lexical arm cannot run. Nothing below would mean anything.")
+        print("no database connection, so the lexical arm cannot run and nothing below would mean anything")
         return 1
     if count_lexical_rows(services) == 0:
-        print("chunk_index is empty. Re-ingest before running this, or every case below fails for that reason.")
+        print(
+            "chunk_index is empty. Every case below would fail for that reason and not for a retrieval one.\n"
+            "The usual cause is a corpus ingested before this store existed: the worker skips a document whose\n"
+            "bytes and payload rules are unchanged, so a new write path needs PAYLOAD_VERSION bumped before it\n"
+            "reaches anything. Check `docker logs ingestion` for the cycle that followed the migration.")
         return 1
 
     print()
