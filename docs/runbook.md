@@ -2385,6 +2385,61 @@ and the gate reads an empty set as "nothing is permitted" rather than as "no opi
 - The record holds the original text: the hash is taken from `cleaned` and the payload from the redaction.
   Check the content mode as well, because `--store-payload` writes content the mode would otherwise not keep.
 
+### 3.12b The chain covers the redaction summary
+
+**A fix to 3.12, done before moving on because it is a hole in a mechanism whose purpose is detecting exactly
+this.** Migration 012 added four columns and the chain's canonical string was not changed to include them, so a
+row whose `redactions` value was edited by hand still verified. In a table that exists to detect that, a field
+the chain does not cover is a field that can be rewritten while every check passes and reports the record
+intact.
+
+**Why this is a version rather than an edit.** A row's stored hash was computed from a canonical string, and
+verification recomputes that string and compares. Change the formula and every row written under the old one
+fails, which is **indistinguishable from tampering**: the verifier reports a chain break on rows nobody touched,
+and the first real break is lost in the noise. On the development instance that would have been rows 1 to 50.
+
+So the formula is versioned. `chain_version` is a column, version 1 is the original thirteen fields, version 2
+adds the four, new rows are version 2, and **nothing is rewritten**.
+
+**Commands.**
+
+    cd /opt/oi-core
+    git pull
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      --profile tools run --rm audit migrate
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env build audit
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      --profile tools run --rm audit export
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      --profile tools run --rm audit verify exports/2026-10-13/audit-events.jsonl
+
+**Expected.** `1 migration(s) applied`. The export then carries every row with its own `chain_version`, and
+`verify` reports no problems: the rows written before the change still verify under version 1 and the rows
+written after it verify under version 2, in one file. The export before this change had 50 rows at version 1.
+
+**What to look for, and it is the whole point.** `select chain_version, count(*) from audit_events group by 1`
+must show version 1 rows beside version 2 rows, and `verify` must pass on the file holding both. **A fix that
+made the whole history verify by rewriting it would have destroyed the property the chain exists for.**
+
+**The summary is flattened rather than serialised as JSON**, to sorted `key=value` pairs. The writer is Postgres
+and the verifier is Python, and `jsonb::text` puts a space after every colon and comma, so matching the two
+textually would mean reproducing one language's serialiser in the other, and the day either changed every row
+would fail at once. Sorted pairs are a form both produce exactly.
+
+**A row from a newer writer is reported as unchecked**, not as a mismatch. A version this verifier does not know
+cannot be checked, and calling that tampering would be a false finding in the one report where a false finding
+does the most damage.
+
+**If it breaks.**
+
+- Every row fails verification after the migration: the canonical formula in `audit_row_canonical` and
+  `row_canonical` in `audit.py` have drifted. They are two copies of one formula and there is a test asserting
+  the field order, the version branch and the separator match.
+- A row reports an unknown chain version: the writer is newer than the verifier. Update the verifier rather than
+  treating it as a break, which is what the message says.
+- The old rows fail and the new ones pass: the version branch is not being read per row. Check that the export
+  carries `chain_version`, because a verifier that cannot see it reads every row as version 1.
+
 ## Phase 4 — Assistant API  *(outline)*
 
 The single surface the client app talks to: ask, tasks, approvals, activity, settings.
