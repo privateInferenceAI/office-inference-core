@@ -1540,6 +1540,72 @@ filter. Step 3.8 is what enforces it.
 removed rather than superseded; that is step 3.10. The parser's per-page confidence is not stored, and
 step 3.4b records why it cannot be read from this service's output anyway.
 
+**The result, 2026-10-13.** Run on the reference instance against the four corpus documents, with the
+collection deleted first so the run is from zero rather than from whatever survived a restart.
+
+| Document | Chunks | Notes |
+|---|---|---|
+| apple-10k-2024.htm | 672 | 588 table entries and **84 prose chunks** |
+| apple-ex10-1-2024.htm | 13 | pageless HTML |
+| apple-ex10-22-2024.htm | 16 | pageless HTML |
+| irs-p15.pdf | 358 | 59 pages, text layer, no OCR |
+| **total** | **1059** | |
+
+The second cycle printed `seen 4, new 0, changed 0, skipped 4, failed 0, chunks written 0`. That is the
+step's whole claim: the same bytes cost one read per file and nothing else.
+
+**Three bugs the run exposed, each fixed and each with a test.**
+
+*The synchronous convert endpoint has a 120-second cap and does not abort the work.* Its handler carries
+`# TODO: abort task!`, so every 504 left the parse running while the client was told it had failed. My
+three retries therefore orphaned three parses and started a fourth: the parser accumulated over eight hours
+of CPU time and the box's load average reached 30 on sixteen cores. Restarting the parser dropped it to
+3.46, which is how the orphans were confirmed. The worker now submits to the asynchronous endpoint and
+polls, which separates whether the parser accepted the work from how long the work takes.
+
+*Two of the four conversion options did not exist.* `do_ocr`, `do_table_structure` and `table_mode` are not
+options of docling-serve 1.36; the stages take `ocr_preset` and `table_structure_preset`, and an unknown
+field is ignored while the service answers success. This is the same trap step 3.4 recorded, which is why
+the runbook now names `/v1/capabilities` as the authority on option names and the option set is asserted by
+a test.
+
+*`is_ocr` was a constant.* The code searched each item's provenance for an `origin` field that this release
+does not emit, so the fallback answered True and an HTML contract was labelled as machine-read text. The
+signal that exists is `parse_score`, null when a document has no digital text at all. It is now read from
+the document-level confidence report.
+
+**A correction to step 3.5's numbers, which is not a regression.** The 10-K produced 588 chunks before this
+work and 672 now, on the same bytes. The old chunker was silently dropping every word of the 10-K's
+narrative: HTML has no pages, so each text item failed the page-number check, and only the table cells
+survived because table fragments do not consult that check. The 588 were 587 table rows and one table with
+no prose at all. Running the old and new chunkers on the same parse confirms it:
+
+    old (d5f2b9a)    588 chunks  {'table': 1, 'table_row': 587}
+    new (main)       672 chunks  {'table': 1, 'table_row': 587, 'prose': 84}
+
+**Retrieval works on what was stored.** The four questions from the fixture set that draw on this corpus
+each found their document, and the table-row design earned its place: the net sales question returned
+`Total net sales | 391,035 | 383,285 | 394,328` as a row entry at 0.646, which is a figure a reader can
+check against the page it cites.
+
+**The review-queue number, deferred three times.**
+
+| | top score |
+|---|---|
+| questions that found their document | 0.621 to 0.673 |
+| unanswerable questions | 0.523, 0.524 |
+
+The two unanswerable questions, which this corpus cannot answer at all, each returned ten passages. That is
+what a nearest-neighbour search does: it has no notion of nothing. Worse for a threshold approach, the
+best wrong answer scores 0.524 and the worst right answer 0.621, so the gap is under a tenth of a point
+across four documents. **A similarity cutoff is not a usable answerability gate at this corpus size**, and
+step 3.8's citation checks are the mechanism that has to carry it instead.
+
+Two of the eight answerable questions did not retrieve their document. Both draw on the IRS publication and
+both ask for a specific figure in a specific form, which is the case the reference answers have to settle:
+the questions are mine and the answers were left null on purpose, so until the parsed pages are read there
+is no way to tell a retrieval miss from a question the corpus cannot answer.
+
 **Repairing a record written under an older rule.** A manifest row records a decision that was made by
 whatever code wrote it, and code changes. The first corpus run left two contract exhibits recorded as
 ingested with zero chunks behind them, and dead-lettered a 60-page PDF over two gateway timeouts. Neither
