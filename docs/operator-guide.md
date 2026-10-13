@@ -1038,3 +1038,207 @@ leave in it.
 So the mitigation is not to store it in the first place, which is what the `hash` and `redacted` modes are
 for. A deployment that selects `full` is choosing to keep content it cannot delete, and should be told so
 before it does.
+
+---
+
+# Stage 10: retention, holds, and the one operation that destroys
+
+**Goal:** destroy a document on purpose, having first proved you can rehearse it.
+
+**This is the only stage in this guide that deletes something irreversibly.** Everything before it can be
+re-run. Read the whole stage before running any of it, and use a throwaway document the first time.
+
+There are two deletion operations and they are different in kind:
+
+| Command | What it does | Does it touch the client's file? |
+|---|---|---|
+| `--purge DOC_ID` | Deletes one document's chunks and index entries **on request** | **No.** The client asked us to stop holding a copy; they still have theirs |
+| `--enforce DATASET` | Deletes everything a retention **period has run out on** | **Yes.** "Keep invoices for seven years" means after seven years there is no invoice |
+
+Confusing the two is the mistake this stage exists to prevent. A job built by reusing the purge would
+report success while the thing the client asked to be destroyed sat in their documents directory.
+
+## 10a. Rehearse first, always
+
+```
+docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+  run --rm retention --enforce documents --dry-run
+```
+
+```
+{
+  "cutoff": "2025-10-13T22:24:42.192625+00:00",
+  "dataset": "documents",
+  "destroyed": 0,
+  "dry_run": true,
+  "examined": 0,
+  "expired": 0,
+  "failed": 0,
+  "failures": [],
+  "held": 0,
+  "retain_days": 365
+}
+
+destroyed 0, held 0, failed 0 (dry run, nothing was changed)
+```
+
+**`examined 0` is usually correct rather than a fault.** A deployment whose corpus was ingested recently
+has nothing a 365-day period can reach. The line to read is `cutoff`: that is the date the period reaches
+back to, and a cutoff that is not what the client agreed means the policy is not what you think.
+
+**The rehearsal reports what a real run would destroy, per store, under `would_delete` rather than
+`deleted`**, so a machine reading the record cannot mistake one for the other.
+
+**Checkpoint.** The dry run exits 0, reports counts, and changes nothing. Prove the nothing: the file's
+hash, the point count for that document, its `chunk_index` rows and its `ingest_manifest` row are all
+identical afterwards, and `purge_records` has not grown.
+
+## 10b. Then destroy a throwaway, and watch all four scenarios
+
+Build a document whose only purpose is to be destroyed, age it past the cutoff, and walk the four
+scenarios in order. This is the sequence the acceptance fixture automates, and doing it by hand once is
+worth it.
+
+```
+cd /opt/oi-core
+printf "# Disposal Fixture\n\nReference OG-DISPOSAL-4488.\n" > documents/company/og-to-be-destroyed.md
+docker exec ingestion python3 /app/ingest.py --documents /documents
+docker exec postgres psql -U oicore -d oicore -c \
+  "update ingest_manifest set ingested_at = now() - interval '800 days' where relpath = 'company/og-to-be-destroyed.md'"
+```
+
+**The UPDATE is the fixture, and it is honest about what it is.** Age is measured from `ingested_at`, and
+the alternative to aging a row is waiting 800 days or setting a retention period of minutes, which is a
+policy nobody would ever set. What the run proves is the mechanism, not the arithmetic.
+
+**Scenario 1: no policy destroys nothing.**
+
+```
+delete from retention_policies where dataset = 'documents';
+-- then:
+NO POLICY for documents, so nothing was destroyed. Set one with --set-retention.
+```
+
+An absent policy is not a default. Destroying on an invented number is the one mistake here that cannot be
+undone, so a deployment with no policy destroys nothing and says so.
+
+**Scenario 2: a hold beats a period.**
+
+```
+retention --set-retention documents --days 365 --legal-basis "the client agreed to 365 days"
+retention --hold company/og-to-be-destroyed.md --reason "litigation in progress"
+retention --enforce documents --dry-run
+```
+
+```
+"destroyed": 0, "examined": 1, "expired": 1, "held": 1
+destroyed 0, held 1, failed 0
+```
+
+**`expired: 1` and `destroyed: 0` together are the whole point.** The document is past its period and a
+hold stopped it. The hold is checked in one query before any store is touched, because checking it per
+store means a hold obeyed by the store somebody remembered and ignored by the one they did not.
+
+**Scenario 3: a dry run changes nothing.** Release the hold and rehearse again. `examined 1`, `expired 1`,
+`destroyed 0`, and the file is still on disk with its indexes intact.
+
+**Scenario 4: the run.** Drop `--dry-run`:
+
+```
+docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+  run --rm retention --enforce documents
+```
+
+```
+"destroyed": 1, "examined": 1, "expired": 1, "failed": 0
+destroyed 1, held 0, failed 0
+```
+
+**Checkpoint.** The document is gone from **all three stores and the filesystem**:
+
+```
+docker exec postgres psql -U oicore -d oicore -tAc \
+  "select (select count(*) from chunk_index where doc_id='company/og-to-be-destroyed.md'),
+          (select count(*) from ingest_manifest where relpath='company/og-to-be-destroyed.md')"
+ls documents/company/og-to-be-destroyed.md
+```
+
+`0|0` and `No such file or directory`. Anything else and the destruction is partial — see 10d.
+
+## 10c. What happens when a destruction fails part way, which it will
+
+**This is the most important thing in the stage, and it was learned by doing it wrong.**
+
+The order of operations inside a real run is: clear the vector store, clear the lexical index, clear the
+manifest, and **then** unlink the client's file. A failure after the first three leaves **a file with no
+index**, and the run reports:
+
+```
+INCOMPLETE: 1 document(s) failed. The run is recorded and re-running is safe.
+```
+
+**"Re-running is safe" is true about the stores and misleading about the file.** Fix the cause and run
+again, and the second run reports:
+
+```
+"destroyed": 0, "examined": 0, "expired": 0, "failed": 0
+```
+
+Nothing failed and nothing happened, because **the document is no longer in the manifest and therefore no
+longer eligible to be destroyed** — the thing that would have deleted the file has forgotten the file
+exists. **The client's document is now unreachable by the system and still sitting in their folder.**
+
+So when a run reports `failed`, do not simply fix and re-run. First establish which stores still hold the
+document, then either re-ingest it and destroy it again properly, or remove the file by hand and record
+that you did. This guide cannot give you a command that finishes a half-done destruction, because there
+isn't one — which is itself worth knowing before you schedule this to run unattended at three in the
+morning.
+
+## 10d. If the destruction does not complete
+
+Work down this list; each cause presents differently.
+
+| Symptom | Cause |
+|---|---|
+| `destroyed: 0, examined: 0` when you expected work | Nothing is past the cutoff. Check `cutoff` and the document's `ingested_at` |
+| `destroyed: 0, examined: 1, held: 1` | A hold. `--holds` lists them, including a deployment-scope hold that covers everything |
+| `failed: 1` with a `PermissionError` | The container cannot unlink. It runs as the operator for exactly this reason; check `HOST_UID` in `rendered/env` matches the owner of the documents tree |
+| `failed: 1` with a `TypeError` about arguments | The purge callback is not being bound with the store locations. That was a real defect and it is fixed; if you see it, the image is older than this guide |
+| `INCOMPLETE` and `re-running is safe` | Read 10c before re-running |
+| A document vanished from the index and the file is still there | A previous run destroyed the stores and failed on the file. Read 10c |
+
+## 10e. Holds, and the one that covers everything
+
+```
+retention --hold company/tax.pdf --reason "litigation in progress"
+retention --hold --reason "litigation in progress"      # the whole deployment
+retention --holds
+retention --release-hold <the id --holds printed>
+```
+
+**`--hold` with no document covers every document, including ones added later.** A hold that only covered
+what existed at the time would have a gap in it, and the gap is where the document that matters ends up.
+It is also the hold people forget they placed, and it is the usual answer to a purge that was refused with
+no obvious reason.
+
+**Release by the id `--holds` prints, never a number you expect.** Hold ids are assigned by the database
+and are not predictable from this guide. An earlier version of the manual said `--release-hold 1`, which
+releases nothing at all — the command exits 1 and prints that the hold is not in force.
+
+**A released hold is not deleted.** The row stays with a `released_at`, because "a hold was placed and
+lifted" is a fact an auditor may ask about.
+
+## 10f. The purge, which leaves the file alone
+
+```
+retention --purge company/invoice-2024.pdf --reason "client asked" --dry-run
+retention --purge company/invoice-2024.pdf --reason "client asked"
+```
+
+`--purge` clears the indexes and the manifest and **leaves the client's file exactly where it is.** The
+client asked us to stop holding a copy; they still have theirs. The distinction from `--enforce` is the
+whole reason both commands exist.
+
+**Its dry run is a rehearsal like `--enforce`'s**, and until recently it was not: `--dry-run` was accepted,
+documented, and ignored on this path, so the rehearsal destroyed the document for real. If you are reading
+a version of the manual or the code older than that fix, do not run it.
