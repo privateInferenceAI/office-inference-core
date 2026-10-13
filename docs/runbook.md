@@ -2178,6 +2178,89 @@ Step 3.11 is what refuses on it.
 - The same pair appears twice: it cannot, because the pair is stored ordered with a unique constraint. If it
   does, the ordering in `near_duplicates` has been changed.
 
+### 3.11 Citations
+
+**Goal.** Every citation is verified against the retrieved set, the page, and entailment. `RET-CITE-001`, whose
+verify line asks that an invented citation index is rejected and an unsupported sentence is marked rather than
+silently kept.
+
+**What this step is, in the research's words.** The mechanical layer "covers fabricated citations, page drift,
+missing quotes, numeric substitution, identifier substitution, superseded sources and low-confidence scans",
+and the literal identifier assertion inside it is "the cheapest item in the entire architecture and the highest
+value". That is seven deterministic checks, no model, no new dependency.
+
+**Why it exists at all is one level up from retrieval.** Every layer below this one checks whether the answer
+matches the source. None checks whether the source is the right source or was read correctly. Those are the two
+most likely wrong answers in a small business, a real number from a superseded document and a real number from
+a misread scan, and **both pass the mechanical layer, both pass entailment, and both come out certified.**
+
+**The seven checks, in the order they run.**
+
+| Check | Reason | What it catches |
+|---|---|---|
+| Citation resolves | `citation_not_found` | A citation to a passage that was never retrieved |
+| Source is current | `superseded` | A real figure from a document a person replaced |
+| Confidence | `low_confidence_scan` | A figure from a page the parser was unsure about |
+| Numbers | `number_not_in_source` | A substituted digit |
+| Identifiers | `identifier_not_in_source` | The right document and the wrong form |
+| Quotes | `quote_not_in_source` | Words in quotation marks that are not in the source |
+| Page | drift, reported separately | The right words with the wrong page attached |
+
+The order is deliberate. A citation that does not resolve is checked first, because every later check reads the
+passage it names and a fabricated index would make them all meaningless. Supersession is second, because a
+number from a replaced document is a correct quote of the wrong source and no amount of literal matching
+catches it. The literal checks come last, since they are the ones that can be false-refused.
+
+**The false refusal is the thing to guard.** A check that refuses correct answers gets turned off, and a check
+that is turned off catches nothing. So the answer is marked, not dropped, and there are as many tests for
+answers that must pass as for answers that must be refused. Four rules follow from that:
+
+- **Trailing zeros only.** `145.00`, `145.0` and `145` are one number. `0.67` is the mileage rate and the first
+  version stripped its leading zero to `.67`, which matched nothing and refused a correct answer.
+- **Supersession fires on ONLY.** A claim citing the replacement alongside the thing it replaced is supported,
+  because the current source is there. Refusing on any superseded citation would refuse a correct answer.
+- **The confidence gate applies to figures only.** A digit read imperfectly is a different number; a word read
+  imperfectly is still the word. Refusing every sentence from a scanned document would refuse whole filings.
+- **A sentence with no citation is `uncited`, not refused.** Transitions and direct answers have nothing wrong
+  with them, and refusing them would refuse most of a normal reply.
+
+**The sentence splitter, which is where the subtleties are.** A marker trails the sentence it supports, and
+getting that wrong runs every check against the wrong passage. Three faults, each hidden behind the last:
+
+- The first version cut `Pub. 515 covers withholding` into `Pub.` and the rest, because a period, a space and a
+  capital is exactly what a sentence boundary looks like. The fragment was then reported uncited and a correct
+  answer was marked unsupported. The splitter now knows the abbreviations this corpus uses, and anything
+  ambiguous is **not** a boundary, because merging two sentences is safe and splitting wrongly is not.
+- The second matched the marker as part of the separator and swallowed it, so every claim came out with no
+  citation and every claim was reported uncited.
+- The third required whitespace directly after the period, so `employee.[1] Form W-4` never split at all.
+
+The rule that came out of it: **the splitter must never lose a marker**, and there is a test that says so.
+
+**The honest bound, and it is a real one.** The confidence gate is **document-level, not page-level**, because
+docling-serve does not populate the per-page confidence map this release exposes. So a page whose digits were
+misread cannot be told from a page read cleanly, and the gate refuses on a low-scoring document rather than on
+a low-scoring page. That is coarser than the architecture asks for. Docling's per-page confidence is named in
+the research as the Wave 4 item to verify, and until it is populated this check is the document-level version.
+
+**Entailment is not here.** It is Layer 1 and it needs a model, and the reply path does not have one until
+Phase 4. So `supported` means every mechanical check passed, which is **not the same as true**. The research is
+explicit that the verifier's own false-negative rate sets the ceiling on what the product can claim, and that
+the ceiling must be published rather than implied.
+
+**If it breaks.**
+
+- A correct answer is being refused: read the `detail`, which names the figure and the passage. If the figure
+  is written differently from the source, the normalisation is the suspect, and the fix is a rule rather than a
+  loosened check.
+- Everything from a scanned document is refused: the confidence gate is firing on the document's own score.
+  Check `select distinct payload->>'parse_score' from ...` before assuming the gate is wrong, because a
+  genuinely low score means the parser was unsure and the refusal is correct.
+- A claim is reported `uncited` that clearly has a citation: the splitter lost it or cut the sentence. The
+  marker is `[n]` with no other form, and there is a test asserting no marker is ever dropped.
+- Nothing is refused at all: the answer has no `[n]` markers, so every claim is `uncited`. The marking
+  convention is the prompt's to teach and this module cannot invent it.
+
 ## Phase 4 — Assistant API  *(outline)*
 
 The single surface the client app talks to: ask, tasks, approvals, activity, settings.

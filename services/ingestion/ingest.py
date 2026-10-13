@@ -88,7 +88,7 @@ STATE_PATH = Path(os.environ.get("INGEST_STATE_PATH", "/state/last-cycle.json"))
 # did not bump this, so the cycle skipped all four documents, the new write path never ran, and the acceptance
 # probe found an empty chunk_index with no error anywhere. Nothing was wrong with the code: the corpus had
 # simply been ingested under rules that did not include the new store. v3 is that bump.
-PAYLOAD_VERSION = "payload-v3"
+PAYLOAD_VERSION = "payload-v4"
 
 # File types the pipeline accepts. Anything else is ignored rather than failed, because a client's
 # document folder will contain a .DS_Store and a shortcut sooner or later, and neither is an error.
@@ -611,6 +611,11 @@ def ingest_document(services: Services, document: Document, content_sha256: str,
     # label for a mixed filing, which is the version that misleads a reader.
     scanned = ocr_pages(parsed_result.get("confidence_pages"))
     document_ocr = _ocr_ran(parsed, parsed_result.get("confidence"))
+    # The parser's confidence, which the citation verifier's confidence gate needs and which was previously
+    # read for one boolean and discarded. It is DOCUMENT-level, and that is a bound rather than a choice:
+    # docling-serve does not populate the per-page confidence map this release exposes, so a page whose digits
+    # were misread cannot be told from one read cleanly. The gate is coarser than the architecture asks for.
+    confidence_score = (parsed_result.get("confidence") or {}).get("parse_score")
 
     # Refuse to record a document that produced nothing. The first real corpus run wrote two contract
     # exhibits as zero chunks and reported success, which put two documents in the index that look
@@ -653,6 +658,13 @@ def ingest_document(services: Services, document: Document, content_sha256: str,
             # partly machine-read rather than being given a yes or no about the whole passage.
             payload["ocr_page_count"] = sum(
                 1 for page in range(chunk.page_start, chunk.page_end + 1) if page in scanned)
+            # The parser's own confidence in what it read, which the confidence gate needs and which was
+            # being discarded. It is DOCUMENT-level and not page-level, and that is a real bound rather than
+            # an implementation choice: docling-serve does not populate the per-page confidence map this
+            # release exposes, so a page whose digits were misread cannot be distinguished from one that was
+            # read cleanly. The gate is therefore coarser than the architecture asks for, and it is recorded
+            # in the runbook as a bound rather than presented as the designed check.
+            payload["parse_score"] = confidence_score
             points.append({"id": chunk.chunk_id, "vector": vector, "payload": payload})
     return points, pages
 
