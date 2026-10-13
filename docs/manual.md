@@ -956,11 +956,28 @@ With no anchor, the command says plainly that completeness cannot be shown, beca
 the end and re-exporting would still verify. That sentence is the honest one, and it is why the
 shipping job in section 14 exists.
 
-**What the anchor check proves, exactly.** It catches an export that is missing the row the anchor
-recorded, and an export with fewer rows than the anchor's count. It does not prove that nothing
-written *after* the anchored row has gone missing, so the accurate claim is "the chain still contains
-the state that existed when this anchor was written", not "nothing is missing". Anchor often enough
-that the gap between two anchors is small, which is why the job runs hourly.
+**What the anchor check proves, exactly.** It places the anchor's row against the export's **window** and
+asks whether it is there. An export covers one day; an anchor records a point in the whole chain, so the
+verifier compares positions rather than counts.
+
+| The anchored row is… | What it means |
+|---|---|
+| **before** the export's window | The anchor is older than this file, so it says nothing about it either way |
+| **inside** the window | The row must be present. A row removed from the middle, or a tail cut off ahead of it, is caught |
+| **past** the window's end | **One anchor cannot decide.** Either the chain grew after the window closed, or the file lost its tail, and both look identical |
+
+That third case is the honest limit, and it is stated rather than guessed at. The check that separates them
+is the **next day's export**: its opening `first_prev_hash` must equal this file's closing `last_row_hash`,
+which is section 13's manual step. Anchoring hourly keeps the gap between anchors small, which is why that
+job runs as often as it does.
+
+**What an auditor can be told from an export alone:** the chain is intact and any edit is detectable. **Not**
+that rows deleted from the end have been ruled out — that needs the off-box anchor, and for the strongest
+form the following day's export as well. Do not promise more than that.
+
+An earlier version of this verifier compared the export's row count against the anchor's cumulative
+`event_count`. That is a category error, invisible on a chain one day long and wrong on every deployment
+older than that: it reported "the chain is shorter than it was" against files nobody had touched.
 
 ### A retention purge
 
@@ -1655,7 +1672,15 @@ reports rather than a file it skips.
 `.docx`, `.pptx`, `.xlsx`, `.html`, `.htm`, `.md`, `.markdown`, `.txt`, `.csv`, `.rtf`, `.odt`, `.ods`,
 `.odp` and `.eml`. Everything else is ignored rather than failed, and it is not reported. In particular
 `.doc` and `.xls` — anything saved by an Office older than 2007 — are ignored, and `.msg` is deliberately
-outside the set because whether the parser reads it is unverified. Count the files in the client's handover
+outside the set because whether the parser reads it is unverified.
+
+**`.rtf` is in the set and depends on something the parser image has to install.** Docling reads RTF by
+converting it to DOCX through **LibreOffice**, which is not part of the base image; the parser service installs
+`libreoffice-writer` for exactly this format. On an image built before 2026-10-13 the binary was absent, and
+every RTF failed with `LibreOffice is required to convert a .rtf file to .docx` — a message the worker records
+as a permanent failure and then never surfaces. **So when the client's handover contains RTF, check it is
+indexed rather than assuming the suffix means it was read.** `docker exec ingestion python3 /app/ingest.py
+--failures` names the reason. Count the files in the client's handover
 against the number the worker reports:
 
 ```
@@ -1803,6 +1828,10 @@ Four rules and nothing else:
    the filter working. `.msg` is deliberately not in the set: whether the parser reads it is unverified,
    and adding a suffix is a promise that files with it are ingested. A client with Outlook exports should
    be told that before they drop a folder of them in.
+   **`.rtf` is in the set and needs LibreOffice in the parser image** — Docling converts RTF to DOCX through
+   it. Without that binary the file fails as a permanent error and, until `--failures` existed, the reason
+   was recorded and never shown. A suffix in this list is a promise; check the promise is kept rather than
+   trusting the list.
 4. **Legacy binary Office formats are not read.** `.doc` and `.xls` are outside the set, so an old
    `.doc` is ignored in exactly the way above. Modern `.docx` and `.xlsx` are read. A client whose archive
    predates 2007 needs to re-save before ingesting, and that is worth saying in the contract rather than
@@ -1948,6 +1977,7 @@ gets another chance without anyone being told to look.
 
 ```
 docker exec ingestion python3 /app/ingest.py --status
+docker exec ingestion python3 /app/ingest.py --failures
 docker exec ingestion python3 /app/ingest.py --clear-failures
 docker exec ingestion python3 /app/ingest.py --clear-failures company/irs-p15.pdf
 ```
@@ -1956,6 +1986,31 @@ docker exec ingestion python3 /app/ingest.py --clear-failures company/irs-p15.pd
 a failure, which is why the container's healthcheck runs it rather than checking the process. With no
 argument `--clear-failures` clears every recorded failure, and with a path it clears one. The next cycle then
 tries those documents again. It is for a change to the failure rules rather than a routine step.
+
+**`--failures` is the one to reach for, and it reads a different place.** `--status` knows only about the
+cycle that just ran, so a document that has been dead-lettered drops out of it: the next cycle skips the file,
+succeeds, and the deployment reports healthy while a client's document is not in the index. `--failures` reads
+the **manifest**, which is the only thing that remembers, and prints each failed document with its failure
+count, its kind, whether it is still being retried, the error itself, and the command to try it again.
+
+```
+2 document(s) have failed at some point:
+
+  company/terms.rtf
+    failures: 2 (permanent), DEAD-LETTERED, not retried until its bytes change
+    last error: RuntimeError: the parser failed on company/terms.rtf: {"task_id": "...", "task_status": "failure"}
+    try it again with: docker exec ingestion python3 /app/ingest.py --clear-failures company/terms.rtf
+```
+
+**Read the error before deciding what to do, because the classification does not distinguish the two cases
+that matter.** A missing system dependency and a corrupt client document both arrive as `permanent`, and their
+fixes have nothing in common: a parser refusal naming a tool or a format is ours to fix, and a refusal on
+content is the client's file. That is how an entire format went unparsed while the deployment looked healthy —
+the binary was missing, the message said so, and nothing surfaced the message.
+
+**Clearing a failure is required after any parser fix.** The latch is keyed on the content hash, so installing
+a missing binary does not make an already dead-lettered file get retried. Without this step a correct fix
+looks like it did not work.
 
 ### Re-ingestion, and `PAYLOAD_VERSION`
 
@@ -3148,6 +3203,23 @@ API that writes it arrives in Phase 4, so its schema is defined and minimal rath
 ```
 oi run --rm retention --destroy-all --reason "contract terminated 2026-11-30"
 ```
+
+**It removes the client's documents from disk, not only the indexes.** A teardown that emptied every index and
+left the corpus sitting in their folder would be the same defect as a retention period that only hid a file, so
+the run walks the documents root and removes what it finds, reporting that as its own store in the record
+beside the vector index, the lexical index, the manifest, the purge history and the holds. Each store is named
+individually so the client can read which of them is empty and which is not.
+
+That is also the only place in this system where deleting by inference is right. Everywhere else, "a file with
+no manifest row" is not a usable test: a document somebody uploaded and no cycle has seen yet looks exactly
+like an orphan, which is why nothing deletes on that basis. Here the manifest has just been emptied on purpose
+and the client has asked for their data to be gone, so every file under the root is meant to go.
+
+| Command | The client's file |
+|---|---|
+| `retention --purge DOC` | **Stays.** One document during the contract, and they still have their copy |
+| `retention --enforce` | **Removed.** The period ran out, so the copy we hold goes |
+| `retention --destroy-all` | **Removed.** The contract ended |
 
 The destruction record is written with the hash of its own contents, and that hash travels with the file, so
 the client can show later that it is the record we produced without either side trusting the other's copy. A

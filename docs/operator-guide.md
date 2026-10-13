@@ -1931,3 +1931,76 @@ oi run --rm retention --destroy-all --reason "..."      # every index, at the en
 
 **The three things to do before anything in that last group:** run the `--dry-run` form, know which document
 or date it will reach, and check `--holds` in case a hold is already covering it.
+
+---
+
+# Appendix B: what changed in October 2026, and what it cost to find out
+
+Four defects were found by running this guide against a live deployment after three review rounds and two
+independent panels had passed the documentation. They are recorded together because they share a shape, and
+the shape is worth recognising the next time.
+
+**The shape: the rehearsal tested a path the real command does not take, or the test's world was not the
+deployed world.**
+
+| Defect | How it hid |
+|---|---|
+| `retention --enforce` raised `TypeError` on every document | `--dry-run` returns before the call that failed, so every rehearsal passed |
+| Then it could not unlink, running as uid 10002 against the operator's tree | Nothing reached the unlink until the first bug was fixed. One defect behind another |
+| A run that failed on the unlink left a file with no index, and re-running found nothing to do | The `INCOMPLETE` message said re-running was safe. It is safe for the stores and wrong about the file |
+| `audit verify --anchor` failed on untampered files | Every test built a **single-day** chain, where the export *is* the whole chain. No test built the multi-day chain a deployment produces |
+| `.rtf` dead-lettered although it is in the accepted list | The generator's "RTF" fixture was plain text with an `.rtf` extension, so the format looked covered |
+
+## The four fixes
+
+**Retention could never destroy anything.** `policy.enforce` calls its purge callback with four arguments
+because it decides whether to destroy rather than where; `retention.purge` takes six. The branch passed the
+bare function. See stage 10.
+
+**Retention could not unlink a client's file.** The container ran as the image's uid 10002 against a documents
+tree owned by uid 1000 with mode `drwxr-xr-x`. Unlinking needs write on the **directory**. `audit`, `keys` and
+`eval` all declared the operator's uid; retention, the one tool that writes to the host filesystem, did not.
+See stage 10.
+
+**A half-done destruction cannot be finished, and this is a design hazard rather than a bug.** The order is:
+clear the vector store, clear the lexical index, clear the manifest, then unlink the file. A failure after the
+first three leaves a file with no index and no manifest row, so a re-run reports `examined 0` and does nothing.
+**There is no command that completes it.** See stage 10c. Anthony's fix, when it lands, is to remove the files
+after the stores are cleared.
+
+**The anchor check compared a slice against a whole.** An export is a window over the chain; an anchor is a
+point in it. The verifier now places the anchored row against the window rather than comparing row counts, and
+where one anchor genuinely cannot decide, it says so instead of choosing a verdict. See stage 11c.
+
+**The RTF format was never parsed.** Docling supports RTF and needs LibreOffice, which was not installed. A
+missing system binary and a corrupt client document both arrive as `permanent` failures and both collapsed
+into a one-line count, so a supported format looked like a broken file. See stage 5 and `--failures` in
+stage 16.
+
+## Two commands that exist because of these
+
+```
+docker exec ingestion python3 /app/ingest.py --failures
+```
+
+Every document that has failed, with the reason and whether it is still being retried. **It reads the
+manifest, not the last cycle**, because a dead-lettered document drops out of `--status`: the next cycle skips
+it, succeeds, and the deployment reports healthy while a file is silently not in the index.
+
+```
+docker exec ingestion python3 /app/ingest.py --clear-failures <relpath>
+```
+
+Clears the dead-letter latch on one document. **This is needed after any fix to the parser**, because the latch
+is keyed on the content hash: installing a missing binary does not make an already dead-lettered file get
+retried. That is exactly how the RTF fix would have appeared not to work.
+
+## What to take from it
+
+**Running the guide is what found these, not reading it.** Every one of them survived unit tests, a
+documentation review and two panels, because each test exercised the code and none exercised the deployment.
+The guide's checkpoints are the part that earns its keep.
+
+**A check that reports a problem is worth less than a check that reports the right problem.** The anchor
+verifier accused intact files of tampering, and the retention job reported `INCOMPLETE` while telling the
+operator to re-run. A false accusation costs an afternoon; a false acquittal costs the client's evidence.

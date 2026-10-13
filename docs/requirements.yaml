@@ -738,6 +738,28 @@ items:
       duplicates; and detection ran only when a file arrived, so a corpus that predates the check was never
       examined at all -- which is why the first two produced no visible symptom. There is now a
       --scan-duplicates command for that case, and the floor is measured in characters of identical text.
+  - id: RET-FORMAT-002
+    title: Every suffix the worker accepts is a format the parser actually reads
+    tier: [cloud, office, hosted]
+    phase: C2
+    verify: a file of each accepted suffix is ingested and answerable, and any format the parser cannot read is either fixed or removed from the accepted set
+    status: verified
+    note: >-
+      VERIFIED 2026-10-13 against the deployed store, BY FINDING A FORMAT THAT FAILED IT. `.rtf` is in the worker's
+      accepted-suffix set and was never parsed: Docling reads RTF by converting it through LibreOffice, and the
+      parser image did not install it, so every RTF raised "LibreOffice is required to convert a .rtf file to
+      .docx". The worker classified that as a permanent failure and dead-lettered the file after two cycles, so a
+      SUPPORTED FORMAT WAS SILENTLY NEVER INDEXED and the only evidence was a failure count. Fixed by installing
+      libreoffice-writer in the parser image -- one line, no application code, 332 MB -- with the build asserting
+      that Docling resolves the binary so an image that cannot parse RTF fails to build rather than dead-lettering.
+      Verified end to end: a genuine RTF is indexed and answerable at rank 1, and a deliberately malformed RTF is
+      refused. Two things this exposed that are fixed with it: the corpus generator's "RTF" fixture was plain text
+      with an .rtf extension (faker-file's provider writes no header and no control words), so the corpus claimed
+      15/15 formats covered while containing no valid RTF at all; and the failure reason was recorded in the
+      manifest's last_error and never surfaced, which is why a missing system binary and a corrupt client document
+      both looked like a one-line count. There is now an ingest --failures command that reads the manifest and
+      prints the reason, and clearing the dead-letter latch is documented as required after any parser fix,
+      because the latch is keyed on the content hash and otherwise makes a correct fix look like it did not work.
   - id: RET-FORMAT-001
     title: Email, spreadsheets, and slides are ingested
     tier: [cloud, office, hosted]
