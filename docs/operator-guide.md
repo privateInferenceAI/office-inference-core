@@ -289,3 +289,393 @@ prints nothing at all and looks like a hang.
   failure, not that the process died. The distinction is deliberate — see stage 4.
 - `oi up -d` prints `Container X Running` and you expected a restart: `up -d` reconciles, and "Running"
   means it decided nothing needed doing.
+
+---
+
+# Stage 4: give it something to read
+
+**Goal:** a corpus on the machine, laid out so the access labels are right the first time.
+
+Up to here the system is a stack that cannot read anything. This stage puts documents where the ingestion
+worker will find them, and it is the stage with the most ways to go quietly wrong.
+
+## 4a. Generate or obtain a corpus
+
+Two sources, and a working corpus usually needs both.
+
+**Generated**, which covers every format and the failure paths:
+
+```
+pip install "faker-file[docx,xlsx,pptx,odt,ods,odp,pdf]>=0.19,<0.20"
+python3 fixtures/generate_corpus.py --out /tmp/client-corpus
+```
+
+```
+writing Meridian Facilities Group's corpus to /tmp/client-corpus
+  authored documents: 13
+  faker-file documents: 13
+  total files: 27
+  suffixes covered: 15/15  (complete)
+  read /tmp/client-corpus/PLACEMENT.md before copying anything anywhere
+```
+
+Read `/tmp/client-corpus/PLACEMENT.md` before you copy anything. It names each document's purpose and
+which root it belongs under.
+
+**Real or fetched**, for documents whose awkwardness you did not choose. The fixture corpus already in the
+repository is four filings from SEC EDGAR and the IRS, and `fixtures/corpus/manifest.yaml` records where
+each came from with the licence read at the source. **If you add anything, add its licence the same way.**
+A document whose licence was assumed rather than read is a document you may have to remove later, and this
+project has been caught by that twice.
+
+## 4b. The one rule that matters
+
+**The top-level folder name is the access label.** Not a filing convention, not a hint — it is the value
+stored on every chunk and the value the search filters on.
+
+```
+/opt/oi-core/documents/            <- the documents root on the host
+  company/                         <- labeled "company"
+    handbook/
+      policy.pdf                   <- labeled "company", despite being two levels down
+  executive/                       <- labeled "executive"
+```
+
+Four consequences, and only the first is obvious:
+
+1. **A file under `company/` is readable by the `staff` retrieval role.** A file under `executive/` is
+   readable only by `executive`.
+2. **Subfolders are free and do not create labels.** Depth costs nothing and every file under a root
+   carries that root's label.
+3. **A folder named anything else makes its contents unreachable.** A file under `acme/` is labelled
+   `acme`, no role's map contains `acme`, and **no search returns it.** It is ingested, it is paid for, and
+   it is invisible. Adding a root is a change to the `ROLES` map in
+   `services/retrieval/retriever.py`, not a setting.
+4. **A file loose in the root takes the root's own name as its label** — `documents` — which no role's map
+   contains either. Same outcome, same silence.
+
+The generated corpus contains one file that demonstrates this on purpose:
+`loose/read-me-first.md`. Copy it into `/opt/oi-core/documents/` itself, not into a folder, once the rest
+is working. Watching it fail to appear in results is faster than reading the four points above.
+
+**Why it is built this way.** The alternative — a separate configuration file mapping documents to
+labels — is a second place for the mapping to drift from the files, and the failure that produces is a
+document labelled one thing in the config and another in the index. Deriving the label from the folder
+makes the layout the single source of truth. The cost is that renaming a folder silently relabels
+everything under it, which is why re-ingestion exists.
+
+## 4c. Copy the documents in
+
+One class at a time, so a failure is attributable. Start with the plain documents, because they exercise
+the whole path with nothing else that can go wrong.
+
+```
+cd /opt/oi-core
+sudo mkdir -p documents/company documents/executive
+sudo chown -R "$USER":"$USER" documents
+
+# the plain markdown first
+cp /tmp/client-corpus/company/travel-expenses-policy.md documents/company/
+cp /tmp/client-corpus/company/onboarding-notes.md      documents/company/
+cp /tmp/client-corpus/company/fee-schedule-2026.md     documents/company/
+cp /tmp/client-corpus/executive/executive-compensation.md documents/executive/
+```
+
+**On ownership and the containers.** The worker reads the mount as an unprivileged user inside the
+container. A file the host can read and the container cannot produces a failure the worker reports, which
+is the good direction; the bad direction is a file written as `root` that nothing can read and no error
+mentions. Give the tree to yourself and let the mounts do the rest.
+
+Do not copy the whole corpus yet. Stages 5 to 8 add to it deliberately, one class at a time, and by the
+end you will have used every document for something.
+
+**Checkpoint.**
+
+```
+find /opt/oi-core/documents -type f | sort
+```
+
+Expect four files, two under `company` and one under `executive`. Nothing under a folder called anything
+else, and nothing loose in the root yet.
+
+**How this breaks.**
+
+- Files are in place and the worker reports `seen 0`: the path is wrong. `--documents /documents` inside
+  the container maps to `${OI_ROOT}/documents` on the host, and `OI_ROOT` is in `rendered/env`.
+- A document lands in the index and cannot be found by any role: its root is not one of the labels in the
+  role map. This is the failure with no error message.
+- `Permission denied` from `cp`: you are not the owner of the tree. Check with `ls -ld documents`.
+
+---
+
+# Stage 5: ingestion, and the two cycles that matter
+
+**Goal:** every document parsed, chunked, embedded, and written to both indexes. Then prove that a second
+pass costs nothing.
+
+```
+oi up -d --build ingestion
+docker logs ingestion --tail 30
+```
+
+**The worker runs on a fifteen-minute cycle** and it is the only component that writes the document
+indexes. It is not a service you query; it wakes up, compares the documents root against a manifest of
+what it has already seen, and does work only on what changed.
+
+**What the log looks like, and why it looks like that.** The container runs the cycle with `--json`, so
+`docker logs` holds JSON objects:
+
+```
+collection documents: 1024 dimensions, Cosine, 1131 points
+{
+  "seen": 12,
+  "new": 0,
+  "changed": 0,
+  "skipped": 12,
+  ...
+}
+```
+
+A cycle **run by hand** prints prose instead, because the CLI defaults to the readable form. Same cycle,
+same numbers, two shapes. Watch for the prose form when you expect JSON and you will think the worker
+changed behaviour:
+
+```
+docker exec ingestion python3 /app/ingest.py --documents /documents
+```
+
+```
+collection documents: 1024 dimensions, Cosine, 1131 points
+
+seen 4, new 4, changed 0, skipped 0, failed 0
+chunks written 61, chunks removed 0, documents removed 0
+```
+
+**The absolute numbers are yours, not these.** `seen` is how many files the worker looked at; `chunks
+written` depends on the corpus and the chunker. What is *not* yours is the relationship between the fields:
+on a first cycle `new` equals `seen` and `skipped` is zero, and on a second cycle that inverts. Those
+relationships are what the checkpoints below test.
+
+**Why `seen` and not a file count.** The worker counts only files whose suffix it accepts, and it ignores
+the rest **without reporting them**, because a client's folder will contain a `.DS_Store` and a shortcut
+and neither is an error. That is why the guide tells you to compare the right two numbers in 5b rather
+than a file count against `seen`.
+
+## 5a. The first cycle
+
+Run it now rather than waiting for the schedule:
+
+```
+docker exec ingestion python3 /app/ingest.py --documents /documents
+```
+
+Expect `new 4`, and a `chunks written` count in the tens. The first cycle parses every document, so it is
+the slow one; on a real corpus of scanned PDFs it is minutes to hours, and the healthcheck's
+`start_period` is an hour for that reason.
+
+**Checkpoint.**
+
+```
+docker exec ingestion python3 /app/ingest.py --status
+```
+
+```
+last cycle at 2026-10-13T22:00:07.439054+00:00: {"seen": 12, "new": 0, "changed": 0, "skipped": 12,
+"failed": 0, "chunks_written": 0, "chunks_removed": 0}
+```
+
+**Read the JSON, not the shape of the line.** It is a timestamp followed by the cycle record, not a JSON
+document on its own, so piping it into a JSON parser fails. What you are looking for is `"failed": 0`.
+
+**`--status` is what the container's healthcheck runs**, which is worth understanding: it reads the last
+cycle's record rather than checking that the process is alive, and **it exits non-zero when that cycle had
+a failure**. `ingestion` has no listening socket, so a healthcheck that only proved the process existed
+would stay green while every document failed. This is the same design decision appearing twice: the
+container reports unhealthy for a *bad cycle*, not for a dead process.
+
+**How this breaks.**
+
+- `collection documents: ... 0 points` on every cycle: the collection was never created. `ensure_collection`
+  runs before the first document and reports the failure once rather than per document.
+- A refusal naming two dimensions: the embedding contract has moved. The collection was built with one
+  model and the worker is now using another, and similarity against the old vectors is meaningless rather
+  than zero. Do not force past it; read manual section 13a's contract section.
+- `failed` above zero with every document listed: the parser is down or unreachable. `docker logs parser`.
+- Nothing happens at all and the log is empty: the worker is waiting out its interval. Run the cycle by
+  hand as above.
+
+## 5b. The second cycle, which is the actual claim
+
+```
+docker exec ingestion python3 /app/ingest.py --documents /documents
+```
+
+```
+seen 4, new 0, changed 0, skipped 4, failed 0
+chunks written 0, chunks removed 0, documents removed 0
+```
+
+**This is the whole performance claim of the ingestion design.** Over unchanged bytes the worker reads
+each file, hashes it, matches the hash against the manifest, and writes nothing. A cycle over a client's
+corpus costs one read per document rather than a parse and an embed per document, which is what makes a
+fifteen-minute interval affordable.
+
+**Checkpoint.**
+
+```
+find /opt/oi-core/documents -type f \
+  -regextype posix-extended -iregex '.*\.(pdf|docx|pptx|xlsx|html?|md|markdown|txt|csv|rtf|odt|ods|odp|eml)' | wc -l
+```
+
+Compare that number with `seen`. **Compare the second number, not a plain `find | wc -l`.** A plain count
+includes the `.DS_Store` and the `.msg` export the worker deliberately ignores, so it will disagree, and
+chasing that disagreement wastes an afternoon. The `-iregex` matters too: the worker lowercases the suffix,
+so `INVOICE.PDF` is ingested while a case-sensitive regex would not count it.
+
+**How this breaks.**
+
+- The regex count is higher than `seen`: a file in an accepted format was missed. Check `failed` in the
+  status output, then the parser's log for that filename.
+- The regex count is lower than `seen`: two paths resolved to the same relative path, or a file was added
+  between the two commands.
+- `failed` is above zero: those documents are dead-lettered after two attempts and **will not be retried
+  until their bytes change**. That is deliberate — see stage 5c.
+
+## 5c. The failure path, on purpose
+
+A corpus of valid documents can never exercise dead-lettering, which is why the generated corpus contains
+a file the parser refuses.
+
+```
+cp /tmp/client-corpus/company/dead-letter-fixture.txt documents/company/
+docker exec ingestion python3 /app/ingest.py --documents /documents   # cycle 1: fails
+docker exec ingestion python3 /app/ingest.py --documents /documents   # cycle 2: fails again
+docker exec ingestion python3 /app/ingest.py --documents /documents   # cycle 3: not retried
+docker exec ingestion python3 /app/ingest.py --status; echo "exit=$?"
+```
+
+**The sequence is the test.** `INGEST_MAX_FAILURES` is 2, so the first `--status` after two failures **exits
+non-zero**, which is what the container's healthcheck reads: a worker whose last cycle failed reports
+unhealthy rather than alive. After that the file is dead-lettered and a cycle no longer attempts it, so the
+status goes back to healthy while the document stays unindexed. That is the designed behaviour and it is
+easy to mistake for a fix.
+
+```
+docker exec ingestion python3 /app/ingest.py --clear-failures company/dead-letter-fixture.txt
+```
+
+`--clear-failures` is the documented way to make it try again, and it exists for a change to the failure
+rules rather than a routine step. Changing the file's bytes also clears it, because the recorded failure
+hash is the hash of the bytes that failed.
+
+**Its output is not a check, and it is worth knowing that before you trust it.**
+
+```
+cleared failures on 1 document(s) matching 'company/onboarding-notes.md'. The next cycle will try them again.
+```
+
+That line prints for a document with no recorded failure at all — run it against a healthy document and it
+still says it cleared one. It reports that the path matched the manifest, not that a failure was cleared,
+so **do not use the count as evidence that the dead-letter state changed.** The evidence is in the next
+cycle: a document that is re-attempted is a document that was cleared, and one that is still `skipped` was
+not.
+
+**Checkpoint.** After clearing, run a cycle and watch what happens to that file. It should be **attempted
+and fail again**, because it is still unparseable. A file that stays `skipped` was never cleared, whatever
+`--clear-failures` said.
+
+**How this breaks.**
+
+- Nothing ever dead-letters: check the suffix is in the accepted set. A file the worker ignores never
+  reaches the parser and never fails.
+- `--clear-failures` reports zero: the path does not match the manifest's. Paths are relative to the
+  documents root, with no leading slash: `company/dead-letter-fixture.txt`.
+- The healthcheck flaps and you cannot tell why: read `--status`. It names the failing documents.
+
+## 5d. Re-ingestion, and when it is the answer
+
+Three things make the worker redo a document it has already seen, and they are different in kind:
+
+| Trigger | What it means |
+|---|---|
+| The bytes changed | The client edited the file. Chunk ids change because the id covers the content, and old chunks are removed before new ones are written |
+| `PAYLOAD_VERSION` changed | **We** changed what a stored field means. The bytes are identical and the stored payload is stale |
+| The record claims success with no chunks behind it | A false claim, re-ingested without being asked |
+
+The second is the one to reach for when stored data looks wrong after a code change, and it is a code
+edit rather than a command. `PAYLOAD_VERSION` is `payload-v4` today, and bumping it re-derives the whole
+corpus on the next cycle. For the fixture corpus that is about ten minutes; for a client's it is the price
+of not serving labels the code no longer produces.
+
+**Do not reach for `PAYLOAD_VERSION` when the collection contract has moved.** Those are different faults
+with different fixes: the contract is the model and its preprocessing, and a mismatch there is refused
+rather than repaired, because re-embedding is a decision rather than a repair.
+
+---
+
+# Stage 6: retrieval, and asking a question
+
+**Goal:** get a real answer out of the corpus, and understand what each line of the output is telling you.
+
+**There is no ask endpoint.** The retrieval path is a function, `search()` in
+`services/retrieval/retriever.py`, and the API that would expose it — sessions, caller identity, streaming —
+is C3. What exists is a probe that runs one question through the whole path, and it is how you answer
+"what does the system return for this" today.
+
+```
+cd /opt/oi-core
+docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+  run --rm --entrypoint python -v /opt/oi-core:/w:ro -w /w eval /w/tests/fixtures/ask.py \
+  -q "What is the standard labour rate per hour?" --role staff
+```
+
+**Every part of that command is load-bearing, and two of them were wrong in an earlier draft of the
+manual.**
+
+- **`compose run` rather than a bare `docker run`** supplies `DATABASE_URL`. It is not in `rendered/env`;
+  the compose file assembles it from `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB`, because the
+  host and port belong to the compose network rather than to the deployment. **A bare `docker run` with
+  `--env-file rendered/env` starts the probe with no database at all**, and its two consequences are
+  silent: the lexical arm reports `0`, which looks like an arm that found nothing, and **no passage is
+  marked `NOT CURRENT`, so a claim resting on a superseded document is certified as supported.**
+- **`-v /opt/oi-core:/w:ro -w /w`** supplies the code. The `eval` service declares no volume, on the
+  assumption that the caller passes one; overriding the entrypoint drops the implicit one, and without
+  this the probe stops with `can't open file '/w/tests/fixtures/ask.py'`.
+
+**Checkpoint.**
+
+```
+arms:     {'dense': 15, 'lexical': 3}
+```
+
+`lexical` must be a number above zero. **`lexical: 0` is ambiguous** — it is recorded both when the arm
+ran and matched nothing and when it never ran for want of a database, and the key is always present. If
+you see zero, check the environment before you believe the index is empty.
+
+**Reading the rest of the output.** Five lines, each answering a question you would otherwise guess at:
+
+- **`role` and `roots`** — the retrieval role and the folders it may read. `--role executive` widens `roots`
+  to `['company', 'executive']`. A role that is not in the map exits 2 rather than defaulting, because a
+  default would grant the broader of two permissions to a typo.
+- **`rerank`** — the reranker's own account of itself: the depth it saw, what it cost in milliseconds,
+  whether that was inside the budget, and which model did it. `reranked: false` comes with a
+  `rerank_reason` rather than a silent fallback to the fused order, which is the difference between
+  reporting that a control did not run and pretending the fused order was the reranked one.
+- **`withheld`** — has two causes and the output does not say which. A passage the store returned that the
+  role may not see is a **security fault**: the query's filter is not working. A chunk the lexical arm
+  named that the vector store does not hold is a **reconciliation fault**: the two indexes have drifted.
+  Non-zero means investigate, not diagnose.
+- **`restricted matched`** — what a second search found outside the role's roots. This is the number a
+  `counted` denial reports.
+- **`score`** — the vector arm's cosine similarity, or `n/a` for a passage only the lexical arm returned.
+  Not comparable across arms, which is why it prints `n/a` rather than a misleadingly small number.
+
+**How this breaks.**
+
+- `ModuleNotFoundError: No module named 'ingest'`: you dropped the `-v` mount.
+- `KeyError: unknown role`: the retrieval role is not one the retriever knows. It knows `staff` and
+  `executive`; the model roles in your manifest are a different vocabulary entirely.
+- Everything returns `n/a` for scores and `lexical` is the only arm with hits: embedding is down.
+  `docker logs embeddings`.
+- Passages come back from the wrong document: that is a corpus or ranking question rather than a fault.
+  Stage 6a is how you tell the difference.
