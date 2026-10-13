@@ -1767,29 +1767,56 @@ docker logs ingestion --tail 30
 rather than that the process is alive. There is no listening socket here, so a check that only proved the
 process existed would stay green while every document failed.
 
-**What a first cycle prints.** The worker parses every document it has not seen, so a first run over a
-client's corpus takes minutes or hours. This is the run the runbook records on the reference instance:
+**What a cycle prints, and how the two forms differ.** The worker parses every document it has not seen, so a
+first run over a client's corpus takes minutes or hours.
+
+`docker logs ingestion` shows **JSON**, because the container runs the cycle with `--json`:
 
 ```
-ingesting apple-10k-2024.htm  (new, 1503891 bytes)
-    214 chunks, 42 pages
-ingesting irs-p15.pdf  (new, 1713916 bytes)
-    ...
-
-seen 4, new 4, changed 0, skipped 0, failed 0
-chunks written 1183, chunks removed 0, documents removed 0
+collection documents: 1024 dimensions, Cosine, 1131 points
+{
+  "seen": 12,
+  "new": 0,
+  "changed": 0,
+  "skipped": 12,
+  "failed": 0,
+  "chunks_written": 0,
+  "chunks_removed": 0,
+  "documents_removed": 0,
+  "failures": []
+}
 ```
 
-The counts depend on the corpus and on the chunker version. The same four-document corpus, ingested into an
-empty collection with the chunker this manual documents, wrote these:
+A cycle **run by hand** prints prose instead, because the CLI defaults to the readable form. This is the
+distinction that trips people up: the same cycle, the same numbers, two different shapes, and the prose form
+is the one the manual can show you because only a hand run produces it:
+
+```
+$ docker exec ingestion python3 /app/ingest.py --documents /documents
+collection documents: 1024 dimensions, Cosine, 1131 points
+
+seen 12, new 0, changed 0, skipped 12, failed 0
+chunks written 0, chunks removed 0, documents removed 0
+```
+
+The counts depend on the corpus and on the chunker version. On this deployment, twelve documents and 1131
+points, measured from the index:
 
 | Document | Chunks | Notes |
 |---|---|---|
-| apple-10k-2024.htm | 672 | 588 table entries and 84 prose chunks |
-| apple-ex10-1-2024.htm | 13 | pageless HTML |
-| apple-ex10-22-2024.htm | 16 | pageless HTML |
-| irs-p15.pdf | 358 | 59 pages, text layer, no OCR |
-| total | 1059 | |
+| company/apple-10k-2024.htm | 672 | 588 table entries and 84 prose chunks |
+| company/apple-ex10-1-2024.htm | 13 | pageless HTML |
+| company/apple-ex10-22-2024.htm | 16 | pageless HTML |
+| company/callout-rate-approval.eml | 1 | email, one chunk |
+| company/dispatch-review-q1.pptx | 2 | slides |
+| company/fee-schedule-2025.md | 20 | superseded, and still indexed |
+| company/fee-schedule-2026-copy.md | 20 | superseded, and still indexed |
+| company/fee-schedule-2026.md | 20 | the current schedule |
+| company/irs-p15.pdf | 358 | 320 digital chunks plus **38 scanned**, the only OCR in the corpus |
+| company/onboarding-notes.md | 1 | |
+| company/rate-card-2026.xlsx | 7 | spreadsheet |
+| executive/executive-compensation.md | 1 | the restricted root |
+| **total** | **1131** | matching the collection's own count |
 
 At the start of a cycle the worker also reports the collection it is writing to: its dimension, its distance
 and how many points it holds. A collection whose dimension does not match what the embedding model produces
@@ -1797,9 +1824,9 @@ stops the run with a refusal naming both numbers, rather than writing vectors of
 collection whose distance is not Cosine, because search results would then be ordered differently from every
 measurement taken on this build.
 
-**The second cycle is the one that matters.** Over unchanged bytes it costs one read per file and writes
-nothing. The recorded line is `seen 4, new 0, changed 0, skipped 4, failed 0, chunks written 0`, and that is
-the whole claim the manifest makes.
+**The second cycle is the one that matters, and both forms above are second cycles.** Over unchanged bytes it
+costs one read per file and writes nothing: `skipped` equals `seen`, and `chunks written 0`. That is the whole
+claim the manifest makes.
 
 **Run a cycle now**, which is what to do after dropping a new document in the folder rather than waiting for
 the schedule:
@@ -1939,19 +1966,22 @@ oi run --rm -v /opt/oi-core:/w eval
 configuration: fused   k=10   n=10
   retrieval  100% (6/6)
   support    100% (4/4)
-  support was not measurable on 2 answerable question(s): no figure in the reference answer
+  support was not measurable on 2 answerable question(s): no figure in the reference answer, so it needs entailment
 
-  category                  n   retr    supp
-  paraphrase                1   100%     n/a
-  single-fact-prose         2   100%    100%
-  table-cell                2   100%    100%
-  two-document              1   100%     n/a
-  unanswerable              2     0%     n/a
+  category            n   retr   supp
+  paraphrase          1   100%    n/a
+  single-fact-prose   2   100%   100%
+  table-cell          2   100%   100%
+  two-document        1   100%    n/a
+  unanswerable        2     0%    n/a
+  unanswerable-near-miss  1     0%    n/a
+  unanswerable-table  1     0%    n/a
 
-  supported answers from documents with no real pages: 1 of 4
+  supported answers from documents with no real pages: 1 of 4. For those the page rule is satisfied trivially and has not been tested.
+
   unanswerable top scores reaching into the answerable range: True
-    answerable   [0.684, 0.659, 0.655, 0.641, 0.633, 0.621]
-    unanswerable [0.673, 0.607, 0.558, 0.524]
+    answerable   [0.684, 0.622, 0.599, 0.557, 0.548, 0.535]
+    unanswerable [0.641, 0.582, 0.558, 0.524]
 ```
 
 Two rates, and the difference is the point. Retrieval counts the document holding the answer among the
@@ -1960,11 +1990,64 @@ document is easy to be near, so a system returning page 1 of the right filing fo
 well on the first rate and badly on the second.
 
 The last two lines are the measurement a refusal threshold would be built on, and they say it would not work
-at this corpus size: the strongest unanswerable question scores 0.673 and the weakest answerable one 0.621,
+at this corpus size: the strongest unanswerable question scores 0.641 and the weakest answerable one 0.535,
 so no cutoff on the top score separates a question the corpus answers from one it does not. A refusal has to
 come from the citation layer instead. The line about pageless documents is a coverage statement rather than a
-result: six of the ten questions draw on HTML filings whose every chunk reports page 1, so the rule that a
-cited page must fall inside its chunk's range is satisfied trivially there and has not been tested on them.
+result, and it is the one number here worth understanding rather than reading. **Six of the ten questions draw
+on documents whose every chunk reports page 1**, so the rule that a cited page must fall inside its chunk's
+range is satisfied trivially for them — 1 is inside 1..1 — and has not been tested there. The six are `Q05`,
+`Q06`, `Q07` and `Q10` against the Apple exhibits, `Q01` against the 10-K, and one of the two-document
+questions; the only question drawing on a document with real page numbers is `Q02`, from the IRS publication.
+
+Measured from the index, which is how to check this rather than by reading the question set: of the twelve
+ingested documents, `irs-p15.pdf` and `rate-card-2026.xlsx` report real pages on every chunk, three others are
+mixed, and the rest are nominal throughout. So `1 of 4` says that four supported answers were measured and
+only one of them came from a document with real pages — which is the honest ceiling on what this run proves
+about the page rule.
+
+**Then one line per question**, and this is the part worth reading rather than skimming. Each carries the
+question's category, the rank the answering passage was found at, and — for a question the corpus cannot
+answer — a paragraph saying what is missing and what an answer would have had to invent:
+
+```
+  ok  Q01  single-fact-prose doc ans  rank=2  matched the figure 184,500
+  ok  Q02  single-fact-prose doc ans  rank=1  matched the figure 200,000
+  ok  Q03  unanswerable               rank=None  NOT ANSWERABLE from this corpus, so this
+      question's original `answerable: true` was wrong. …
+  MISS Q05  two-document      doc      rank=None  the question states no reference figure, so
+      support needs entailment and is not measurable at this layer. Excluded from the support
+      rate rather than counted as a miss.
+  …
+wrote /tmp/eval-report.json
+```
+
+**Two of the ten questions come back `NOT ANSWERABLE from this corpus` while the fixture still records them
+as `answerable: true`.** `Q03` asks for a new-hire reporting deadline that Publication 15 does not state, and
+`Q04` asks for a withholding-table cell that lives in Pub. 15-T, which is not in the corpus. The retrieval
+rate is unaffected — an unanswerable question is scored on whether anything came back, and the tool says so
+rather than counting it as a retrieval failure — but those two questions are now measuring the wrong thing,
+and the fixture is what needs fixing. **A question set that records an answerable question as unanswerable is
+a yardstick with a bend in it**, and the paragraphs above are how it was caught.
+
+`Q08` is the one worth reading in full, because it is a near miss doing its job: the corpus does contain a
+mileage figure, but it is the company's own client-facing rate of 0.67 per mile, and the question asks about
+employee reimbursement. Answering `67 cents` would match a vendor billing rate to an employee question, which
+is exactly the failure that question exists to catch. The question set is in `fixtures/corpus/questions.yaml`.
+
+**`eval` takes no arguments and prints no usage.** It parses no argv at all, so `--help` is silently ignored
+and a full evaluation runs instead. Its controls are environment variables — `K` (default 10),
+`CONFIGURATION`, `ROLE` (default `staff`), `QUESTIONS`, `REPORT_OUT` — and it **requires the checkout mounted
+at `/w`**, because the harness imports the retriever and the ingestion worker from there rather than carrying
+its own copy:
+
+```
+# without the mount: fails, because the image is not the code
+oi run --rm eval --help
+ModuleNotFoundError: No module named 'ingest'
+```
+
+That failure is worth recognising rather than debugging: the eval image carries the harness and botocore, and
+the mounted checkout carries everything the harness calls.
 
 Ten questions can catch a search that is broken. They cannot support a quality claim, and the client's own
 sixty arrive in C8.
@@ -2188,23 +2271,77 @@ docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
 ```
 
 ```
-PART ONE: a damaged figure is caught
-  CAUGHT 2026-13-45          malformed.date
-  CAUGHT 02/31/2026          malformed.date
-  CAUGHT 1450%               malformed.percent_range
-  CAUGHT 12345678901234.00   malformed.implausible_magnitude
-  CAUGHT 12,34,567.00        malformed.not_a_figure
-  ok     145.00 1,250.00 (1,450.00) 145% 32.50 0.67   - none flagged
+PART ONE: a damaged figure is caught by a format or arithmetic check
+  shapes a defective read produced in the step 3.4 measurement:
+    CAUGHT 2026-13-45          malformed.date
+    CAUGHT 02/31/2026          malformed.date
+    CAUGHT 1450%               malformed.percent_range
+    CAUGHT 12345678901234.00   malformed.implausible_magnitude
+    CAUGHT 12,34,567.00        malformed.not_a_figure
 
-  100.00 + 45.00 against 145.00: True
-  100.00 + 45.00 against 155.00: False
-  no relationship to check: None
+  and figures that are not damaged, which must not be flagged:
+    ok    145.00              -
+    ok    1,250.00            -
+    ok    (1,450.00)          -
+    ok    145%                -
+    ok    32.50               -
+    ok    0.67                -
 
-PART THREE: is_ocr is set per chunk, true for the scanned publication
+  arithmetic, where the document states the relationship:
+    ok    100.00 + 45.00 against a stated total of 145.00: True
+    ok    100.00 + 45.00 against a stated total of 155.00: False
 
-PART TWO: an unverified figure from a scanned passage is disclosed as machine-read
-  "machine-read from a scanned page and not confirmed by any other check in the document"
+  and a document with nothing to add up returns None rather than False:
+    None - most documents have no relationship to check, and False would mark every figure in
+    every prose document as unconfirmed for a reason that is not about the figure
+
+PART THREE: a scanned page is labelled and a digital one is not
+    is_ocr=False  672 chunk(s)  company/apple-10k-2024.htm
+    is_ocr=False   13 chunk(s)  company/apple-ex10-1-2024.htm
+    is_ocr=False   16 chunk(s)  company/apple-ex10-22-2024.htm
+    is_ocr=False    1 chunk(s)  company/callout-rate-approval.eml
+    is_ocr=False    2 chunk(s)  company/dispatch-review-q1.pptx
+    is_ocr=False   20 chunk(s)  company/fee-schedule-2025.md
+    is_ocr=False   20 chunk(s)  company/fee-schedule-2026-copy.md
+    is_ocr=False   20 chunk(s)  company/fee-schedule-2026.md
+    is_ocr=False  320 chunk(s)  company/irs-p15.pdf
+    is_ocr=True    38 chunk(s)  company/irs-p15.pdf
+    is_ocr=False    1 chunk(s)  company/onboarding-notes.md
+    is_ocr=False    7 chunk(s)  company/rate-card-2026.xlsx
+    is_ocr=False    1 chunk(s)  executive/executive-compensation.md
+
+  does the lexical index carry the label? NO
+    The column is absent and that does not matter: nothing builds a passage from chunk_index.
+    lexical_search returns ids only, and every id the dense arm did not return has its payload
+    fetched from Qdrant with with_payload true, so is_ocr reaches the passage on both arms.
+    This probe printed the opposite conclusion first and the fidelity checker caught it.
+
+PART TWO: a figure that passes every check is disclosed as machine-read when cited
+  a scanned passage carrying an unverified figure: machine-read from a scanned page and not confirmed by any other check in the document
+  and one the document's own arithmetic confirms is not disclosed, because something did verify it
+
+PASSED: the measured damaged shapes are caught and the intact figures are not, arithmetic confirms what
+the document states, scanned and digital chunks are labelled apart, and an unverified figure from a
+scanned page is disclosed when it is cited
 ```
+
+**The `PART THREE` tally is the result worth reading, and it has two parts.** The first is the split on
+`company/irs-p15.pdf`: **320 chunks labelled digital and 38 labelled scanned**, from one document. That is the
+label doing its job at chunk granularity rather than per file, so one figure from that publication can carry a
+machine-read caveat while another from the same file does not. Every other document is wholly one or the
+other.
+
+The second is the line that says the lexical index does **not** carry the label, followed by the probe's own
+correction. The column is genuinely absent from `chunk_index`, and it genuinely does not matter, for the reason
+printed underneath: nothing builds a passage from that table. `lexical_search` returns ids only, and every id
+the dense arm did not already return has its payload fetched from Qdrant with `with_payload` true, so `is_ocr`
+reaches the passage on both arms. **The probe printed the opposite conclusion first and a review caught it**,
+which is why the correction is in the output rather than in a comment — a reader who sees only the `NO` would
+reasonably conclude the lexical arm loses a field the verifier needs.
+
+`PART TWO` also records a negative result rather than glossing it: on the question it asked, no scanned passage
+was retrieved, so the disclosure could not fire on the real path, and the probe says so and checks the
+behaviour directly instead.
 
 A date like the 31st of February passed a first version that only checked a day between 1 and 31, so dates
 are checked against a real calendar. A negative figure in parentheses did not parse at all, because the brackets are the
