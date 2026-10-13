@@ -13,6 +13,11 @@ Two loops exist, and they are different things:
   synthesises, two attack the result from different directions, and one revises. It runs before a
   decision that is expensive to reverse.
 
+**The round number is shared between the two tables**, so a decision round appears as a gap in the
+deliverable loop's numbering. That is deliberate: it keeps the log in the order the rounds happened, which
+is what someone reading downward expects, and it is why the deliverable loop goes 1 to 6 while the decision
+loop's first entry is 7.
+
 Both exist because reading is not running. The single most useful finding in the whole of C1 came from
 an agent typing a command the manual told it to type, not from anyone reading the manual.
 
@@ -24,6 +29,8 @@ an agent typing a command the manual told it to type, not from anyone reading th
 | 2 | The corrections from round 1, re-tested | Executor, fidelity | **`oi up -d litellm` reloads nothing**, so the add-a-role walkthrough would have silently done nothing; the export job shipped the day that was *starting*; the pack catalog's `requires` edges were documentation that nothing read; two worked services had no `service.yaml` while the convention required one |
 | 3 | The corrections from round 2 | Executor, fidelity | The claim that `data_classes_allowed` is rendered into the environment was false; two `verify` sample blocks were stale and self-contradictory, quoting a hash no artifact ever held |
 | 4 | The whole manual as a newcomer would meet it, plus the code claims | Executor, cold reader, fidelity | The manual's own "worked example" for adding a service did not exist as described; `DATABASE_URL` was listed as renderer-written when compose assembles it; the reranker documentation read as a ban when it was a deferral |
+| 5 | The six C2 operating pages (13a to 13f), against the code and against the live box | Executor, cold reader, fidelity | **That C2 had closed its register without writing its operating pages at all.** Then, once the pages existed: every acceptance probe passed while the documented commands were broken. `--purge --dry-run` was accepted, documented and ignored, so the safety rehearsal destroyed the document for real; the retention image was missing `policy.py`; the confidence gate never fired because `Passage.from_payload` dropped `parse_score`; a held purge's refusal was recorded nowhere. Seven blocking documentation gaps (no host path for the documents root, `eval` and `retention` never introduced, `staff`/`executive` defined nowhere, no procedure for asking a question, the C2 manifest fields outside the table that claimed to be authoritative, no migration procedure, no corpus onboarding) |
+| 6 | The corrections from round 5 | Fidelity, executor | The corrections were mostly wrong in their own right, which is the useful part. **The documented `ask.py` command carried no `DATABASE_URL`, so it silently ran with no database: the lexical arm reported zero and a claim resting on a superseded document came back certified as supported.** Also: a manifest with the frontier lane enabled and no `access.egress` block validated and then refused every frontier call, in three shipped examples; the migration count was wrong; the pageless-page metric was glossed as its own inverse; the retention "recorded run" was a fixture's output presented as the CLI's |
 
 Roughly seventy-five findings across the four rounds. The ones worth remembering are the ones a
 reader could not have found: a command that reloads nothing, an export job that ships the wrong day,
@@ -38,7 +45,9 @@ section rewritten so every entry gives a discriminator rather than a suspicion.
 
 | Round | Decision | Agents | What it caught |
 |---|---|---|---|
-| 5 | The C2 retrieval architecture | Nine research angles, a synthesis, two adversarial critiques, a revision | That the problem is **tokenisation, not ranking** (an identifier shatters in the parser and no BM25 buys it back); that the reranker at the brief's depth cannot ship on CPU; that the synthesis had invented a constraint by carrying a Qdrant version across from a sibling project; that ParadeDB is the only measured engine to recover partial identifiers, and that its licence is a decision rather than a prohibition |
+| 7 | The C2 retrieval architecture | Nine research angles, a synthesis, two adversarial critiques, a revision | That the problem is **tokenisation, not ranking** (an identifier shatters in the parser and no BM25 buys it back); that the reranker at the brief's depth cannot ship on CPU; that the synthesis had invented a constraint by carrying a Qdrant version across from a sibling project; that ParadeDB is the only measured engine to recover partial identifiers, and that its licence is a decision rather than a prohibition |
+
+| 8 | The manifest field overlap, `lanes.frontier.data_classes_allowed` against `access.egress.frontier_classes` | **Not run.** It is recorded here because it is the next decision, not because a round happened | Found while writing the C2 pages: two fields carry the same enum and the same meaning, the validator reads the first, and the gate reads the second. Working out what that does produced the round's most concrete finding — three shipped manifests declared only the first, so they validated and then refused every frontier call, with no error at validation time. Fixed. **Whether the two fields should both exist is a decision rather than a fix, and it has not been taken** |
 
 The research reports, the critiques and the revision are in `docs/research/search-2026-10/`. The
 decision they produced is `docs/search-architecture.md`.
