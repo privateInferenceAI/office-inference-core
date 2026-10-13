@@ -26,6 +26,8 @@ if "psycopg" not in sys.modules:
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "audit"))
 import audit  # noqa: E402
 
+ROOT = Path(__file__).resolve().parents[1]
+
 
 class FakeCursor:
     def __init__(self) -> None:
@@ -63,7 +65,10 @@ def record_args(**overrides):
               "deployment_id": "test-deploy", "data_class": "internal", "outcome": "ok",
               "tool": None, "model": None, "request_id": None, "approval": None,
               "type": "access", "store_payload": False, "dev": False,
-              "prompt": None, "completion": None}
+              "prompt": None, "completion": None,
+              # The redaction summary. Defaults here rather than getattr in the writer, so a field added to the
+              # CLI without being added here fails a test instead of being silently absent at run time.
+              "redactions": None, "unverified_card_shapes": 0, "egress_allowed": None}
     values.update(overrides)
     return type("Args", (), values)()
 
@@ -114,12 +119,42 @@ def record_with_content(monkeypatch, **overrides):
     return insert
 
 
+def insert_columns() -> list[str]:
+    """The column list the writer inserts into, read from its own SQL.
+
+    Read rather than written out, because the failure this guards against is the two drifting apart: a helper
+    that counts from the end of the parameter list reads whatever happens to be there after somebody adds a
+    column, and it reads it as a hash without complaining.
+    """
+    import re
+    source = (ROOT / "services" / "audit" / "audit.py").read_text()
+    match = re.search(r"insert into audit_events\s*\(([^)]+)\)\s*values", source)
+    assert match, "could not find the audit insert statement"
+    return [column.strip() for column in match.group(1).replace("\n", " ").split(",") if column.strip()]
+
+
+def field(insert_params, name: str):
+    """One parameter by column name, so adding a column cannot silently shift what a test reads."""
+    columns = insert_columns()
+    index = columns.index(name)
+    assert len(insert_params) == len(columns), (
+        f"the insert takes {len(columns)} parameters and got {len(insert_params)}")
+    return insert_params[index]
+
+
 def stored_payload(insert_params):
-    return insert_params[-3]
+    return field(insert_params, "payload")
 
 
 def prompt_hash(insert_params):
-    return insert_params[-2]
+    """The prompt hash, by column name.
+
+    It used to be `[-2]`, the second-from-last parameter, until the redaction summary added four more after it
+    and it silently became the unverified-card count: a test comparing a hash to a small integer, failing for a
+    reason that had nothing to do with what it was testing. Position from the end is as fragile as position from
+    the start, so both directions are gone.
+    """
+    return field(insert_params, "prompt_sha256")
 
 
 def test_hash_mode_stores_no_content(monkeypatch):

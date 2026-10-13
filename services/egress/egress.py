@@ -31,6 +31,11 @@ class Prepared:
     payload: dict | None = None
     redaction: redaction_module.Redaction = field(default_factory=redaction_module.Redaction)
     prompt_sha256: str | None = None
+    # The exact string whose hash is recorded, so a caller passing it to the audit does not have to serialise
+    # the payload a second time and get the same hash by luck. The first probe did serialise it again, with
+    # different separators, and recorded a hash that did not match the one this module computed: the record
+    # looked fine and proved nothing about what was sent.
+    sent_text: str | None = None
     refusal: str | None = None
 
     def as_record(self) -> dict:
@@ -75,6 +80,8 @@ def prepare(payload: dict, data_class: str, lane: str = "frontier",
     else:
         cleaned, found = payload, redaction_module.Redaction()
 
+    # Serialised once, hashed, and handed out, so there is one string and one hash rather than two of each.
+    sent = _stable(cleaned)
     return Prepared(
         allowed=True,
         decision=decision,
@@ -82,7 +89,8 @@ def prepare(payload: dict, data_class: str, lane: str = "frontier",
         redaction=found,
         # Of the redacted request, so the record proves what was sent rather than becoming a copy of what was
         # removed. The audit column already says it holds the hash of the prompt as sent.
-        prompt_sha256=redaction_module.sha256_of(_stable(cleaned)),
+        prompt_sha256=redaction_module.sha256_of(sent),
+        sent_text=sent,
     )
 
 

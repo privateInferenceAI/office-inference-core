@@ -130,8 +130,14 @@ def main() -> int:
         "--type", "model_call", "--actor", "egress-acceptance", "--actor-role", "system",
         "--data-class", "internal", "--outcome", "ok", "--model", REQUEST["model"],
         "--request-id", request_id,
-        "--prompt", json.dumps(prepared.payload, sort_keys=True),
+        # The string prepare() hashed, not a re-serialisation of the payload. Passing a differently formatted
+        # string produced a recorded hash that did not match, so the record looked correct and proved nothing
+        # about what was sent.
+        "--prompt", prepared.sent_text,
         "--payload", json.dumps(record, sort_keys=True),
+        "--redactions", json.dumps(record["redactions"], sort_keys=True),
+        "--unverified-card-shapes", str(record["unverified_card_shapes"]),
+        "--egress-allowed", "true" if prepared.allowed else "false",
     ]
     import subprocess
     written = subprocess.run(command, capture_output=True, text=True)
@@ -146,25 +152,34 @@ def main() -> int:
         import psycopg
         connection = psycopg.connect(os.environ["DATABASE_URL"])
         with connection.cursor() as cur:
-            cur.execute("""select data_class, outcome, model, prompt_sha256, payload
+            cur.execute("""select data_class, outcome, model, prompt_sha256, payload,
+                                  redaction_count, redactions, egress_allowed
                            from audit_events where request_id = %s""", (request_id,))
             row = cur.fetchone()
         if not row:
             problems.append("the audit event could not be read back, so the record does not show anything")
         else:
-            data_class, outcome, model, prompt_sha, payload = row
+            data_class, outcome, model, prompt_sha, payload, rcount, redactions, allowed = row
             print(f"  read back: data_class={data_class} outcome={outcome} model={model}")
             print(f"  prompt_sha256={prompt_sha[:16]}...")
-            print(f"  payload={json.dumps(payload, sort_keys=True)}")
+            print(f"  content mode stored the payload as: {payload!r}")
+            print(f"  redaction_count={rcount} redactions={redactions} egress_allowed={allowed}")
             if data_class != "internal":
                 problems.append(f"the audit shows {data_class!r} rather than the data class of the request")
             if prompt_sha != prepared.prompt_sha256:
                 problems.append("the recorded hash is not the hash of what was sent, so the record does not "
                                 "prove what left")
-            if SSN in json.dumps(payload):
+            # The summary must be readable on the DEFAULT content mode, which hashes the payload rather than
+            # storing it. The first version put the summary in the payload and the default deployment kept no
+            # record at all that anything had been redacted.
+            if not redactions or "ssn" not in redactions:
+                problems.append("the record does not say that an SSN was removed, and on the default content "
+                                "mode the payload is hashed rather than stored, so a summary kept there is not "
+                                "a record")
+            elif payload is not None and SSN in json.dumps(payload):
                 problems.append("the audit payload holds the SSN, so the record kept what it removed")
-            if "ssn" not in (payload or {}).get("redactions", {}):
-                problems.append("the record does not say that an SSN was removed")
+            if allowed is not True:
+                problems.append(f"the record does not show the request was permitted to leave: {allowed!r}")
         connection.close()
     except ImportError as exc:
         print(f"  psycopg is not in this image ({exc}), so the sink could not be read")

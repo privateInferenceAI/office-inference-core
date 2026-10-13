@@ -153,23 +153,38 @@ def cmd_record(args) -> int:
     payload_sha = sha256_hex(canonical_json(stored_payload if stored_payload is not None else {}))
     approval = json.loads(args.approval) if args.approval else None
 
+    # The redaction summary, written to its own columns and NOT into the payload. It is metadata about the
+    # request rather than content, so the content mode must not govern it: on the default hash mode the payload
+    # is hashed and not stored, and a summary that lived there would leave a deployment with no record at all
+    # that anything had been redacted. The probe found that on its first run.
+    redactions = json.loads(args.redactions) if args.redactions else None
+    if redactions is not None and not isinstance(redactions, dict):
+        die('--redactions takes a JSON object of kinds to counts, as {"ssn": 2}')
+    redaction_count = sum(int(v) for v in redactions.values()) if redactions else 0
+    egress_allowed = None if args.egress_allowed is None else args.egress_allowed == "true"
+
     with connect() as conn, conn.cursor() as cur:
         cur.execute("""
             insert into audit_events
               (event_type, actor, actor_role, deployment_id, data_class, outcome,
                tool, model, request_id, approval, payload_sha256, payload,
-               prompt_sha256, completion_sha256)
-            values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               prompt_sha256, completion_sha256,
+               redaction_count, redactions, unverified_card_shapes, egress_allowed)
+            values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             returning id, ts_iso, row_hash""",
             (args.type, args.actor, args.actor_role, args.deployment_id, args.data_class,
              args.outcome, args.tool, args.model, args.request_id,
              Jsonb(approval) if approval is not None else None, payload_sha,
              Jsonb(stored_payload) if stored_payload is not None else None,
-             prompt_sha, completion_sha))
+             prompt_sha, completion_sha,
+             redaction_count, Jsonb(redactions) if redactions is not None else None,
+             args.unverified_card_shapes, egress_allowed))
         row = cur.fetchone()
     print(json.dumps({"id": row[0], "ts_iso": row[1], "row_hash": row[2],
                       "payload_sha256": payload_sha, "content_mode": mode,
-                      "prompt_sha256": prompt_sha, "completion_sha256": completion_sha}, indent=2))
+                      "prompt_sha256": prompt_sha, "completion_sha256": completion_sha,
+                      "redaction_count": redaction_count, "redactions": redactions,
+                      "egress_allowed": egress_allowed}, indent=2))
     return 0
 
 
@@ -619,6 +634,14 @@ def main() -> int:
     record.add_argument("--request-id")
     record.add_argument("--approval", help="JSON describing the approval")
     record.add_argument("--payload", help="JSON, @file, or - for stdin")
+    record.add_argument("--redactions", help="JSON object of kinds to counts removed before this request "
+                                             "left, as {\"ssn\": 2}. Metadata, so recorded whatever the content "
+                                             "mode: a deployment on hash mode would otherwise keep no record "
+                                             "that anything was redacted. Never the values.")
+    record.add_argument("--unverified-card-shapes", type=int, default=0,
+                        help="long numbers redacted that failed the card check digit")
+    record.add_argument("--egress-allowed", choices=["true", "false"],
+                        help="whether the data-class gate permitted this request to leave")
     record.add_argument("--prompt", help="the prompt as sent. Its hash is always recorded; the text "
                                           "is stored only if the content mode allows it")
     record.add_argument("--completion", help="the completion as returned, under the same rule")

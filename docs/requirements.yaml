@@ -150,7 +150,19 @@ items:
       check and is still a card. THE BOUND: this is pattern matching, it catches identifiers with a shape, and
       it does NOT catch a person's name, an address, or an account number written in words. It is a reduction
       in what leaves, not a guarantee about what cannot. Status is open because the proof has to run on the
-      deployed store, writing to the real audit sink.
+      deployed store, writing to the real audit sink. The deployed run found two faults, both in the recording
+      half. The redaction summary was being written into the audit payload, and the default content mode is
+      hash, which stores a hash of the payload and not the payload, so on the arrangement the system ships with
+      the record proved a call happened and proved NOTHING about the redaction: an operator asking whether
+      anything was removed got a null. A summary is metadata rather than content, so it now has four columns of
+      its own in migration 012 and is not governed by a setting about storing content. And the probe serialised
+      the payload a second time with different separators, recording a hash that did not match the one the
+      module computed, so the record looked correct and proved nothing about what was sent; `prepare()` now
+      hands out the exact string it hashed. OPEN, a tamper-evidence gap rather than a correctness one: the audit
+      chain's canonical string covers twelve fields and not the four new ones, so a hand-edited redaction count
+      would still verify. Extending a hash chain's canonical form invalidates every existing row's hash, so it
+      needs a version column and a verifier that reads the version per row. It is the first item for 3.14, which
+      owns the audit record's lifecycle.
   - id: SEC-INJECT-001
     title: Prompt injection from document content cannot change the lane or the answer's boundary
     tier: [cloud, office, hosted]
