@@ -15,6 +15,34 @@ FROM ghcr.io/docling-project/docling-serve-cpu@sha256:225c8586e20d5d0fc6811a9e0e
 # The service is one file and it imports only what the image already installs: fastapi, uvicorn, docling.
 COPY parser_service.py /app/parser_service.py
 
+# **LibreOffice, because Docling needs it for RTF and this was the only thing missing for that format.**
+#
+# Docling's format table lists `RTF | Rich Text Format; requires LibreOffice`, and it registers RTF properly:
+# `InputFormat.RTF` maps to `WordFormatOption()`, whose backend shells out to convert the file to DOCX. Its
+# `get_libreoffice_cmd()` returned `None` in this image because the binary was not installed, so every RTF
+# failed with `LibreOffice is required to convert a .rtf file to .docx` -- which the ingestion worker sees as
+# a generic `RuntimeError`, classifies as a PERMANENT failure, and dead-letters after two cycles.
+#
+# The symptom was therefore a supported format silently never being indexed. Nothing in the pipeline said a
+# binary was missing; the manifest recorded a failure count, and the reason sat unread in `last_error`.
+#
+# `libreoffice-writer` rather than the full suite: 332 MB installed against several times that, and it is the
+# component that opens a Word or RTF document. `--setopt=install_weak_deps=False` keeps out the fonts, Java
+# runtimes and mail-merge extras that arrive as recommendations and none of which a converter needs.
+#
+# No application code changes. Docling finds the binary itself with `shutil.which` and already isolates its
+# own LibreOffice profile per process and applies a timeout, so the library handles concurrency rather than us.
+#
+# **The image runs as uid 1001 with `HOME=/opt/app-root/src`, which is writable.** That matters: LibreOffice
+# creates a user profile on first use and fails without somewhere to put it. It was checked, not assumed.
+RUN set -eux; \
+    dnf install -y --setopt=install_weak_deps=False libreoffice-writer; \
+    dnf clean all; \
+    rm -rf /var/cache/dnf; \
+    command -v soffice >/dev/null; \
+    python -c "from docling.backend.docx.drawingml.utils import get_libreoffice_cmd; \
+assert get_libreoffice_cmd(), 'Docling cannot find LibreOffice, so .rtf will dead-letter again'"
+
 ENV PYTHONUNBUFFERED=1 \
     PARSER_UPLOAD_DIR=/tmp/oi-parser
 

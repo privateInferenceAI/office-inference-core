@@ -50,6 +50,7 @@ from __future__ import annotations
 import argparse
 import csv
 import io
+import re
 import shutil
 import sys
 import textwrap
@@ -238,8 +239,6 @@ GENERATED = (
      "the .ods case: an open-document spreadsheet"),
     ("odp_file", "OdpFileProvider", "odp_file", "toolbox-talk.odp", "company",
      "the .odp case: an open-document presentation"),
-    ("rtf_file", "RtfFileProvider", "rtf_file", "terms-rtf.rtf", "company",
-     "the .rtf case: older interchange format, plain markup"),
     ("csv_file", "CsvFileProvider", "csv_file", "callout-log.csv", "company",
      "the .csv case: rows the lexical arm can match exactly"),
     ("txt_file", "TxtFileProvider", "txt_file", "meeting-notes.txt", "company",
@@ -253,6 +252,53 @@ GENERATED = (
     ("pdf_file", "PdfFileProvider", "pdf_file", "board-minutes.pdf", "executive",
      "a second restricted-root document, in the format most likely to be cited"),
 )
+
+
+def rich_text(paragraphs: list[tuple[str, str]]) -> str:
+    """A genuine RTF document, which `faker-file` does not produce.
+
+    **`faker-file`'s RtfFileProvider writes plain text with an `.rtf` extension** -- no `{\rtf1` header and no
+    control words. `file` reports `ASCII text`, and a strict parser is right to refuse it. That mattered
+    because the corpus reported "15/15 formats covered" while containing nothing a real client's parser would
+    accept, so the format looked tested and was not.
+
+    RTF is a brace-delimited tree of control words. The minimum a parser needs is `{\rtf1` to open, a font
+    table, and `\par` between paragraphs. Escapes matter: a literal backslash, `{` or `}` must itself be
+    backslash-escaped or the tree structure breaks, which is the commonest way a hand-made RTF fails.
+    """
+    def escape(text: str) -> str:
+        out = text.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
+        return out.replace("\n", " ")
+
+    body = []
+    for style, text in paragraphs:
+        escaped = escape(text)
+        match = re.match(r"^(#{1,3})\s+(.*)$", escaped)
+        if match:
+            body.append("\\b\\fs%d %s\\b0\\par" % (28 - 4 * len(match.group(1)), match.group(2)))
+        else:
+            body.append("%s\\par" % escaped)
+    return (
+        "{\\rtf1\\ansi\\deff0\n"
+        "{\\fonttbl{\\f0\\froman Times New Roman;}{\\f1\\fswiss Arial;}}\n"
+        "\\f0\\fs24\n" + "\n".join(body) + "\n}\n"
+    )
+
+
+def malformed_rich_text() -> str:
+    """RTF a strict parser refuses: the braces do not balance.
+
+    A client can supply a file whose extension promises one thing and whose contents are another -- a
+    truncated download, a renamed text file, a document saved with the wrong extension. The corpus needs one
+    of those as much as it needs a valid file, because the two paths through the pipeline differ: a valid
+    file must be parsed, and a malformed one must fail **visibly**, be retried once, then dead-letter.
+    """
+    return (
+        "{\\rtf1\\ansi\\deff0\n"
+        "{\\fonttbl{\\f0\\froman Times New Roman;}\n"   # font table never closed
+        "\\f0\\fs24 This document is deliberately malformed.\\par\n"
+        "The font table above is missing its closing brace, so a parser that trusts the tree will fail.\n"
+    )
 
 
 def markdown_to_html(markdown_text: str) -> str:
@@ -295,6 +341,24 @@ def write_authored(target: Path, lines: list[str]) -> dict:
         written[root].append(name)
 
     put("company", "travel-expenses-policy.md", policy_markdown())
+    # **`faker-file` cannot write a valid RTF**, so both RTF cases are authored here: one a parser must
+    # accept, and one it must refuse visibly. See `rich_text` for why the provider's output is not RTF.
+    put("company", "terms-of-service.rtf", rich_text([
+        ("h1", f"{CLIENT}: Standard Terms of Service"),
+        ("p", "These terms apply to all work carried out under a signed order. They take precedence over "
+              "any terms supplied by the client, except where the order states otherwise in writing."),
+        ("h2", "1. Charges"),
+        ("p", "Charges are as set out in the schedule of fees current at the date of the order. Standard "
+              "labour is charged at 145.00 per hour during business hours and at the out of hours rate "
+              "outside them."),
+        ("h2", "2. Payment"),
+        ("p", "Invoices are payable within thirty days. Interest accrues on late payment at 2 percent "
+              "above the base rate."),
+        ("h2", "3. Liability"),
+        ("p", "Liability is limited to the charges paid for the work giving rise to the claim. Nothing in "
+              "these terms limits liability for death or personal injury caused by negligence."),
+    ]))
+    put("company", "malformed-fixture.rtf", malformed_rich_text())
     put("company", "onboarding-notes.md", onboarding_notes_markdown())
     put("company", "pii-new-starter.md", pii_markdown())
     put("company", "dead-letter-fixture.txt", dead_letter_txt())
