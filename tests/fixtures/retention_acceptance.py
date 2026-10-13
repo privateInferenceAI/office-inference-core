@@ -17,7 +17,12 @@ Run from the repo root on the box:
     cd /opt/oi-core
     docker run --rm --network ai-net --user "$(id -u):$(id -g)" \\
       -v /opt/oi-core:/w -v /tmp:/probe:ro -w /w \\
-      --entrypoint python oi-core/retention:local /tmp/retention_acceptance.py
+      --entrypoint python oi-core/ingestion:local /tmp/retention_acceptance.py
+
+The image is the INGESTION one and not the retention one, which is not obvious. This probe imports the
+retriever, and the retriever's lexical arm reaches Postgres through `psycopg2`; the retention image carries
+`psycopg` version 3 for its own CLI and those are different packages. The retention module imports neither, so
+this is the same file reached through the same path, in the image that has the driver the other half needs.
 """
 from __future__ import annotations
 
@@ -89,8 +94,12 @@ until the hold is released, and the hold register is checked before every dispos
 
 
 def db():
-    import psycopg
-    return psycopg.connect(os.environ["DATABASE_URL"], autocommit=True)
+    # psycopg2 rather than psycopg 3, because this runs in the ingestion image which has the driver the
+    # retriever's lexical arm needs. `retention.py` imports neither, so the module under test is the same file.
+    import psycopg2
+    connection = psycopg2.connect(os.environ["DATABASE_URL"])
+    connection.autocommit = True
+    return connection
 
 
 def present() -> dict:
@@ -99,9 +108,9 @@ def present() -> dict:
     Asked of the stores rather than of the purge's own report, because a purge that reports success while a
     store still holds the text is the failure this test exists for.
     """
-    import psycopg
+    import psycopg2
     counts = {}
-    with psycopg.connect(os.environ["DATABASE_URL"]) as connection:
+    with psycopg2.connect(os.environ["DATABASE_URL"]) as connection:
         with connection.cursor() as cur:
             cur.execute("select count(*) from chunk_index where doc_id = %s", (DOC_ID,))
             counts["lexical"] = cur.fetchone()[0]
@@ -143,11 +152,17 @@ def main() -> int:
         # Ingested through the worker's own cycle, exactly as a real document would be. Skipped when the worker
         # has already picked it up, because running a second cycle beside the worker's is how the payload
         # version bump put this box at load 38.
+        # The environment is passed explicitly. Without DATABASE_URL the worker falls back to an in-memory
+        # manifest, treats every document as new and re-embeds the whole corpus: a run of this probe that
+        # forgot it re-embedded 764 chunks beside the worker's own cycle and the embedding service answered 429.
         cycle = subprocess.run([sys.executable, "/app/ingest.py", "--documents", "/w/documents"],
-                               capture_output=True, text=True)
+                               capture_output=True, text=True, env=dict(os.environ))
         print(f"  ingest exited {cycle.returncode}")
-        for line in (cycle.stdout or "").strip().splitlines()[-3:]:
+        for line in (cycle.stdout or "").strip().splitlines()[-4:]:
             print(f"    {line}")
+        if "keeps its manifest in memory" in (cycle.stdout or ""):
+            problems.append("the ingest ran without DATABASE_URL, so it used a memory manifest and re-embedded "
+                            "the whole corpus instead of adding one document")
 
     before = present()
     print(f"  indexed: {before}")

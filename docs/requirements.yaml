@@ -273,7 +273,7 @@ items:
     tier: [cloud, office, hosted]
     phase: C2
     verify: after a purge, the same question returns no passage from the deleted document
-    status: open
+    status: verified
     note: >-
       Built 2026-10-13, recorded in docs/runbook.md step 3.14. EVERYWHERE is the requirement. The vector index
       is named because it is the obvious one, and the one that gets forgotten is whichever store was added most
@@ -290,13 +290,20 @@ items:
       not. Status is open because the proof has to run against the deployed stores. BOUND, stated rather than
       hidden: there is no rollback, so a purge that fails part way leaves the document partly gone. The record
       says which stores confirmed, and re-running is safe because every delete is by filter rather than by a
-      list of ids.
+      list of ids. VERIFIED 2026-10-13 against the deployed stores. A fixture carrying a reference that appears
+      nowhere else was retrievable as the FIRST result for its question before the purge; a hold was placed and
+      the purge was refused with the reason legal_hold while every store was measured unchanged; the hold was
+      released and the purge cleared the vector index, the lexical index and the manifest, each confirmed by
+      querying the store rather than by reading the purge's own report; and the same question asked afterwards
+      returned no passage from the document. The record named all four stores including audit_payload reporting
+      zero, which is the point of recording per store rather than as a total: a store that was never wired in
+      looks like a store that had nothing to do, and only the per-store record tells them apart.
   - id: DATA-HOLD-001
     title: Legal hold blocks a purge
     tier: [cloud, hosted]
     phase: C2
     verify: a purge on a held document is refused and the refusal is recorded
-    status: open
+    status: verified
     note: >-
       Built 2026-10-13, recorded in docs/runbook.md step 3.14. A deployment-scope hold has no document list, so
       a document uploaded after the hold was placed is covered by it: a hold that only covered what existed at
@@ -304,8 +311,10 @@ items:
       checked in ONE query before any store is touched, because checking it per store means a hold obeyed by
       the store somebody remembered and ignored by the one they did not, which from the client's side is the
       same as no hold at all. The refusal names the hold, its scope, who placed it and why, and how to release
-      it, because a refusal a person cannot act on is one they route around. Status is open because the proof
-      has to run against the deployed store.
+      it, because a refusal a person cannot act on is one they route around. VERIFIED 2026-10-13 against the
+      deployed store, in the same run as DATA-PURGE-001: the hold was placed, the purge was refused with the
+      reason legal_hold, and every store was measured before and after the refusal and was unchanged. The
+      refusal named the hold id, its scope, who placed it and why, and the command to release it.
   - id: DATA-EXIT-001
     title: Termination destroys client data and produces evidence that it happened
     tier: [cloud, hosted, office]
