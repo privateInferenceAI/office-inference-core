@@ -374,3 +374,114 @@ def test_an_office_build_with_no_frontier_lane_needs_no_egress_block(packs):
     manifest = load(ROOT / "manifests" / "dev-office.yaml")
     assert manifest["lanes"]["frontier"]["enabled"] is False
     assert problems(manifest, packs) == []
+
+
+# --------------------------------------------------------------------------- divergence warnings
+#
+# Two fields carry the same enum and the same meaning: `lanes.frontier.data_classes_allowed` and
+# `access.egress.frontier_classes`. The validator reads the first, the egress gate reads the second, and
+# nothing reconciled them until these warnings. Both fields stay, so a disagreement has to be VISIBLE
+# rather than fatal — a manifest that works today must not stop working on upgrade.
+
+def test_agreeing_fields_produce_no_warning(packs):
+    """The common case, and the one that must stay quiet.
+
+    `example-hybrid` declares both blocks with the same classes on purpose: it is what a client manifest
+    should look like, and a warning here would teach people to ignore warnings.
+    """
+    manifest = load(ROOT / "manifests" / "example-hybrid.yaml")
+    assert vm.divergences(manifest) == []
+
+
+def test_a_gate_wider_than_the_declaration_is_reported_as_dangerous(packs):
+    """The direction that matters: material leaves that the lane block does not permit.
+
+    This is the case a client's contract would call a breach, and it is the one the warning has to name.
+    Saying only "the two lists differ" would leave a reader to work out which way was bad.
+    """
+    manifest = load(ROOT / "manifests" / "dev-cloud.yaml")
+    manifest["lanes"]["frontier"]["data_classes_allowed"] = ["public"]
+    manifest["access"]["egress"]["frontier_classes"] = ["public", "internal"]
+    # The redaction pair is made to agree so this test asserts one thing.
+    manifest["lanes"]["frontier"]["redaction"] = True
+    manifest["access"]["egress"]["redaction"] = "on"
+
+    found = vm.divergences(manifest)
+    assert len(found) == 1, found
+    assert "may leave for a frontier model although the lane block does not permit it" in found[0]
+    assert "[internal]" in found[0]
+
+
+def test_a_gate_narrower_than_the_declaration_is_reported_as_safe_but_misleading(packs):
+    """The other direction, and it deserves different words.
+
+    Nothing leaves that was forbidden, so this is not a breach — it is a manifest that reads as though
+    something may be sent when it may not. Calling both directions "a disagreement" would make the safe
+    one look as urgent as the dangerous one.
+    """
+    manifest = load(ROOT / "manifests" / "dev-cloud.yaml")
+    manifest["lanes"]["frontier"]["data_classes_allowed"] = ["public", "internal"]
+    manifest["access"]["egress"]["frontier_classes"] = ["public"]
+    manifest["lanes"]["frontier"]["redaction"] = True
+    manifest["access"]["egress"]["redaction"] = "on"
+
+    found = vm.divergences(manifest)
+    assert len(found) == 1, found
+    assert "safe, but the manifest reads as though" in found[0]
+    assert "may leave for a frontier model although" not in found[0]
+
+
+def test_one_field_absent_is_not_a_divergence(packs):
+    """A manifest written against the old table declares only the lane field.
+
+    That is stale rather than contradictory, and warning about it would fire on manifests that are working
+    exactly as intended. The check is about two declarations disagreeing, not about one being missing.
+    """
+    manifest = load(ROOT / "manifests" / "dev-cloud.yaml")
+    manifest.pop("access", None)
+    assert vm.divergences(manifest) == []
+
+
+def test_redaction_disagreeing_is_reported(packs):
+    """The same pairing on the other decision, and it is divergent in two shipped manifests already.
+
+    `dev-cloud` says `redaction: false` in the lane block and `on` in the access block. The renderer's
+    default has been deciding which wins, silently, which is the whole problem this warning exists for.
+    """
+    manifest = load(ROOT / "manifests" / "dev-cloud.yaml")
+    manifest["lanes"]["frontier"]["data_classes_allowed"] = ["public", "internal"]
+    manifest["access"]["egress"]["frontier_classes"] = ["public", "internal"]
+    manifest["lanes"]["frontier"]["redaction"] = False
+    manifest["access"]["egress"]["redaction"] = "on"
+
+    found = vm.divergences(manifest)
+    assert len(found) == 1, found
+    assert "access.egress.redaction disagree" in found[0]
+
+
+def test_the_two_shipped_manifests_that_diverge_are_reported(packs):
+    """A regression guard on the real files, so a quiet revert shows up here.
+
+    `dev-cloud` and `example-standard-cloud` both declare `redaction: false` in the lane block while the
+    access block says `on`. Either the manifests get corrected or this test gets corrected; what must not
+    happen is the warning silently disappearing.
+    """
+    for name in ("dev-cloud.yaml", "example-standard-cloud.yaml"):
+        manifest = load(ROOT / "manifests" / name)
+        found = vm.divergences(manifest)
+        assert any("redaction" in w for w in found), f"{name} should report its redaction divergence"
+
+
+def test_a_warning_never_makes_a_valid_manifest_fail(packs):
+    """The property the whole design rests on: visible, not fatal.
+
+    A divergence warning printed beside a FAIL would make every divergent manifest unshippable, and refusing
+    a manifest that is working today is a worse outcome than a warning nobody reads. `check` and
+    `divergences` are separate functions for this reason.
+    """
+    manifest = load(ROOT / "manifests" / "dev-cloud.yaml")
+    manifest["lanes"]["frontier"]["data_classes_allowed"] = ["public"]
+    manifest["access"]["egress"]["frontier_classes"] = ["public", "internal"]
+    assert vm.divergences(manifest), "this manifest diverges"
+    assert vm.check(copy.deepcopy(manifest), packs, Path("test-manifest.yaml")) == [], (
+        "a divergence must not add a problem that fails validation")

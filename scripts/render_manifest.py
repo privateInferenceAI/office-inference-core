@@ -202,6 +202,21 @@ def main() -> int:
     env["FRONTIER_CLASSES"] = ",".join(egress.get("frontier_classes") or [])
     env["EGRESS_REDACTION"] = str(egress.get("redaction", "on"))
 
+    # Whether this deployment is running on a manifest that says one thing in the lane block and another in
+    # the access block, rendered into the environment so the divergence is discoverable ON THE BOX and not
+    # only to whoever last ran the validator. The two fields carry the same enum, the gate reads the access
+    # one, and nothing else reconciles them; a client asking "why did that get sent" should be answerable by
+    # reading the deployment's own env file rather than by finding the manifest and diffing two lists.
+    #
+    # Absent rather than empty when there is no divergence, so `grep MANIFEST_DIVERGENCE rendered/env` is a
+    # check that either finds something or finds nothing, with no third case to interpret.
+    from validate_manifests import divergences  # noqa: PLC0415
+    found = divergences(manifest)
+    if found:
+        env["MANIFEST_DIVERGENCE"] = " | ".join(found)
+    else:
+        env.pop("MANIFEST_DIVERGENCE", None)
+
     # Offsite delivery of audit artifacts. Absent means this build keeps everything on the box,
     # which is a valid office shape and the default. Set and removed explicitly rather than
     # defaulted, so a manifest without a destination cannot inherit one from an earlier render.

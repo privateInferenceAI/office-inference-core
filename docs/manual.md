@@ -1248,6 +1248,31 @@ So a client's manifest can say one thing in `lanes.frontier.data_classes_allowed
 the first disagrees. Until the overlap is resolved, **set both, and treat `access.egress` as the one that
 decides.** The same applies to `lanes.frontier.redaction` against `access.egress.redaction`: set both.
 
+**You do not have to remember to compare them, because the tools do it for you.** The validator prints a
+warning beside the `ok` line when the two disagree, and the renderer writes the same warning into
+`rendered/env` as `MANIFEST_DIVERGENCE`, so the divergence is discoverable on the machine rather than only
+to whoever last ran the validator:
+
+```
+python3 scripts/validate_manifests.py
+ok   dev-cloud.yaml  (profile=cloud, packs=['core'])
+  ! dev-cloud.yaml: lanes.frontier.redaction and access.egress.redaction disagree, and access.egress is
+    the one the egress gate reads: declared False, enforced 'on'. …
+```
+
+**A warning, never a failure, and the direction is stated.** A manifest that is working today must not stop
+working on upgrade, so a divergence does not make a manifest invalid. What it does do is say which way the
+two differ, because the two directions are not equally urgent:
+
+- **The gate is wider than the declaration** — material leaves that the lane block does not permit. The
+  warning says so, and this is the one to act on.
+- **The gate is narrower** — nothing leaves that was forbidden, so it is safe and *misleading* rather than
+  unsafe. Worth correcting, not worth an incident.
+
+**What neither tool can do is decide which line is right.** The warning names both values and tells you they
+disagree; a person then has to read the client's contract and correct whichever line is wrong. That is
+deliberate, and it is the reason this is a warning rather than a silent rule.
+
 **This is not hypothetical, and the failure mode is worth stating because it is silent.** Three of the
 example manifests shipped with `lanes.frontier.data_classes_allowed` declared and **no `access` block at
 all**. They validated. They then rendered `FRONTIER_CLASSES=` — empty — and the gate reads an empty list as

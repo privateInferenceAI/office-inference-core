@@ -27,6 +27,90 @@ OFFSITE_ARTIFACTS = frozenset({"anchors", "exports", "backups"})
 CONTENT_MODES = frozenset({"hash", "redacted", "full"})
 DATA_CLASSES = frozenset({"public", "internal", "confidential", "regulated"})
 
+# The data classes in order of sensitivity. This exists so a divergence can be reported as a DIRECTION
+# rather than as two lists that differ, which is the difference between a warning somebody reads and one
+# they learn to ignore. `regulated` is most sensitive, `public` least.
+DATA_CLASS_ORDER = ("public", "internal", "confidential", "regulated")
+
+
+def _sensitivity(classes) -> int:
+    """How far up the sensitivity order a set of classes reaches. -1 for none."""
+    ranked = [DATA_CLASS_ORDER.index(str(c)) for c in (classes or []) if str(c) in DATA_CLASS_ORDER]
+    return max(ranked) if ranked else -1
+
+
+def divergences(manifest: dict) -> list[str]:
+    """Where declaration and enforcement disagree about the same policy, as warnings.
+
+    **Why this exists and why it warns rather than refuses.** Two fields carry the same enum and the same
+    meaning: `lanes.frontier.data_classes_allowed` and `access.egress.frontier_classes`. The validator reads
+    the first and `services/egress/lane.py` reads the second, which is rendered from it. A client's manifest
+    can therefore declare one policy in one place and enforce another in the other, pass validation, and
+    behave according to whichever field the reader happened to look at.
+
+    Both fields stay, because every shipped manifest before C2 declared only the lane one and removing it
+    would make those manifests invalid rather than merely stale. What this adds is that a disagreement is
+    **visible** instead of silent. It is not an error for two reasons: a manifest that declares one field and
+    not the other is not contradictory, and a manifest that is genuinely contradictory today is working, so
+    failing it would break a deployment on upgrade — which is a worse outcome than a warning nobody reads.
+
+    The direction matters more than the fact. `access.egress` is what leaves, so:
+
+      access.egress wider than the lane   -> material leaves that the declaration does not permit.
+                                             This is the dangerous direction and the message says so.
+      access.egress narrower              -> nothing leaves that was not permitted, which is safe and
+                                             misleading rather than unsafe.
+
+    The same pairing applies to redaction, and it is already divergent in a shipped manifest: the lane block
+    says `redaction: false` while the egress block says `on`, and the renderer's default has been deciding.
+    """
+    warnings: list[str] = []
+    lane = (manifest.get("lanes") or {}).get("frontier") or {}
+    egress = (manifest.get("access") or {}).get("egress") or {}
+
+    lane_classes = list(lane.get("data_classes_allowed") or [])
+    egress_classes = list(egress.get("frontier_classes") or [])
+
+    if not lane_classes or not egress_classes:
+        return warnings
+
+    def show(classes) -> str:
+        return "[" + ", ".join(str(c) for c in classes) + "]"
+
+    missing_from_egress = [c for c in lane_classes if c not in egress_classes]
+    extra_in_egress = [c for c in egress_classes if c not in lane_classes]
+    if missing_from_egress or extra_in_egress:
+        header = (
+            "lanes.frontier.data_classes_allowed and access.egress.frontier_classes disagree, and "
+            "access.egress is the one that governs egress: "
+            f"declared {show(lane_classes)}, enforced {show(egress_classes)}."
+        )
+        if extra_in_egress:
+            warnings.append(
+                header + f" **{show(extra_in_egress)} may leave for a frontier model although the lane "
+                "block does not permit it.** Set both fields to the classes the client's contract allows, "
+                "and read the contract before changing either: this is a divergence a person has to "
+                "resolve, not one the renderer should guess at.")
+        else:
+            warnings.append(
+                header + f" The gate is narrower, so nothing leaves that the declaration forbids — safe, "
+                f"but the manifest reads as though {show(missing_from_egress)} may be sent when it may "
+                "not. Set both fields to the same list.")
+
+    lane_redaction = lane.get("redaction")
+    egress_redaction = egress.get("redaction")
+    if lane_redaction is not None and egress_redaction is not None:
+        def truthy(value) -> bool:
+            return str(value).strip().lower() in ("1", "true", "yes", "on")
+        if truthy(lane_redaction) != truthy(egress_redaction):
+            warnings.append(
+                "lanes.frontier.redaction and access.egress.redaction disagree, and access.egress is the "
+                f"one the egress gate reads: declared {lane_redaction!r}, enforced {egress_redaction!r}. "
+                "Nothing downstream reconciles them, so the rendered value decides and the lane block is "
+                "decoration. Set both to what the client asked for.")
+
+    return warnings
+
 
 def load_catalog_requires() -> dict[str, list[str]]:
     """The `requires` edges between packs, read from the same catalog as the ids."""
@@ -316,6 +400,10 @@ def main(argv: list[str]) -> int:
     for path in paths:
         manifest = parse(path.read_text()) or {}
         problems = check(manifest, packs, path)
+        # Warnings are printed whether or not the manifest validates, and they never affect the exit code.
+        # A divergence between the two places the same policy can be declared is a thing for a person to go
+        # and read the contract about; it is not a reason to refuse a manifest that is working.
+        warnings = divergences(manifest)
         if problems:
             failed += 1
             print(f"FAIL {path.name}")
@@ -323,6 +411,8 @@ def main(argv: list[str]) -> int:
                 print(f"  - {p}")
         else:
             print(f"ok   {path.name}  (profile={manifest['profile']}, packs={manifest['packs']})")
+        for w in warnings:
+            print(f"  ! {path.name}: {w}")
 
     print()
     print(f"{len(paths) - failed}/{len(paths)} manifests valid; {len(packs)} packs known")
