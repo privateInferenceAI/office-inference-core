@@ -354,7 +354,7 @@ def _record_purge(connection, result: PurgeResult, reason: str, actor: str) -> N
 # --------------------------------------------------------------------------- destruction
 
 def destroy_all(connection, reason: str, actor: str, vector_url: str, collection: str,
-                timeout: int = 120) -> dict:
+                timeout: int = 120, documents_root: str | None = None) -> dict:
     """Every document in every store, with a record the client can keep and check.
 
     Separate from `purge` because it is a different event. A purge is one document on a client's instruction
@@ -430,6 +430,43 @@ def destroy_all(connection, reason: str, actor: str, vector_url: str, collection
             f"store it there, which is what the hash content mode is for.")
     attempt("purge_history", "the record of earlier purges", clear_table("purge_records"))
     attempt("holds", "the record of holds", clear_table("legal_holds"))
+
+    # **The files, which is the store a teardown is FOR.** Every other attempt above clears an index this
+    # system built; this one removes the client's own documents from disk, and it is the only place in the
+    # product where that is right.
+    #
+    # The reasoning is the same one that says `--enforce` must unlink and `--purge` must not. A purge is one
+    # document on a client's instruction during the contract, and they still have their copy, so the file
+    # stays. A teardown is the end of the contract and the client has asked for their data to be gone; a
+    # teardown that left every document sitting in their folder would be the same defect as a retention
+    # period that only hid a file.
+    #
+    # **This is also where a sweep is safe, and that is worth stating because it is not safe anywhere else.**
+    # "Files with no manifest row" is NOT a safe test in general: a document somebody just uploaded and no
+    # ingestion cycle has seen yet looks identical to an orphan, which is why nothing deletes on that
+    # inference. Here the manifest has just been emptied on purpose and the intent is that nothing remains,
+    # so every file under the root is meant to go. The verb is `deleted` because that is what happened.
+    if documents_root is not None:
+        root = Path(documents_root)
+
+        def remove_documents() -> int:
+            if not root.exists():
+                return 0
+            removed = 0
+            for path in sorted(root.rglob("*"), reverse=True):
+                if path.is_file() or path.is_symlink():
+                    path.unlink()
+                    removed += 1
+                elif path.is_dir() and path != root:
+                    # Directories go only if the removal above left them empty, so a nested folder holding
+                    # something this loop did not delete is reported by its contents rather than vanishing.
+                    try:
+                        path.rmdir()
+                    except OSError:
+                        pass
+            return removed
+
+        attempt("documents", "the client's own documents, on disk in their folder", remove_documents)
 
     # The audit chain itself is NOT destroyed, and that is a decision rather than an omission. It records that
     # documents existed and that they were destroyed, and it is the thing that proves the destruction happened.

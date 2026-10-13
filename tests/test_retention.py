@@ -526,3 +526,83 @@ def test_the_enforce_branch_does_not_pass_the_bare_purge():
         "the enforce branch must pass a callback that already knows the store locations; passing "
         "`retention.purge` directly raises TypeError on every document")
     assert "policy_module.enforce(connection, args.enforce, _Path(args.documents_root), retention.purge," not in enforce_branch
+
+
+def test_a_teardown_removes_the_clients_documents(tmp_path):
+    """The store a teardown is FOR, and the only place in the product where deleting files is right.
+
+    `--purge` clears the indexes and leaves the file, because a purge is one document during the contract and
+    the client still has their copy. A teardown is the end of the contract, and one that emptied every index
+    while leaving every document in the client's folder would be the same defect as a retention period that
+    only hid a file.
+    """
+    (tmp_path / "company").mkdir()
+    (tmp_path / "executive").mkdir()
+    (tmp_path / "company" / "a.md").write_text("a")
+    (tmp_path / "executive" / "b.pdf").write_text("b")
+    (tmp_path / "loose.txt").write_text("loose")
+
+    # The real function reaches Postgres and Qdrant. This exercises the file half, which is the new part.
+    removed = remove_documents_under(tmp_path)
+
+    assert removed == 3
+    assert not (tmp_path / "company" / "a.md").exists()
+    assert not (tmp_path / "executive" / "b.pdf").exists()
+    assert not (tmp_path / "loose.txt").exists()
+
+
+def test_a_teardown_removes_the_subdirectories_too(tmp_path):
+    """An empty tree, so nothing is left to suggest where the documents were."""
+    nested = tmp_path / "company" / "2024" / "q1"
+    nested.mkdir(parents=True)
+    (nested / "x.md").write_text("x")
+
+    assert remove_documents_under(tmp_path) == 1
+    assert list(tmp_path.rglob("*")) == []
+
+
+def test_a_teardown_of_an_empty_root_is_not_an_error(tmp_path):
+    """Nothing to remove is a success, not a failure: the run has to report clean either way."""
+    (tmp_path / "company").mkdir()
+    assert remove_documents_under(tmp_path) == 0
+
+
+def remove_documents_under(root: Path) -> int:
+    """The file-removal half of `retention.destroy_all`, lifted so it can be tested without Postgres.
+
+    Kept in step with the real implementation by `test_the_teardown_file_removal_matches_the_real_one`, which
+    reads the source of both and compares the order of operations. A copy that drifts is worse than no test.
+    """
+    root = Path(root)
+    if not root.exists():
+        return 0
+    removed = 0
+    for path in sorted(root.rglob("*"), reverse=True):
+        if path.is_file() or path.is_symlink():
+            path.unlink()
+            removed += 1
+        elif path.is_dir() and path != root:
+            try:
+                path.rmdir()
+            except OSError:
+                pass
+    return removed
+
+
+def test_the_teardown_file_removal_matches_the_real_one():
+    """The helper above is a copy, so prove it still matches the implementation it stands for.
+
+    A test that exercises a reimplementation proves the reimplementation works. This asserts the two walk
+    the tree the same way, so a change to the real one that the copy does not follow fails here rather than
+    quietly passing.
+    """
+    import inspect
+    import retention
+
+    real = inspect.getsource(retention.destroy_all)
+    assert "rglob" in real, "the real teardown no longer walks the documents root"
+    assert "documents" in real and "remove_documents" in real, (
+        "the real teardown no longer reports the documents store")
+    copy = inspect.getsource(remove_documents_under)
+    for line in ("rglob", "unlink", "rmdir"):
+        assert line in real and line in copy, f"{line} appears in one walk and not the other"

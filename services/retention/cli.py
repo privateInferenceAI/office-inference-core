@@ -176,8 +176,13 @@ def main() -> int:
             print("--destroy-all needs --reason", file=sys.stderr)
             return 1
         with connect() as connection:
+            # The documents root is passed so the teardown removes the client's own files as well as the
+            # indexes. Without it a teardown would clear everything this system built and leave every
+            # document sitting in the client's folder, which is the same defect as a retention period that
+            # only hid a file.
             record = retention.destroy_all(connection, args.reason, args.actor,
-                                           args.vector_url, args.collection)
+                                           args.vector_url, args.collection,
+                                           documents_root=args.documents_root)
         print(json.dumps(record, indent=2, sort_keys=True))
         print()
         print("Keep that file. Its hash is what lets you show later that it is the record we produced.")
