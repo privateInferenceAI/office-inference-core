@@ -1540,8 +1540,28 @@ filter. Step 3.8 is what enforces it.
 removed rather than superseded; that is step 3.10. The parser's per-page confidence is not stored, and
 step 3.4b records why it cannot be read from this service's output anyway.
 
+**Repairing a record written under an older rule.** A manifest row records a decision that was made by
+whatever code wrote it, and code changes. The first corpus run left two contract exhibits recorded as
+ingested with zero chunks behind them, and dead-lettered a 60-page PDF over two gateway timeouts. Neither
+row could know that the rules had moved, so both kept the documents out of the index while every fix to
+the chunker and the failure policy passed them by.
+
+The cycle now re-ingests a record that claims success with no chunks behind it, because a manifest is a
+cache of a claim about the index and a record with nothing behind it is a false claim whatever wrote it.
+For the failures, the repair is explicit:
+
+    docker exec ingestion python3 /app/ingest.py --clear-failures
+    docker exec ingestion python3 /app/ingest.py --clear-failures company/irs-p15.pdf
+
+With no argument it clears every recorded failure; with a path it clears one. The next cycle then tries
+those documents again. It is needed when a failure rule changes rather than routinely, and the
+alternative is telling an operator to delete rows by hand from a table they have no reason to know about.
+
 **If it breaks.**
 
+- A document that was fixed on disk is still skipped: the change is in the code rather than the bytes, so
+  the hash still matches and the manifest still believes its old claim. That is what the two repairs above
+  are for.
 - The worker re-ingests everything every cycle: the manifest is in memory, which happens when
   `DATABASE_URL` is unset or the database is unreachable. It says so at the top of its output rather than
   doing it quietly. Check `docker exec ingestion env | grep DATABASE_URL` and that `postgres` is healthy.

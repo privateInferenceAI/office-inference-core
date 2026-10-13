@@ -610,3 +610,70 @@ def test_the_kind_of_failure_is_decided_from_the_exception():
     assert ingest.is_transient(TimeoutError("took too long")) is True
     assert ingest.is_transient(ConnectionError("refused")) is True
     assert ingest.is_transient(RuntimeError("no retrievable text")) is False
+
+
+# --------------------------------------------------------------------------- repairing old records
+
+def test_a_record_claiming_success_with_no_chunks_is_re_ingested(tmp_path, wired):
+    """The residue of a bug the fix cannot reach by itself.
+
+    The first corpus run wrote two contract exhibits as zero chunks and recorded them as ingested. Those
+    rows say "unchanged, 0 chunks" ever since, so the hash check skips them forever and no fix to the
+    chunker ever reaches those documents. A manifest is a cache of a claim about the index, and a record
+    with nothing behind it is a false claim whatever wrote it.
+    """
+    services = wired()
+    make_corpus(tmp_path, "company/contract.htm", b"<html>a contract</html>")
+    manifest = ingest.MemoryManifest()
+    # The false claim, exactly as the old code wrote it.
+    manifest.put("company/contract.htm", {"relpath": "company/contract.htm", "root": "company",
+                                          "content_sha256": ingest.sha256_of(
+                                              tmp_path / "company" / "contract.htm")[0],
+                                          "chunk_count": 0, "failure_count": 0})
+
+    result = ingest.ingest_cycle(services, tmp_path, manifest)
+    assert result.skipped == 0, "a record with no chunks behind it must not be trusted"
+    assert result.changed == 1
+    assert result.chunks_written >= 1
+    assert services.parsed_names == ["company/contract.htm"]
+
+
+def test_clearing_failures_makes_a_dead_lettered_document_retryable(tmp_path, wired):
+    """What an operator needs when a failure rule changes.
+
+    The 60-page PDF was dead-lettered over two gateway timeouts. When failures learned to tell an outage
+    from a corrupt file, that row still said "two failures" and the document stayed dead, because a row
+    cannot know the rule that wrote it has been replaced. The alternative to a repair path is telling an
+    operator to delete rows by hand from a table they have no reason to know about.
+    """
+    services = wired(fail_for={"company/broken.pdf"})
+    make_corpus(tmp_path, "company/broken.pdf", b"not a pdf")
+    manifest = ingest.MemoryManifest()
+    ingest.ingest_cycle(services, tmp_path, manifest)
+    ingest.ingest_cycle(services, tmp_path, manifest)
+    assert manifest.get("company/broken.pdf")["failure_count"] == 2
+
+    # Still dead-lettered.
+    assert ingest.ingest_cycle(services, tmp_path, manifest).skipped == 1
+
+    assert manifest.clear_failures() == 1
+    record = manifest.get("company/broken.pdf")
+    assert record["failure_count"] == 0
+    assert record["failure_kind"] is None
+
+    # And now it is attempted again.
+    services.fail_for.clear()
+    result = ingest.ingest_cycle(services, tmp_path, manifest)
+    assert result.failed == 0
+    assert result.chunks_written >= 1
+
+
+def test_clearing_one_document_leaves_the_others_alone(tmp_path, wired):
+    """Scoped repair, so fixing one file does not silently retry a corpus of genuinely broken ones."""
+    manifest = ingest.MemoryManifest()
+    for name in ("a.pdf", "b.pdf"):
+        manifest.put(name, {"relpath": name, "root": "company", "content_sha256": "x",
+                            "chunk_count": 0, "failure_count": 2, "failure_kind": "permanent"})
+    assert manifest.clear_failures("a.pdf") == 1
+    assert manifest.get("a.pdf")["failure_count"] == 0
+    assert manifest.get("b.pdf")["failure_count"] == 2
