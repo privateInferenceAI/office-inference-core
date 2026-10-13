@@ -2407,10 +2407,30 @@ replaced. Nothing below this layer would have caught it. The probe was wrong and
 assumed the top-ranked passage is a good source, and it now builds its claim from the first passage a person
 may rely on.
 
-**One thing is open, and it is a ranking question rather than a correctness one.** Both versions were
-retrieved and the superseded one ranked first, so a user asking about the current rate got a refusal when a
-good answer was two places down. Whether a current document should be boosted is a search-quality change to
-measure against the golden set rather than guess at, so it is recorded as open.
+**The ranking item that was open is now closed, and the closing is worth reading because it was not a change
+to ranking.** When this step was first built the superseded 2025 schedule ranked first and the current 2026
+one second, so a user asking the current rate got a refusal while a good answer sat one place down. That was
+recorded as open rather than fixed, because boosting current documents is a search-quality change that should
+be measured against the golden set. It then resolved itself on a later run, and the honest record is that
+**nothing was changed to fix it**:
+
+```
+  [1] company/fee-schedule-2026.md   p1  score=0.60290456   current
+  [2] company/fee-schedule-2025.md   p1  score=0.59917563   SUPERSEDED
+```
+
+The margin is 0.0037, which is not a fix, it is a coin landing the other way. So the item is closed as
+*observed current* rather than as *solved*: a ranking that puts the current version first by four thousandths
+is one rerun away from putting it second again. If this matters for a client, it needs the golden set and a
+deliberate choice about boosting current documents, not another observation.
+
+**Two things in that output are worth noticing for a different reason.** The superseded `2026-copy` appears at
+`[3]`, so a near-duplicate of the current document is still competing with it in the result set; resolving the
+duplicate pair with `--distinct` or `--supersede` is the corpus fix, and section 13d covers that. And the
+higher-scoring passages are `[4]` and `[5]` at 0.7592 — the single line stating the rate — while the
+lower-scoring `[1]` is the whole table. **A small chunk that contains exactly the answer can outscore the
+fuller passage a person would want cited**, which is a chunking observation rather than a retrieval fault, and
+it is why the verifier works from what it was given rather than from what ranked highest.
 
 **If it breaks.**
 
@@ -2508,22 +2528,39 @@ zero on every question.
 
 ```
 docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
+  -e ACCESS_DENIAL_MODE=counted \
   -v /opt/oi-core:/w -w /w \
   --entrypoint python oi-core/ingestion:local \
   /w/tests/fixtures/acl_probe.py
 
 # and again with each policy, so the client's choice is seen rather than taken from a unit test
 docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
+  -e ACCESS_DENIAL_MODE=silent \
   -v /opt/oi-core:/w -w /w \
   --entrypoint python oi-core/ingestion:local \
-  /w/tests/fixtures/acl_probe.py --denial silent
+  /w/tests/fixtures/acl_probe.py
 ```
+
+**The `-e ACCESS_DENIAL_MODE=…` is not optional, and leaving it out is the trap this page used to fall into.**
+`DEFAULT_DENIAL_MODE` is read from the environment **at import time**, and a bare `docker run` passes no
+environment at all. So the probe without `-e` prints the library's fallback:
+
+```
+denial mode: denied (configured denied)
+```
+
+That is the code's default rather than the deployment's setting, which the manifest and `rendered/env` both
+declare as `counted`. The line is honest about the distinction — it says *configured denied* — but a reader
+who runs the command as it was written sees the wrong mode and concludes the manifest is not being honoured.
+Passing `-e` is what makes the probe show what the deployment actually does. The same caution applies to any
+probe run with a bare `docker run`: the tool reads its configuration from the environment, and only the
+compose file supplies it.
 
 The probe prints what is in the index by label, the denial mode in force, and then, for each role and
 question, how many passages came back, the best restricted score, whether the denial fired, and the
 disclosure the user would see. In silent mode that last line says the silent policy is working.
 
-The recorded measurement, against the deployed store on 2026-10-13, with the index holding 1059 company
+The recorded measurement, against the deployed store on 2026-10-13, with the index holding 1130 company
 points and 1 executive point:
 
 | Question, asked by the staff role | best permitted | best restricted | denied |
@@ -2701,9 +2738,30 @@ beside it.
 
 The event was then written through the deployment's own audit CLI and read back from Postgres. It showed
 `data_class=internal`, `redaction_count=3`, redactions of two Social Security numbers and one card, and
-`egress_allowed` true, on the default content mode where the payload itself is stored as a hash and not as
-text. The run printed `content mode stored the payload as: None` beside the redaction counts, which is the
-point: the record says what was removed, and it does not hold what was removed.
+`egress_allowed` true.
+
+**What the record holds depends on the class, and for this one it is not a hash.** `manifests/dev-cloud.yaml`
+sets `internal: redacted`, so the stored payload is the redacted request itself:
+
+```
+  content mode stored the payload as: {'lane': 'frontier', 'prompt': '{"messages":[{"content":"What does
+  the file say about [REDACTED-SSN]?"…}],"passages":[{"doc_id":"company/client-file.pdf","page":4,
+  "text":"Account holder SSN [REDACTED-SSN], card on file [REDACTED-CARD], rate 145.00 per hour."}]}',
+  'data_class': 'internal', 'redactions': {'ssn': 2, 'card': 1}, 'prompt_sha256': 'd914d097…',
+  'egress_allowed': True, 'redaction_count': 3, 'unverified_card_shapes': 0}
+```
+
+So the reader can see the question and the passage as they were sent, **with the identifiers replaced in
+place**. The security claim survives — no Social Security number and no card number is in that row — and it
+survives for a better reason than a hash would give, because the record shows what the model was actually
+asked while the thing that must not be stored is not in it. The hash of the redacted prompt is there too, so
+the record can still prove the prompt was not altered afterwards.
+
+An earlier version of this page said the payload was stored as a hash and that the run printed
+`content mode stored the payload as: None`. Both were wrong: `None` is not a value this probe prints, and the
+class in force is `redacted` rather than `hash`. It is corrected here because the wrong version made a
+narrower claim than the system can support, and a reader who checked it would have found the record holding
+more than the page promised.
 
 The gate and the redaction run where a frontier request is assembled. The component that assembles one, the
 assistant API, arrives in Phase 4, so today they are exercised by this probe and by the test suite.
@@ -2765,7 +2823,6 @@ oi run --rm retention --hold company/tax.pdf --reason "litigation in progress"
 oi run --rm retention --hold --reason "litigation in progress"
 oi run --rm retention --holds
 oi run --rm retention --purge company/tax.pdf --reason "client asked"
-oi run --rm retention --release-hold 1
 ```
 
 A hold refuses a purge and changes nothing, and the refusal is recorded. `--hold` with a document places a
@@ -2777,6 +2834,43 @@ ignored by the one they did not.
 
 `--holds` lists what is in force. A deployment-scope hold is the one people forget they placed, and it is the
 usual answer to a purge that was refused with no obvious reason.
+
+**Releasing a hold, and the mistake this page used to make.** Hold ids are assigned by the database and are
+**not** a sequence you can predict from this manual. An earlier version of the example below said
+`--release-hold 1`, which on the reference deployment releases nothing at all, because ids start at 2 and the
+first row was already released. The command exits 1 and prints:
+
+```
+hold 1 is not in force, so there was nothing to release
+```
+
+So the sequence is: **list, read the id, then release it.** Never guess the number.
+
+```
+$ oi run --rm retention --holds
+id 3  document   company/tax.pdf    litigation in progress   placed 2026-10-13 19:45
+id 4  deployment (every document)   litigation in progress   placed 2026-10-13 19:45
+
+$ oi run --rm retention --release-hold 4
+hold 4 released
+```
+
+**The second thing that trips people up: `--hold` with no document is easy to type by accident and it covers
+everything.** If a purge is refused and `--holds` shows a deployment-scope hold, that is the reason — for
+every document, not just the one you tried. Release it by the id `--holds` printed, and check afterwards that
+the list is empty rather than assuming the release worked:
+
+```
+oi run --rm retention --release-hold <the id --holds printed>
+oi run --rm retention --holds
+```
+
+`--release-hold` refuses an id that is not in force, which means **releasing twice is an error rather than a
+no-op** — so a script that releases defensively will report a failure on the second run. Check `--holds`
+first if that matters to you.
+
+**A hold is not deleted when released.** The row stays in `legal_holds` with a `released_at`, because "a hold
+was placed and lifted" is a fact an auditor may ask about, and a row that vanished could not answer.
 
 ### Time-based retention
 
