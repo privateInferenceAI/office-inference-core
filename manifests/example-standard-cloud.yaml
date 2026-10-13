@@ -26,6 +26,21 @@ lanes:
     data_classes_allowed: [public, internal, confidential]
     requires_approval: false
     redaction: false
+access:
+  # Read this block, not the lane's list above. The egress gate renders from
+  # access.egress.frontier_classes, so a manifest declaring only lanes.frontier.data_classes_allowed
+  # validates and then renders an empty permission set, which refuses every request without saying why.
+  # Both places carry the same classes until that overlap is resolved.
+  #
+  # redaction is "on" here while lanes.frontier.redaction above says false, and that mismatch is worth
+  # seeing rather than hiding: the renderer defaults access.egress.redaction to "on", so this deployment
+  # redacts today whether or not the lane block says otherwise. Turning it off is a client's decision to
+  # make explicitly, and a standard-cloud build that intends to send confidential material unredacted
+  # should say so here rather than only in the lane block, which nothing reads.
+  denial: denied
+  egress:
+    frontier_classes: [public, internal, confidential]
+    redaction: "on"
 budgets:
   # Per-role ceilings in USD. A hard cap: the gateway refuses over-budget requests rather
   # than alerting about them. Example figures for a small firm.

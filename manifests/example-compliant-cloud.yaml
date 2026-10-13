@@ -23,6 +23,14 @@ lanes:
     data_classes_allowed: [public, internal, confidential, regulated]
     requires_approval: false
     redaction: true
+access:
+  # The egress gate reads this block, not the lane's list above. Both carry the same classes on purpose:
+  # declaring only lanes.frontier.data_classes_allowed validates, then renders an empty permission set,
+  # and the gate refuses every request on a compliant deployment that believes it permits four classes.
+  denial: denied
+  egress:
+    frontier_classes: [public, internal, confidential, regulated]
+    redaction: "on"
 budgets:
   # Per-role ceilings in USD. A hard cap: the gateway refuses over-budget requests rather
   # than alerting about them. Example figures for a small firm.

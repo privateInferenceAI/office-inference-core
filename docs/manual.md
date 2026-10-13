@@ -1244,6 +1244,21 @@ So a client's manifest can say one thing in `lanes.frontier.data_classes_allowed
 the first disagrees. Until the overlap is resolved, **set both, and treat `access.egress` as the one that
 decides.** The same applies to `lanes.frontier.redaction` against `access.egress.redaction`: set both.
 
+**This is not hypothetical, and the failure mode is worth stating because it is silent.** Three of the
+example manifests shipped with `lanes.frontier.data_classes_allowed` declared and **no `access` block at
+all**. They validated. They then rendered `FRONTIER_CLASSES=` — empty — and the gate reads an empty list as
+a set of permitted classes with nothing in it, so it refuses:
+
+```
+no data classes are permitted on the frontier lane. This is what an unconfigured deployment looks like,
+and it refuses rather than guessing a default.
+```
+
+Every request refused, on a manifest that says three classes are allowed. Nothing errors at validation, and
+the first symptom is a model call that will not go out. A validator rule requiring `access.egress` whenever
+the frontier lane is enabled would catch it, and that rule does not exist yet; the three examples now
+declare both blocks, with a comment saying which one is read.
+
 This was found by a review, not by a failure, and it is left standing on purpose. Resolving it means
 either deleting a field that section 16 documents and clients may have written, or changing which field a
 security control reads, and both are decisions for the owner of the product rather than for whoever
