@@ -2488,9 +2488,26 @@ document telling employees not to share passwords is imperative, contains "must 
 an assistant** and at **attempts to change its behaviour**, not at imperative language, and there are tests
 asserting that a fee schedule, an employee policy and a document about assistants all pass untouched.
 
-**The honest bound.** Detection is not a guarantee and is not presented as one. A passage written to look like
-ordinary prose while steering the model is not caught by any pattern, and the controls that hold in that case
-are the structural three, which do not depend on recognising anything.
+**Two bounds, and the deployed run found the second.**
+
+*Detection is not a guarantee.* A passage written to look like ordinary prose while steering the model is not
+caught by any pattern, and the controls that hold in that case are the structural three, which do not depend on
+recognising anything.
+
+*And quarantine is per passage, which on a short document is the whole document.* The installed fixture is **one
+chunk of 964 characters**, below the chunker's 384-token minimum, so the instruction and the invoices and the
+shared-drive paragraph are the same passage and quarantining it took all of them. **The answer is safe and the
+document is unusable**, which is the right direction to fail in and still a real loss. The honest fixes are a
+chunker that splits on headings or a quarantine that removes the instruction rather than dropping the passage,
+and neither is in this step.
+
+**A probe defect worth recording, because it was a false pass.** The check for whether the legitimate content
+survived read `"shared drive" in assembled.user`, and the user turn **ends with the question**, which asks about
+the shared drive. So the assertion was satisfied by the input rather than the output: it passed on a run where
+the whole document had been quarantined, and printed that the ordinary sections were still available. It now
+tests the document block with the question appended rather than the whole turn, using terms that appear in the
+document and not in the question. **An assertion that can be satisfied by the question is not testing the
+assembly.**
 
 **The refusal names the passage by the index the citations will use**, so a reviewer reading "passage 2 was
 quarantined" can find passage 2, and the record carries the signal names, the score and a 120-character excerpt
@@ -2498,6 +2515,10 @@ and never the passage. **A record holding the content would be a copy of what th
 
 **If it breaks.**
 
+- A short document is quarantined whole and its usable content is lost: that is the bound above, not a
+  misconfiguration. Check the chunk count with
+  `select doc_id, count(*) from chunk_index where doc_id = '...'`; one chunk means one passage means no partial
+  quarantine.
 - A legitimate document is quarantined: read the signal names in the record. If they are `assistant_address` or
   `override_behaviour` on ordinary prose, the pattern is too broad; if they are `restricted_target`, the document
   legitimately names a restricted folder and the pattern needs the second-person context it currently lacks.
