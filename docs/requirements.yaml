@@ -320,7 +320,28 @@ items:
     tier: [cloud, hosted, office]
     phase: DEPLOY
     verify: a teardown run produces a signed destruction record naming every store and its state
-    status: open
+    status: verified
+    note: >-
+      Built 2026-10-13, recorded in docs/runbook.md step 3.14. VERIFIED against the deployed store, by running
+      it: the teardown emptied the vector index, the lexical index, the ingestion manifest, the purge history
+      and the holds, named every store with the verb that is true of it, and produced a record whose hash
+      recomputes to itself from its own contents, which is the check a client can run without trusting us. The
+      client's files are untouched, and that is the recovery path rather than an oversight: one ingest cycle
+      rebuilt 1121 chunks from them, which was demonstrated after the run. The audit chain is deliberately kept
+      and the record says so, because it is what lets the destruction be checked by someone who does not trust
+      us. THREE FAULTS WERE FOUND BY RUNNING IT, all in the record rather than in the deletion. The teardown
+      reported `deleted: 34` for a store it had only counted, so the record said something false in the one
+      document whose purpose is to be checkable. The teardown reported `complete: true` while 34 audit records
+      still held content, where a single-document purge in the same position reports incomplete: the same fact
+      reported two ways, and the teardown's way is the one a client keeps for years. And the probe asserted
+      exactly one destruction record, failing on its second run in a way that read as the record having been
+      destroyed. OPEN, and it is a conflict between two requirements rather than a defect: content stored in the
+      audit record CANNOT be purged, because the table is append-only and the hash chain covers the stored
+      payload, so clearing it leaves the row unverifiable and updating the hash makes the chain a record of what
+      somebody chose to leave in it. On this deployment CONTENT_MODE_INTERNAL is redacted, so 34 records hold
+      redacted content and a document quoted in one of them cannot be destroyed. The mitigation is not to store
+      content there, which is why the default is hash; a deployment that selects full is choosing to keep
+      content it cannot later delete, and the record now says so rather than reporting success.
   - id: DATA-RESIDENCY-001
     title: Residency is enforced by the validator, not documented
     tier: [cloud, hosted]
