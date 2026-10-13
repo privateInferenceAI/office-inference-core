@@ -47,6 +47,13 @@ content:
   classes:
     public: full
     internal: redacted
+access:
+  # What a user is told when their role excludes content that would answer the
+  # question. silent tells them nothing; denied says documents exist that they
+  # cannot see; counted also says how many passages were withheld. The trade is
+  # the client's: disclosing reveals that restricted content EXISTS, and staying
+  # silent makes a partial answer look complete.
+  denial: counted
 budgets:
   # Per-role ceilings, in USD, over the period below. A hard cap: the gateway refuses over-budget
   # requests rather than alerting about them. Internal cost control, not client billing.

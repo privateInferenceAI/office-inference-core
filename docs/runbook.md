@@ -1796,6 +1796,103 @@ alternative is telling an operator to delete rows by hand from a table they have
 - A cycle exits non-zero but the log shows no failure: the exit code is non-zero when any document failed,
   deliberately, so a scheduled run surfaces a bad file. `--status` names it.
 
+### 3.8 Access labels
+
+**Goal.** A role cannot retrieve a chunk its label excludes, and the exclusion happens inside the search
+rather than after it. The requirement is `SEC-ACL-001`, and its verify line is the test this step ships.
+
+**Commands.**
+
+    cd /opt/oi-core
+    git pull
+    python3 tests/fixtures/build_executive_fixture.py
+    mkdir -p documents/executive
+    cp fixtures/corpus/executive-compensation.md documents/executive/
+    ls -l documents/executive/
+
+    docker exec ingestion python3 /app/ingest.py --documents /documents
+
+Then the proof. This is a probe rather than a unit test because the thing being proved is what the STORE
+returns when the query carries a filter, and a stub cannot answer that:
+
+    docker run --rm --network ai-net -v /opt/oi-core:/w:ro -w /w \
+      --entrypoint python ghcr.io/docling-project/docling-serve-cpu:v1.36.0 \
+      /w/tests/fixtures/acl_probe.py
+
+**Expected.** The ingest picks up the fifth document:
+
+    seen 5, new 1, changed 0, skipped 4, failed 0
+    chunks written 3, chunks removed 0, documents removed 0
+
+And the probe reports, for each role, what the store returned and what the retriever passed on:
+
+    role=staff      store returned 0 passages, withheld 0, denied False
+    role=executive  store returned 3 passages, withheld 0, denied False
+    staff query for 418,750: no passage contains the figure
+
+**What just happened, and why the order matters.** The build order says this regression test ships *before*
+the feature, and the reason is in the sentence it comes from: a filter that runs after the search returns
+results is the mistake this phase exists to avoid. A test written afterwards describes whatever the code
+happens to do, and the thing under test here is *where the filter runs*, which a test written afterwards
+cannot see.
+
+So the test was written against a module that did not exist. Ten tests, all failing on a placeholder that
+returned nothing, and then the module that makes them pass. The evidence for the failing half is in the pull
+request, because a test that has never failed is a test nobody has seen work.
+
+**The permission model, and why it is this small.** Two roots, `company` and `executive`, matching how a
+client's folder tree is organised, and two roles permitted one or both. Per-user and per-group permissions
+are `SEC-ACL-002`, a later phase. A model with two roles can be read in full and tested exhaustively, and
+getting the inside-the-search part right matters more than having more roles.
+
+**What a denied user is told is the client's policy, not ours.** Anthony's decision, 2026-10-13: this
+should be something a client turns on or off rather than a behaviour we choose for them. So it is declared
+in the manifest under `access.denial`, and there are three modes because the trade has three defensible
+answers.
+
+| Mode | What the user is told | What it costs |
+|---|---|---|
+| `silent` | Nothing. The answer is built from what the role can see | An incomplete answer is indistinguishable from a complete one |
+| `denied` | Documents exist that may answer this and they lack access, with no count | Reveals that restricted content EXISTS |
+| `counted` | The same, plus how many passages were withheld | Reveals existence and implies how many documents hold it |
+
+**The default is `denied`**, and the reasoning is the product's own: a silent system returns a partial
+answer with no way for a user to tell it from a complete one, which is the confidently-wrong failure this
+whole design exists to fight. A client who weighs the leak of existence more heavily sets `silent` and gets
+no disclosure at all. The dev cloud manifest declares `counted`, because a developer debugging a missing
+passage wants the number and there is no client to weigh the trade.
+
+**The fact and the disclosure are separate, and that separation is the point.** `withheld` and `denied` stay
+accurate in every mode, so the record and any audit trail can report what happened; only `disclosure` is
+governed by policy, and it is `None` in silent mode rather than an empty message. Collapsing the two would
+make silent mean "we withheld nothing", which is a lie the record would then carry — and the record is the
+artifact a client's auditor reads.
+
+`SEC-ACL-003` records the trade, and the schema description says it belongs in the contract under a
+compliance profile, the same way the content modes do.
+
+**The fixture is restricted content, and it had to come first.** The corpus is four documents, all under
+`company/`. Before this step there was nothing restricted to leak, so a permission test would have passed
+against a retriever with no filter at all — the failure mode a permissions test is most prone to. The
+fixture is a synthetic executive compensation memorandum carrying two figures that appear nowhere else in
+the corpus, `418,750` and `62.5`, so a leak is found by grepping for a figure rather than only by comparing
+counts.
+
+**If it breaks.**
+
+- `unknown role`: the role is not in `ROLES`, and the retriever refuses rather than defaulting. A default
+  here grants the broader of two permissions to a typo, which is the failure worth being loud about.
+- The probe reports a staff store return above zero: the query's filter clause is not reaching Qdrant.
+  Print the body the retriever builds and check that `filter.must` carries the `acl` clause, rather than
+  checking the results, because the results are what a missing filter also produces.
+- A denial appears when the client declared `silent`: the renderer did not write `ACCESS_DENIAL_MODE`, so
+  the retriever fell back to its default. Check `grep ACCESS_DENIAL_MODE rendered/env`, because the
+  fallback is silent by design and the symptom is a disclosure rather than an error.
+- `withheld` above zero on a normal query: the store returned something the role may not see. That is a
+  second line rather than the first, so it working is good news and it firing means the first line is not.
+- Fewer passages than the limit with nothing withheld: overfetch is too low, or the corpus is small. The
+  store is asked for three times the limit because withheld passages consume part of the result set.
+
 ## Phase 4 — Assistant API  *(outline)*
 
 The single surface the client app talks to: ask, tasks, approvals, activity, settings.

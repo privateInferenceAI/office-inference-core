@@ -68,6 +68,42 @@ items:
     phase: C2
     verify: a staff-role query for executive content returns a denial and zero restricted passages in the trace
     status: open
+    note: >-
+      Built 2026-10-12, recorded in docs/runbook.md step 3.8. The filter is a clause in the Qdrant query
+      rather than a step after the search, because a retriever that fetches ten and discards three produces
+      the right answer while the restricted text leaves the store, is counted, and sits one logging
+      statement from a leak. Ten tests ship with it, written before the module existed as the build order
+      requires: the decisive one asserts the acl clause is present in the query, because every other test in
+      the file passes against a retriever that fetches everything and filters afterwards. Two roles over two
+      document roots; per-user and per-group permissions are SEC-ACL-002 in C3. Status is open rather than
+      verified because the proof has to run against the deployed store: a unit test can assert the clause is
+      built, and only the store can show it is honoured.
+  - id: SEC-ACL-003
+    title: What a denied user is told is the client's declared policy
+    tier: [cloud, hosted]
+    phase: C2
+    verify: a manifest declaring silent produces no disclosure, denied produces one without a count, and
+      counted produces one with it; an unrecognised mode is refused rather than defaulted; and in every
+      mode the record still reports what was withheld
+    status: open
+    note: >-
+      Anthony's decision 2026-10-13: this is something a client turns on or off rather than a behaviour we
+      choose for them. Declared in the manifest as access.denial with three modes, because the trade has
+      three defensible answers. silent tells the user nothing and costs the ability to distinguish an
+      incomplete answer from a complete one. denied says documents exist that may answer the question and
+      they lack access, with no count, which reveals that restricted content EXISTS. counted adds how many
+      passages were withheld, which implies how many documents hold it. The default is denied because a
+      silent system returns a partial answer that looks complete, which is the confidently-wrong failure
+      this product exists to avoid; a client who weighs the leak of existence more heavily sets silent and
+      gets no disclosure at all. The dev cloud manifest declares counted, since a developer debugging a
+      missing passage wants the number and there is no client to weigh the trade. The fact and the
+      disclosure are separate fields on purpose: withheld and denied stay accurate in every mode so the
+      record can report what happened, and only disclosure is governed by policy, so collapsing them would
+      make silent mean "we withheld nothing", which is a lie the record would then carry. One test asserts
+      the restricted figure appears nowhere in the result object rather than only in the passages, because
+      a debug field is the same leak with a different name. Status is open because the proof has to run
+      against the deployed store and a rendered env file, which is the next run. The schema says this
+      belongs in the contract under a compliance profile, the same way the content modes do.
   - id: SEC-ACL-002
     title: Per-user and per-group document permissions beyond two folder roles
     tier: [cloud, hosted]
