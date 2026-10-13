@@ -118,7 +118,11 @@ def main() -> int:
         print("no database connection, so the lexical arm cannot run and nothing below would mean anything")
         return 1
     if count_lexical_rows(services) == 0:
-        print("chunk_index is empty. Re-ingest before running this, or every case below fails for that reason.")
+        print(
+            "chunk_index is empty. Every case below would fail for that reason and not for a retrieval one.\n"
+            "The usual cause is a corpus ingested before this store existed: the worker skips a document whose\n"
+            "bytes and payload rules are unchanged, so a new write path needs PAYLOAD_VERSION bumped before it\n"
+            "reaches anything. Check `docker logs ingestion` for the cycle that followed the migration.")
         return 1
 
     print()
