@@ -59,15 +59,51 @@ def sha256_hex(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def redaction_summary(redactions) -> str:
+    """The redaction counts as `key=value` pairs in key order, or empty.
+
+    Flattened rather than serialised as JSON, because the writer is Postgres and the verifier is Python and
+    `jsonb::text` puts a space after every colon and comma. Matching that textually would mean reproducing one
+    language's serialiser in the other, and the day either changed, every row would fail verification at once.
+    Sorted pairs are a form both produce exactly.
+    """
+    if not redactions:
+        return ""
+    return ",".join(f"{key}={redactions[key]}" for key in sorted(redactions))
+
+
 def row_canonical(row: dict) -> str:
-    """Must match the canonical string built by the audit_events_chain trigger, field for field."""
-    parts = [
+    """The canonical string a row's hash was computed from, for that row's chain version.
+
+    Must match `audit_row_canonical` in the database, field for field, for every version.
+
+    The version is read PER ROW rather than assumed, and that is the whole reason this function takes a
+    parameter. Recomputing every row with the newest formula would fail every row written before the formula
+    changed, and a verifier that reports untouched history as tampering is one whose real findings nobody
+    reads. Version 1 is the original thirteen fields; version 2 adds the redaction summary.
+    """
+    version = row.get("chain_version") or 1
+    base = "|".join([
         row["ts_iso"], row["event_type"], row["actor"], row.get("actor_role") or "",
         row["deployment_id"], row["data_class"], row["outcome"], row.get("tool") or "",
         row.get("model") or "", row.get("request_id") or "", row["payload_sha256"],
         str(row["payload_bytes"]), row.get("prev_hash") or "",
-    ]
-    return "|".join(parts)
+    ])
+    if version < 2:
+        return base
+    allowed = row.get("egress_allowed")
+    return "|".join([
+        base,
+        str(row.get("redaction_count") or 0),
+        redaction_summary(row.get("redactions")),
+        str(row.get("unverified_card_shapes") or 0),
+        "" if allowed is None else ("true" if allowed else "false"),
+    ])
+
+
+# The newest chain version this verifier understands. A row claiming a higher one cannot be checked, and saying
+# so is better than computing a hash from the wrong formula and calling the mismatch tampering.
+KNOWN_CHAIN_VERSION = 2
 
 
 # --------------------------------------------------------------------------- migrate
@@ -438,7 +474,8 @@ def cmd_export(args) -> int:
         cur.execute("""
             select id, occurred_at, ts_iso, event_type, actor, actor_role, deployment_id,
                    data_class, outcome, tool, model, request_id, approval, payload_sha256,
-                   payload_bytes, payload, prev_hash, row_hash
+                   payload_bytes, payload, prev_hash, row_hash, chain_version,
+                   redaction_count, redactions, unverified_card_shapes, egress_allowed
             from audit_events
             where occurred_at >= %s and occurred_at < %s + interval '1 day'
             order by id""", (start, start))
@@ -545,7 +582,15 @@ def cmd_verify(args) -> int:
                              "starting hash, so where this export starts cannot be shown")
         elif row.get("prev_hash") != previous_hash:
             problems.append(f"line {index}: prev_hash does not match the previous row")
-        if sha256_hex(row_canonical(row)) != row["row_hash"]:
+        # A row from a newer writer cannot be checked by this verifier. Reported as an unverifiable row rather
+        # than as a mismatch, because the two are different findings and only one of them is about tampering.
+        # Saying nothing would be worse than either: the row would pass or fail for a reason nobody could see.
+        if (row.get("chain_version") or 1) > KNOWN_CHAIN_VERSION:
+            problems.append(
+                f"line {index}: the row was written with chain version {row['chain_version']} and this "
+                f"verifier understands up to {KNOWN_CHAIN_VERSION}, so its hash was not checked. Update the "
+                f"verifier rather than treating this as a break.")
+        elif sha256_hex(row_canonical(row)) != row["row_hash"]:
             problems.append(f"line {index}: row_hash does not match the row contents")
 
         # The payload sits inside the row, so when it is stored it must hash to payload_sha256.
