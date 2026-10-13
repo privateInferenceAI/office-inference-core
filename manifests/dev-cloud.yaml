@@ -54,6 +54,18 @@ access:
   # the client's: disclosing reveals that restricted content EXISTS, and staying
   # silent makes a partial answer look complete.
   denial: counted
+
+  # What may leave for a frontier model. The gate refuses rather than defaulting, so a deployment that
+  # declares nothing sends nothing off-box. This one declares the two classes a small business can send to a
+  # provider: public material and ordinary internal work. confidential and regulated are absent rather than
+  # listed as false, so the permission set is what it says it is and the reason a refusal gives names what IS
+  # permitted.
+  egress:
+    frontier_classes: [public, internal]
+    # On, and the default. Turning it off is a client's decision and one they should have to make explicitly:
+    # the cost of redacting something harmless is a question the model cannot answer, and the cost of not
+    # redacting a card number is a payment incident in a provider's logs.
+    redaction: "on"
 budgets:
   # Per-role ceilings, in USD, over the period below. A hard cap: the gateway refuses over-budget
   # requests rather than alerting about them. Internal cost control, not client billing.

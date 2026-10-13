@@ -29,3 +29,10 @@ access:
   # This build says denied, the default. The cloud development manifest says counted, because a developer
   # debugging a missing passage wants the number and there is no client to weigh the trade.
   denial: denied
+
+  # This build has no frontier lane at all: inference is local, so nothing leaves the building. The empty list
+  # is the policy and not an oversight, and the gate reads it as "nothing is permitted" rather than as "no
+  # opinion", which is why an unset variable refuses instead of defaulting to something.
+  egress:
+    frontier_classes: []
+    redaction: "on"
