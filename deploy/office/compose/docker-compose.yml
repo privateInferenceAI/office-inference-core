@@ -151,6 +151,12 @@ services:
       DOCLING_SERVE_ENG_LOC_NUM_WORKERS: "1"
       DOCLING_SERVE_ENG_LOC_SHARE_MODELS: "true"
       DOCLING_DEVICE: cpu
+      # The synchronous endpoint's wait, raised from its 120-second default. The worker uses the
+      # asynchronous endpoint precisely because this limit exists and because the handler does not abort
+      # the task when it fires (`# TODO: abort task!` in docling-serve 1.36), so a timeout orphans a parse.
+      # The value is kept honest rather than made enormous: it is a boundary for anything else that talks
+      # to this service synchronously, not the mechanism the worker relies on.
+      DOCLING_SERVE_MAX_SYNC_WAIT: "600"
       # No DOCLING_SERVE_ARTIFACTS_PATH, and that is a decision rather than an omission. The variable
       # does not mean "cache the models here": it means "load the models from here and never download
       # them". Pointing it at an empty directory tells the service its weights are missing and forbids

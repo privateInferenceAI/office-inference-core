@@ -93,6 +93,9 @@ class Services:
     vector_url: str = field(default_factory=lambda: os.environ.get("VECTOR_URL", "http://vector:6333"))
     collection: str = field(default_factory=lambda: os.environ.get("COLLECTION", "documents"))
     timeout: int = 900
+    # One document's parse budget. Generous on purpose: a 59-page scan through OCR is minutes of CPU on
+    # this box, and the alternative to waiting is failing.
+    parse_timeout: float = float(os.environ.get("INGEST_PARSE_TIMEOUT", "3600"))
     # Discovered once per run, because the embedding service has had more than one batch endpoint and
     # asking which one answers is cheaper than being wrong about it on every chunk.
     embed_path: str | None = None
@@ -154,6 +157,19 @@ def _get(url: str, timeout: int) -> dict | None:
         raise
 
 
+def _get_json(url: str, timeout: int) -> dict | None:
+    """A GET that returns a JSON object, or None when the service says it has nothing yet."""
+    request = urllib.request.Request(url, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read()
+        return json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise
+
+
 def _multipart(url: str, filename: str, payload: bytes, options: dict, timeout: int) -> dict:
     """A multipart POST with each option as its own form field.
 
@@ -188,26 +204,78 @@ def _multipart(url: str, filename: str, payload: bytes, options: dict, timeout: 
         return json.loads(response.read())
 
 
-def parse_document(services: Services, path: Path, relpath: str) -> dict:
-    """The parser's structured output for one file.
+# The conversion options, and every one of them is a real option of this release. That is worth stating
+# because three of the four in the first version were not. `do_ocr`, `do_table_structure` and `table_mode`
+# are ignored by docling-serve 1.36, which takes `ocr_preset` and `table_structure_preset` instead, and it
+# ignores an unknown field while answering success. The capabilities endpoint lists the real names:
+#
+#     docker run --rm --network ai-net curlimages/curl -sS http://parser:5001/v1/capabilities
+#
+# `ocr_preset=auto` runs OCR only on pages without a text layer, which is the released default. A 59-page
+# government PDF has a text layer, so forcing OCR on it rasterises every page and reads back text that was
+# already there: the most expensive thing this box can be asked to do, for no gain.
+PARSE_OPTIONS = {
+    "to_formats": "json",
+    "image_export_mode": "placeholder",
+    "ocr_preset": "auto",
+    # Named explicitly rather than left to the default so the table model is a decision in the diff. The
+    # default is this value.
+    "table_structure_preset": "tableformer_v1_accurate",
+}
 
-    Retried, because this is the slow stage and the first real corpus run lost a 60-page PDF to a 504 from
-    whatever sits in front of the parser. The parse itself is idempotent, so trying again costs time and
-    nothing else.
+# How long to wait for one document, and how often to ask. The synchronous endpoint gives up after
+# DOCLING_SERVE_MAX_SYNC_WAIT, which defaults to 120 seconds, and the handler carries `# TODO: abort task!`
+# so the parse keeps running after the client is told it failed. That combination is why one 59-page PDF
+# produced a 504 on every attempt while a docling process accumulated over six hours of CPU time: each
+# retry orphaned a parse and started another. The asynchronous endpoint has no such limit and reports
+# progress, so the wait is this worker's to choose.
+PARSE_POLL_SECONDS = 10
+
+
+def parse_document(services: Services, path: Path, relpath: str) -> dict:
+    """The parser's structured output for one file, submitted and then waited for.
+
+    Asynchronous by necessity rather than preference. The synchronous endpoint's wait is capped at 120
+    seconds by the service, and it does not stop the work when it gives up, so a slow document fails every
+    time and leaves a parse behind on each attempt. Submitting a task and polling it separates the two
+    questions: whether the parser accepted the work, which is answerable in a second, and how long the work
+    takes, which is the worker's budget rather than the service's.
     """
-    payload = _with_retries(
-        f"parsing {relpath}",
+    accepted = _with_retries(
+        f"submitting {relpath}",
         lambda: _multipart(
-            f"{services.parser_url}/v1/convert/file", path.name, path.read_bytes(),
-            {"to_formats": "json", "do_ocr": True, "do_table_structure": True,
-             "table_mode": "accurate", "image_export_mode": "placeholder"},
-            services.timeout))
+            f"{services.parser_url}/v1/convert/file/async", path.name, path.read_bytes(),
+            PARSE_OPTIONS, services.timeout))
+    task_id = accepted.get("task_id")
+    if not task_id:
+        raise RuntimeError(
+            f"the parser accepted {relpath} without returning a task id: {accepted!r}")
+
+    deadline = time.monotonic() + services.parse_timeout
+    while time.monotonic() < deadline:
+        status = _get_json(
+            f"{services.parser_url}/v1/status/poll/{task_id}?wait={PARSE_POLL_SECONDS}",
+            services.timeout)
+        state = (status or {}).get("task_status")
+        if state == "success":
+            break
+        if state in ("failure", "skipped"):
+            raise RuntimeError(
+                f"the parser failed on {relpath}: {json.dumps(status)[:400]}")
+        time.sleep(PARSE_POLL_SECONDS)
+    else:
+        raise TimeoutError(
+            f"the parser did not finish {relpath} within {services.parse_timeout}s. The task is still "
+            f"running on the box as {task_id}; raising rather than resubmitting is what keeps one slow "
+            f"document from becoming several.")
+
+    payload = _get_json(f"{services.parser_url}/v1/result/{task_id}", services.timeout) or {}
     document = (payload.get("document") or {}).get("json_content") or {}
     if not document:
         raise RuntimeError(
             f"the parser returned no structured output for {relpath}. Its status was "
             f"{payload.get('status')!r}; an empty json_content usually means the options were not "
-            f"accepted, which is what step 3.4 spent a round trip on.")
+            f"accepted, and the real option names are in the service's capabilities endpoint.")
     return document
 
 

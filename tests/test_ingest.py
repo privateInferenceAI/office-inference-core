@@ -677,3 +677,95 @@ def test_clearing_one_document_leaves_the_others_alone(tmp_path, wired):
     assert manifest.clear_failures("a.pdf") == 1
     assert manifest.get("a.pdf")["failure_count"] == 0
     assert manifest.get("b.pdf")["failure_count"] == 2
+
+
+# --------------------------------------------------------------------------- the parser contract
+
+def test_the_conversion_options_are_ones_the_service_accepts():
+    """Three of the four options in the first version were ignored by the parser, which answers success
+    anyway. `do_ocr`, `do_table_structure` and `table_mode` are not options of docling-serve 1.36: the
+    stages take `ocr_preset` and `table_structure_preset`.
+
+    This test is a list rather than a live check because CI has no parser. The live check is the
+    capabilities endpoint, recorded in the runbook:
+
+        curl -sS http://parser:5001/v1/capabilities
+    """
+    assert set(ingest.PARSE_OPTIONS) == {
+        "to_formats", "image_export_mode", "ocr_preset", "table_structure_preset"}, (
+        "an option the service ignores looks exactly like one it accepts, so the set is asserted")
+    for invented in ("do_ocr", "do_table_structure", "table_mode", "force_ocr"):
+        assert invented not in ingest.PARSE_OPTIONS, (
+            f"{invented} is not a docling-serve 1.36 option; it would be silently ignored")
+    # And the OCR preset must be the released default rather than a forced run, because forcing OCR
+    # rasterises pages that already have a text layer.
+    assert ingest.PARSE_OPTIONS["ocr_preset"] == "auto"
+
+
+def test_parsing_uses_the_async_endpoint_rather_than_the_capped_one(tmp_path):
+    """The synchronous endpoint gives up after DOCLING_SERVE_MAX_SYNC_WAIT, 120 seconds by default, and
+    does not abort the task when it does. On a 59-page PDF that meant every attempt returned 504 while a
+    parse kept running, so each retry orphaned work and started more. One docling process accumulated over
+    six hours of CPU that way.
+
+    Asserted against the URL the code builds, because the difference between the two endpoints is one path
+    segment and the failure it causes is a timeout rather than an error.
+    """
+    seen = {}
+
+    def capture(url, filename, payload, options, timeout):
+        seen["url"] = url
+        return {"task_id": "t-1", "task_status": "pending"}
+
+    class OnePoll:
+        def __init__(self):
+            self.calls = 0
+
+    polls = OnePoll()
+
+    def fake_get_json(url, timeout):
+        if "/status/poll/" in url:
+            polls.calls += 1
+            return {"task_status": "success"}
+        return {"document": {"json_content": {"texts": [{"text": "x"}], "pages": {"1": {}}}}}
+
+    import pytest as _pytest
+    with _pytest.MonkeyPatch.context() as patch:
+        patch.setattr(ingest, "_multipart", capture)
+        patch.setattr(ingest, "_get_json", fake_get_json)
+        patch.setattr(ingest, "time", ingest.time)
+        source = tmp_path / "x.pdf"
+        source.write_bytes(b"%PDF-1.4 test")
+        document = ingest.parse_document(ingest.Services(), source, "company/x.pdf")
+
+    # The async path contains the sync path as a prefix, so the check has to be the suffix rather than
+    # the absence of the shorter one.
+    assert seen["url"].endswith("/v1/convert/file/async"), seen["url"]
+    assert document["texts"], "the parsed document should come back"
+    assert polls.calls == 1, "the task should be waited for rather than assumed"
+
+
+def test_a_parse_that_exceeds_its_budget_raises_rather_than_resubmitting(tmp_path):
+    """The task is still running on the box when this happens, and the message says so. Submitting again
+    is what turned one slow document into several orphaned parses."""
+    import pytest as _pytest
+
+    class Expired(ingest.Services):
+        """The real service record with a budget of zero, so the wait expires immediately."""
+        def __init__(self):
+            super().__init__()
+            self.parse_timeout = 0.0
+
+    source = tmp_path / "x.pdf"
+    source.write_bytes(b"%PDF-1.4 test")
+
+    with _pytest.MonkeyPatch.context() as patch:
+        patch.setattr(ingest, "_multipart",
+                      lambda url, filename, payload, options, timeout:
+                      {"task_id": "still-running", "task_status": "pending"})
+        patch.setattr(ingest, "_get_json", lambda url, timeout: {"task_status": "pending"})
+        with _pytest.raises(TimeoutError) as raised:
+            ingest.parse_document(Expired(), source, "company/x.pdf")
+    message = str(raised.value)
+    assert "still running on the box" in message
+    assert "still-running" in message, "the message must name the task so it can be found"
