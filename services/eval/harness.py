@@ -85,6 +85,25 @@ def normalise(text: str) -> str:
     return re.sub(r"\s+", " ", text or "").strip().lower()
 
 
+def primary_figure(value: str) -> str | None:
+    """The most specific figure in a reference answer, which is the fact the question is about.
+
+    Needed because the reference answers were written by reading the corpus and explaining what they found, so
+    many are a paragraph rather than a number. Requiring every figure in a paragraph to appear in one passage
+    scores a correct retrieval as a miss: Q06's answer names the fiscal year and the year-end date as well as
+    the sales figure, and no single chunk of a financial table holds all three.
+
+    The longest digit run is the specific one. `391,035` is what the question asks for; `2024` and `29` are how
+    the answer situates it, and they belong in the explanation rather than in the test.
+    """
+    runs = re.findall(r"\d[\d,.]*\d|\d", value or "")
+    cleaned = [(re.sub(r"\D", "", run), run) for run in runs]
+    cleaned = [(digits, run) for digits, run in cleaned if len(digits) >= 2]
+    if not cleaned:
+        return None
+    return max(cleaned, key=lambda pair: len(pair[0]))[1]
+
+
 def number_forms(value: str) -> set[str]:
     """Every spelling of a figure, so one occurrence matches whichever way either side wrote it.
 
@@ -287,21 +306,34 @@ def grade(question: Question, passages: list, k: int) -> Outcome:
         outcome.detail = "no source document named; only support is measurable"
 
     if question.reference_answer:
-        wanted_numbers = number_forms(question.reference_answer)
+        # Graded on the answer's most specific figure when it has one, and on a share of its distinctive words
+        # when it does not. The first version required every figure in the answer to appear in one passage and
+        # scored Q06 and Q07 as misses while the retriever had put the right table in front of the model: the
+        # reference answers explain what they found, so they carry the fiscal year and a date beside the figure.
+        figure = primary_figure(question.reference_answer)
         wanted_text = normalise(question.reference_answer)
+        # The words a paraphrase question turns on. Length five and up, because shorter ones are articles and
+        # prepositions that any passage contains.
+        wanted_words = {word.strip(".,;:()") for word in wanted_text.split() if len(word) >= 5}
         for rank, passage in enumerate(passages[:k], start=1):
             text = getattr(passage, "text", "") or ""
             flat = normalise(text)
-            if wanted_text and wanted_text in flat:
+            if figure and re.sub(r"\D", "", figure) in re.sub(r"\D", "", text):
                 outcome.supported, outcome.rank = True, rank
+                outcome.detail = f"matched the figure {figure}"
                 outcome.page_is_nominal = bool(getattr(passage, "page_is_nominal", False))
                 break
-            if wanted_numbers and wanted_numbers <= number_forms(text):
-                outcome.supported, outcome.rank = True, rank
-                outcome.page_is_nominal = bool(getattr(passage, "page_is_nominal", False))
-                break
+            if not figure and wanted_words:
+                present = {word for word in wanted_words if word in flat}
+                if len(present) >= max(1, int(len(wanted_words) * 0.6)):
+                    outcome.supported, outcome.rank = True, rank
+                    outcome.detail = (f"matched {len(present)} of {len(wanted_words)} distinctive words; no "
+                                      f"figure in the answer to match on")
+                    outcome.page_is_nominal = bool(getattr(passage, "page_is_nominal", False))
+                    break
         if not outcome.supported:
-            outcome.detail = f"no passage among the top {k} contains {question.reference_answer!r}"
+            wanted = f"the figure {figure}" if figure else f"{len(wanted_words)} distinctive words"
+            outcome.detail = f"no passage among the top {k} contains {wanted}"
     else:
         outcome.detail = (outcome.detail + " | " if outcome.detail else "") + \
             "no reference answer, so support is not measurable"

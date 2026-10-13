@@ -198,3 +198,57 @@ def test_a_success_on_a_pageless_document_is_recorded_as_not_having_tested_the_p
     paged = harness.run([q(**net_sales)],
                         lambda _: [Passage("company/apple-10k-2024.htm", "Total net sales 391,035")], k=10)
     assert paged.supported_on_nominal_pages == 0
+
+
+def test_support_is_graded_on_the_answers_most_specific_figure():
+    """Found by running the harness on the real corpus.
+
+    The reference answers were written by reading the corpus and explaining what was found, so many are a
+    paragraph. Requiring every figure in one to appear in a single passage scored Q06 and Q07 as misses while the
+    retriever had put the right table in front of the model: Q06's answer names the sales figure, the fiscal year
+    and the year-end date, and no single chunk of a financial table holds all three.
+
+    The longest digit run is the specific one. `391,035` is what the question asks for; `2024` is how the answer
+    situates it and belongs in the explanation rather than in the test.
+    """
+    assert harness.primary_figure("391,035 million dollars of total net sales for fiscal 2024, ended 28 Sep") \
+        == "391,035"
+    assert harness.primary_figure("15,115,823,000 shares as of October 18, 2024") == "15,115,823,000"
+    assert harness.primary_figure("no figures here at all") is None
+
+    answer = "391,035 million dollars of total net sales for fiscal 2024, the year ended 28 September 2024"
+    passage = [Passage("company/apple-10k-2024.htm", "Total net sales | 391,035 | 2 | % | 383,285")]
+    outcome = harness.grade(q(reference_answer=answer, source_document="apple-10k"),
+                            passage, k=10)
+    assert outcome.supported, outcome.detail
+    assert "matched the figure" in outcome.detail
+
+
+def test_an_answer_with_no_figure_is_graded_on_its_distinctive_words():
+    """A paraphrase question's answer shares no figure with the passage, because the whole point of the question
+    is that the agreement's wording and the question's wording have nothing in common. Grading it on figures
+    would score it unmeasurable; grading it on the whole answer string would score every answer a miss."""
+    answer = "The unvested units are forfeited on termination of service, with disability pro-rated"
+    passage = [Passage("company/apple-ex10-1-2024.htm",
+                       "any unvested RSUs shall terminate on the Severance Date and the Participant will have "
+                       "no right to the terminated RSUs")]
+    outcome = harness.grade(q(reference_answer=answer, source_document="apple-ex10-1"),
+                            passage, k=10)
+    assert outcome.supported, outcome.detail
+    assert "distinctive words" in outcome.detail
+
+
+def test_a_document_named_by_its_publication_identity_does_not_match_its_filename():
+    """The other half of the same run, kept as a test so the fixture cannot drift back.
+
+    The question set named `irs-p15-2026`, which is the publication's identity, and the corpus holds
+    `company/irs-p15.pdf`. `apple-10k-2024` happened to match because the filename contains it. So two questions
+    were scored as retrieval failures for a naming mismatch, and a retrieval rate that is wrong in the direction
+    of looking bad is still wrong.
+    """
+    passage = [Passage("company/irs-p15.pdf", "The social security wage base limit is 184,500 dollars.")]
+    named_by_identity = harness.grade(q(source_document="irs-p15-2026"), passage, k=10)
+    assert not named_by_identity.retrieved_document, (
+        "the harness now matches a publication name to a filename, so the fixture no longer has to")
+    named_by_path = harness.grade(q(source_document="irs-p15"), passage, k=10)
+    assert named_by_path.retrieved_document

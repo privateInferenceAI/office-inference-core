@@ -49,7 +49,7 @@ questions:
     tests: paraphrase. The document states this as a wage base rather than as earnings a person can make.
     expected:
       answerable: true
-      source_document: irs-p15-2026
+      source_document: irs-p15
       references:
         reference_answer: >-
           184,500 dollars, the 2026 social security wage base limit (the rate of social security tax
@@ -70,7 +70,7 @@ questions:
     tests: a threshold buried in prose, with a different figure for married filers as a decoy.
     expected:
       answerable: true
-      source_document: irs-p15-2026
+      source_document: irs-p15
       references:
         reference_answer: >-
           200,000 dollars of wages in a calendar year: the employer must withhold the 0.9%
