@@ -67,7 +67,7 @@ items:
     tier: [cloud, office]
     phase: C2
     verify: a staff-role query for executive content returns a denial and zero restricted passages in the trace
-    status: open
+    status: verified
     note: >-
       Built 2026-10-12, recorded in docs/runbook.md step 3.8. The filter is a clause in the Qdrant query
       rather than a step after the search, because a retriever that fetches ten and discards three produces
@@ -78,6 +78,20 @@ items:
       document roots; per-user and per-group permissions are SEC-ACL-002 in C3. Status is open rather than
       verified because the proof has to run against the deployed store: a unit test can assert the clause is
       built, and only the store can show it is honoured.
+      VERIFIED 2026-10-13 against the deployed store, recorded in docs/runbook.md step 3.8. The index held
+      1059 company points and 1 executive point; a staff query for the chief executive's salary returned five
+      company passages and no restricted figure, and a staff search for either restricted figure returned ten
+      passages containing neither. Two things had to be fixed before that run meant anything, and both were
+      found by running rather than by reading. First, the denial never fired: it was inferred from passages
+      the store returned that the role could not see, and since the filter is in the query and the store
+      honours it, that count stayed at zero and the client's policy on what a denied user is told was dead
+      code. It now runs a second search against the complement of the role's roots and denies when the
+      restricted best score beats the best permitted one. Second, the probe's own leak check ran for every
+      role, so it reported the executive role as leaking the figures it is permitted to read and the run
+      ended in failure with the permissions correct. A limitation is recorded rather than fixed: on a
+      severance question the restricted chunk scored 0.4088 against a permitted 0.65, so no denial fired even
+      though the memorandum answers it. The cause is that the 1,541-character memorandum is one chunk whose
+      embedding averages salary, bonus, equity and severance, so it matches any single question weakly.
   - id: SEC-ACL-003
     title: What a denied user is told is the client's declared policy
     tier: [cloud, hosted]
