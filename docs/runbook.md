@@ -1819,6 +1819,11 @@ returns when the query carries a filter, and a stub cannot answer that:
       --entrypoint python ghcr.io/docling-project/docling-serve-cpu:v1.36.0 \
       /w/tests/fixtures/acl_probe.py
 
+    # And again with each policy, so the client's choice is seen rather than taken from a unit test:
+    docker run --rm --network ai-net -v /opt/oi-core:/w:ro -w /w \
+      --entrypoint python ghcr.io/docling-project/docling-serve-cpu:v1.36.0 \
+      /w/tests/fixtures/acl_probe.py --denial silent
+
 **Expected.** The ingest picks up the fifth document:
 
     seen 5, new 1, changed 0, skipped 4, failed 0
@@ -1844,6 +1849,36 @@ request, because a test that has never failed is a test nobody has seen work.
 client's folder tree is organised, and two roles permitted one or both. Per-user and per-group permissions
 are `SEC-ACL-002`, a later phase. A model with two roles can be read in full and tested exhaustively, and
 getting the inside-the-search part right matters more than having more roles.
+
+**The denial had to be rebuilt, because the first version never fired.** The deployed probe reported
+`withheld 0` and `denied False` on every question, which looked like the filter working and was the feature
+being dead code.
+
+The first version inferred a denial from passages the store returned that the role could not see. The filter
+is in the query and the store honours it, so nothing restricted comes back, so that count stayed at zero and
+`denied` was never true. Every unit test passed, because their stub returned restricted passages to prove the
+second line worked — and the second line only fires when the store misbehaves. The client's policy on what a
+denied user is told would never have applied to anything.
+
+The requirement is that a staff query for executive content returns *a denial*, and that needs knowing
+whether restricted content **would have answered**. So the retriever now runs a second search against the
+complement of the role's roots and compares scores.
+
+**Only a better match counts.** A weak restricted match exists for almost any question, because every corpus
+has something loosely related to everything, and denying on one would put a warning on most answers. A
+warning that fires constantly is one users learn to ignore, which costs the disclosure its only job. So the
+denial fires when the restricted best score **beats** the best permitted one, and a worse restricted match is
+recorded for the record and not shown.
+
+**What keeps that second search from being a leak.** It runs with `with_payload: false`, so no restricted
+text enters this process: only a number crosses the boundary. Only the score is compared, never the content.
+And the filter is expressed as `must_not` over the role's roots rather than a list of known-restricted ones,
+so a folder nobody declared a role for counts as restricted rather than being silently omitted. The point id
+Qdrant returns anyway is a uuid5 over the document id, so it does not name a file.
+
+It runs in every mode, including silent, because the record has to report that a partial answer was
+returned. That is precisely what an auditor asks about, and a silent organisation is the one most likely to
+be asked.
 
 **What a denied user is told is the client's policy, not ours.** Anthony's decision, 2026-10-13: this
 should be something a client turns on or off rather than a behaviour we choose for them. So it is declared
