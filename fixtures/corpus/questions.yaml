@@ -8,12 +8,22 @@
 # must produce a refusal, a required page number, a table-cell answer, a two-document answer, and
 # deliberate coverage of the awkward small document rather than only the long one.
 #
-# What is deliberately NOT here yet: `reference_answer` for any question. A reference answer is a claim
-# that a specific fact appears on a specific page, and the only honest way to write one is to read the
-# parsed text and check. Writing them from general knowledge would repeat the mistake this corpus's
-# manifest already caught once, where a licence was described before it was read. The workflow is: ingest
+# How the `reference_answer` blocks were written, and why they are trustworthy. A reference answer is a
+# claim that a specific fact appears on a specific page, and the only honest way to write one is to read
+# the parsed text and check. Writing them from general knowledge would repeat the mistake this corpus's
+# manifest already caught once, where a licence was described before it was read. The workflow was: ingest
 # the corpus in runbook step 3.6, read the parsed pages, then fill each answer in with the page it came
-# from. Until then a question is a prompt to retrieve, not a graded item.
+# from. That reading was done on 2026-10-13 against `chunk_index` on the box, and every answer below cites
+# the chunk it came from. Four questions turned out not to be answerable at all and are marked false with
+# a `reference_note` saying what was searched for and why it is not there; a fifth (Q07) has two defensible
+# answers at two different dates, so its answer states both rather than choosing silently.
+#
+# Two caveats that the page numbers cannot express. The three .htm files are pageless and every chunk in
+# them reports page_start 1, so a page citation for the 10-K or either exhibit satisfies the in-range rule
+# trivially and carries no information; `reference_note` records where the text really sits (a section
+# number, or the printed page in the filing's own pagination). And in Q02 the sentence carrying the
+# threshold straddles the page 29/30 boundary, so page 30 is where the answer's words are while page 29 is
+# where the sentence begins.
 #
 # The `expected` blocks below carry two things that CAN be written without reading: whether the question
 # is answerable from this corpus at all, and which document should supply the answer. Both are decisions
@@ -21,7 +31,7 @@
 
 question_set_version: "fixture-questions-v1"
 corpus_version: "fixture-v1"
-status: questions written, reference answers pending the parsed corpus
+status: questions written, reference answers filled in from the parsed corpus on 2026-10-13; Q03, Q04, Q08 and Q09 are not answerable from this corpus
 
 # The grading rules, stated once rather than per question.
 rules:
@@ -33,6 +43,7 @@ rules:
 questions:
   # ---- answerable from one document, paraphrased so lexical matching alone does not win ----
   - id: Q01
+    category: single-fact-prose
     question: How much can an employee earn in 2026 before no social security tax is withheld from them?
     draws_on: [irs-p15-2026]
     tests: paraphrase. The document states this as a wage base rather than as earnings a person can make.
@@ -40,10 +51,20 @@ questions:
       answerable: true
       source_document: irs-p15-2026
       references:
-        reference_answer: null
-        page: null
-
+        reference_answer: >-
+          184,500 dollars, the 2026 social security wage base limit (the rate of social security tax
+          on taxable wages is 6.2% each for the employer and the employee)
+        page: 29
+      reference_note: >-
+        Stated as a limit on the wages subject to the tax, not as what a person may earn. Page 29
+        reads verbatim: "For 2026, the social security tax rate is 6.2% (amount withheld) each for
+        the employer and employee (12.4% total). The social security wage base limit is $184,500."
+        The same figure appears in "What's New" on page 1 and again on page 40, but page 29 is the
+        section that defines it rather than announcing it. The limit applies per employer: page 31
+        says it doesn't matter whether the worker "has the maximum amount of social security tax
+        withheld by another employer".
   - id: Q02
+    category: single-fact-prose
     question: At what income level does the extra Medicare tax start applying to a single filer?
     draws_on: [irs-p15-2026]
     tests: a threshold buried in prose, with a different figure for married filers as a decoy.
@@ -51,35 +72,79 @@ questions:
       answerable: true
       source_document: irs-p15-2026
       references:
-        reference_answer: null
-        page: null
-
+        reference_answer: >-
+          200,000 dollars of wages in a calendar year: the employer must withhold the 0.9%
+          Additional Medicare Tax from wages paid in excess of that amount, and there is no employer
+          share
+        page: 30
+      reference_note: >-
+        The sentence carrying the threshold is split across the page 29/30 chunk boundary. The page
+        29 chunk ends "...you must withhold a" and the page 30 chunk opens "0.9% Additional Medicare
+        Tax from wages you pay to an employee in excess of $200,000 in a calendar year." Mind what
+        the number is: the publication states the employer withholding threshold, and it does not
+        give the filing thresholds that differ by filing status. A corpus-wide search for "Form
+        8959" returns nothing, so this document alone cannot distinguish a single filer from a
+        married-filing-jointly filer. The decoy figure in the same document is the 2023 social
+        security wage base of $160,200 in the table on page 39, which is a different tax.
   - id: Q03
+    category: unanswerable
     question: What is the deadline for sending a new hire's details to the tax authority?
     draws_on: [irs-p15-2026]
-    tests: a date, phrased as a business would ask it rather than as the document states it.
+    tests: >-
+      a date, phrased as a business would ask it rather than as the document states it. It turned out to
+      be a refusal case instead: the document states the obligation and names the registry, and the
+      deadline it asks for is set by state law, outside this corpus.
     expected:
-      answerable: true
-      source_document: irs-p15-2026
+      answerable: false
+      source_document: null
       references:
         reference_answer: null
         page: null
-
-  # ---- a table-cell answer, which is the case the chunker's row entries exist for ----
+      reference_note: >-
+        NOT ANSWERABLE from this corpus, so this question's original `answerable: true` was wrong.
+        Publication 15 page 7, under "New hire reporting", says only: "All 50 states, and most of
+        the territories, have a new hire registry. You're required to report any new employee to a
+        designated state new hire registry. A new employee is an employee who hasn't previously been
+        employed by you or was previously employed by you but has been separated from such prior
+        employment for at least 60 consecutive days." It gives the obligation, the addressee and the
+        definition, and no deadline. The same page tells employers in the territories to contact
+        their local government about their new hire registry. A corpus-wide search for hire, hiring
+        and newly hired returns only this passage, E-Verify and Form I-9 eligibility, Form W-4
+        timing, and the special-rules table on page 49. The reporting period (commonly 20 days) is
+        set by state law and is not in this document, so any date in an answer would be invented.
+        Either this fixture becomes a refusal case or the corpus needs a state new hire page.
+  # ---- the table-cell case, which the chunker's row entries exist for. It turned out to be a corpus
+  # ---- gap: the tables this names live in Publication 15-T, and it is now a refusal case.     ----
   - id: Q04
+    category: unanswerable-table
     question: In the withholding tables, what is the amount to withhold for a single person paid weekly with taxable wages of 1,000 dollars?
     draws_on: [irs-p15-2026]
-    tests: a figure that lives inside a table cell. If the cell is not retrievable on its own this fails
-      for a reason that has nothing to do with the model.
+    tests: >-
+      a figure that lives inside a table cell. If the cell is not retrievable on its own this fails
+      for a reason that has nothing to do with the model. It failed for a corpus reason instead: the
+      withholding tables it names are in Publication 15-T, which was never ingested.
     expected:
-      answerable: true
-      source_document: irs-p15-2026
+      answerable: false
+      source_document: null
       references:
         reference_answer: null
         page: null
-
+      reference_note: >-
+        NOT ANSWERABLE from this corpus, so this question's original `answerable: true` was wrong.
+        Publication 15 page 4 says verbatim: "2026 withholding tables. The Percentage Method and
+        Wage Bracket Method withholding tables, the employer instructions on how to figure employee
+        withholding, and the amount to add to a nonresident alien employee's wages for figuring
+        federal income tax withholding are included in Pub. 15-T, available at IRS.gov/Pub15T." Pub.
+        15-T is not in this corpus and there is no wage bracket or percentage method table in any
+        ingested document. The only withholding figures present are worked examples: page 24,
+        Example 2 withholds 65 dollars on 2,000 dollars of monthly wages and 179 dollars on 3,000
+        dollars, continued on page 25 at 5,000 dollars. Those are monthly and are not the table cell
+        this question names, so answering 65 or 179 would be wrong. The failure is in the corpus
+        selection, not in the chunker: the cell does not exist here, though the row entries the
+        fixture wants to exercise do exist for the publication's own tables.
   # ---- a two-document answer, which is where a single-chunk retriever tends to give half a picture ----
   - id: Q05
+    category: two-document
     question: Both agreements in this set grant something to an employee. What does each one grant, and are the vesting terms the same?
     draws_on: [apple-ex10-1-2024, apple-ex10-22-2024]
     tests: two documents, and a comparison rather than a lookup. Also the near-duplicate case, where the two
@@ -88,12 +153,39 @@ questions:
       answerable: true
       source_document: both
       references:
-        reference_answer: null
-        page: null
-        pages: []
-
+        reference_answer: >-
+          Exhibit 10.1 (filed as Exhibit 10.19) grants a time-based restricted stock unit award
+          under the Apple Inc. 2022 Employee Stock Plan: RSUs that "vest and become nonforfeitable
+          as set forth in the Grant Notice" (Section 3), with vesting conditioned on continued
+          active employment or service through each applicable Vesting Date (Section 4) and a
+          "Vesting Schedule" to be filled in on the Grant Notice. Exhibit 10.22 grants a
+          performance-based restricted stock unit award under the same plan: the percentage of
+          target RSUs that vest on the single Vesting Date is set by the Company's relative total
+          shareholder return (TSR) percentile for the Performance Period under Exhibit A,
+          interpolated straight-line between levels, with no more than 100% of target vesting if TSR
+          is negative. The vesting terms are NOT the same. Both require continued employment and
+          both sit under the same plan, but 10.1 vests by a time-based schedule with an installment
+          on each Vesting Date while 10.22 vests once, on performance. The termination terms differ
+          too: 10.1 pro-rates on Disability and fully vests on death, while 10.22 lets unvested RSUs
+          stay eligible to vest on the Vesting Date after Retirement (age 60 with ten years of
+          service, and only where termination is on or after the first anniversary of the Award
+          Date), death or Disability, with no pro-ration, and adds a discretionary Committee
+          override.
+        page: 1
+        pages: [1, 1]
+      reference_note: >-
+        Two documents, so the page list carries one entry per document rather than a single page:
+        apple-ex10-1-2024.htm at page 1 and apple-ex10-22-2024.htm at page 1. Both are HTML with no
+        real pages, so neither page number carries information and both are nominal. Read 10.1
+        Sections 3, 4 and 8 (Section 3 defers to the Grant Notice, Section 8 holds the termination
+        terms) and 10.22 Sections 3, 4, 8 and Exhibit A. The near-duplicate trap is real: both
+        Section 8s open "Except as expressly provided in Section 4 or this Section 8, the
+        Participant's RSUs ... shall terminate", so returning one exhibit produces a confident
+        half-answer. 10.1 is headed "RESTRICTED STOCK UNIT AWARD AGREEMENT / NOTICE OF GRANT" and
+        10.22 "RESTRICTED STOCK UNIT AWARD AGREEMENT / PERFORMANCE AWARD".
   # ---- the long document, for a figure that appears in more than one place ----
   - id: Q06
+    category: table-cell
     question: What did the company report as total net sales for the most recent fiscal year?
     draws_on: [apple-10k-2024]
     tests: a headline figure that appears in the income statement and again in the notes, so a citation
@@ -102,10 +194,23 @@ questions:
       answerable: true
       source_document: apple-10k-2024
       references:
-        reference_answer: null
-        page: null
-
+        reference_answer: >-
+          391,035 million dollars of total net sales for fiscal 2024, the year ended 28 September
+          2024
+        page: 1
+      reference_note: >-
+        The 10-K is HTML with no real pages, so page 1 is nominal and the rule that a cited page
+        must fall inside the chunk's page range is satisfied trivially. The row is a table_row
+        chunk, "Total net sales | $ | 391,035 | $ | 383,285 | $ | 394,328", under the column headed
+        September 28, 2024; the unit comes from the header the parser kept in a separate prose
+        chunk, "Apple Inc. CONSOLIDATED STATEMENTS OF OPERATIONS (In millions, except number of
+        shares, which are reflected in thousands, and per-share amounts)". The same total appears
+        again in the segment note's net sales table and as a percentage-change row in MD&A, so a
+        citation has to say which occurrence it used. In the filing's own pagination the statements
+        are on printed page 29; that printed number is worth recording even though it is not the
+        retrieval page.
   - id: Q07
+    category: table-cell
     question: How many shares were outstanding at the end of the most recent fiscal year?
     draws_on: [apple-10k-2024]
     tests: a figure that appears on the cover page as well as in the statements, at different dates. The
@@ -114,23 +219,59 @@ questions:
       answerable: true
       source_document: apple-10k-2024
       references:
-        reference_answer: null
-        page: null
-
-  # ---- unanswerable, which must produce a refusal rather than a plausible invention ----
+        reference_answer: >-
+          15,115,823,000 shares of common stock were issued and outstanding as of October 18, 2024,
+          the only per-share count the cover page states. The balance sheet and the shareholders'
+          equity statement state "15,116,786 and 15,550,061 shares issued and outstanding,
+          respectively" as of September 28, 2024 and September 30, 2023, and the statements are
+          headed "(In millions, except number of shares, which are reflected in thousands)", so
+          those two are thousands: 15,116,786 thousand = 15,116,786,000 shares at fiscal year end
+          and 15,550,061 thousand = 15,550,061,000 shares at the prior year end.
+        page: 1
+      reference_note: >-
+        The question has two defensible answers on two different dates, so the reference answer says
+        both and says which is which. Cover page, verbatim: "15,115,823,000 shares of common stock
+        were issued and outstanding as of October 18, 2024" — after the fiscal year end, and the
+        count as of the latest practicable date rather than the year-end count. Year end, in two
+        places and in thousands: the balance sheet line "Common stock and additional paid-in
+        capital, $0.00001 par value: 50,400,000 shares authorized; 15,116,786 and 15,550,061 shares
+        issued and outstanding, respectively | 83,276 | 73,812", and the equity statement rows
+        "Common stock outstanding, ending balances | 15,116,786 | 15,550,061 | 15,943,425" with its
+        companion "Common stock outstanding, beginning balances | 15,550,061 | 15,943,425 |
+        16,426,786" for 2024, 2023 and 2022. So 15,116,786 is not a count of individual shares and
+        is not the cover-page figure; as thousands it is 15.117 billion at year end against the
+        cover page's 15.116 billion on 18 October 2024. Note 10 discloses 499 million shares
+        repurchased during 2024, which is why the year-end count fell. Pages are nominal here as in
+        Q06: every chunk in this document reports page 1.
+  # ---- unanswerable, which must produce a refusal rather than a plausible invention. Q03 and Q04
+  # ---- above joined this group once the corpus was read; Q08 and Q09 were always intended.   ----
   - id: Q08
+    category: unanswerable-near-miss
     question: What is the company's policy on paying mileage for employees who drive their own cars to client sites?
     draws_on: []
-    tests: unanswerable. A 10-K and a tax guide have no expense policy. The failure to watch for is a
-      confident answer assembled from unrelated travel figures.
+    tests: unanswerable. No expense policy exists in this corpus, but a client-facing fee schedule does
+      carry a mileage rate for a client-owned vehicle, so the failure to watch for is that rate being
+      served up as employee reimbursement.
     expected:
       answerable: false
       source_document: null
       references:
         reference_answer: null
         page: null
-
+      reference_note: >-
+        Confirmed NOT ANSWERABLE, but the reason is narrower than the original note gives and worth
+        recording precisely, because the corpus does contain a mileage figure. What exists is a
+        client-facing price list, in all three fee schedules: the row "Mileage, client-owned vehicle
+        | per mile | 0.67" and the prose "Mileage applies to travel in a client-owned vehicle from
+        the service address to the site and back, and does not apply where a company vehicle is
+        provided." That is what the company charges a client for travel. There is no employee
+        expense or reimbursement policy anywhere in the corpus: the only other mileage material is
+        Publication 15 pages 19 and 20 on accountable and nonaccountable plans, which gives the tax
+        treatment of reimbursements and states no rate, and the 10-K's mileage hits are supply-chain
+        prose. Answering "67 cents per mile" would be exactly the failure this question was written
+        to catch, matching a vendor billing rate to an employee question.
   - id: Q09
+    category: unanswerable
     question: Which supplier provided the materials for the most recent quarter, and what did they charge?
     draws_on: []
     tests: unanswerable, and shaped like a question a small business would really ask, which makes it the
@@ -141,9 +282,19 @@ questions:
       references:
         reference_answer: null
         page: null
-
+      reference_note: >-
+        Confirmed NOT ANSWERABLE. No supplier is named and no charge is stated anywhere in the
+        corpus. Supplier appears only in the 10-K's generic risk-factor and supply-chain prose
+        (outsourcing partners, single-source components, the Supplier Trust team) with no company,
+        product or figure, and once in the onboarding note: "Supplier invoices arrive on the shared
+        inbox and are matched against the purchase order before being passed to accounts. Anything
+        without a purchase order goes back to the supplier with a note." That describes a process
+        and names nobody. There is also no quarterly reporting in the corpus to anchor "the most
+        recent quarter": the 10-K reports fiscal years, a search for quarter outside the 10-K
+        returns nothing, and the fee schedules bill monthly. Any answer would be invented.
   # ---- the awkward small document rather than the long one ----
   - id: Q10
+    category: paraphrase
     question: Under the award agreement, what happens to the award if the person leaves before it has vested?
     draws_on: [apple-ex10-1-2024]
     tests: a conditional buried in a numbered clause, in a document of about 27,000 characters. The main
@@ -152,5 +303,27 @@ questions:
       answerable: true
       source_document: apple-ex10-1-2024
       references:
-        reference_answer: null
-        page: null
+        reference_answer: >-
+          The RSUs that have not vested are forfeited. Under Section 8, on a Termination of Service
+          (the first date the Participant is no longer employed by or providing services to the
+          Company or a Subsidiary, called the Severance Date) the unvested RSUs and the related
+          Dividend Equivalent Rights terminate, "regardless of the reason for the Participant's
+          Termination of Service, whether with or without cause, voluntarily or involuntarily", and
+          are cancelled without payment of any consideration. Two carve-outs sit in the same
+          section: on Disability the award pro-rates, vesting on the Severance Date as to the number
+          of RSUs that would have vested on the next Vesting Date multiplied by the fraction of days
+          elapsed between the preceding Vesting Date (or the Vesting Commencement Date) and that
+          next Vesting Date, with the remainder cancelled; on death every unvested RSU becomes fully
+          vested as of the Severance Date. Section 4 adds that vesting requires continued active
+          employment through each Vesting Date, that service for part of a period gives no
+          proportionate vesting, and that active service includes an approved leave of absence and
+          the first thirty days of an approved personal leave, with vesting tolling from day 31.
+        page: 1
+      reference_note: >-
+        Section 8, "Effect of Termination of Service", with the pro-ration and the death
+        acceleration later in the same section; the parser split those across two chunks, so the
+        clause heading and the fraction sentence are in different chunks, both on page 1. The
+        exhibit is HTML with no real pages, so page 1 is nominal. Exhibit 10.22 answers the same
+        question differently (Retirement, death or Disability let unvested RSUs stay eligible to
+        vest), which is why the Q05 comparison matters: an answer taken from 10.22 would be wrong
+        for this question.

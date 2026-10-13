@@ -187,6 +187,49 @@ def embed_query(services: ingest.Services, texts: list[str]) -> list[list[float]
     return ingest.embed_texts(services, texts)
 
 
+# Whether this process has already checked the embedding contract for a collection. Checking on every search
+# would add a database round trip and a call to the embedding service to every question, and the answer cannot
+# change while the process runs: a deployment that swaps its embedding model restarts its readers.
+_CONTRACT_CHECKED: set[str] = set()
+
+
+def verify_contract(services: ingest.Services, connection=None) -> None:
+    """Refuse to search a collection whose vectors came from a different embedding contract.
+
+    RET-EMBED-001 asks for this on the READ path as well as the write one, and the reason is that a change only
+    the writer notices is a reader answering from vectors it should not trust. The writer refusing to add to a
+    mismatched collection does nothing about the queries already going to it.
+
+    Cached per process, because the answer cannot change while the process runs and a question should not pay a
+    database round trip and an HTTP call for a fact that was true at startup.
+
+    Raising rather than warning. **A retrieval system that answers from meaningless vectors looks exactly like
+    one answering a hard question**, so a warning is a line in a log nobody reads beside answers that look
+    normal. The deployment stops answering until somebody decides, which is the direction that gets it fixed.
+    """
+    if services.collection in _CONTRACT_CHECKED:
+        return
+    if not services.database_url:
+        return
+
+    import contract as contract_module
+    owned = connection is None
+    if owned:
+        import psycopg2
+        connection = psycopg2.connect(services.database_url)
+    try:
+        live = contract_module.live_contract(services, info=contract_module.read_embedding_service(
+            services.embed_url))
+        # The measured size, because the contract written at ingest time carries the size the collection was
+        # built at and the live one would otherwise carry whatever this process happens to have.
+        live["dimension"] = live.get("dimension") or getattr(services, "dimension", None)
+        contract_module.check(connection, services.collection, live)
+    finally:
+        if owned:
+            connection.close()
+    _CONTRACT_CHECKED.add(services.collection)
+
+
 def document_versions(services: ingest.Services) -> dict[str, bool]:
     """Which documents may be relied on, from the registry.
 
@@ -451,6 +494,10 @@ def search(services: ingest.Services, question: str, role: str, limit: int = 10,
         "with_payload": True,
         "filter": {"must": [{"key": "acl", "match": {"any": sorted(roots)}}]},
     }
+    # Before the search, so a reader cannot get an answer built on vectors from another contract. Cheap after
+    # the first call in a process, which is what makes it affordable on the path a question takes.
+    verify_contract(services)
+
     raw = _search(services, body)
 
     dense: list[str] = []

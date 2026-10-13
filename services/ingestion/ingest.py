@@ -92,8 +92,16 @@ PAYLOAD_VERSION = "payload-v4"
 
 # File types the pipeline accepts. Anything else is ignored rather than failed, because a client's
 # document folder will contain a .DS_Store and a shortcut sooner or later, and neither is an error.
+# What the worker will look at. `.eml` was missing until RET-FORMAT-001, so a client's saved email messages were
+# skipped as an unsupported format while the parser handled them perfectly: the requirement names email among
+# the formats that must work, and the only thing standing between it working and not was this set.
+#
+# `.msg` is deliberately NOT here. It is a compound binary format rather than RFC 822, and whether the parser
+# reads it is unverified. Adding a suffix to this set is a promise that files with it are ingested, and an
+# unverified promise is worse than an honest gap: a client would see the file in their folder and not in the
+# index with nothing said.
 ACCEPTED_SUFFIXES = {".pdf", ".docx", ".pptx", ".xlsx", ".html", ".htm", ".md", ".markdown",
-                     ".txt", ".csv", ".rtf", ".odt", ".ods", ".odp"}
+                     ".txt", ".csv", ".rtf", ".odt", ".ods", ".odp", ".eml"}
 
 
 def sha256_of(path: Path) -> tuple[str, int]:
@@ -127,6 +135,17 @@ class Services:
     # Discovered once per run, because the embedding service has had more than one batch endpoint and
     # asking which one answers is cheaper than being wrong about it on every chunk.
     embed_path: str | None = None
+    # The preprocessing half of the embedding contract. These change what a stored vector means as surely as the
+    # model does, and they are ours rather than the server's, so they belong in the recorded contract. Read from
+    # the environment because a manifest decision with a schema and a diff is how the rest of this system
+    # carries a decision; the defaults are empty because a prefix nobody set is no prefix.
+    query_prefix: str = field(default_factory=lambda: os.environ.get("EMBED_QUERY_PREFIX", ""))
+    passage_prefix: str = field(default_factory=lambda: os.environ.get("EMBED_PASSAGE_PREFIX", ""))
+    normalise_embeddings: bool = field(
+        default_factory=lambda: (os.environ.get("EMBED_NORMALISE", "true").lower() != "false"))
+    # Measured once and remembered, so the contract can carry the size without calling the service on every
+    # comparison.
+    dimension: int | None = None
 
 
 # Statuses worth trying again. A 5xx from a gateway in front of a slow stage is the transient case that
@@ -389,6 +408,16 @@ def _ocr_ran(parsed: dict, confidence: dict | None = None) -> bool:
     return False
 
 
+def _contract_change_allowed() -> bool:
+    """Whether a contract change is deliberate. Never by default.
+
+    A check that repairs itself on noticing a mismatch re-embeds a client's corpus at whatever moment the
+    mismatch is noticed, which could be during a search. The opt-in is an environment variable rather than a
+    flag on the cycle so that running the cycle the ordinary way can never be the act that changes it.
+    """
+    return (os.environ.get("EMBED_CONTRACT_ALLOW_CHANGE", "").strip().lower() in ("1", "true", "yes"))
+
+
 def embed_texts(services: Services, texts: list[str]) -> list[list[float]]:
     """Vectors for a batch of chunks, from whichever embedding endpoint answers.
 
@@ -408,7 +437,9 @@ def embed_texts(services: Services, texts: list[str]) -> list[list[float]]:
                                 {"input": texts, "model": "bge-m3"}, services.timeout)
                 vectors = [item["embedding"] for item in payload.get("data", [])]
             else:
-                payload = _post(f"{services.embed_url}{path}", {"inputs": texts}, services.timeout)
+                payload = _post(f"{services.embed_url}{path}",
+                                {"inputs": [f"{services.passage_prefix}{text}" for text in texts]},
+                                services.timeout)
                 vectors = payload if isinstance(payload, list) else payload.get("data", [])
             if vectors and isinstance(vectors[0], list):
                 services.embed_path = path
@@ -476,6 +507,7 @@ def ensure_collection(services: Services) -> int:
               {"vectors": {"size": measured, "distance": "Cosine"}}, services.timeout,
               method="PUT")
         print(f"created collection {services.collection} at {measured} dimensions, cosine distance")
+        services.dimension = measured
         return measured
 
     params = ((existing.get("config") or {}).get("params") or {}).get("vectors") or {}
@@ -493,6 +525,7 @@ def ensure_collection(services: Services) -> int:
             f"Search results would be ordered differently from every measurement taken so far.")
     print(f"collection {services.collection}: {size} dimensions, {distance}, "
           f"{existing.get('points_count')} points")
+    services.dimension = size
     return measured
 
 
@@ -1382,6 +1415,19 @@ def main(argv: list[str] | None = None) -> int:
     # of a cycle rather than one identical error per document.
     try:
         ensure_collection(services)
+        # The contract the vectors are built under, recorded when the collection is established and compared on
+        # every write. A mismatch raises rather than warns, because the vectors already in the collection are
+        # meaningless under a different contract and similarity against them is not zero, it is nonsense.
+        if manifest is not None and getattr(manifest, "connection", None) is not None:
+            import contract as contract_module
+            live = contract_module.live_contract(services)
+            outcome = contract_module.check(manifest.connection, services.collection, live,
+                                            allow_change=_contract_change_allowed(),
+                                            reason=os.environ.get("EMBED_CONTRACT_REASON"))
+            if outcome["status"] != "unchanged":
+                print(f"embedding contract {outcome['status']} at generation {outcome['generation']}: "
+                      f"{live.get('model_id')}, {live.get('pooling')} pooling, "
+                      f"{live.get('dimension')} dimensions")
     except Exception as exc:  # noqa: BLE001
         print(f"cannot use the vector store: {exc}")
         return 1
