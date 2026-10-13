@@ -112,14 +112,14 @@ authored_fixtures:
   #   install: no-install-step    nothing in the repository places it; a reader rebuilding a corpus must
   #                               copy it by hand, and the three below are a real gap rather than a choice
   #
-  # Five write directly (the three fee schedules and onboarding-notes), one is copied by the runbook
-  # (executive-compensation, step 3.12), and the three format fixtures have no install step anywhere. The
+  # Four write directly (the three fee schedules and onboarding-notes), one is copied by the runbook
+  # (executive-compensation, step 3.8 "Access labels"), and the three format fixtures have no install step
+  # anywhere. The
   # twelve-document deployed corpus is therefore not reproducible by following the repository alone, which
   # a reader should know before trying.
   - id: fee-schedule-2025
     path: company/fee-schedule-2025.md
     built_by: tests/fixtures/versioning_acceptance.py
-    install: written-directly
     install: written-directly
     what_it_tests: the superseded case. A 2025 schedule that a 2026 one replaces, so retrieval has a
       real choice between two documents that both answer the question.

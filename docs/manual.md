@@ -1260,8 +1260,9 @@ and it refuses rather than guessing a default.
 
 Every request refused, on a manifest that says three classes are allowed. The first symptom is a model call
 that will not go out, and **before this round nothing errored at validation at all.** A validator rule now
-refuses the shape — it is the last bullet under "What the validator refuses" below — and the three examples
-declare both blocks, each with a comment saying which one is read.
+refuses the shape — the bullet beginning "A frontier lane enabled with no `access.egress.frontier_classes`",
+under "Residency and model eligibility" below — and the three examples declare both blocks, each with a
+comment saying which one is read.
 
 This was found by a review, not by a failure, and it is left standing on purpose. Resolving it means
 either deleting a field that section 16 documents and clients may have written, or changing which field a
@@ -1857,7 +1858,7 @@ deployed corpus — which is not the same for all eight:**
 | How it arrives | How many | Which |
 |---|---|---|
 | `written-directly` — the builder writes into `/w/documents`, so running it installs the file | 4 | the three fee schedules, `onboarding-notes.md` |
-| `copied-by-hand` — the builder writes into the repository and an operator copies it in | 1 | `executive-compensation.md`, by runbook step 3.12 |
+| `copied-by-hand` — the builder writes into the repository and an operator copies it in | 1 | `executive-compensation.md`, by runbook step 3.8, "Access labels" |
 | `no-install-step` — nothing in the repository places it | 3 | `callout-rate-approval.eml`, `rate-card-2026.xlsx`, `dispatch-review-q1.pptx` |
 
 So an index holding twelve is correct rather than a sign that something was ingested twice, and **a reader
@@ -3470,13 +3471,14 @@ only artifact that can detect rows deleted from the end.
 **Backfill.** Copying the gateway's own records into the audit chain.
 
 **Chain.** The audit record's structure: each row carries a hash of the row before it, so edits are
-detectable. Precisely: a row's hash covers thirteen of its columns, the last of them the previous row's
-hash, ordering is by id, the first row chains to nothing, and a purge continues the chain rather than
-restarting it, because the tombstone is itself a row that chains from the head before the deletion.
+detectable. Precisely: a row's hash covers seventeen of its columns on a row written since C2 and thirteen on
+the rows before it, the last of them the previous row's hash; ordering is by id, the first row chains to
+nothing, and a purge continues the chain rather than restarting it, because the tombstone is itself a row that
+chains from the head before the deletion.
 
-**The hash covers seventeen columns on any row written since C2, and thirteen on the rows before it.** The
-original thirteen are the timestamp, event type, actor, actor role, deployment, data class, outcome, tool,
-model, request id, payload hash, payload size and the previous hash. `chain_version` 2 adds `redaction_count`,
+**The seventeen** are the original thirteen plus four that C2 added. The thirteen are the timestamp, event
+type, actor, actor role, deployment, data class, outcome, tool, model, request id, payload hash, payload size
+and the previous hash. `chain_version` 2 adds `redaction_count`,
 the redaction summary, `unverified_card_shapes` and `egress_allowed`, which is the change section 13e
 describes: those four are the ones a reader would most want to edit quietly, and editing them now fails a
 verify rather than passing one. Rows written before the change keep version 1 and still verify, so the
