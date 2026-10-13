@@ -36,6 +36,7 @@ import sys
 sys.path.insert(0, "/w/services/retrieval")
 sys.path.insert(0, "/w/services/ingestion")
 
+import citations  # noqa: E402
 import ingest  # noqa: E402
 import retriever  # noqa: E402
 
@@ -132,11 +133,16 @@ def main() -> int:
         print()
 
     if args.verify:
-        verified = retriever.citations.verify(args.verify, result.passages)
+        verified = citations.verify(args.verify, result.passages)
+        print()
         for claim in verified.claims:
             mark = "supported" if claim.ok else f"REFUSED ({claim.reason})"
             print(f"  [{mark}] {claim.text[:100]}")
-        print(f"\nall supported: {verified.all_supported()}")
+            if claim.detail:
+                print(f"      {claim.detail}")
+        if verified.refusals:
+            print(f"\nrefusals by reason: {verified.refusals}")
+        print(f"all supported: {verified.all_supported}")
 
     return 0
 

@@ -2202,16 +2202,34 @@ Five things that output tells you, and each one is a line you would otherwise ha
 … /w/tests/fixtures/ask.py -q "What is the chief executive officer's base salary?" --role executive
 
 # check a candidate answer's citations against what was actually retrieved
-… /w/tests/fixtures/ask.py -q "…" --verify "Emergency callout is 8,475.50 per visit."
+… /w/tests/fixtures/ask.py -q "What is the standard labour rate?" --role staff \
+    --verify "The standard labour rate is 145.00 per hour. [5]"
 
 # machine-readable, for piping
 … /w/tests/fixtures/ask.py -q "…" --json
 ```
 
-`--verify` is the bridge to section 13c: it splits the candidate answer into claims and checks each one
-against the passages that were retrieved, so a figure that is not in any of them is refused rather than
-reported. It is the same verifier the harness uses, which is why a claim can be refused for being
-superseded even when the number is right.
+**`--verify` needs a citation marker, and a claim without one is refused rather than passed.** `[n]` is the
+only supported form, and it carries the same meaning it does in section 13c: this sentence rests on passage
+`n` of what was retrieved. Both outcomes, run against this corpus:
+
+```
+  [supported] The standard labour rate is 145.00 per hour. [5]
+all supported: True
+
+  [REFUSED (number_not_in_source)] The standard labour rate is 999.99 per hour. [5]
+      states 999.99 and the cited passage does not contain it. This is the check that catches a
+      substituted digit.
+refusals by reason: {'number_not_in_source': 1}
+all supported: False
+```
+
+A sentence with no marker comes back `REFUSED (no_citation)` — *the sentence carries no citation marker, so
+none of the checks could be run on it*. That is the check being honest rather than lenient, and it means an
+answer written in prose without markers verifies as entirely unsupported. The verifier works from the
+passages `ask.py` retrieved, which is why the passage numbers in your answer must match the output above it.
+It is the same verifier section 13c documents, so a claim can also be refused for being `superseded` when the
+figures are right.
 
 **The exit codes are the contract**, because this is the only piece of the C2 path a script can call:
 `0` when something was returned, **`0` when the role was denied** — a denial is the control working, not a
