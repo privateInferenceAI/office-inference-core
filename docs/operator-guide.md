@@ -1242,3 +1242,198 @@ whole reason both commands exist.
 **Its dry run is a rehearsal like `--enforce`'s**, and until recently it was not: `--dry-run` was accepted,
 documented, and ignored on this path, so the rehearsal destroyed the document for real. If you are reading
 a version of the manual or the code older than that fix, do not run it.
+
+---
+
+# Stage 11: the audit record, and what it can and cannot prove
+
+**Goal:** read the record, export a day, and understand exactly what a client's auditor can and cannot
+conclude from it.
+
+The record is the product's central claim. Every model call, every denial, every key minted, every export
+and every purge is written to one append-only table, and each row carries a hash of the row before it. An
+edit anywhere breaks every hash after it, which is what makes the record evidence rather than a log.
+
+## 11a. Reading it
+
+```
+docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+  run --rm audit list --limit 3
+```
+
+```
+    id  when                         type           actor                   class          outcome  detail
+    61  2026-10-13T22:39:43.340114Z  model_call     egress-acceptance       internal       ok       anthropic.claude-sonnet-4-5
+    60  2026-10-13T21:10:48.985000Z  model_call     gateway-key:50b578d6    internal       ok       bedrock/deepseek.v3.2
+    59  2026-10-13T21:10:47.555000Z  model_call     gateway-key:50b578d6    internal       denied   bedrock/deepseek.v3.2
+```
+
+`--type` filters, `--limit` bounds it, and the columns are the ones to quote to a client: when, what kind
+of event, who, at what data class, with what outcome.
+
+**Two conventions worth knowing before you read a sample.** A `docker compose run` prints its own preamble
+above the tool's output — the `Container postgres …` lines — and every example in this guide omits it. And
+the record's ids are not contiguous with the events you can see, because a purge leaves a tombstone rather
+than a gap.
+
+**Checkpoint.** `audit list` exits 0 and prints rows. If it prints nothing on a deployment you have been
+using, the events are going somewhere else — check `DEPLOYMENT_ID` in `rendered/env`, because every row
+carries it and a mismatch means you are reading a different deployment's id than the one writing.
+
+## 11b. Export a day, and verify it without an anchor
+
+```
+D=$(date -u +%Y-%m-%d)
+docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+  run --rm audit export --date "$D"
+```
+
+```
+exported 13 event(s) for 2026-10-13
+  /app/exports/2026-10-13/audit-events.jsonl
+  /app/exports/2026-10-13/manifest.json
+  last row hash 1953fcb2e870519983f57f33ff82e9a6548cfd998b40ccf5d77f9586cf7f9c97
+```
+
+Two files, and the manifest is what makes the JSONL checkable: it records the file's own hash, its row
+count and its final row hash.
+
+**Note the path.** The export lands in `/app/exports` **inside the container**, which is
+`${OI_ROOT}/exports` on the host. That distinction bites when you verify: the documented command passes
+`/app/exports/...`, not `/w/exports/...`, because the audit image already mounts the exports directory
+rather than the whole checkout.
+
+```
+docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+  run --rm audit verify /app/exports/$D/audit-events.jsonl
+```
+
+```
+ok   /app/exports/2026-10-13/audit-events.jsonl: 13 event(s), chain intact
+     note: no external anchor was supplied, so completeness cannot be shown: deleting rows from the
+           end and re-exporting would still verify. Pass --anchor with the file written by the anchor job
+     note: chained from row 47 (72a888eda49a...), which is not in this file
+```
+
+**Read both notes, because they bound the claim.** The first says what this check does *not* prove: every
+row links to the one before it, so an edit is caught, but rows deleted from the **end** leave a shorter
+chain that verifies perfectly. That is what the anchor is for. The second note is the same fact from the
+other side: this export starts mid-chain, so its first row points at a row the file does not contain.
+
+**Checkpoint.** `chain intact` and an exit code of 0. Then tamper with a **copy** and watch it fail:
+
+```
+cp -r exports/$D /tmp/tamper
+sed -i 's/"actor":"[^"]*"/"actor":"not-anthony"/' /tmp/tamper/audit-events.jsonl
+docker run --rm -v /tmp/tamper:/app/exports \
+  -v /opt/oi-core/db/migrations:/app/migrations:ro \
+  --network ai-net --env-file rendered/env \
+  oi-core-audit:latest verify /app/exports/audit-events.jsonl
+```
+
+```
+FAIL /app/exports/audit-events.jsonl
+  - line 1: row_hash does not match the row contents
+  - line 2: row_hash does not match the row contents
+```
+
+**It fails from line 1 rather than at the edited row**, because changing a row breaks that row's hash and
+every hash after it. One edited field turns a valid file into a file that is wrong from the first link
+onward, which is the property the chain exists to provide.
+
+**Run it against a copy, not the export.** The audit image mounts `${OI_ROOT}/exports` at `/app/exports`,
+so `-v /tmp/tamper:/app/exports` replaces that mount for this one container and nothing touches the real
+export.
+
+**How this breaks.**
+
+- `no such file`: the path is the container's. Exports are at `/app/exports`, not `/w/exports`.
+- A verification failure on a file you did not touch: compare it with the manifest. A file that was
+  re-exported after the manifest was written will not match it.
+
+## 11c. The anchor, and the honest problem with it
+
+```
+docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+  run --rm audit anchor
+```
+
+```
+anchored 49 event(s), head 1953fcb2e870519983f57f33ff82e9a6548cfd998b40ccf5d77f9586cf7f9c97
+  /app/exports/anchors/anchor-2026-10-13-00000049.json
+  Ship this file off this machine. Kept here, it proves nothing.
+```
+
+**The last line is the whole design.** An anchor kept beside the database it describes can be rewritten by
+whoever rewrote the database. It only proves something once it is somewhere the database owner does not
+control, which is what the shipping job is for.
+
+**Now the part you need to know before you promise it to a client.** In principle, verifying a day's export
+against an anchor is what catches a deleted tail. In practice, **the two do not fit together, and this
+guide will not pretend they do.**
+
+An **export** holds one day: `export --date D` filters the chain to that date. An **anchor** records the
+head of the **whole chain** and its total row count.
+
+```
+export of 2026-10-13 : 13 rows, the day's events, ending at row 49 of 49
+anchor at the same time: 49 events, head = row 49
+```
+
+Run them against each other on a deployment more than a day old and the anchor check fails on a file
+nobody has touched:
+
+```
+FAIL /app/exports/2026-10-13/audit-events.jsonl
+  - this export holds 13 rows and the anchor records 49: the chain is shorter than it was
+```
+
+**That message accuses the client's file of having lost rows.** The file is intact. The check is comparing
+a slice of the chain against the whole of it.
+
+And the failing case is worse than the noisy one. If the anchor was written *after* the last event of the
+day you are checking — an hourly anchor against a day whose traffic stopped at lunchtime — then the
+anchored row is not in the export at all, and the check reports:
+
+```
+the anchored row 1953fcb2e870... is missing from this export, so rows that existed when the anchor was
+written are gone
+```
+
+**Which is the language of tampering, applied to an untampered file.**
+
+**So what is the honest position, today?**
+
+| Claim | Holds? |
+|---|---|
+| Every row links to the one before it, so an edit is caught | **Yes.** Verified in this stage |
+| Rows deleted from the end are caught | **Only if the anchor's head happens to be in the export.** Not in general |
+| Verify-with-anchor works for a daily export | **No.** It reports a false failure on a chain older than a day |
+
+The unit tests for this pass, because each one builds a single-day chain where the export *is* the whole
+chain and the two line up. No test builds a multi-day chain, so the shape the deployment actually produces
+is the one shape that is untested. That is the same pattern as the retention failures in stage 10: the code
+was tested, and the gap between the test's world and the deployed world was not.
+
+**This is recorded as an open defect rather than worked around here.** For an auditor today, the defensible
+statement is the first row of that table and nothing more: the chain is intact and an edit is detectable.
+Completeness against a deleted tail is not something this deployment can currently demonstrate, and saying
+otherwise to a client would be promising a control that returns a false accusation.
+
+**Checkpoint.** You can state which of those three claims you are making. If you need the third, it is not
+available yet.
+
+## 11d. Purging old events, which is a different retention
+
+The record has its own retention, separate from documents:
+
+```
+oi run --rm audit purge --before 2026-01-01 --reason "retention: 90 days" --dry-run
+```
+
+A purge of the record writes a **tombstone** first: a row carrying the chain head before the deletion and
+the head after, so the gap is explained rather than looking like tampering. The check in 11b reports the
+tombstone and continues the chain across it.
+
+**Never run this without `--dry-run` on a deployment whose record you have not exported.** The rows are
+gone afterwards, and the tombstone records that they went rather than what they said.
