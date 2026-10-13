@@ -455,6 +455,17 @@ class Manifest:
     def remove(self, relpath: str) -> None:
         raise NotImplementedError
 
+    def clear_failures(self, relpath: str | None = None) -> int:
+        """Forget recorded failures, for one document or for all of them.
+
+        Needed because a rule can change and the rows it wrote cannot know that. The first real corpus run
+        dead-lettered a 60-page PDF over two gateway timeouts, and when failures learned to distinguish an
+        outage from a corrupt file, that row still said "two failures" and the document stayed dead. A
+        repair path is the honest answer: the alternative is telling an operator to delete rows by hand
+        from a table they have no reason to know about.
+        """
+        raise NotImplementedError
+
     def start_run(self) -> int | None:
         return None
 
@@ -477,6 +488,18 @@ class MemoryManifest(Manifest):
 
     def remove(self, relpath: str) -> None:
         self.records.pop(relpath, None)
+
+    def clear_failures(self, relpath: str | None = None) -> int:
+        cleared = 0
+        for key, record in self.records.items():
+            if relpath is not None and key != relpath:
+                continue
+            if (record.get("failure_count") or 0) or record.get("failure_kind"):
+                record["failure_count"] = 0
+                record["failure_kind"] = None
+                record["last_error"] = None
+                cleared += 1
+        return cleared
 
 
 class PostgresManifest(Manifest):
@@ -536,6 +559,19 @@ class PostgresManifest(Manifest):
     def remove(self, relpath: str) -> None:
         with self.connection.cursor() as cur:
             cur.execute("delete from ingest_manifest where relpath = %s", (relpath,))
+
+    def clear_failures(self, relpath: str | None = None) -> int:
+        with self.connection.cursor() as cur:
+            if relpath is None:
+                cur.execute(
+                    "update ingest_manifest set failure_count = 0, failure_kind = null, "
+                    "last_error = null, updated_at = now() "
+                    "where failure_count > 0 or failure_kind is not null")
+            else:
+                cur.execute(
+                    "update ingest_manifest set failure_count = 0, failure_kind = null, "
+                    "last_error = null, updated_at = now() where relpath = %s", (relpath,))
+            return cur.rowcount
 
     def start_run(self) -> int | None:
         with self.connection.cursor() as cur:
@@ -630,6 +666,18 @@ def ingest_cycle(services: Services, documents_root: Path, manifest: Manifest,
         # there.
         failures = int((record or {}).get("failure_count") or 0)
         same_bytes = bool(record) and record.get("content_sha256") == content_sha256
+
+        # A record claiming success with no chunks is not a document that has been ingested, it is a bug's
+        # residue. The first real corpus run wrote two contract exhibits as zero chunks before the worker
+        # learned to refuse them, and those rows say "ingested, unchanged, 0 chunks" ever since, so the
+        # hash check skips them forever and the fix never reaches them. Treating zero chunks as never
+        # ingested is the general form of that: the manifest is a cache of a claim about the index, and a
+        # record with nothing behind it is a false claim whatever wrote it.
+        if same_bytes and record and not (record.get("failure_count") or 0) \
+                and not (record.get("chunk_count") or 0):
+            same_bytes = False
+            print(f"  {document.relpath} is recorded as ingested with no chunks behind it; "
+                  f"re-ingesting")
         # The dead-letter limit counts only failures that are about the document. A transient one says
         # something about the moment, so the document is tried again on the next cycle: skipping it here
         # would mean it never recovers when the service comes back, which is the opposite of the point.
@@ -770,12 +818,29 @@ def main(argv: list[str] | None = None) -> int:
                         help="accepted for symmetry with the scheduled form; a single cycle is the default")
     parser.add_argument("--status", action="store_true",
                         help="report the last cycle's outcome and exit; this is the healthcheck")
+    parser.add_argument("--clear-failures", metavar="RELPATH", nargs="?", const="",
+                        help="forget recorded failures so dead-lettered documents are tried again. "
+                             "With no argument, all of them. Use after a failure rule changes, because "
+                             "the rows written under the old rule cannot know it did.")
     parser.add_argument("--state", default=str(STATE_PATH),
                         help="where the last cycle's result is recorded")
     args = parser.parse_args(argv)
 
     if args.status:
         return cmd_status(Path(args.state))
+
+    if args.clear_failures is not None:
+        # Dry runs have no manifest to repair, and saying so beats silently reporting zero.
+        if args.dry_run:
+            print("--clear-failures needs the real manifest, not a dry run")
+            return 1
+        repair_manifest = build_manifest(os.environ.get("DATABASE_URL"))
+        target = args.clear_failures or None
+        cleared = repair_manifest.clear_failures(target)
+        print(f"cleared failures on {cleared} document(s)"
+              + (f" matching {target!r}" if target else "")
+              + ". The next cycle will try them again.")
+        return 0
 
     services = Services()
     manifest = MemoryManifest() if args.dry_run else build_manifest(os.environ.get("DATABASE_URL"))
