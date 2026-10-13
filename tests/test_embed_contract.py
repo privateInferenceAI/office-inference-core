@@ -146,3 +146,29 @@ def test_nothing_re_embeds_the_corpus_automatically():
     helper = helper[:helper.index("def ", 1)]
     assert 'in ("1", "true", "yes")' in helper, "the opt-in is not an opt-in"
     assert "Never by default" in helper
+
+
+def test_the_contract_module_is_in_the_image_that_imports_it():
+    """Found by deploying it: the worker refused to run with "No module named 'contract'", because the
+    Dockerfile copies a fixed file list and this module was not on it.
+
+    The unit tests passed, because they import from the source tree where every file is present. The image is a
+    different set of files and nothing in the test suite was checking that the set was complete, which makes this
+    the same class of fault as a check that passes while the thing it guards is not running.
+    """
+    dockerfile = (ROOT / "services" / "ingestion" / "Dockerfile").read_text()
+    copy_lines = [line for line in dockerfile.splitlines() if line.startswith("COPY")]
+    assert copy_lines, "the Dockerfile stopped copying anything, so this test is stale"
+    copied = " ".join(copy_lines)
+    for module in ("chunker.py", "ingest.py", "identifiers.py", "contract.py"):
+        assert module in copied, f"{module} is imported by the worker and not copied into its image"
+
+    # And every local module the worker imports is on the list, so a module added later fails here rather than
+    # at run time on the box.
+    import re
+    source = (ROOT / "services" / "ingestion" / "ingest.py").read_text()
+    local_imports = set(re.findall(r"^(?:import|from) (\w+)(?: import|$)", source, re.M))
+    for name in sorted(local_imports):
+        if (ROOT / "services" / "ingestion" / f"{name}.py").exists():
+            assert f"{name}.py" in copied, (
+                f"ingest.py imports {name} from the same directory and the image does not copy it")
