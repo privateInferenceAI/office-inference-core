@@ -1008,8 +1008,16 @@ asked for. Creating a 1024-long vector by hand is not worth typing; step 3.2 pro
 
 ### 3.3 The reranker, measured
 
-**Goal.** Answer one question with a number rather than an opinion: how many candidates can the
-reranker score inside the five-second budget, on the box that would serve them.
+**Goal.** Answer one question with a number rather than an opinion: **can a reranker on this box serve
+this pipeline at all?** Not how many candidates fit a budget, which is what this step originally asked and
+which turned out to be the wrong question: the box being measured was never going to serve the cloud build,
+and the cloud build is the one being built.
+
+The measurement still settled the build. It established the negative by a wide enough margin that there
+was no depth worth tuning to, which is why the cloud build reranks at Bedrock and the CPU reranker ships
+in no build. That is a useful result reached by asking a badly framed question, and the framing is recorded
+here rather than quietly improved, because the same mistake is easy to make again: **measure the thing you
+are going to run, not the thing sitting in front of you.**
 
 **Commands.** The service first, then the measurement. The reranker is behind the `bench` profile, so
 it does not start with the stack:
@@ -1051,8 +1059,33 @@ Against real chunks it was wrong by about eighteen times on the number that matt
 
 - **Cloud build: Bedrock `cohere.rerank-v3-5:0`.** No reranker on the box at all. `us-east-1`,
   ON_DEMAND, ACTIVE since 2024-12-01. One call per query, 1 to 1,000 sources, returning an index and a
-  relevance score, so a 40 to 50 candidate pool costs a few hundred milliseconds on their hardware.
-  This is the decision that matters now, because the cloud build is the one being built.
+  relevance score.
+
+**Bedrock measured, 2026-10-13.** The paragraph above used to say "a few hundred milliseconds on their
+hardware" with no measurement behind it, which is the habit this project has already paid for five times
+over. Measured through the AWS CLI with the CLI's own startup subtracted as a baseline, three runs each:
+
+| Passage words | Candidates | Service time | Per candidate |
+|---|---|---|---|
+| 85 | 10 / 25 / 50 | 0.161 / 0.218 / 0.262 s | 16.1 / 8.7 / 5.2 ms |
+| 250 | 10 / 25 / 50 | 0.216 / 0.286 / 0.389 s | 21.6 / 11.4 / 7.8 ms |
+| 570 | 10 / 25 / 50 | 0.227 / 0.234 / 0.342 s | 22.7 / 9.3 / 6.8 ms |
+
+**Read it per call, not per token, and not too finely.** This is the opposite of the local reranker, whose
+cost was flat in candidates and rose with passage length, which made per-token the only reading that
+transferred there. Here a 10-candidate call and a 50-candidate call at the same length differ by about
+0.1 seconds, and the run-to-run spread on a repeated shape (0.342 against 0.366 s at 570 words and 50
+candidates) is as large as some of the differences between rows. So the defensible statement is that
+**a 50-candidate pool at our chunk size returns in about a third of a second**, and the per-token column
+should not be read as a cost model.
+
+That is roughly a thirtyfold improvement over 91.2 seconds for the same pool on this box. It is the number
+that settles the cloud build's pool depth: 40 to 50 candidates is affordable, so depth is not a tuning
+problem for us, and the five-second budget is not a cloud constraint.
+
+The benchmark is `scripts/bench_bedrock_rerank.py`, which reports both the raw wall clock and the baseline-
+subtracted service time, because the first version of it reported the AWS CLI's Python startup as reranker
+latency.
 - **The office build is not decided here.** Its reranking belongs to that build, on hardware that does
   not exist yet, and it will arrive with its own problems. What this measurement establishes is only
   the negative: a CPU reranker cannot serve it at our chunk size, so whatever that build does, it is
