@@ -38,6 +38,8 @@ class StubServices(ingest.Services):
         self.parsed = parsed or simple_document()
         # A document with a digital text layer, which is what a simple fixture represents.
         self.confidence: dict = {"parse_score": 1.0, "ocr_score": 0.9}
+        # No page carried an OCR score, so nothing in this fixture was read off an image.
+        self.confidence_pages: dict = {"1": {"parse_score": 1.0, "ocr_score": None}}
         self.fail_for = fail_for or set()
         self.dims = dims
         self.parsed_names: list[str] = []
@@ -70,7 +72,8 @@ def wired(monkeypatch):
             raise RuntimeError(f"parser refused {relpath}")
         # The real call returns the document with its confidence report beside it, because is_ocr is
         # decided from that report. The stub mirrors the shape rather than the document alone.
-        return {"document": services.parsed, "confidence": services.confidence}
+        return {"document": services.parsed, "confidence": services.confidence,
+                "confidence_pages": services.confidence_pages}
 
     def fake_embed(services, texts):
         services.embed_batches += 1
@@ -695,24 +698,25 @@ def test_clearing_one_document_leaves_the_others_alone(tmp_path, wired):
 # --------------------------------------------------------------------------- the parser contract
 
 def test_the_conversion_options_are_ones_the_service_accepts():
-    """Three of the four options in the first version were ignored by the parser, which answers success
-    anyway. `do_ocr`, `do_table_structure` and `table_mode` are not options of docling-serve 1.36: the
-    stages take `ocr_preset` and `table_structure_preset`.
+    """Three of the four options in the first version were ignored by the parser, which answered success
+    anyway. `do_ocr`, `do_table_structure` and `table_mode` were not options of docling-serve 1.36, and it
+    accepted them by ignoring them, which is the failure this whole line of work came out of.
 
-    This test is a list rather than a live check because CI has no parser. The live check is the
-    capabilities endpoint, recorded in the runbook:
-
-        curl -sS http://parser:5001/v1/capabilities
+    The service this talks to now is `services/parser`, which refuses an unknown option and names the ones
+    it accepts, so a wrong name fails loudly at the first document instead of silently for a year. This test
+    is still a list rather than a live check, because CI has no parser; the live check is in the runbook.
     """
     assert set(ingest.PARSE_OPTIONS) == {
-        "to_formats", "image_export_mode", "ocr_preset", "table_structure_preset"}, (
-        "an option the service ignores looks exactly like one it accepts, so the set is asserted")
-    for invented in ("do_ocr", "do_table_structure", "table_mode", "force_ocr"):
-        assert invented not in ingest.PARSE_OPTIONS, (
-            f"{invented} is not a docling-serve 1.36 option; it would be silently ignored")
-    # And the OCR preset must be the released default rather than a forced run, because forcing OCR
-    # rasterises pages that already have a text layer.
-    assert ingest.PARSE_OPTIONS["ocr_preset"] == "auto"
+        "to_formats", "image_export_mode", "ocr", "table_structure"}, (
+        "the option set is asserted because an ignored option looks exactly like an accepted one")
+    for not_an_option in ("do_ocr", "do_table_structure", "table_mode", "ocr_preset",
+                          "table_structure_preset", "force_ocr"):
+        assert not_an_option not in ingest.PARSE_OPTIONS, (
+            f"{not_an_option} is not an option of services/parser; it would be refused, which is correct "
+            f"but not what we want to send")
+    # And OCR must be left to decide per page rather than forced, because forcing it rasterises pages that
+    # already have a text layer.
+    assert ingest.PARSE_OPTIONS["ocr"] == "true"
 
 
 def test_parsing_uses_the_async_endpoint_rather_than_the_capped_one(tmp_path):
@@ -783,3 +787,81 @@ def test_a_parse_that_exceeds_its_budget_raises_rather_than_resubmitting(tmp_pat
     message = str(raised.value)
     assert "still running on the box" in message
     assert "still-running" in message, "the message must name the task so it can be found"
+
+
+# --------------------------------------------------------------------------- per-page OCR
+
+def test_ocr_pages_reads_the_scanned_pages_from_the_report():
+    """The fact the pipeline could not have before this work.
+
+    Measured on the fixture corpus's 59-page publication: pages 1 and 8 carry an `ocr_score` and the other
+    57 have null. A page with a score was read off an image; a page without one was not touched by OCR. That
+    is the whole signal, and it is the reason services/parser exists.
+    """
+    report = {
+        "1": {"ocr_score": 0.7284, "parse_score": None},
+        "2": {"ocr_score": None, "parse_score": 1.0},
+        "3": {"ocr_score": None, "parse_score": 1.0},
+        "8": {"ocr_score": 0.9282, "parse_score": None},
+        "59": {"ocr_score": None, "parse_score": 1.0},
+    }
+    assert ingest.ocr_pages(report) == {1, 8}
+    assert ingest.ocr_pages({}) == set()
+    assert ingest.ocr_pages(None) == set()
+    # A malformed key is skipped rather than raising, because a page number that will not parse should cost
+    # one page's label and not the document.
+    assert ingest.ocr_pages({"x": {"ocr_score": 0.5}, "4": {"ocr_score": 0.5}}) == {4}
+
+
+def test_is_ocr_is_set_per_chunk_from_the_page_it_came_from(tmp_path, wired):
+    """A mixed filing labelled one way for the whole document is the version that misleads a reader.
+
+    The fixture's construction: pages 1 and 3 digital, pages 2 and 4 scanned. A chunk on page 2 was read off
+    an image and must say so; a chunk on page 1 must not. Before services/parser both were labelled the same
+    way, and the direction of the error was the dangerous one, because text recognised from a scan was
+    presented as text that was already in the file.
+    """
+    services = wired()
+    services.confidence = {"parse_score": 1.0}
+    services.confidence_pages = {
+        "1": {"ocr_score": None, "parse_score": 1.0},
+        "2": {"ocr_score": 0.99, "parse_score": None},
+        "3": {"ocr_score": None, "parse_score": 1.0},
+        "4": {"ocr_score": 0.98, "parse_score": None},
+    }
+    # One text item per page, so each becomes its own chunk.
+    services.parsed = {
+        "pages": {str(p): {} for p in (1, 2, 3, 4)},
+        "body": {"children": [{"$ref": f"#/texts/{i}"} for i in range(4)]},
+        "texts": [{"self_ref": f"#/texts/{i}", "label": "paragraph",
+                   "text": f"Rates for page {i + 1}: RATE-{i + 1}00.",
+                   "prov": [{"page_no": i + 1, "bbox": {"l": 53, "t": 700, "b": 660}}]}
+                  for i in range(4)],
+        "tables": [],
+    }
+    make_corpus(tmp_path, "company/mixed.pdf", b"%PDF mixed")
+    ingest.ingest_cycle(services, tmp_path, ingest.MemoryManifest())
+
+    by_page = {point["payload"]["page_start"]: point["payload"] for point in services.upserted}
+    assert set(by_page) == {1, 2, 3, 4}
+    assert by_page[1]["is_ocr"] is False, "page 1 is digital"
+    assert by_page[2]["is_ocr"] is True, "page 2 is a scan"
+    assert by_page[3]["is_ocr"] is False, "page 3 is digital"
+    assert by_page[4]["is_ocr"] is True, "page 4 is a scan"
+    # And the count travels, so a reader can be told a figure is partly machine-read.
+    assert by_page[2]["ocr_page_count"] == 1
+    assert by_page[1]["ocr_page_count"] == 0
+
+
+def test_a_document_with_no_per_page_report_falls_back_to_the_rollup(tmp_path, wired):
+    """docling-serve never sends confidence_pages, and a format the parser does not score sends none
+    either. The field then falls back to the document-level answer, which is exactly what the worker did
+    before services/parser existed. A fallback that silently answered "not OCR" would be the dangerous
+    direction."""
+    services = wired()
+    services.confidence = {"parse_score": None, "ocr_score": 0.5}
+    services.confidence_pages = {}
+    make_corpus(tmp_path)
+    ingest.ingest_cycle(services, tmp_path, ingest.MemoryManifest())
+    assert all(point["payload"]["is_ocr"] is True for point in services.upserted)
+    assert all(point["payload"]["ocr_page_count"] == 0 for point in services.upserted)

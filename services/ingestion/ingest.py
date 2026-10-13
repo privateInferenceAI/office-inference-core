@@ -204,23 +204,21 @@ def _multipart(url: str, filename: str, payload: bytes, options: dict, timeout: 
         return json.loads(response.read())
 
 
-# The conversion options, and every one of them is a real option of this release. That is worth stating
-# because three of the four in the first version were not. `do_ocr`, `do_table_structure` and `table_mode`
-# are ignored by docling-serve 1.36, which takes `ocr_preset` and `table_structure_preset` instead, and it
-# ignores an unknown field while answering success. The capabilities endpoint lists the real names:
+# The conversion options, and every one of them is a real option of the service this talks to.
 #
-#     docker run --rm --network ai-net curlimages/curl -sS http://parser:5001/v1/capabilities
+# Three of the four in an earlier version were not. `do_ocr`, `do_table_structure` and `table_mode` are
+# ignored by docling-serve 1.36, which takes `ocr_preset` and `table_structure_preset`, and it ignores an
+# unknown field while answering success. That cost three round trips, so the service this now talks to is
+# `services/parser`, which REFUSES an option it does not understand and names the ones it accepts.
 #
-# `ocr_preset=auto` runs OCR only on pages without a text layer, which is the released default. A 59-page
-# government PDF has a text layer, so forcing OCR on it rasterises every page and reads back text that was
-# already there: the most expensive thing this box can be asked to do, for no gain.
+# `ocr=True` runs OCR only where there is no text layer, which is what the released default did. A 59-page
+# government PDF has a text layer, so forcing OCR on it would rasterise every page and read back text that
+# was already there: the most expensive thing this box can be asked to do, for no gain.
 PARSE_OPTIONS = {
     "to_formats": "json",
     "image_export_mode": "placeholder",
-    "ocr_preset": "auto",
-    # Named explicitly rather than left to the default so the table model is a decision in the diff. The
-    # default is this value.
-    "table_structure_preset": "tableformer_v1_accurate",
+    "ocr": "true",
+    "table_structure": "true",
 }
 
 # How long to wait for one document, and how often to ask. The synchronous endpoint gives up after
@@ -276,10 +274,44 @@ def parse_document(services: Services, path: Path, relpath: str) -> dict:
             f"the parser returned no structured output for {relpath}. Its status was "
             f"{payload.get('status')!r}; an empty json_content usually means the options were not "
             f"accepted, and the real option names are in the service's capabilities endpoint.")
-    # The confidence report travels with the document because the chunker cannot see it and the worker needs
-    # it to decide whether these figures were recognised from an image. Step 3.4 established that per-page
-    # confidence does not survive into the wire schema, so this is the document-level report or nothing.
-    return {"document": document, "confidence": payload.get("confidence") or {}}
+    # Both confidence reports travel with the document, because the chunker cannot see them and the worker
+    # needs them to decide whether a figure was recognised from an image. `confidence` is the document
+    # rollup and `confidence_pages` is the per-page map, which is the one that can name a scanned page:
+    # the rollup cannot, because a 5th-percentile average over 59 pages is not moved by one bad page.
+    #
+    # `confidence_pages` is absent from docling-serve, so this field is what distinguishes the two
+    # services. Against docling-serve the worker falls back to the document-level answer, which is what it
+    # did before services/parser existed.
+    return {
+        "document": document,
+        "confidence": payload.get("confidence") or {},
+        "confidence_pages": payload.get("confidence_pages") or {},
+    }
+
+
+def ocr_pages(confidence_pages: dict | None) -> set[int]:
+    """The pages OCR actually ran on, from the per-page confidence report.
+
+    A page whose `ocr_score` is null is a page OCR did not touch, and a page that has one was read off an
+    image. Measured on the fixture corpus's 59-page publication: pages 1 and 8 carry a score and the other
+    57 do not, which matches the in-process report exactly.
+
+    This is the fact the pipeline could not have before. docling-serve computes it and serialises only the
+    document-level rollup, so the label had to be guessed from the document as a whole and a mixed filing
+    came out labelled entirely one way or the other.
+    """
+    if not confidence_pages:
+        return set()
+    pages: set[int] = set()
+    for key, page in confidence_pages.items():
+        if not isinstance(page, dict):
+            continue
+        if page.get("ocr_score") is not None:
+            try:
+                pages.add(int(key))
+            except (TypeError, ValueError):
+                continue
+    return pages
 
 
 def _ocr_ran(parsed: dict, confidence: dict | None = None) -> bool:
@@ -480,6 +512,12 @@ def ingest_document(services: Services, document: Document, content_sha256: str,
     chunks = chunker.chunk_document(parsed, doc_id=document.relpath, source_sha256=content_sha256)
     pages = len(parsed.get("pages") or {}) or None
 
+    # Per chunk rather than per document. A chunk that overlaps a page OCR read carries text that was
+    # recognised from an image, and one that does not, does not. The document-level answer was a single
+    # label for a mixed filing, which is the version that misleads a reader.
+    scanned = ocr_pages(parsed_result.get("confidence_pages"))
+    document_ocr = _ocr_ran(parsed, parsed_result.get("confidence"))
+
     # Refuse to record a document that produced nothing. The first real corpus run wrote two contract
     # exhibits as zero chunks and reported success, which put two documents in the index that look
     # retrievable and contain no text. A failure would have been visible; this was not. The check is here
@@ -497,7 +535,6 @@ def ingest_document(services: Services, document: Document, content_sha256: str,
     # the wrong answer for a digital one, so it is corrected here from the parser's own report. A figure
     # read by OCR and a figure read from a text layer carry different risk, and the payload is where that
     # difference has to survive.
-    ocr_ran = _ocr_ran(parsed, parsed_result.get("confidence"))
 
     points: list[dict] = []
     for start in range(0, len(chunks), EMBED_BATCH):
@@ -511,7 +548,17 @@ def ingest_document(services: Services, document: Document, content_sha256: str,
             # The access label is attached here rather than derived at query time, because the search
             # filters on it and a filter that reads the filesystem is not a filter.
             payload["acl"] = document.root
-            payload["is_ocr"] = ocr_ran
+            if scanned:
+                payload["is_ocr"] = any(
+                    page in scanned for page in range(chunk.page_start, chunk.page_end + 1))
+            else:
+                # No per-page report, which happens for a format the parser does not score. Fall back to
+                # the document-level answer, which is what this field used to be.
+                payload["is_ocr"] = document_ocr
+            # How many of this chunk's pages were read off an image, so a reader can be told the figure is
+            # partly machine-read rather than being given a yes or no about the whole passage.
+            payload["ocr_page_count"] = sum(
+                1 for page in range(chunk.page_start, chunk.page_end + 1) if page in scanned)
             points.append({"id": chunk.chunk_id, "vector": vector, "payload": payload})
     return points, pages
 

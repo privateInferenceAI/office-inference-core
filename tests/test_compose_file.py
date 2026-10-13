@@ -88,27 +88,73 @@ def test_third_party_images_are_pinned_by_digest(services):
 
 def test_the_document_services_are_pinned_and_unpublished(compose):
     """The C2 containers. Every one of them is digest-pinned, on ai-net, and publishes no port: the
-    posture is that nothing of ours is reachable from outside the machine."""
+    posture is that nothing of ours is reachable from outside the machine.
+
+    `parser` is a local build now, so it pins by its Dockerfile's `FROM` rather than by an `image:` digest.
+    That is a weaker check than the others and it is checked separately below, because a build with an
+    unpinned base is an unpinned image wearing a tag.
+    """
     services = compose["services"]
-    for name in ("parser", "vector", "embeddings", "reranker"):
+    for name in ("vector", "embeddings", "reranker"):
         service = services[name]
         assert "sha256:" in service["image"], f"{name} must be digest-pinned"
         assert "ai-net" in service["networks"], f"{name} must be on the private network"
         assert not service.get("ports"), f"{name} must not publish a port"
 
+    parser = services["parser"]
+    assert "ai-net" in parser["networks"], "parser must be on the private network"
+    assert not parser.get("ports"), "parser must not publish a port"
+    assert parser.get("build"), "parser is a local build"
+    dockerfile = (COMPOSE.parents[3] / "services" / "parser" / "Dockerfile").read_text()
+    assert "sha256:" in dockerfile, (
+        "the parser is a local build, so its base image must be digest-pinned in the Dockerfile; a tag "
+        "would be a different image next month")
 
-def test_the_parser_has_every_outbound_door_shut(compose):
-    """Docling Serve can fetch remote sources, call vision-language APIs, load third-party plugins and
-    serve a browser UI. None of that belongs on a box whose promise is that documents do not leave it,
-    and none of it is on by default in a way we can rely on: remote services and plugins default to
-    false, but so does everything else here, and a default is not a decision."""
+
+def test_the_parser_service_refuses_options_it_does_not_understand():
+    """The service that replaced docling-serve exists to stop a class of silent failure, so its own
+    handling of an unknown option is the thing to check.
+
+    docling-serve ignores an unknown field while answering success. `do_ocr`, `do_table_structure` and
+    `table_mode` all looked like they worked for three round trips because of it. The replacement refuses
+    the request and names what it accepts, and that behaviour is in the source rather than in a comment.
+    """
+    source = (COMPOSE.parents[3] / "services" / "parser" / "parser_service.py").read_text()
+    assert "ACCEPTED_FIELDS" in source
+    assert "unknown option(s)" in source, "an unknown option must be reported, not ignored"
+    # And the fields the worker sends must be in the accepted set, or every document fails.
+    worker = (COMPOSE.parents[3] / "services" / "ingestion" / "ingest.py").read_text()
+    for field in ("to_formats", "image_export_mode", "ocr", "table_structure"):
+        assert f'"{field}"' in worker, f"the worker should send {field}"
+    for field in ("to_formats", "image_export_mode", "ocr", "table_structure"):
+        assert f'"{field}"' in source, f"the service should accept {field}"
+
+
+def test_the_parser_has_no_outbound_door_to_shut(compose):
+    """The previous version of this test asserted five environment variables that switched off docling-
+    serve's remote sources, vision-language APIs, plugins, browser UI and API docs.
+
+    Those switches are gone because the surface is gone. The service is one endpoint that converts an
+    uploaded document: it has no route that fetches a URL, no plugin loader, no UI and no published schema
+    to disable one variable at a time. A smaller surface was the point of the wrapper, and this test
+    records that the reason the old assertions existed no longer applies rather than deleting them
+    quietly.
+
+    What still needs checking is that nothing new opened a door.
+    """
     env = compose["services"]["parser"]["environment"]
-    assert env["DOCLING_SERVE_ENABLE_REMOTE_SERVICES"] == "false"
-    assert env["DOCLING_SERVE_ALLOW_EXTERNAL_PLUGINS"] == "false"
-    assert env["DOCLING_SERVE_ENABLE_UI"] == "false"
-    assert env["DOCLING_SERVE_ENABLE_API_DOCS"] == "false"
-    assert env["DOCLING_SERVE_DEBUG_ERROR_DETAILS"] == "false"
-    assert env["DOCLING_SERVE_CORS_ORIGINS"] != '["*"]', "CORS must not stay at its default"
+    source = (COMPOSE.parents[3] / "services" / "parser" / "parser_service.py").read_text()
+
+    # No route that takes a URL, and no import of the machinery that would fetch one.
+    for forbidden in ("HttpSource", "requests.get", "urlopen(", "allow_external_plugins",
+                      "enable_remote_services"):
+        assert forbidden not in source, f"the parser service should not use {forbidden}"
+    # The API docs and schema endpoints FastAPI offers by default are switched off at construction.
+    assert "docs_url=None" in source and "openapi_url=None" in source, (
+        "FastAPI publishes /docs and /openapi.json unless told not to")
+    # And a conversion runs one at a time, because the models are the memory.
+    assert env.get("PARSER_MAX_CONCURRENT") == "1", (
+        "a second concurrent conversion is a second copy of the models on a box sized for one")
 
 
 def test_the_parser_healthcheck_can_actually_run(compose):
