@@ -1371,6 +1371,22 @@ This makes step 3.1's manual collection creation a diagnostic rather than a prer
 against an existing collection is a no-op; running it against a fresh store is how you check the store
 before the worker gets there.
 
+**The result, 2026-10-13.** The parser swap deployed and verified on the reference instance. The corpus
+re-ingested to 1059 chunks with no failures, and a second cycle skipped all four and wrote nothing.
+
+| Document | Chunks | `is_ocr` | Pages labelled OCR |
+|---|---|---|---|
+| irs-p15.pdf | 358 | **38 true, 320 false** | **1 and 8** — the two the parser read off an image |
+| apple-ex10-1-2024.htm | 13 | 13 false | none |
+| apple-ex10-22-2024.htm | 16 | 16 false | none |
+| apple-10k-2024.htm | 400 | 400 false | none |
+
+The publication is the one that matters: 2 of its 59 pages were read off an image, and 38 of its 358
+chunks say so while the other 320 say they were not. Before this work the document-level answer was "not
+OCR" in full, so a figure recognised from page 1's scan was presented as text that was already there.
+`ocr_page_count` travels with each chunk as well, so a passage that is partly machine-read can be described
+that way rather than with a yes or no.
+
 **The parser is now `services/parser`, not `docling-serve`.** Step 3.4 chose docling-serve and this step
 replaced its HTTP layer while keeping its image, weights and request shape. The reason is one field.
 
