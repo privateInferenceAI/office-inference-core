@@ -1,6 +1,12 @@
 name: parser
 location: either
-image: ghcr.io/docling-project/docling-serve-cpu
+# Our wrapper over the same image docling-serve ships, replacing its HTTP layer.
+#
+# Why the swap, in one line: docling-serve computes Docling's per-page confidence report and serialises
+# only the document-level rollup, so the pipeline cannot tell which pages were read off an image. A mixed
+# filing is then labelled one way for the whole document, which presents a figure recognised from a scan as
+# text that was already there — the direction that makes a reader trust it more rather than less.
+build: .
 packs: [document-chat]
 depends_on: []
 ports:
@@ -12,19 +18,30 @@ gpu:
   required: false
 data_class: confidential
 config_schema:
-  threads:
+  max_concurrent:
     type: integer
-    default: 12
-  table_mode:
-    type: string
-    default: accurate
+    default: 1
+    description: >-
+      Conversions in flight. One, because the models are the memory and a second concurrent conversion is a
+      second copy of them on a box sized for one.
+  ocr:
+    type: boolean
+    default: true
+    description: >-
+      Run OCR where a page has no text layer. Per page rather than per document: forcing it on every page
+      would rasterise 57 digital pages of a 59-page PDF to re-read text that was already there.
+  table_structure:
+    type: boolean
+    default: true
+    description: Table structure recognition, using Docling's accurate TableFormer.
 substrate:
   office:
     notes: >-
-      The same image and the same weights, cached under OI_ROOT so an air-gapped install ships with
-      the cache filled. On a GPU appliance the CUDA variant of the same release replaces the CPU one,
-      which is a tag change and nothing else.
+      The same image and the same weights as docling-serve, so this adds one Python file rather than a
+      second copy of 2 GB of models. On a GPU appliance the CUDA variant of the same release replaces the
+      base image, which is a tag change and nothing else.
   cloud:
     notes: >-
-      Runs on CPU on the reference instance. It is the only stage in the pipeline that touches a
-      document in its original form, so nothing downstream depends on a model that saw the raw file.
+      Runs on CPU on the reference instance, about 11 seconds for a four-page mixed scan and nine minutes
+      for the 59-page publication. It is the only stage that touches a document in its original form, so
+      nothing downstream depends on a model that saw the raw file.

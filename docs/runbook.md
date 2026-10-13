@@ -1338,6 +1338,45 @@ This makes step 3.1's manual collection creation a diagnostic rather than a prer
 against an existing collection is a no-op; running it against a fresh store is how you check the store
 before the worker gets there.
 
+**The parser is now `services/parser`, not `docling-serve`.** Step 3.4 chose docling-serve and this step
+replaced its HTTP layer while keeping its image, weights and request shape. The reason is one field.
+
+`docling-serve` computes Docling's per-page confidence report and serialises only the document-level
+rollup. Its own code says so:
+
+    class ConfidenceScores(BaseModel):
+        """JSON-safe snapshot of docling confidence scores.
+        Document-level only. A per-page breakdown can be added later as an optional ``pages`` field..."""
+
+That breakdown is what tells the pipeline which pages were read off an image. Measured on the fixture
+corpus's 59-page publication, the in-process report names pages 1 and 8 as OCR'd, with page 1 carrying the
+weakest OCR score on the document at 0.7284. The served rollup cannot express any of that: it reports
+`low_score 0.9326` while page 59 scores 0.6739, because a 5th-percentile average over 59 pages is not moved
+by one bad page.
+
+**The wrapper adds one Python file to the same image**, so nothing doubles: same base digest, same weights,
+same 5001, same request shape, and the ingestion worker talks to either service without a code change. What
+comes back is different.
+
+Three things it does differently, and each is a decision:
+
+* **It returns `confidence_pages`.** A page with an `ocr_score` was read off an image; a page with null was
+  not touched by OCR. The worker uses it to set `is_ocr` per chunk rather than per document, so a figure
+  from a scanned page of a mixed filing is labelled as machine-read and a figure from a digital page is not.
+* **It refuses an option it does not understand**, naming the ones it accepts. `docling-serve` ignores an
+  unknown field while answering success, which is how `do_ocr`, `do_table_structure` and `table_mode` all
+  looked like they worked. Sending `do_ocr=true` to the new service returns a 422 listing the real names.
+* **It offers no route that fetches a URL, no plugin loader, no UI and no published schema.** The five
+  variables that switched those off in docling-serve were about a surface this service does not have.
+
+**The fixture, and why it took two.** The existing scanned fixture is one page, and a one-page scan cannot
+test whether the pipeline knows WHICH pages were read off an image: a wholly scanned document and a wholly
+digital one are both labelled correctly by a document-level answer. The failure only exists in a mixture.
+`tests/fixtures/build_mixed_scan.py` authors four pages with scanned and digital interleaved, pages 2 and 4
+as image-only pages with no text layer, and it refuses to write a fixture whose pages do not have the shape
+it claims. Verified: the service reports an `ocr_score` for pages 2 and 4 and null for pages 1 and 3, in 11
+seconds.
+
 **What the numbers are not.** The token count is estimated from word count rather than measured with the
 embedding model's tokenizer, and the estimate is named in the module so it can be replaced. It bounds a
 chunk size and must never be used to assert one. Step 3.6's embedding contract is where the real

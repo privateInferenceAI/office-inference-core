@@ -121,27 +121,34 @@ services:
   # layout, table and OCR models are the largest thing in the pipeline, and a worker that restarts on
   # every document change should not reload them.
   parser:
-    # ghcr.io/docling-project/docling-serve-cpu:v1.36.0, released 2026-10-01. The -cpu suffix is
-    # load-bearing in the same way TEI's is: it is the variant that does not pull CUDA wheels onto a
-    # box with no GPU.
-    image: ghcr.io/docling-project/docling-serve-cpu@sha256:225c8586e20d5d0fc6811a9e0e044fa602bcc4393f00389009bad42d6787b58f
+    # Our wrapper over the same image, not docling-serve itself.
+    #
+    # Why the swap. docling-serve computes the per-page confidence report and serialises only the
+    # document-level rollup, which its own code acknowledges: "Document-level only. A per-page breakdown can
+    # be added later as an optional ``pages`` field". That breakdown is what tells a reader which pages were
+    # read off an image. Without it a mixed filing is labelled one way for the whole document, so a figure
+    # recognised from a scan is presented as text that was already there.
+    #
+    # The base is the same image and the same weights, so this adds one Python file rather than a second
+    # copy of 2 GB of models. Verified 2026-10-13 on the mixed-scan fixture: it reports an ocr_score for
+    # pages 2 and 4 and null for pages 1 and 3, which is exactly the fixture's construction, in 11 seconds.
+    build:
+      context: ../../../services/parser
+      dockerfile: Dockerfile
+    image: oi-core/parser:local
     container_name: parser
     restart: unless-stopped
     environment:
-      # Everything a request could ask for that reaches outside the box is off. Remote services covers
-      # vision-language models called over APIs, external plugins covers third-party code, the UI is a
-      # browser surface nothing needs, and the API docs publish the schema to anonymous callers.
-      DOCLING_SERVE_ENABLE_REMOTE_SERVICES: "false"
-      DOCLING_SERVE_ALLOW_EXTERNAL_PLUGINS: "false"
-      DOCLING_SERVE_ENABLE_UI: "false"
-      DOCLING_SERVE_ENABLE_API_DOCS: "false"
-      DOCLING_SERVE_ENABLE_MANAGEMENT_ENDPOINTS: "false"
-      DOCLING_SERVE_DEBUG_ERROR_DETAILS: "false"
-      # Narrowed from the "*" default. Nothing browses this service, but a permissive default on an
-      # internal service is how a stray page becomes an API.
-      DOCLING_SERVE_CORS_ORIGINS: '["http://localhost"]'
+      # No remote services, no external plugins, no UI and no API docs, because this service does not offer
+      # them: it is one endpoint that converts a document. The surface that docling-serve had to switch off
+      # one variable at a time does not exist here, which is the smaller attack surface that came free with
+      # the wrapper.
+      #
+      # One conversion at a time. The models are the memory, and a second concurrent conversion is a second
+      # copy of them on a box sized for one.
+      PARSER_MAX_CONCURRENT: "1"
+      PARSER_UPLOAD_DIR: /tmp/oi-parser
       # Structured logs, so a parse failure is greppable rather than a paragraph.
-      DOCLING_SERVE_LOG_FORMAT: json
       DOCLING_SERVE_LOG_LEVEL: INFO
       # This box is 16 vCPU and its default of 4 leaves three quarters idle, on the slowest stage in
       # ingestion. The workers are threads inside one process and they share the loaded models, which
@@ -169,9 +176,9 @@ services:
     networks:
       - ai-net
     healthcheck:
-      # Python rather than curl: this image installs tesseract and GL libraries and no HTTP client,
-      # so a curl healthcheck would fail with "not found" and the container would never be healthy.
-      # It is a UBI Python image, so the interpreter is the one thing guaranteed to be there.
+      # Python rather than curl: this image installs tesseract and GL libraries and no HTTP client, so a
+      # curl healthcheck would fail with "not found" and the container would never be healthy. It is a UBI
+      # Python image, so the interpreter is the one thing guaranteed to be there.
       test: ["CMD", "python", "-c",
              "import urllib.request; urllib.request.urlopen('http://localhost:5001/health', timeout=4)"]
       interval: 15s
