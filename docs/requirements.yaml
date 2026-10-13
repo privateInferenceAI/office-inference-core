@@ -408,7 +408,7 @@ items:
     tier: [cloud, office, hosted]
     phase: C2
     verify: with two versions indexed, the answer cites the current one
-    status: open
+    status: verified
     note: >-
       Built 2026-10-13, recorded in docs/runbook.md step 3.10. The design is the research's rather than
       invented here: a version registry with an explicit is_current flag, set at ingest and reviewable by a
@@ -418,14 +418,16 @@ items:
       exactly as it did before it existed. A superseded passage is MARKED rather than dropped from the
       results: dropping it would answer the question from a different document with no sign that the right one
       existed and had been excluded, which is a wrong answer wearing a correct one's clothes. The refusal
-      itself is step 3.11's, and this step carries the fact to it. Status is open because the proof has to run
-      on the deployed store with two versions actually indexed.
+      itself is step 3.11's, and this step carries the fact to it. VERIFIED 2026-10-13 against the deployed
+      store: a query over a corpus holding two versions of a fee schedule returned both, the superseded one
+      marked current=False and the current one marked current=True, with the superseded document named in the
+      result so step 3.11 can refuse on it. The refused answer itself is 3.11's to build.
   - id: RET-DUPE-001
     title: Near-duplicate documents are detected at ingest
     tier: [cloud, office, hosted]
     phase: C2
     verify: the same document under two filenames is flagged rather than indexed twice
-    status: open
+    status: verified
     note: >-
       Built 2026-10-13, recorded in docs/runbook.md step 3.10. The signature is the set of chunk ids, which
       are already a hash of each chunk's text, so the lexical index holds what a comparison needs and no new
@@ -436,7 +438,16 @@ items:
       and keeping both silently means an answer cites whichever the retriever happened to rank first. The pair
       is stored ordered with a unique constraint so it is recorded once whichever document arrived second, and
       a count floor of five chunks keeps two small documents that happen to agree from being flagged. Status
-      is open because the proof has to run on the deployed store with a real duplicate pair.
+      VERIFIED 2026-10-13 against the deployed store. A byte-identical copy of a fee schedule under a third
+      name was flagged at 100 percent shared, alongside the 90 percent pair formed by the two versions of the
+      same schedule, which is the detector working as intended: a new version of a document IS a near-duplicate
+      of the old one, so one flag surfaces both the duplicate case and the version case and a person resolves
+      each by declaring which is current. Three faults were found by running it and none by reading it: the
+      comparison used chunk ids, which contain the document they belong to and so can never match two copies of
+      a file; the chunk-count floor suppressed single-page documents, which are exactly what a small business
+      duplicates; and detection ran only when a file arrived, so a corpus that predates the check was never
+      examined at all -- which is why the first two produced no visible symptom. There is now a
+      --scan-duplicates command for that case, and the floor is measured in characters of identical text.
   - id: RET-FORMAT-001
     title: Email, spreadsheets, and slides are ingested
     tier: [cloud, office, hosted]
