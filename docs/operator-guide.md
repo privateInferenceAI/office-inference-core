@@ -1437,3 +1437,262 @@ tombstone and continues the chain across it.
 
 **Never run this without `--dry-run` on a deployment whose record you have not exported.** The rows are
 gone afterwards, and the tombstone records that they went rather than what they said.
+
+---
+
+# Stage 12: backup and restore, which do not exist yet
+
+**Goal:** know what protects this deployment's data today, and what does not.
+
+**This stage is short because the feature is not built.** There is no backup script in this repository, no
+`services/backup/`, and no restore procedure. `OPS-BACKUP-001` in `docs/requirements.yaml` reads *"Backups
+restore, proven by a drill"* and its status is **open**, phase C8.
+
+That is not an oversight in the guide. It is the state of the system, and a guide that skipped the stage
+would leave an operator assuming something exists that does not.
+
+## 12a. What is protected today, and by what
+
+| Data | Where it lives | What protects it today |
+|---|---|---|
+| The audit record | `postgres`, volume under `data/postgres` | The bucket it ships to, with Object Lock — **the record, not the database** |
+| Documents | `documents/` on the host | Nothing. The client's own copies are the backup, which is a real answer for a purge and not one for a disk failure |
+| The vector store | `data/qdrant/` | Nothing. It is derived data and can be rebuilt by re-ingesting, at the cost of the parse time |
+| The manifest and the rendered env | `manifests/`, `rendered/env` | Git for the manifest; **`rendered/env` is gitignored and holds the generated secrets** |
+| API keys | `rendered/keys.json` | Nothing |
+| Retention policy, holds, version registry | `postgres` | Nothing |
+
+**The one that should worry you is `rendered/env`.** It holds the Postgres password and the LiteLLM master
+key, it is generated once, and it is deliberately not in git. Lose it and you cannot authenticate to your
+own database or gateway; the data is intact and unreachable. **Copy it somewhere safe by hand, now**, and
+treat that as the minimum viable backup until C8.
+
+## 12b. What an operator can do today, and what it does not cover
+
+Two things are available, and neither is a backup:
+
+```
+# the vector store is derived, so re-ingesting rebuilds it
+docker exec ingestion python3 /app/ingest.py --documents /documents
+
+# the record can be exported and shipped, which is what the bucket is for
+oi run --rm audit export --date "$(date -u +%Y-%m-%d)"
+```
+
+The first is a slow rebuild rather than a restore, and it depends on the documents still being on disk —
+which is exactly what a disk failure takes away. The second protects the *record* off-machine, which is the
+compliance claim, and does nothing for the documents or the keys.
+
+**A truthful sentence to a client today:** *the audit record ships continuously to write-once storage in your
+account, so the evidence survives this machine; the documents and the configuration do not yet have a
+backup procedure, and that arrives with C8.*
+
+## 12c. What a restore will have to cover when it is built
+
+Recorded here so the operator knows what to ask for, and so whoever builds it has the list:
+
+- `postgres` — the record, the manifest, the lexical index, the version registry, holds and policy. A
+  `pg_dump` and a matching `rendered/env`, or the dump is unusable
+- `documents/` — the client's files, which the system does not own and should not be the only copy of
+- `data/qdrant/` — derivable, so a restore may legitimately choose to re-ingest instead, and the choice
+  should be deliberate because re-ingesting a scanned corpus takes hours
+- `rendered/env` and `rendered/keys.json` — small, secret, and the difference between a restorable
+  deployment and an unreachable one
+- `manifests/` — in git already
+- The **restore drill** the requirement asks for: a restore that produces a working system, with the
+  elapsed time recorded as the RTO. A backup nobody has restored is a hypothesis
+
+**Checkpoint.** You can answer two questions: where is `rendered/env` copied to, and who knows. If the
+answer to the second is "nobody", that is the finding.
+
+---
+
+# Stage 13: the acceptance probes, in one run
+
+**Goal:** one pass that exercises every control, so a new deployment can be judged in twenty minutes
+rather than by reading.
+
+Each probe is a script under `tests/fixtures/` that talks to the real services. **They are not unit tests**:
+unit tests prove the code does what it was written to do, and these prove the *deployment* behaves. That
+distinction is the reason this project was caught shipping a purge rehearsal that destroyed documents.
+
+Run them in this order. Each prints `PASSED` or `FAILED with N problem(s)` and nothing in between is worth
+ignoring.
+
+## 13a. The four that need only the checkout
+
+```
+cd /opt/oi-core
+run() { docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
+  -v /opt/oi-core:/w -w /w --env-file rendered/env "$@"; }
+
+run --entrypoint python oi-core/ingestion:local /w/tests/fixtures/hybrid_acceptance.py
+run --entrypoint python oi-core/ingestion:local /w/tests/fixtures/figures_acceptance.py
+run --entrypoint python oi-core/ingestion:local /w/tests/fixtures/api_contract_probe.py
+run --entrypoint python oi-core/ingestion:local /w/tests/fixtures/citations_acceptance.py
+```
+
+| Probe | What its `PASSED` line tells you |
+|---|---|
+| `hybrid_acceptance` | A bare reference is found by the lexical arm and missed without it, and fusion keeps what the vector arm found. **The last line prints `arms on:`** — on a larger corpus those counts grow, which is how you know the corpus is being searched rather than a fixture |
+| `figures_acceptance` | Damaged figures are caught, intact ones are not, arithmetic confirms what the document states, and scanned and digital chunks are labelled apart |
+| `api_contract_probe` | The services answer what the contract says they answer. **Its last line — "Findings are what the services answered, not what a document said they would" — is the point of the whole suite** |
+| `citations_acceptance` | An invented citation is rejected, an unsupported sentence is marked and kept, and a correct sentence survives |
+
+And the one that needs the reranker's paid subscription rather than just the checkout:
+
+```
+run --entrypoint python oi-core/eval:local /w/tests/fixtures/rerank_acceptance.py
+```
+
+It prints the rank changes the reranker produced and its latency against the budget, and it says plainly
+that ten questions cannot resolve a small effect. **A `403` naming AWS Marketplace here means the
+subscription lapsed** — it is an agreement rather than a permission, and no IAM change substitutes for it.
+
+## 13b. The ACL probe, which needs the denial mode passed explicitly
+
+```
+run -e ACCESS_DENIAL_MODE=counted --entrypoint python oi-core/ingestion:local /w/tests/fixtures/acl_probe.py
+```
+
+Without `-e`, it prints the library default rather than your deployment's mode. Stage 8 explains why.
+
+## 13c. The retention probe, which needs more than the others
+
+**This one wrote a file into a client's corpus and destroyed it, and it needs the eval image rather than
+the retention image.** That is not obvious from any of its invocation lines, and it cost this guide two
+failed attempts. Every requirement is load-bearing:
+
+```
+docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+  run --rm --user "$(id -u):$(id -g)" \
+  -e DOCUMENTS_ROOT=/documents -e VECTOR_URL=http://vector:6333 -e COLLECTION=documents \
+  --entrypoint python \
+  -v /opt/oi-core:/w -v /opt/oi-core/documents:/documents -w /w \
+  eval /w/tests/fixtures/retention_policy_acceptance.py
+```
+
+| Part | Why |
+|---|---|
+| **the `eval` image** | The probe imports `psycopg2` and spawns `/app/ingest.py`. The retention image ships psycopg 3 and has no `ingest.py`, so it fails with `ModuleNotFoundError` |
+| `--user "$(id -u):$(id -g)"` | It writes into the documents tree, which belongs to the operator |
+| `-e DOCUMENTS_ROOT=/documents` | Or it writes to `/documents` and then inspects `/w/documents`, finds its own fixture missing, and reports five failures that all follow from that |
+| `-v /opt/oi-core/documents:/documents` | The file half of the test |
+| **not `:ro`** | The eval service mounts the checkout read-only by convention. The probe must write, so this mount cannot be read-only, and the write lands **on your real corpus** |
+| `-e VECTOR_URL` and `-e COLLECTION` | The compose `eval` service does not set them; the probe's purge needs them to reach the store |
+
+```
+  vector index:  0
+  lexical index: 0
+  manifest:      0
+  object store:  GONE
+  PASSED: a period with no policy destroyed nothing, a hold beat the period, a dry run changed nothing,
+  and the real run left the document gone from the vector index, the lexical index, the manifest and the
+  client's own files
+```
+
+**`object store: GONE` is the assertion nothing else in this suite makes.** It is the only proof that a
+retention period destroys the client's own file rather than merely hiding it.
+
+**Checkpoint.** All five print `PASSED`, and the probe leaves no fixture behind. Confirm:
+
+```
+ls documents/company/retention-policy-fixture.md     # must not exist
+docker exec postgres psql -U oicore -d oicore -tAc "select count(*) from retention_policies"
+```
+
+**A warning about running this on a client's deployment.** The probe writes a document into the corpus and
+destroys it. On a deployment whose corpus is not disposable, run it on a copy, or accept that for a few
+seconds a document that is not the client's exists in their folder and then is destroyed. Its `DOC_ID` is
+`company/retention-policy-fixture.md`, a name no client will collide with.
+
+## 13d. What a full pass means, and what it does not
+
+**Five `PASSED` lines mean:** retrieval works at both arms and fuses them, the figure checks catch what they
+claim to, the access filter holds, citations are refused when they are invented or superseded, and a
+retention period destroys a document everywhere including the client's file.
+
+**They do not mean the answers are true.** No probe here evaluates whether a model's prose is correct, and
+stage 7c explains why the checks cannot. The suite proves the controls around the model, not the model.
+
+---
+
+# Stage 14: onboarding a second client's corpus
+
+**Goal:** add a corpus to a deployment that is already holding one, without disturbing it.
+
+This is the procedure manual section 19 describes and, until this guide was written, nothing had ever run
+it. It is also where the access-label rule turns from a theoretical problem into a decision.
+
+## 14a. Decide the roots before you copy anything
+
+**This is the step people skip and then redo.** A root is a top-level folder under `documents/`, and its
+name is the label. Two questions, both of which are the client's to answer:
+
+1. **Who may see what?** Two roots exist in code today: `company` and `executive`. **Adding a third is a
+   code change** to the `ROLES` map in `services/retrieval/retriever.py` and a redeploy, not a setting.
+2. **Is there anything one group must not see?** Whatever goes in a restricted root, the client should
+   understand that a search by a role without it returns a denial rather than an answer, and that
+   `access.denial` decides whether they are told.
+
+**A root named anything else is a folder nobody can read.** If the client's organisation implies
+`finance/` or `hr/`, you have three options and only one of them is free: file those documents under
+`executive/` and accept that only the executive role sees them; add the root to the code; or wait for C3's
+per-user permissions. Decide before the corpus is laid out, because relabelling afterwards means
+re-ingesting.
+
+## 14b. One deployment holds one corpus, and this is a limitation
+
+A second deployment is a second manifest, a second database and a second bucket. **Loading a second
+client's documents into this deployment's `company/` folder puts them in the same search as the first
+client's**, with no boundary between them: the ACL filters by folder, not by client.
+
+So the honest options are:
+
+- **A second deployment** for a second client, which is the shape section 19 describes and what the
+  `deployment_id` in the manifest is for
+- **One shared corpus** when the two bodies of documents genuinely are one pool, which is the case for a
+  single firm's departments and is what the fixture corpus looks like
+
+**Never mix two clients' material in one root.** The failure is silent: every question returns a blend, and
+the ACL cannot tell you because there is nothing to filter on.
+
+## 14c. The procedure
+
+```
+cd /opt/oi-core
+
+# 1. the documents, under roots that already exist
+cp /tmp/newclient/policy.md      documents/company/
+cp /tmp/newclient/board-pack.pdf documents/executive/
+
+# 2. ingest, and read the counts rather than the exit code
+docker exec ingestion python3 /app/ingest.py --documents /documents
+
+# 3. set the retention period BEFORE there is anything to retain
+docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+  run --rm retention --set-retention documents --days 365 \
+  --legal-basis "<the period, in the client's or their regulator's words>"
+
+# 4. ask one question per root
+docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+  run --rm --entrypoint python -v /opt/oi-core:/w:ro -w /w eval /w/tests/fixtures/ask.py \
+  -q "<a question the client says must work>" --role staff
+```
+
+**Compare the right two numbers** before telling anyone it is loaded — stage 5b has the regex, and the
+point is that a plain file count includes the `.DS_Store` and the `.msg` the worker ignores on purpose.
+
+**`--legal-basis` is not decoration.** A retention period with no stated basis is one nobody can defend to
+an auditor.
+
+**Checkpoint.** `seen` matches the count of accepted-suffix files, the question returns passages from the
+root you expect, and a restricted question returns a denial rather than content. If restricted content comes
+back, **stop** — that is the access filter failing, and stage 8d is where to go.
+
+## 14d. What this stage cannot yet prove
+
+**Two clients in one deployment, isolated from each other, is not possible.** There is one database, one
+vector collection and one role map. The unit of isolation is the deployment, and a second client means a
+second deployment. That is a real architectural limit and worth saying to a client who asks whether they can
+share.
