@@ -178,6 +178,25 @@ items:
     phase: C2
     verify: a document containing an instruction to reveal other documents produces a refusal
     status: open
+    note: >-
+      Built 2026-10-13, recorded in docs/runbook.md step 3.13. Four controls and only one of them is a
+      detector, because three are structural and hold regardless of what a passage says. The lane is decided
+      from the manifest before any content is assembled, and there is deliberately NO code path from retrieved
+      text to the data class, with a test asserting the absence rather than any behaviour: a function that
+      computed a lane from content would be the vulnerability however carefully it checked, and no behaviour
+      test would notice the day somebody added one. The boundary is the access filter at retrieval, which has
+      already run and is not re-run because a passage asked for something, so an injection in a passage a role
+      can see can only reach material already in front of it. Content is presented as data inside delimiters
+      after the instruction, never concatenated into it, which is the difference between a document that says
+      "ignore your instructions" and one that IS an instruction, decided by where the text sits rather than by
+      what it says. The fourth control is a weighted detector that quarantines text aimed at the assistant
+      rather than at a reader, and it is written as the signal it is. It is shaped around its false positives
+      because that is what gets a detector turned off: the signals aim at second-person address and at attempts
+      to change behaviour rather than at imperative language, and there are tests asserting that a fee schedule,
+      an employee policy and a document about assistants all pass untouched. THE BOUND: a passage written to
+      look like ordinary prose while steering the model is not caught by any pattern, and the structural three
+      are what hold in that case. Status is open because the proof has to run against a document installed in
+      the deployed corpus and retrieved by the ordinary path.
 
   # ---------------------------------------------------------------- audit and evidence
   - id: AUD-CHAIN-001
