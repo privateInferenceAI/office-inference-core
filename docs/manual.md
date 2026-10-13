@@ -14,7 +14,7 @@ your own, which is the point of a hash chain.
 
 **Status when this was written:** phase C1 complete. The system runs, answers through a gateway,
 records what it did, ships that record off the machine, and can prove the record was not altered. It
-cannot read a client's documents yet. That is phase C2 and it is next.
+cannot read a client's documents until it is deployed with the ingestion worker. That arrived in C2.
 
 ---
 
@@ -238,7 +238,7 @@ so rather than implying otherwise.
 
 | Working now | Not built yet |
 |---|---|
-| The stack runs from a manifest, in the client's account, on CPU | Reading the client's documents. Ingestion and retrieval are C2 |
+| The stack runs from a manifest, in the client's account, on CPU | Reading the client's documents. Built in C2; see sections 13a to 13f |
 | Four roles on the provider's models, through one gateway | A user interface of any kind. C4 |
 | Per-role keys with model permissions and hard spending ceilings | Per-user permissions. Today roles are all there is |
 | An append-only audit record with a hash chain | Alarms that page someone, and a restore drill. C8 |
@@ -1436,6 +1436,854 @@ writing an event by hand in development, and it is why that flag exists.
 **A pack** is a sellable bundle, listed in `packs/catalog.yaml` with the services it declares. Adding
 one is a catalog entry plus the services it names. The manifest's `packs` list is what switches it on,
 and an unknown pack id fails validation.
+
+---
+
+## 13a. Ingesting documents
+
+A client's documents are not searchable until the worker has read them. `ingestion` walks the documents
+directory, parses each file it has not seen before, cuts the text into chunks, embeds them, and writes the
+result twice: the vectors the dense search reads, and the rows the lexical arm reads. It runs a cycle every
+fifteen minutes, and it is the only component that writes the document indexes.
+
+Each chunk carries the label of the top-level folder it was found under, so `company/handbook/policy.pdf`
+is labelled `company`. The label is attached here rather than worked out during a search, because the
+search filters on it. Section 13d covers what enforces it.
+
+**Apply the schema, then start the worker:**
+
+```
+oi run --rm audit migrate
+oi up -d --build ingestion
+oi ps
+docker logs ingestion --tail 30
+```
+
+`audit migrate` is the one path that applies migrations, and it applies them in order. `oi ps` should list
+`ingestion` as `healthy`, and healthy for this container means the last cycle finished with no failures
+rather than that the process is alive. There is no listening socket here, so a check that only proved the
+process existed would stay green while every document failed.
+
+**What a first cycle prints.** The worker parses every document it has not seen, so a first run over a
+client's corpus takes minutes or hours. This is the run the runbook records on the reference instance:
+
+```
+ingesting apple-10k-2024.htm  (new, 1503891 bytes)
+    214 chunks, 42 pages
+ingesting irs-p15.pdf  (new, 1713916 bytes)
+    ...
+
+seen 4, new 4, changed 0, skipped 0, failed 0
+chunks written 1183, chunks removed 0, documents removed 0
+```
+
+The counts depend on the corpus and on the chunker version. The same four-document corpus, ingested into an
+empty collection with the chunker this manual documents, wrote these:
+
+| Document | Chunks | Notes |
+|---|---|---|
+| apple-10k-2024.htm | 672 | 588 table entries and 84 prose chunks |
+| apple-ex10-1-2024.htm | 13 | pageless HTML |
+| apple-ex10-22-2024.htm | 16 | pageless HTML |
+| irs-p15.pdf | 358 | 59 pages, text layer, no OCR |
+| total | 1059 | |
+
+At the start of a cycle the worker also reports the collection it is writing to: its dimension, its distance
+and how many points it holds. A collection whose dimension does not match what the embedding model produces
+stops the run with a refusal naming both numbers, rather than writing vectors of the wrong shape. So does a
+collection whose distance is not Cosine, because search results would then be ordered differently from every
+measurement taken on this build.
+
+**The second cycle is the one that matters.** Over unchanged bytes it costs one read per file and writes
+nothing. The recorded line is `seen 4, new 0, changed 0, skipped 4, failed 0, chunks written 0`, and that is
+the whole claim the manifest makes.
+
+**Run a cycle now**, which is what to do after dropping a new document in the folder rather than waiting for
+the schedule:
+
+```
+docker exec ingestion python3 /app/ingest.py --documents /documents
+```
+
+### The manifest
+
+`ingest_manifest` holds one row per document, keyed by its path relative to the documents root: the sha256
+of the file as ingested, its size, its page count, its chunk count, and enough about its failures to decide
+whether to try it again. The hash decides everything. A file whose bytes are unchanged is skipped without
+being parsed, so a cycle over a client's corpus costs one read per document rather than a parse and an embed
+per document. A file whose bytes changed gets new chunk ids, because the id covers the content, and its old
+chunks are removed before the new ones are written so a document that shrank cannot leave orphans behind.
+
+Removals are reconciled from the manifest rather than from the filesystem. A document the manifest knows
+about whose file has gone is removed from both indexes, and a documents mount that failed to appear cannot
+empty a client's index while the container restarts. A file that was never ingested cannot cause a removal.
+
+A document that fails twice is dead-lettered until its bytes change, which is `INGEST_MAX_FAILURES` set to 2.
+The hash recorded on failure is the hash of the bytes that failed, so the check works and a replaced file
+gets another chance without anyone being told to look.
+
+**Where the failure state lives, and how to clear it:**
+
+```
+docker exec ingestion python3 /app/ingest.py --status
+docker exec ingestion python3 /app/ingest.py --clear-failures
+docker exec ingestion python3 /app/ingest.py --clear-failures company/irs-p15.pdf
+```
+
+`--status` reads the last cycle's record from `/state/last-cycle.json` and exits non-zero when that cycle had
+a failure, which is why the container's healthcheck runs it rather than checking the process. With no
+argument `--clear-failures` clears every recorded failure, and with a path it clears one. The next cycle then
+tries those documents again. It is for a change to the failure rules rather than a routine step.
+
+### Re-ingestion, and `PAYLOAD_VERSION`
+
+The skip decision is made on a file's bytes. That is right for a file that was edited and wrong for a change
+to the code that derives the stored payload from those bytes. Then the bytes are identical, the manifest
+still believes its old claim, and the fix never arrives. It has happened twice in this build: two exhibits
+recorded as ingested with no chunks behind them, and 29 chunks of HTML left labelled machine-read after the
+code that labelled them was corrected.
+
+`PAYLOAD_VERSION` in `services/ingestion/ingest.py` names the rules a stored payload was derived under. It is
+`payload-v4` today. The manifest records it per document, and a record whose value differs from the running
+worker's is re-derived even though its bytes have not changed. Bump it when the meaning of a stored field
+changes, and the next cycle re-derives the whole corpus once. For the fixture corpus that is about ten
+minutes. For a client's, it is the price of not serving labels the code no longer produces.
+
+It is deliberately separate from the chunker's version, which is `chunker-v1`. A payload change does not
+change a chunk's text or its chunk id, and forcing a re-parse for every labelling fix would hide the
+difference between the two.
+
+A record that claims success with no chunks behind it is re-ingested without being asked, because a manifest
+is a cache of a claim about the index and a record with nothing behind it is a false claim whatever wrote it.
+
+### The collection contract
+
+Migration 015 adds `collection_contracts`, which records what built the vectors in a collection: the model
+and its revision, the pooling, whether vectors are normalised, the query and passage prefixes, the truncation
+behaviour, the dimension, and the chunker version.
+
+The failure it exists for is quiet. Change the embedding model or its pooling, and every vector already
+stored came from the old contract. Similarity between a new query vector and an old passage vector is not
+zero, it is meaningless, and meaningless similarity still returns results in a plausible order. So a search
+checks the fingerprint before it runs and refuses when the contract has moved, naming the field rather than
+reporting that two hashes differ. Re-embedding is a decision, not a repair, and nothing re-embeds
+automatically.
+
+**Check the embedding service and the collection directly:**
+
+```
+docker run --rm --network ai-net -v /opt/oi-core:/w -w /w \
+  --entrypoint python ghcr.io/docling-project/docling-serve-cpu:v1.36.0 \
+  /w/tests/fixtures/api_contract_probe.py
+```
+
+The probe reports which batch endpoint answers, whether a batch returns one vector per input, the
+collection's vector configuration and dimension, and a point it writes that must be found by a payload filter
+and then removed. Read the endpoint it found against the one the worker tries first, because a request shape
+the service ignores looks like a missing feature rather than a malformed request.
+
+**If it breaks.**
+
+- A document the parser now reads differently is still skipped: the bytes are the same, so the hash matches
+  and the manifest believes its old claim. Bump `PAYLOAD_VERSION` for a payload change, and use
+  `--clear-failures` when the failure rules moved.
+- The worker re-ingests everything every cycle: the manifest is in memory, which happens when `DATABASE_URL`
+  is unset or Postgres is unreachable. It says so at the top of its output rather than doing it quietly.
+  Check `docker exec ingestion env | grep DATABASE_URL`, and that `postgres` is healthy.
+- `the parser returned no structured output`: the conversion options were not accepted. They are sent as
+  separate multipart fields, and the parser's `/v1/capabilities` is the authority on their names.
+- Chunk counts far above the page count the run prints: OCR read a page as several regions. Compare against
+  the page count before assuming the chunker is wrong.
+- A cycle exits non-zero with no failure in the log: the exit code is non-zero when any document failed,
+  deliberately, so a scheduled run surfaces a bad file. `--status` names it.
+
+## 13b. Retrieval
+
+Retrieval is what chooses the passages an answer is built from. Two searches run and their results are fused.
+The dense arm embeds the question and asks the vector store for the nearest passages, filtered by the role's
+permitted roots. The lexical arm looks for the exact references in the question in a Postgres table of chunk
+text, under the same access clause in its own query. The fusion is reciprocal rank with `k=60` and equal
+weights, so a confident first place in one arm does not simply win, and the tie is broken on chunk id so the
+same question produces the same order twice.
+
+The lexical arm exists because a similarity search cannot see an identifier. On the recorded acceptance run,
+`Pub. 515`, `Form W-3SS` and `Pub. 519` were found with the arm on and missed with it off, while `Form W-4`
+and `Pub. 15` were found either way as controls. What the arm fixes is phrasing rather
+than rarity: the same reference is found or missed depending on how the question is worded, and the bare form
+a person types, `Pub. 515` on its own, was missed every time. Plain Postgres full-text matched none of the
+seven phrasings, because `plainto_tsquery` ANDs every term of a natural question and the parser splits
+`Form W-4` into pieces. So references are normalised by an extractor both the ingestion worker and the
+retriever share, and a small alias table closes the gap between `Pub. 515` and `Publication 515`.
+
+Reranking runs on the fused head. The reranker scores the question against the top 50 candidates, which is
+`RERANK_DEPTH`, and it can promote a passage the fusion barely kept or demote one it ranked first. The tail
+keeps its order behind the head, because a reranker that saw the top of a list cannot reorder the rest.
+
+**The yardstick first:**
+
+```
+oi run --rm -v /opt/oi-core:/w eval
+```
+
+```
+configuration: fused   k=10   n=10
+  retrieval  100% (6/6)
+  support    100% (4/4)
+  support was not measurable on 2 answerable question(s): no figure in the reference answer
+
+  category                  n   retr    supp
+  paraphrase                1   100%     n/a
+  single-fact-prose         2   100%    100%
+  table-cell                2   100%    100%
+  two-document              1   100%     n/a
+  unanswerable              2     0%     n/a
+
+  supported answers from documents with no real pages: 1 of 4
+  unanswerable top scores reaching into the answerable range: True
+    answerable   [0.684, 0.659, 0.655, 0.641, 0.633, 0.621]
+    unanswerable [0.673, 0.607, 0.558, 0.524]
+```
+
+Two rates, and the difference is the point. Retrieval counts the document holding the answer among the
+passages returned. Support counts a passage containing the answer's own value, which is much stricter. A long
+document is easy to be near, so a system returning page 1 of the right filing for every question would score
+well on the first rate and badly on the second.
+
+The last two lines are the measurement a refusal threshold would be built on, and they say it would not work
+at this corpus size: the strongest unanswerable question scores 0.673 and the weakest answerable one 0.621,
+so no cutoff on the top score separates a question the corpus answers from one it does not. A refusal has to
+come from the citation layer instead. The line about pageless documents is a coverage statement rather than a
+result: six of the ten questions draw on HTML filings whose every chunk reports page 1, so the rule that a
+cited page must fall inside its chunk's range is satisfied trivially there and has not been tested on them.
+
+Ten questions can catch a search that is broken. They cannot support a quality claim, and the client's own
+sixty arrive in C8.
+
+**What each arm contributed.** The retriever's result carries `arms`, a count per arm. `lexical: 0` means the
+arm ran and found nothing, and a missing key means it did not run at all, which are different faults. The
+acceptance probe prints that dictionary under each verdict:
+
+```
+docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
+  -v /opt/oi-core:/w -w /w \
+  --entrypoint python oi-core/ingestion:local \
+  /w/tests/fixtures/hybrid_acceptance.py
+```
+
+The recorded run, against the deployed store on 2026-10-13, with the lexical index holding 1060 rows and 435
+of them carrying identifiers:
+
+| Reference | hybrid on | hybrid off | verdict |
+|---|---|---|---|
+| `Pub. 515` | found | missed | HYBRID WINS |
+| `Form W-3SS` | found | missed | HYBRID WINS |
+| `Pub. 519` | found | missed | HYBRID WINS |
+| `Form W-4` | found | found | both, as expected |
+| `Pub. 15` | found | found | both, as expected |
+
+Three references the lexical arm is what finds, and two controls where the dense arm already did. A test built
+on a phrasing the dense arm happens to handle would prove nothing, which is why the bare form is the one used.
+
+**Reranking, and what it changed:**
+
+```
+docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
+  -v /opt/oi-core:/w -w /w \
+  -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION=us-east-1 \
+  --entrypoint python oi-core/eval:local \
+  /w/tests/fixtures/rerank_acceptance.py
+```
+
+```
+questions reranked: 10 of 10
+per question: slowest 428 ms, average 344 ms
+budget 5000 ms: WITHIN
+
+WHAT IT CHANGED
+  Q07: rank 10 -> 1
+  Q01: rank 1 -> 2
+  Q06: rank 1 -> 2
+```
+
+Latency is measured and comfortably inside the budget. The quality half shows no movement, and that is not
+evidence that reranking does not help: both rates were already at their maximum, so there was nothing for it
+to improve, and the comparison says so rather than claiming a benefit or denying one. The evidence is in the
+ranks. Q07 moved from rank 10 to rank 1, and at rank 10 it was one place from being dropped. Q01 and Q06 each
+moved from 1 to 2, so the reranker demotes as well as promotes. A ten-question set cannot resolve a benefit
+when both rates are at their maximum, which is why the client's sixty questions are where the second half
+becomes measurable.
+
+The reranker is a paid provider model. If it cannot run, the result says `reranked: false` with a reason
+rather than falling back to the fused order quietly, so a deployment answering from the fused list while
+believing it reranked is not a state this code can reach.
+
+**If it breaks.**
+
+- No identifier hits at all: the lexical arm is not running. It returns an empty list when `DATABASE_URL` is
+  unset or unreachable and prints why, and `arms` records `lexical: 0`.
+- An identifier hits the wrong document: check the extractor on both the question and the chunk text. The two
+  sides share one function, so a disagreement means a chunk was indexed before the normalisation changed,
+  which `PAYLOAD_VERSION` handles by re-deriving the corpus.
+- Fewer passages than the limit: the two stores have drifted. A chunk the lexical arm names and the vector
+  store does not hold is counted in `withheld` rather than skipped, because it is a reconciliation fault
+  worth seeing.
+- `HTTP Error 403` naming AWS Marketplace actions: the reranker subscription has lapsed or the account
+  changed. It is a paid agreement rather than a permission, and no policy change substitutes for it.
+- The rates do not move after a change: check whether they were at their maximum before it. A change measured
+  against a system already at 100 percent is being measured on ranks.
+
+## 13c. Citations and verification
+
+The verifier is the layer that checks an answer against what it cites. Everything below it checks whether the
+answer matches the source, and none of it checks whether the source is the right source or was read correctly.
+Those are the two most likely wrong answers in a small business: a real number from a document somebody
+replaced, and a real number from a page the scanner misread. Both pass literal matching, both pass a
+comparison of numbers, and both would otherwise come out certified. So seven checks run over each sentence,
+deterministic, with no model and no new dependency.
+
+**The seven checks, in the order they run:**
+
+| Check | Reason | What it catches |
+|---|---|---|
+| Citation resolves | `citation_not_found` | A citation to a passage that was never retrieved |
+| Source is current | `superseded` | A real figure from a document a person replaced |
+| Confidence | `low_confidence_scan` | A figure from a page the parser was unsure about |
+| Numbers | `number_not_in_source` | A substituted digit |
+| Identifiers | `identifier_not_in_source` | The right document and the wrong form |
+| Quotes | `quote_not_in_source` | Words in quotation marks that are not in the source |
+| Page | drift, reported separately | The right words with the wrong page attached |
+
+The order is deliberate. A citation that does not resolve is checked first, because every later check reads
+the passage it names and a fabricated index would make them all meaningless. Supersession is second, because
+a number from a replaced document is a correct quote of the wrong source and no amount of literal matching
+catches it. The literal checks come last, since they are the ones that can refuse a correct answer.
+
+**A sentence with no marker is not a refusal.** It comes back `uncited` with the reason `no_citation`.
+Transitions and direct answers have nothing wrong with them, and refusing them would refuse most of a normal
+reply. Page drift is also not a reason to drop a claim: it is reported by `check_page` as a detail, because
+the words are right and the place is wrong, and a person can act on that. A claim is marked rather than
+dropped, so a reader can see which sentence failed and why.
+
+**Three rules keep the false refusals down**, because a check that refuses correct answers gets turned off
+and a check that is turned off catches nothing. Numbers compare with trailing zeros dropped only, so `145.00`,
+`145.0` and `145` are one number, and the leading zero of `0.67` is left alone because stripping it once
+refused a correct answer. Supersession fires only when every cited passage is superseded, so a claim citing
+the replacement alongside the thing it replaced is supported. And the confidence gate applies to figures
+rather than prose, because a digit read imperfectly is a different number and a word read imperfectly is
+still the word.
+
+**The sentence splitter is where the subtleties are.** A citation marker trails the sentence it supports, so
+a splitter that cuts in the wrong place runs every check against the wrong passage. Three faults were fixed
+here. A full stop, a space and a capital is what a sentence boundary looks like, and it is also `Pub. 515`,
+so the splitter knows this corpus's abbreviations and treats an ambiguous stop as not a boundary, because
+merging two sentences is safe and splitting wrongly is not. A single initial is not a boundary either.
+Markers may sit between the full stop and the next sentence, as in `employee.[1] Form W-4`, so they are
+skipped before the boundary is decided. The rule that came out of it is that the splitter must never lose a
+marker, and there is a test that says so.
+
+### The figure checks
+
+The citation checks confirm that a number is present in the passage it cites. If OCR put the wrong number
+there, they confirm the wrong number. The figure checks are the second half: a read that produces something a
+number cannot be, and arithmetic the document itself states.
+
+```
+docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
+  -v /opt/oi-core:/w -w /w \
+  --entrypoint python oi-core/ingestion:local \
+  /w/tests/fixtures/figures_acceptance.py
+```
+
+```
+PART ONE: a damaged figure is caught
+  CAUGHT 2026-13-45          malformed.date
+  CAUGHT 02/31/2026          malformed.date
+  CAUGHT 1450%               malformed.percent_range
+  CAUGHT 12345678901234.00   malformed.implausible_magnitude
+  CAUGHT 12,34,567.00        malformed.not_a_figure
+  ok     145.00 1,250.00 (1,450.00) 145% 32.50 0.67   - none flagged
+
+  100.00 + 45.00 against 145.00: True
+  100.00 + 45.00 against 155.00: False
+  no relationship to check: None
+
+PART THREE: is_ocr is set per chunk, true for the scanned publication
+
+PART TWO: an unverified figure from a scanned passage is disclosed as machine-read
+  "machine-read from a scanned page and not confirmed by any other check in the document"
+```
+
+A date like the 31st of February passed a first version that only checked a day between 1 and 31, so dates
+are checked against a real calendar. A negative figure in parentheses did not parse at all, because the brackets are the
+sign. And the percentage line is drawn where a percentage stops being plausible as any percentage rather than
+as a rate, because 145 percent is a real growth rate and flagging it would be a check that fires on correct
+documents. A document with nothing to add up returns `None` rather than `False`, because returning `False`
+would mark every figure in every prose document as unconfirmed for a reason that is not about the figure.
+
+**The bound is the reason this page says what the check cannot do.** A read that produces something a number
+cannot be is caught. A read that produces a different plausible number is not, and that is the common case: in
+the measured sample, fourteen of fifteen wrong readings were exactly that. The check catches the malformed
+quarter of misreads and confirms what the document's own arithmetic confirms. Calling it a check that catches
+OCR errors would be believed, and it would be wrong.
+
+The disclosure travels inside the citation, so it goes wherever the citation goes. Saying nothing is not a
+guarantee: most figures carry no caveat because there was nothing to disclose, not because they were checked.
+
+### What `supported` means, and what it does not
+
+`supported` means every mechanical check passed. It is not the same as true. Entailment is Layer 1, it needs a
+model, and the reply path does not have one until Phase 4, so a sentence can be supported and still not be
+entailed by the passage it cites. The verifier's own false-negative rate sets the ceiling on what the product
+can claim, and that ceiling is published rather than implied.
+
+Support grading needs entailment for prose, which is why the eval harness measures support by finding the
+answer's own figure in a passage. A question whose reference answer carries no figure is excluded from the
+rate and counted beside it. On the recorded run, two answerable questions were excluded for exactly that
+reason. A rate that counted an unmeasurable question as a miss would be a measure of how many questions have
+a figure in their answer, reported as a measure of retrieval quality.
+
+**Two bounds on the confidence gate, and the second is worth knowing before you rely on it.** The gate is
+document-level rather than page-level, because docling-serve does not populate the per-page confidence map
+this release exposes, so a page whose digits were misread cannot be told from a page read cleanly.
+Separately, the gate compares the passage's own parse score, and that score lives in the vector payload: the
+retriever's `Passage` copies `is_ocr` from the payload and not `parse_score`, so as the code stands the gate
+does not refuse anything on the retrieve-and-verify path. The unit tests exercise it with a passage that
+carries the score.
+
+### Trying it on the deployment
+
+```
+docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
+  -v /opt/oi-core:/w -w /w \
+  --entrypoint python oi-core/ingestion:local \
+  /w/tests/fixtures/citations_acceptance.py
+```
+
+The probe retrieves passages for a question about the standard labour rate, prints each one with its score,
+prints which of them a person may rely on, and then checks an answer built to contain a correct claim, an
+invented citation, and a figure that appears nowhere in the corpus. It ends with `refusals by reason`, which
+is the number to watch: a rising `number_not_in_source` is a generation problem and a rising
+`citation_not_found` is a prompt problem.
+
+The recorded proof is that the invented citation was rejected as `citation_not_found` and the impossible
+figure was marked `number_not_in_source` while remaining in the reply rather than being dropped.
+
+**The first run found the failure this layer exists for, by accident.** The question asked for the standard
+labour rate, the retriever returned the superseded 2025 schedule as passage `[1]` with the current 2026 one at
+`[2]`, and the verifier refused the claim built from `[1]` with the reason `superseded`. A real figure, from a
+real document, on a real page, correct in every literal respect, refused because the document had been
+replaced. Nothing below this layer would have caught it. The probe was wrong and the check was right: it had
+assumed the top-ranked passage is a good source, and it now builds its claim from the first passage a person
+may rely on.
+
+**One thing is open, and it is a ranking question rather than a correctness one.** Both versions were
+retrieved and the superseded one ranked first, so a user asking about the current rate got a refusal when a
+good answer was two places down. Whether a current document should be boosted is a search-quality change to
+measure against the golden set rather than guess at, so it is recorded as open.
+
+**If it breaks.**
+
+- A correct answer is refused: read the `detail`, which names the figure and the passage. If the figure is
+  written differently from the source, the normalisation is the suspect, and the fix is a rule rather than a
+  loosened check.
+- Everything from a scanned document is refused: the gate is firing on the document's own score rather than
+  on a page's, which is the bound described above. Check the stored score before assuming the gate is wrong,
+  because a genuinely low score means the parser was unsure and the refusal is correct.
+- A claim is reported `uncited` that clearly has a citation: the splitter lost it or cut the sentence. `[n]`
+  is the only supported form, and there is a test asserting no marker is ever dropped.
+- Nothing is refused at all: the answer has no `[n]` markers, so every claim is `uncited`. The marking
+  convention is the prompt's to teach, and this module cannot invent it.
+
+## 13d. Access control
+
+Two roles exist today, `staff` and `executive`, over two document roots, `company` and `executive`. A role's
+permitted roots are the folders its search may read: `staff` sees `company`, and `executive` sees both.
+Per-user and per-group permissions are a later phase, so roles are all there is for now.
+
+The filter is a clause in the search query itself, in both arms, so a restricted passage never leaves the
+store. There is a second check afterwards that counts anything the store returned that the role may not see.
+Both are present because they fail differently: the query clause is the requirement, and the check is what
+keeps a store bug from becoming a disclosure. A role that is not in the map is refused rather than defaulted,
+because a default would grant the broader of two permissions to a typo.
+
+**A denial is a measurement, not a guess.** A staff question whose answer sits in restricted content has to
+be told apart from a question the corpus cannot answer, and a similarity cutoff cannot do it at this corpus
+size. So the retriever runs a second search against the complement of the role's roots and denies when the
+restricted best score beats the best permitted one. Only a better match counts, because a weak restricted
+match exists for almost any question, and a warning that fires constantly is one users learn to ignore.
+
+Three things keep that second search from being a leak. It runs with `with_payload: false`, so no restricted
+text enters the process and only a number crosses the boundary. Its filter is `must_not` over the role's
+roots, so a folder nobody declared a role for counts as restricted rather than being silently omitted. And
+the point id it sees is a uuid5 over the document id, so it does not name a file.
+
+**What a denied user is told is the client's policy.** It is declared in the manifest as `access.denial`, and
+there are three modes because the trade has three defensible answers:
+
+| Mode | What the user is told | What it costs |
+|---|---|---|
+| `silent` | Nothing. The answer is built from what the role can see | An incomplete answer is indistinguishable from a complete one |
+| `denied` | Documents exist that may answer this and they lack access, with no count | Reveals that restricted content exists |
+| `counted` | The same, plus how many passages matched | Reveals existence and implies how many documents hold it |
+
+The default is `denied`, and the reasoning is the product's own: a silent system returns a partial answer
+with no way for a user to tell it from a complete one, which is the confidently-wrong failure this design
+exists to fight. A client who weighs the leak of existence more heavily sets `silent` and gets no disclosure
+at all. The dev cloud manifest declares `counted`, because a developer debugging a missing passage wants the
+number and there is no client to weigh the trade. An unrecognised value is refused rather than defaulted.
+
+The fact and the disclosure are separate, and that separation is the point. `withheld` and `denied` stay
+accurate in every mode, so the record can report what happened, and only `disclosure` is governed by policy.
+In silent mode it is `None` rather than an empty message, so a caller that forgets to check the mode has
+nothing to render. The count in `counted` reports how many restricted passages matched the search rather than
+how many were withheld: the filter works, so nothing restricted is ever returned and `withheld` is honestly
+zero on every question.
+
+**See it on the deployment:**
+
+```
+docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
+  -v /opt/oi-core:/w -w /w \
+  --entrypoint python oi-core/ingestion:local \
+  /w/tests/fixtures/acl_probe.py
+
+# and again with each policy, so the client's choice is seen rather than taken from a unit test
+docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
+  -v /opt/oi-core:/w -w /w \
+  --entrypoint python oi-core/ingestion:local \
+  /w/tests/fixtures/acl_probe.py --denial silent
+```
+
+The probe prints what is in the index by label, the denial mode in force, and then, for each role and
+question, how many passages came back, the best restricted score, whether the denial fired, and the
+disclosure the user would see. In silent mode that last line says the silent policy is working.
+
+The recorded measurement, against the deployed store on 2026-10-13, with the index holding 1059 company
+points and 1 executive point:
+
+| Question, asked by the staff role | best permitted | best restricted | denied |
+|---|---|---|---|
+| CEO base salary | 0.62 | 0.7766 | yes |
+| Executive bonus target | 0.58 | 0.6543 | yes |
+| Severance on a change of control | 0.65 | 0.4088 | no |
+
+The executive role reports `restricted_best` as null on all three, because nothing is restricted from it, and
+`denied` is false. A staff search for either restricted figure returns ten passages and contains neither.
+
+**The third row is a false negative, recorded rather than discovered later.** The executive memorandum does
+answer the severance question, the content is there, a person cannot see it, and the system does not say so.
+The cause is chunking rather than the comparison: the memorandum is 1,541 characters, which is one chunk, so
+its embedding averages salary, bonus, equity and severance together, and a question about any one of them
+matches that average weakly while a specific passage from a long filing matches strongly. The score
+comparison is a heuristic and this is the shape of its failure, a short document whose content is varied
+reads as a worse match for every question than a long document's targeted passage. The alternatives are
+worse, because a bare hit test would deny on most questions, so this is a recorded bound.
+
+### The version registry and near-duplicate flags
+
+Nothing here guesses which of two documents is current. Every document is current by default, so a corpus
+that never touches the registry behaves exactly as it did before the table existed, and declaring otherwise
+is one command:
+
+```
+docker exec ingestion python3 /app/ingest.py --versions
+docker exec ingestion python3 /app/ingest.py --supersede company/fee-2025.pdf \
+  --by company/fee-2026.pdf --note "2026 schedule in force"
+docker exec ingestion python3 /app/ingest.py --scan-duplicates
+docker exec ingestion python3 /app/ingest.py --distinct company/policy-copy.pdf \
+  --note "a separate policy, not a copy"
+```
+
+`--versions` prints every declaration and any unresolved near-duplicate flag. A superseded passage is
+deliberately not dropped from the results: it reaches the verifier marked `is_current` false, and a claim
+supported only by a replaced document is refused with the reason `superseded`. Dropping it here would answer
+the question from a different document with no sign that the right one existed and had been excluded, which
+is a wrong answer wearing a correct one's clothes.
+
+Near-duplicate detection compares the hash of each chunk's text, and the share is measured over the smaller
+document, because a five-chunk summary of a hundred-chunk report is entirely contained in it. A pair is
+recorded and never acted on, because deleting the second copy loses a document a client put in a folder
+deliberately. The overlap threshold is half the smaller document, and the floor is `DUPLICATE_MIN_SHARED_CHARS`
+set to 500 characters of identical text, so two documents sharing a cover line are not compared. The pair is
+stored ordered with a unique constraint, so one pair is one row whichever document arrived second.
+
+`--scan-duplicates` exists because detection otherwise runs only when a file arrives, and a corpus ingested
+before the check existed is never examined. That is not a rare case: every corpus becomes an old corpus the
+moment the feature ships.
+
+**If it breaks.**
+
+- `unknown role`: the role is not in the map and the retriever refuses rather than defaulting. A default here
+  grants the broader of two permissions to a typo, which is the failure worth being loud about.
+- A staff store return above zero: the query's filter clause is not reaching the store. Print the body the
+  retriever builds and check that `filter.must` carries the `acl` clause, rather than checking the results,
+  because the results are what a missing filter also produces.
+- A denial appears when the client declared `silent`: check `grep ACCESS_DENIAL_MODE rendered/env`. A
+  manifest that declares `silent` with an env file that was not re-rendered still discloses.
+- `withheld` above zero on a normal query: the store returned something the role may not see. That is the
+  second line rather than the first, so it firing means the first line is not.
+- Fewer passages than the limit with nothing withheld: the overfetch is too low or the corpus is small. The
+  store is asked for three times the limit because withheld passages consume part of the result set.
+- A duplicate pair is not flagged: run `--scan-duplicates` first. If it still reports nothing, the identical
+  text is under the floor.
+- A pair is flagged that is genuinely two documents: resolve it with `--distinct`, which records the decision
+  and clears the flag without superseding anything. The flag is the feature working, not a false positive.
+
+## 13e. Redaction and the egress gate
+
+Two questions, asked in this order. May this request leave the building at all, and what must not go inside a
+request that may. The gate answers the first from the manifest. The redaction answers the second. The order
+is the design: redacting a regulated document and sending the remainder answers a different question than the
+one the client decided.
+
+**What may leave is a decision in the manifest, not a view held in code.** `access.egress.frontier_classes`
+lists the data classes a deployment permits on the frontier lane, and the renderer writes it to
+`FRONTIER_CLASSES`. The dev cloud manifest permits `public` and `internal`, the two classes a small
+business can send to a provider. The office manifest renders the value empty, and that is its policy rather
+than an oversight: that build has no frontier lane, and the gate reads an empty set as nothing is permitted
+rather than as no opinion.
+
+```
+python3 scripts/validate_manifests.py
+python3 scripts/render_manifest.py --manifest manifests/dev-cloud.yaml
+grep -E 'FRONTIER_CLASSES|EGRESS_REDACTION' rendered/env
+```
+
+```
+FRONTIER_CLASSES=public,internal
+EGRESS_REDACTION=on
+```
+
+The renderer writes both variables for every manifest, including the empty case, so a deployment reads a
+decision rather than an absence. `EGRESS_REDACTION` also defaults to on in the code, so forgetting to set it
+cannot become forgetting to redact.
+
+**The gate fails closed, and each refusal names what is wrong.** A request with no data class is refused,
+because an unclassified request cannot be shown to be permitted. A class outside the four is refused, because
+nothing is known about whether it may leave. An empty permission set is refused, which is what an
+unconfigured deployment looks like. And a class the deployment did not permit is refused with the classes
+that are permitted named in the reason. The alternative is a system that sends a client's confidential
+document because a variable was misspelled, and it does so silently because the call succeeds.
+
+**The redaction walks every string in the request**, not a list of fields. The question is typed by a person
+who knows what not to type. The retrieved passages are whatever the corpus contained, and they are the part
+most likely to hold a client's identifiers. Walking the whole structure means a field added later is covered
+without anyone remembering to cover it.
+
+The patterns are one combined expression with ordered alternatives, most specific first, so the pass cannot
+re-match what it just wrote. Credentials come first, because a key that reaches a provider's logs is not a
+privacy incident but an incident, and rotation is the only remedy: AWS key ids, private key headers, bearer
+tokens, `sk-` style keys, and password assignments. Then identity and payment: Social Security numbers, EINs,
+IBANs, card-shaped digit runs, email addresses, phone numbers and IPv4 addresses. A match is replaced with
+its label, so a reader of the redacted text can tell a redacted email from a redacted card. The label carries
+no part of the value and not even its length, because either would narrow a guess.
+
+**The card trade is made deliberately rather than hidden.** Shape decides whether to redact, and the check
+digit decides only what the reader is told. A number that passes Luhn becomes `[REDACTED-CARD]` and one that
+fails becomes `[REDACTED-LONG_NUMBER]`, counted separately as `unverified_card_shapes`. A card whose digits
+OCR damaged fails the check and is still a card, so the check cannot be allowed to decide. Figures are the
+other direction and are tested: `145.00`, `1,500.00`, `418750` and `0.67` are not identifiers, and a pattern
+that caught them would make every question about money unanswerable.
+
+**The honest bound.** This is pattern matching. It catches identifiers that have a shape, and it does not
+catch a person's name, an address, or an account number written in words. It is a reduction in what leaves
+rather than a guarantee about what cannot, and presenting it as a guarantee is how a client ends up sending
+something they would not have. There is a test asserting that a name survives, so the bound cannot be quietly
+assumed away.
+
+**What the audit records.** The data class, whether egress was allowed, the kinds and counts of what was
+removed, and the number of card-shaped numbers that failed the check digit. The four have columns of their
+own, `redaction_count`, `redactions`, `unverified_card_shapes` and `egress_allowed`. A summary is not
+content, so it is stored whatever the content mode says, and the default mode stores a hash rather than the
+payload. The prompt hash is taken after redaction, so the record proves what was sent instead of becoming a
+comparable copy of what was removed. A hash of the original could not be read, but it could be compared,
+which is enough to confirm a guess about a Social Security number.
+
+`chain_version` 2 covers those four columns in the row hash. Rows written before that change verify under
+version 1 and are not rewritten, so the untouched history still verifies while an edit to a redaction count
+is now caught. A row from a writer newer than the verifier is reported as unchecked rather than as a
+mismatch, because a version this verifier does not know cannot be checked.
+
+**Prove it on the deployment:**
+
+```
+oi run --rm -v /opt/oi-core:/w -w /w --entrypoint python audit \
+  /w/tests/fixtures/egress_acceptance.py
+```
+
+The probe prints the deployment's permitted classes and whether redaction is on, the request as assembled,
+what would reach the frontier model, and then a class the deployment does not permit. The recorded
+acceptance run carried a Social Security number in the question and one plus a card number in a retrieved
+passage. What would have been sent carried neither, and the fee figure 145.00 survived because a figure is
+not an identifier. A regulated request was refused with no payload at all rather than a payload with a flag
+beside it.
+
+The event was then written through the deployment's own audit CLI and read back from Postgres. It showed
+`data_class=internal`, `redaction_count=3`, redactions of two Social Security numbers and one card, and
+`egress_allowed` true, on the default content mode where the payload itself is stored as a hash and not as
+text. The run printed `content mode stored the payload as: None` beside the redaction counts, which is the
+point: the record says what was removed, and it does not hold what was removed.
+
+The gate and the redaction run where a frontier request is assembled. The component that assembles one, the
+assistant API, arrives in Phase 4, so today they are exercised by this probe and by the test suite.
+
+**If it breaks.**
+
+- Nothing leaves and the reason says no classes are permitted: `rendered/env` has not been re-rendered since
+  the manifest gained the policy, so `FRONTIER_CLASSES` is absent. Absent refuses, which is the intended
+  behaviour for an unconfigured deployment and a confusing one for a configured deployment with a stale file.
+- A figure is being redacted: check the patterns for a shape that is too broad. The decimal and thousands
+  separators are the ones that matter, and there is a test for each.
+- A real identifier survives: it has no shape this recognises. Names and addresses are the known bound, and a
+  client whose documents are full of them needs a different mechanism rather than a longer pattern list.
+- The record holds the original text: the hash is taken from the cleaned payload and the payload from the
+  redaction. Check the content mode as well, because `--store-payload` writes content the mode would
+  otherwise not keep.
+
+## 13f. Retention and deletion
+
+Two operations that look alike and are not. A purge is a client asking us to stop holding a copy. It clears
+every store that holds the document and deliberately leaves the file, because the client still has it.
+Retention is a period running out, and it destroys the file as well, because keeping invoices for seven years
+means that after seven years there is no invoice. A retention job built by reusing the purge and forgetting
+the file would report success while the thing the client asked to be destroyed sat in their documents
+directory.
+
+### A client-requested purge
+
+```
+oi run --rm retention --purge company/invoice-2024.pdf --reason "client asked"
+oi run --rm retention --purges
+```
+
+The stores are a list in `services/retention/retention.py`: the vector index, the lexical index, the
+ingestion manifest, and any audit record whose stored payload quotes the document. A test reads the
+ingestion worker's write paths and asserts a purge path exists for each, so a store added in a later step
+fails that test rather than failing in a client's question six months later.
+
+The result is per store rather than a total, so a store that contributed nothing is visible instead of
+looking like a store that had nothing to do. A purge that cannot reach a store reports `complete: false` and
+exits non-zero, because reporting success because the reachable stores succeeded is how a client is told
+their data is gone while it is not. There is no rollback, and that is worth being plain about: a purge that
+fails part way leaves the document partly gone, the record says which stores confirmed, and running it again
+is safe because every delete is by filter rather than by a list of ids.
+
+**One store cannot always be cleared, and the record says so.** Content stored in the audit record cannot be
+deleted. The table is append-only, and the chain covers the payload's hash and length, so clearing a payload
+without updating those leaves the row failing verification and updating them makes the chain a record of what
+somebody chose to leave in it. So the purge counts those rows instead of clearing them, and a non-zero count
+makes the purge incomplete. A document whose text is still readable in the audit record has not been purged,
+whatever the other stores reported. The mitigation is not to store it there, which is why the default content
+mode is `hash`. A deployment that selects `full` is choosing to keep content it cannot later delete, and that
+is a decision a client has to make knowing the consequence.
+
+### Legal holds
+
+```
+oi run --rm retention --hold company/tax.pdf --reason "litigation in progress"
+oi run --rm retention --hold --reason "litigation in progress"
+oi run --rm retention --holds
+oi run --rm retention --purge company/tax.pdf --reason "client asked"
+oi run --rm retention --release-hold 1
+```
+
+A hold refuses a purge and changes nothing, and the refusal is recorded. `--hold` with a document places a
+document-scope hold. `--hold` with no document places a deployment-scope hold, which covers every document
+including ones uploaded after it was placed. A hold that only covered what existed at the time would have a
+gap in it, and the gap is where the document that matters ends up. The hold is checked in one query before
+any store is touched, because checking it per store means a hold obeyed by the store somebody remembered and
+ignored by the one they did not.
+
+`--holds` lists what is in force. A deployment-scope hold is the one people forget they placed, and it is the
+usual answer to a purge that was refused with no obvious reason.
+
+### Time-based retention
+
+```
+oi run --rm retention --set-retention documents --days 365 --legal-basis "tax law"
+oi run --rm retention --set-retention conversations --days 90 --legal-basis "client policy"
+
+oi run --rm retention --enforce documents --dry-run
+oi run --rm retention --enforce documents
+oi run --rm retention --retention-runs
+```
+
+The recorded run on the reference instance, over a fixture aged 800 days:
+
+```
+NO POLICY MEANS NOTHING IS DESTROYED
+  retain_days=0 examined=0 destroyed=0
+A HOLD BEATS A PERIOD
+  examined=1 destroyed=0 held=1
+A DRY RUN CHANGES NOTHING
+  examined=1 expired=1 destroyed=0
+THE RUN
+  destroyed=1 failed=0
+
+DATA-RETAIN-001: gone from the vector index, the object store and the answer
+  vector index:  0
+  lexical index: 0
+  manifest:      0
+  object store:  GONE
+  asking about it returned no passage from it
+```
+
+Age is measured from `ingested_at`, not from the file's modification time. The file's date is a fact about
+the client's filesystem, and copying a folder resets every modification time, so a document whose date was
+reset would be retained for another period without anybody deciding to. `ingested_at` is when the obligation
+to keep it started, which is the date a retention policy is about. A document with no `ingested_at` is not
+expired, because an unknown age is not the same as an old one.
+
+Three behaviours are proved beside the destruction, each a way the mechanism could be wrong in the direction
+that cannot be undone. No policy destroys nothing, because a default period invented here would delete a
+client's documents on a number they never agreed to. A hold beats a period, and a held document is counted
+separately from a destroyed one, because a run that skipped forty documents under a hold and a run that
+destroyed forty are different outcomes. And a dry run changes nothing while still checking the hold, because
+a rehearsal whose output does not match the real thing rehearses a different operation.
+
+The stores are cleared before the file is removed, and only one of those orders is recoverable. A failure
+between them leaves a file with no index, which re-ingesting fixes. The other order leaves an index pointing
+at a file that is gone, which is a passage the system will cite and nobody can open.
+
+The conversations dataset exists so the requirement's second half has something to bind to. The assistant
+API that writes it arrives in Phase 4, so its schema is defined and minimal rather than invented now.
+
+### The end of a contract
+
+```
+oi run --rm retention --destroy-all --reason "contract terminated 2026-11-30"
+```
+
+The destruction record is written with the hash of its own contents, and that hash travels with the file, so
+the client can show later that it is the record we produced without either side trusting the other's copy. A
+mismatch means the file was edited, and it is not something to reconcile.
+
+The audit chain itself is deliberately not destroyed, and the record says so. It says which documents existed
+and that they were destroyed, which is what lets the destruction be checked by someone who does not trust us.
+Destroying it would leave the client unable to show anyone that we did what we said. Stored payloads are
+cleared and the events are kept.
+
+This is a different command from the audit record's own retention in section 13. `audit purge` deletes old
+events from the record and leaves a tombstone. `retention` destroys documents and conversations.
+
+**If it breaks.**
+
+- The document still answers after a purge: check
+  `docker exec postgres psql -U oicore -d oicore -c 'select doc_id, count(*) from chunk_index group by doc_id'`.
+  The lexical index is the usual answer, and the fix is a store in the list rather than a larger delete in one
+  place.
+- `complete: false`: read the store that carries the error, fix it, and run the purge again. Nothing is
+  rolled back, so the record is the only account of what was removed.
+- A purge is refused and no hold is visible: check `select * from legal_holds where released_at is null`. The
+  deployment-scope hold is the one that catches everything and the one people forget they placed.
+- Nothing is destroyed and `retain_days` is 0: no policy is set. That is the intended state rather than a
+  fault, and the command says so.
+- Everything was destroyed on the first run: the period is too short, or the cutoff landed on the wrong
+  column. Age comes from `ingested_at`, and a null there is not expired, so a corpus whose manifest predates
+  that column is safe rather than empty.
+- The file is gone and the index still holds it: the two operations ran in the wrong order, or the purge
+  reported incomplete and the unlink was reached anyway. Check `--purges` for a record that says
+  `complete: false`.
 
 ---
 

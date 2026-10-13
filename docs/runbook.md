@@ -1850,7 +1850,6 @@ client's folder tree is organised, and two roles permitted one or both. Per-user
 are `SEC-ACL-002`, a later phase. A model with two roles can be read in full and tested exhaustively, and
 getting the inside-the-search part right matters more than having more roles.
 
-<<<<<<< Updated upstream
 **The denial had to be rebuilt, because the first version never fired.** The deployed probe reported
 `withheld 0` and `denied False` on every question, which looked like the filter working and was the feature
 being dead code.
@@ -1880,36 +1879,6 @@ Qdrant returns anyway is a uuid5 over the document id, so it does not name a fil
 It runs in every mode, including silent, because the record has to report that a partial answer was
 returned. That is precisely what an auditor asks about, and a silent organisation is the one most likely to
 be asked.
-=======
-**The result, 2026-10-13.** Run on the reference instance against the deployed store, with the restricted
-fixture installed. The index holds 1059 company points and 1 executive point.
-
-| Question, asked by the staff role | best permitted | best restricted | denied |
-|---|---|---|---|
-| CEO base salary | 0.62 | **0.7766** | **yes** |
-| Executive bonus target | 0.58 | **0.6543** | **yes** |
-| Severance on a change of control | 0.65 | 0.4088 | no |
-
-The executive role returns `restricted_best None` on all three, because nothing is restricted from it, and
-`denied False`. A staff search for either restricted figure returns ten passages and contains neither.
-
-Run again with `--denial silent`, the same three rows report `denied True` and print `DISCLOSURE: none`,
-which is the two fields doing their separate jobs: the fact stays accurate for the record and the disclosure
-follows the client's policy.
-
-**A limitation the third row exposes, recorded rather than discovered later.** The severity question is not
-denied, because the restricted chunk scored 0.4088 against a permitted best of 0.65. The executive
-memorandum does answer it, so that is a **false negative**: the content is there, a person cannot see it, and
-the system does not say so.
-
-The cause is chunking rather than the comparison. The memorandum is 1,541 characters, which is one chunk, so
-its embedding is an average of salary, bonus, equity and severance together. A question about any one of them
-matches that average weakly, while a specific passage from the 10-K matches strongly. **The score comparison
-is a heuristic and this is the shape of its failure**: a short document whose content is varied reads as a
-worse match for every question than a long document's targeted passage. The alternatives are worse — a bare
-hit test would deny on most questions and train users to ignore the warning — so this is recorded as a
-bound, not fixed.
->>>>>>> Stashed changes
 
 **The result, 2026-10-13.** Run on the reference instance against the deployed store, with the restricted
 fixture installed. The index holds 1059 company points and 1 executive point.
@@ -1982,7 +1951,8 @@ counts.
   checking the results, because the results are what a missing filter also produces.
 - A denial appears when the client declared `silent`: the renderer did not write `ACCESS_DENIAL_MODE`, so
   the retriever fell back to its default. Check `grep ACCESS_DENIAL_MODE rendered/env`, because the
-  fallback is silent by design and the symptom is a disclosure rather than an error.
+  fallback is `denied`, which is the mode the product defaults to: a deployment that lost the variable
+  discloses rather than hides, and the symptom is a disclosure where none was configured.
 - `withheld` above zero on a normal query: the store returned something the role may not see. That is a
   second line rather than the first, so it working is good news and it firing means the first line is not.
 - Fewer passages than the limit with nothing withheld: overfetch is too low, or the corpus is small. The
@@ -2366,7 +2336,7 @@ prompt as sent". The record carries the data class, the kinds and counts of what
     cd /opt/oi-core
     git pull
     # Re-render, because the egress policy is new and rendered/env is a generated file.
-    docker compose -f deploy/office/compose/docker-compose.yml --profile tools run --rm render
+    python3 scripts/render_manifest.py --manifest manifests/dev-cloud.yaml
     grep -E 'FRONTIER_CLASSES|EGRESS_REDACTION' rendered/env
 
 **Expected.** `dev-cloud` renders `FRONTIER_CLASSES=public,internal` and `EGRESS_REDACTION=on`. `dev-office`

@@ -563,3 +563,34 @@ def test_the_counted_mode_reports_a_number_because_withheld_is_always_zero(wired
     assert "At least 3 passage(s)" in result.disclosure.message
     # The wording says "at least", because the count is over the search's limit rather than a total.
     assert "at least" in result.disclosure.message.lower()
+
+
+def test_the_confidence_gate_can_actually_fire_on_the_retrieval_path(wired):
+    """The gate read an attribute the retriever never set, so it skipped every passage and refused nothing.
+
+    `citations.verify_claim` does `getattr(passage, "parse_score", None)` and continues when it is None.
+    `Passage.from_payload` copied `is_ocr`, `page_is_nominal`, `table_id` and `row_index` from the payload but
+    **not `parse_score`**, and the worker does write it: `ingest.py` stores `payload["parse_score"]`. So the
+    value was in the store, in the payload, in the dictionary the retriever was holding, and dropped at the last
+    step on the way to the one place that reads it.
+
+    The result was a check that never refused anything in production while its unit tests passed, because the
+    tests build a passage carrying the attribute. That is the failure shape this phase keeps finding, and it is
+    worse than a missing check: it was reported as one.
+    """
+    from retriever import Passage
+
+    scanned = Passage.from_payload(
+        {"doc_id": "company/irs-p15.pdf", "acl": "company", "text": "the wage base is 184,500",
+         "chunk_id": "c1", "page_start": 29, "is_ocr": True, "parse_score": 0.42}, 0.9)
+    assert scanned.parse_score == 0.42, "the payload's score reaches the passage"
+    assert scanned.is_ocr is True
+
+    digital = Passage.from_payload(
+        {"doc_id": "company/notes.md", "acl": "company", "text": "a note", "chunk_id": "c2",
+         "page_start": 1, "parse_score": None}, 0.5)
+    assert digital.parse_score is None, "an absent score stays absent rather than becoming zero"
+
+    missing = Passage.from_payload(
+        {"doc_id": "company/x.md", "acl": "company", "text": "a note", "chunk_id": "c3"}, 0.5)
+    assert missing.parse_score is None, "a payload without the key does not raise"
