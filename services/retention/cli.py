@@ -43,6 +43,13 @@ def main() -> int:
     parser.add_argument("--documents-root", default=os.environ.get("DOCUMENTS_ROOT", "/documents"),
                         help="where the client's files are, because retention destroys those too")
     parser.add_argument("--retention-runs", action="store_true", help="what retention has done")
+    # The flag the enforce path reads and the manual documents. The commit that added --enforce called
+    # `args.dry_run` without ever defining it, so `--enforce documents --dry-run` was rejected as an unknown
+    # argument and plain `--enforce documents` died with AttributeError before doing anything. **The acceptance
+    # probe called policy.enforce(dry_run=True) directly and never went through this path**, which is how a
+    # broken command passed a test that was named for it.
+    parser.add_argument("--dry-run", action="store_true",
+                        help="report what a run would destroy without destroying it")
     parser.add_argument("--vector-url", default=os.environ.get("VECTOR_URL", "http://vector:6333"))
     parser.add_argument("--collection", default=os.environ.get("COLLECTION", "documents"))
     args = parser.parse_args()
