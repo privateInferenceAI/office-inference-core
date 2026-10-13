@@ -1817,6 +1817,14 @@ chunks written 0, chunks removed 0, documents removed 0
 The counts depend on the corpus and on the chunker version. On this deployment, twelve documents and 1131
 points, measured from the index:
 
+**Twelve documents, and only four of them were fetched.** `fixtures/corpus/manifest.yaml` declares both
+lists and is the authority: four real filings from SEC EDGAR and the IRS under `documents`, with the
+licence read at the source, and eight fixtures this project wrote under `authored_fixtures`, each naming
+the `tests/fixtures/*.py` script that builds it and the control it exists to prove. The eight land in the
+deployed corpus because their builders write straight into the documents root, so an index holding twelve
+is correct rather than a sign that something was ingested twice. `python3 fixtures/corpus/validate_corpus.py`
+checks that every authored fixture names a builder that exists.
+
 | Document | Chunks | Notes |
 |---|---|---|
 | company/apple-10k-2024.htm | 672 | 588 table entries and 84 prose chunks |
