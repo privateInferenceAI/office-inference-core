@@ -26,7 +26,13 @@ import retriever  # noqa: E402
 sys.path.insert(0, str(ROOT / "tests"))
 
 
-def chunk_ids(prefix: str, count: int) -> list[str]:
+def text_hashes(prefix: str, count: int) -> list[str]:
+    """Stand-ins for `md5(text)` per chunk, which is what the comparison uses.
+
+    Not chunk ids. An id is `uuid5(doc_id, ...)` and therefore contains the document it belongs to, so two
+    copies of one file have ids that all differ and an overlap over ids is always zero. The first version of
+    these tests supplied shared ids by hand and passed while the query was broken.
+    """
     return [f"{prefix}-{i}" for i in range(count)]
 
 
@@ -36,8 +42,8 @@ def test_the_same_document_under_two_names_is_flagged():
     """RET-DUPE-001. A client exports the same policy twice with different names, or keeps a copy in two
     folders, and the system should notice rather than index it twice and cite whichever ranked first."""
     manifest = ingest.MemoryManifest()
-    manifest.chunks["company/fee-schedule.pdf"] = chunk_ids("a", 10)
-    manifest.chunks["company/fee-schedule-copy.pdf"] = chunk_ids("a", 10)
+    manifest.chunk_hashes["company/fee-schedule.pdf"] = text_hashes("a", 10)
+    manifest.chunk_hashes["company/fee-schedule-copy.pdf"] = text_hashes("a", 10)
 
     found = manifest.near_duplicates("company/fee-schedule-copy.pdf", 0.5)
     assert found == [("company/fee-schedule.pdf", 1.0)], found
@@ -52,8 +58,8 @@ def test_a_two_page_extract_of_a_long_report_is_not_a_duplicate():
     thing from a second copy, which is why the threshold applies to the smaller and the count floor exists.
     """
     manifest = ingest.MemoryManifest()
-    manifest.chunks["company/annual-report.pdf"] = chunk_ids("r", 100)
-    manifest.chunks["company/summary.pdf"] = chunk_ids("r", 5)      # the first five chunks, verbatim
+    manifest.chunk_hashes["company/annual-report.pdf"] = text_hashes("r", 100)
+    manifest.chunk_hashes["company/summary.pdf"] = text_hashes("r", 5)      # the first five chunks, verbatim
 
     # Fully contained, so it flags: the honest answer is that a person should look, not that the system
     # should decide. The count floor means it takes five chunks to be worth asking about at all.
@@ -65,8 +71,8 @@ def test_two_documents_that_merely_share_a_page_are_not_flagged():
     """A corpus of invoices shares a template. If a shared header is enough to flag a pair, the flag becomes
     noise and nobody reads it, which costs the feature the only thing it does."""
     manifest = ingest.MemoryManifest()
-    manifest.chunks["company/invoice-001.pdf"] = [f"t{i}" for i in range(90)] + chunk_ids("h", 10)
-    manifest.chunks["company/invoice-002.pdf"] = [f"u{i}" for i in range(90)] + chunk_ids("h", 10)
+    manifest.chunk_hashes["company/invoice-001.pdf"] = [f"t{i}" for i in range(90)] + text_hashes("h", 10)
+    manifest.chunk_hashes["company/invoice-002.pdf"] = [f"u{i}" for i in range(90)] + text_hashes("h", 10)
 
     found = manifest.near_duplicates("company/invoice-002.pdf", 0.5)
     assert found == [], f"a shared template should not flag a pair, got {found}"
@@ -76,8 +82,8 @@ def test_a_document_too_small_to_judge_is_not_flagged():
     """Two one-chunk documents that agree are not evidence of a duplicate, and a flag nobody can act on
     teaches people to ignore flags."""
     manifest = ingest.MemoryManifest()
-    manifest.chunks["company/a.txt"] = ["only-chunk"]
-    manifest.chunks["company/b.txt"] = ["only-chunk"]
+    manifest.chunk_hashes["company/a.txt"] = ["only-chunk"]
+    manifest.chunk_hashes["company/b.txt"] = ["only-chunk"]
     assert manifest.near_duplicates("company/b.txt", 0.5) == []
 
 
@@ -85,8 +91,8 @@ def test_a_flagged_pair_is_recorded_once_whichever_document_arrived_second():
     """The pair is ordered, so the uniqueness constraint means what it says. Without that, the second
     document's cycle records the pair again in the other order and the review list shows it twice."""
     manifest = ingest.MemoryManifest()
-    manifest.chunks["company/zeta.pdf"] = chunk_ids("a", 10)
-    manifest.chunks["company/alpha.pdf"] = chunk_ids("a", 10)
+    manifest.chunk_hashes["company/zeta.pdf"] = text_hashes("a", 10)
+    manifest.chunk_hashes["company/alpha.pdf"] = text_hashes("a", 10)
     first = manifest.near_duplicates("company/zeta.pdf", 0.5)
     second = manifest.near_duplicates("company/alpha.pdf", 0.5)
     assert first == [("company/alpha.pdf", 1.0)]
@@ -203,3 +209,37 @@ class _Services(ingest.Services):
     def __init__(self, hits):
         super().__init__()
         self.hits = hits
+
+
+def test_two_byte_identical_files_are_detected(monkeypatch):
+    """The bug the deployed store found, as a test.
+
+    Two identical files were ingested and no duplicate was reported. The comparison used chunk ids, and an id
+    is `uuid5(doc_id, source_sha256, chunker_version, ordinal, content_hash)`: it contains the document it
+    belongs to, so two copies of one file produce ids that all differ. The overlap was structurally always
+    zero and the feature could not fire whatever the corpus contained.
+
+    The unit test passed because it supplied shared ids by hand, which is a fixture agreeing with itself rather
+    than modelling the data. This one derives ids the way the chunker does, so a comparison over ids fails it.
+    """
+    import hashlib
+    import uuid as uuid_module
+
+    def real_text_hashes(doc_id: str, source_sha256: str, texts: list[str]) -> list[str]:
+        """The chunker's own id scheme, so a comparison over ids produces no overlap for identical text."""
+        return [str(uuid_module.uuid5(uuid_module.NAMESPACE_URL, "|".join(
+            (doc_id, source_sha256, "chunker-v1", str(ordinal),
+             hashlib.sha256(text.encode()).hexdigest())))) for ordinal, text in enumerate(texts)]
+
+    body = [f"Fee schedule line {i}, rate 145.00 per hour" for i in range(10)]
+    ids_a = real_text_hashes("company/schedule.md", "same-file-hash", body)
+    ids_b = real_text_hashes("company/schedule-copy.md", "same-file-hash", body)
+    assert not (set(ids_a) & set(ids_b)), "identical text under two names must have disjoint chunk ids"
+
+    # And the text hashes both documents produce ARE identical, which is what the comparison uses.
+    hashes = [hashlib.md5(text.encode()).hexdigest() for text in body]
+    manifest = ingest.MemoryManifest()
+    manifest.chunk_hashes["company/schedule.md"] = hashes
+    manifest.chunk_hashes["company/schedule-copy.md"] = hashes
+    found = manifest.near_duplicates("company/schedule-copy.md", ingest.DUPLICATE_OVERLAP_THRESHOLD)
+    assert found == [("company/schedule.md", 1.0)], found

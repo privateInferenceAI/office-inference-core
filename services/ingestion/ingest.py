@@ -509,6 +509,10 @@ def upsert_points(services: Services, points: list[dict]) -> None:
 # differs. Half is the point where "these are substantially the same document" stops being a judgement.
 DUPLICATE_OVERLAP_THRESHOLD = 0.5
 
+# The fewest chunks a document must have before it can be compared. Two small documents that agree are not
+# evidence of a duplicate, and a flag nobody can act on teaches people to ignore flags.
+DUPLICATE_MIN_CHUNKS = 5
+
 
 def index_for_lexical(manifest: "Manifest", points: list[dict]) -> None:
     """Write the lexical arm's copy of these chunks, beside the vectors.
@@ -714,10 +718,10 @@ class Manifest:
 class MemoryManifest(Manifest):
     def __init__(self) -> None:
         self.records: dict[str, dict] = {}
-        # chunk ids per document, which is the signature duplicate detection compares, and the declared
-        # currency of each document. Both are supplied by a test rather than derived, because deriving them
-        # is what the database does.
-        self.chunks: dict[str, list[str]] = {}
+        # Hash of each chunk's TEXT per document, which is the signature duplicate detection compares, and
+        # the declared currency of each document. A test supplies these rather than deriving them, because
+        # deriving them is what the database does.
+        self.chunk_hashes: dict[str, list[str]] = {}
         self.versions: dict[str, bool] = {}
 
     def get(self, relpath: str) -> dict | None:
@@ -733,18 +737,22 @@ class MemoryManifest(Manifest):
         self.records.pop(relpath, None)
 
     def near_duplicates(self, doc_id: str, threshold: float) -> list[tuple[str, float]]:
-        """The same comparison the database does, over chunk ids the test has put in the manifest. A memory
-        manifest holds no chunks, so a test that wants duplicate detection supplies them itself."""
-        mine = set(self.chunks.get(doc_id, []))
-        if len(mine) < 5:
+        """The same comparison the database does, over a hash of each chunk's TEXT.
+
+        A test supplies text hashes rather than chunk ids, because a chunk id carries the document it belongs
+        to and comparing ids can never match two copies of the same file. Supplying ids by hand is how the
+        first version of this test passed while the query it was testing was broken.
+        """
+        mine = set(self.chunk_hashes.get(doc_id, []))
+        if len(mine) < DUPLICATE_MIN_CHUNKS:
             return []
         found = []
-        for other, theirs in sorted(self.chunks.items()):
+        for other, theirs in sorted(self.chunk_hashes.items()):
             if other == doc_id:
                 continue
             shared = len(mine & set(theirs))
             smaller = min(len(mine), len(theirs))
-            if smaller >= 5 and shared / smaller >= threshold:
+            if smaller >= DUPLICATE_MIN_CHUNKS and shared / smaller >= threshold:
                 found.append((other, shared / smaller))
         return found
 
@@ -875,23 +883,25 @@ class PostgresManifest(Manifest):
     def near_duplicates(self, doc_id: str, threshold: float) -> list[tuple[str, float]]:
         """Documents sharing at least `threshold` of this one's chunks.
 
-        The signature is the set of chunk ids, which are already a hash of each chunk's text, so no new table
-        is needed: the lexical index holds exactly the information a comparison wants. The share is over the
-        SMALLER document so a two-page extract of a long report reads as a small overlap rather than a
-        complete one, and the overlap is computed in the database rather than by fetching every id.
+        The signature is a hash of each chunk's TEXT, not its id, and that distinction is the whole correctness
+        of this function. A chunk id is `uuid5(doc_id, source_sha256, chunker_version, ordinal, content_hash)`,
+        so it contains the document it belongs to: two byte-identical files produce two documents whose chunk
+        ids all differ, an overlap computed over ids is always zero, and the feature never fires. The first
+        version compared ids and reported no duplicates for a corpus containing an exact copy, while its unit
+        test passed because the test supplied shared ids by hand.
 
-        The comparison excludes exact matches of the whole file, which the content hash already caught before
-        this ran, and it needs at least a handful of chunks on both sides so two one-chunk documents that
-        happen to agree are not flagged as near-duplicates of each other.
+        Hashing the text in the query costs a little and needs no schema change, because `chunk_index` already
+        holds the text. The share is over the SMALLER document so a two-page extract of a long report reads as
+        a small overlap rather than a complete one, and both sides need a handful of chunks so two small
+        documents that happen to agree are not reported as duplicates of each other.
         """
         with self.connection.cursor() as cur:
             cur.execute("""
                 with mine as (
-                  select chunk_id from chunk_index where doc_id = %(doc)s
+                  select md5(text) as sig from chunk_index where doc_id = %(doc)s
                 ),
                 theirs as (
-                  select doc_id, chunk_id from chunk_index
-                  where doc_id <> %(doc)s and doc_id <> %(doc)s
+                  select doc_id, md5(text) as sig from chunk_index where doc_id <> %(doc)s
                 ),
                 shared as (
                   select t.doc_id,
@@ -899,15 +909,15 @@ class PostgresManifest(Manifest):
                          (select count(*) from mine) as mine_count,
                          (select count(*) from theirs x where x.doc_id = t.doc_id) as their_count
                   from theirs t
-                  where t.chunk_id in (select chunk_id from mine)
+                  where t.sig in (select sig from mine)
                   group by t.doc_id
                 )
                 select doc_id, common::float / least(mine_count, their_count)
                 from shared
-                where least(mine_count, their_count) >= 5
+                where least(mine_count, their_count) >= %(floor)s
                   and common::float / least(mine_count, their_count) >= %(threshold)s
                 order by doc_id
-            """, {"doc": doc_id, "threshold": threshold})
+            """, {"doc": doc_id, "threshold": threshold, "floor": DUPLICATE_MIN_CHUNKS})
             found = [(row[0], float(row[1])) for row in cur.fetchall()]
 
             for other, overlap in found:
