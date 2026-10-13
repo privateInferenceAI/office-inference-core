@@ -356,6 +356,19 @@ def page_texts(document: dict) -> list[tuple[int, str, dict, list[str]]]:
     items: list[tuple[int, str, dict, list[str]]] = []
     headings: list[str] = []
     order = _walk_order(body, document)
+
+    # The body's children ARE the reading order, so a text item not referenced from there is invisible
+    # however much content it holds. That is not hypothetical: two HTML contract exhibits parsed to
+    # nothing on the first real corpus run, both the worker and the chunker reported success, and the
+    # index gained two documents that look retrievable and contain no text. An empty result is worse than
+    # a failure, so when the walk finds nothing but the document has text, fall back to every text item in
+    # page and position order. The order is worse than the body's and it is enormously better than
+    # nothing, and the fallback announces itself so a wrong traversal is visible rather than quiet.
+    if not order and (document.get("texts") or []):
+        order = [t.get("self_ref") for t in document.get("texts") or [] if t.get("self_ref")]
+        print(f"  warning: the document body references no items, so reading order is unavailable. "
+              f"Falling back to {len(order)} text items sorted by page and position.")
+
     for ref in order:
         if ref in tables_in_flow or ref in by_ref:
             continue
@@ -373,6 +386,10 @@ def page_texts(document: dict) -> list[tuple[int, str, dict, list[str]]]:
         if not text or page_no is None:
             continue
         items.append((int(page_no), text, prov.get("bbox") or {}, list(headings)))
+    # Deliberately NOT re-sorted by position. The body walk returns reading order, and on a two-column
+    # page a sort by vertical position is not reading order at all: it interleaves the columns. The
+    # fallback path takes the parser's item order in page order, which is the least wrong available
+    # answer when the traversal has failed, and it says so when it happens.
     return items
 
 
