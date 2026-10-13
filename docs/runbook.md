@@ -2243,6 +2243,26 @@ misread cannot be told from a page read cleanly, and the gate refuses on a low-s
 a low-scoring page. That is coarser than the architecture asks for. Docling's per-page confidence is named in
 the research as the Wave 4 item to verify, and until it is populated this check is the document-level version.
 
+**The first run found something by accident, and it is the best evidence this step has.** The probe asked for
+the standard labour rate, and the retriever returned the **superseded 2025 schedule as passage [1]**, with the
+current 2026 one at [2]. The verifier then refused the claim built from [1] with the reason `superseded`.
+
+That is the whole chain working on a real question with no contrived fixture: a real figure, from a real
+document, on a real page, correct in every literal respect, and **refused because the document had been
+replaced.** Nothing below this layer would have caught it.
+
+**The probe was wrong and the check was right.** It built its "correct" claim from passage [1] on the
+assumption that the top-ranked passage is a good source, which is the same class of mistake as the fixtures in
+3.9 and 3.10: a test that encodes an assumption about the data instead of the property being tested. It now
+builds the claim from the first passage a person may rely on and prints the currency of every passage it
+retrieved.
+
+**Open, and it is a ranking question rather than a correctness one.** Both versions were retrieved, and the
+superseded one ranked first. The answer is refused rather than wrong, which is the designed behaviour, but a
+user asked about the current rate and got a refusal when a good answer was in the result set two places down.
+Whether current documents should be boosted in ranking is a search-quality change that should be measured
+against the golden set rather than guessed at here, so it is recorded as open rather than fixed.
+
 **Entailment is not here.** It is Layer 1 and it needs a model, and the reply path does not have one until
 Phase 4. So `supported` means every mechanical check passed, which is **not the same as true**. The research is
 explicit that the verifier's own false-negative rate sets the ceiling on what the product can claim, and that

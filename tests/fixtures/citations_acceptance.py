@@ -76,17 +76,38 @@ def main() -> int:
         print("nothing retrieved, so nothing below would prove anything")
         return 1
 
-    # A figure that really is in the first passage, taken from it rather than typed, so the correct claim is
-    # correct by construction.
-    import re
-    figures = re.findall(r"\b\d{2,3}(?:\.\d{2})?\b", result.passages[0].text)
-    real_figure = figures[0] if figures else None
     print()
-    print(f"a figure taken from passage [1] to build the correct claim: {real_figure!r}")
+    print("=== which of those a person may rely on ===")
+    for index, passage in enumerate(result.passages, start=1):
+        state = "current" if passage.is_current else "SUPERSEDED"
+        print(f"  [{index}] {state:<11}{passage.doc_id}")
+    if result.superseded:
+        print(f"  a superseded document was retrieved and ranked: {result.superseded[0]}")
+        print("  That is the failure this step exists to catch. It was found by accident on the first run:")
+        print("  the query asked for the standard rate, the retriever put the 2025 schedule first, and the")
+        print("  verifier refused the claim rather than certifying an out-of-date figure as the current one.")
+
+    # The correct claim is built from the first passage a person may rely on, not the first passage. Taking it
+    # from position 1 and calling it correct is what the first version did, and it produced a claim about the
+    # superseded 2025 rate that was correctly refused. The fixture was wrong and the check was right.
+    current = [(index, passage) for index, passage in enumerate(result.passages, start=1)
+               if passage.is_current]
+    import re
+    real_figure, real_index = None, None
+    for index, passage in current:
+        figures = re.findall(r"\b\d{2,3}(?:\.\d{2})?\b", passage.text)
+        if figures:
+            real_figure, real_index = figures[0], index
+            break
+    print()
+    if real_figure:
+        print(f"a figure taken from current passage [{real_index}] to build the correct claim: {real_figure!r}")
+    else:
+        print("no current passage carried a figure, so the correct claim cannot be built by construction")
 
     answer = " ".join(filter(None, [
-        f"The standard labour rate is {real_figure} per hour.[1]" if real_figure else None,
-        f"The rate is {IMPOSSIBLE} per hour.[1]",
+        f"The standard labour rate is {real_figure} per hour.[{real_index}]" if real_figure else None,
+        f"The rate is {IMPOSSIBLE} per hour.[{real_index}]" if real_figure else None,
         "The rate is set out in the schedule.[99]",
         "This paragraph has no citation at all.",
     ]))
@@ -132,9 +153,11 @@ def main() -> int:
         correct = [c for c in verified.claims if c.ok]
         if correct:
             print(f"  SUPPORTED {correct[0].text}")
+            print(f"            drawn from {result.passages[real_index - 1].doc_id}, which is current")
         else:
+            refusals = ", ".join(f"{c.reason}: {c.detail}" for c in verified.claims if not c.ok)
             problems.append(f"the correct claim about {real_figure} was refused, which is the false refusal "
-                            f"that gets a check turned off")
+                            f"that gets a check turned off. Reasons: {refusals}")
 
     print()
     print(f"refusals by reason: {verified.refusals}")

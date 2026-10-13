@@ -376,7 +376,7 @@ items:
     tier: [cloud, office, hosted]
     phase: C2
     verify: an invented citation index is rejected; an unsupported sentence is marked, not silently kept
-    status: open
+    status: verified
     note: >-
       Built 2026-10-13, recorded in docs/runbook.md step 3.11. The mechanical layer only: seven deterministic
       checks with no model and no new dependency, which is the scope the research sets for Layer 0. Fabricated
@@ -393,8 +393,20 @@ items:
       passed and is not the same as true. And the confidence gate is document-level rather than page-level,
       because docling-serve does not populate the per-page confidence map this release exposes, so a page whose
       digits were misread cannot be told from one read cleanly; the research names per-page confidence as the
-      Wave 4 item to verify. Status is open because the proof has to run on the deployed store against real
-      retrieved passages.
+      Wave 4 item to verify. VERIFIED 2026-10-13 against the deployed store, and the first run found the
+      failure this step exists for by accident: the probe asked for the standard labour rate, the retriever
+      returned the SUPERSEDED 2025 schedule as passage [1] with the current 2026 one at [2], and the verifier
+      refused the claim built from [1] with the reason superseded. A real figure from a real document on a real
+      page, correct in every literal respect, refused because the document had been replaced, which nothing
+      below this layer would have caught. The probe was wrong and the check was right: it assumed the
+      top-ranked passage is a good source, which is the same class of mistake as the 3.9 and 3.10 fixtures, and
+      it now builds its claim from the first passage a person may rely on. The two halves of the verify line
+      were then proved directly: a claim citing [99] against five retrieved passages was rejected as
+      citation_not_found, and a claim stating a figure that appears nowhere in the corpus was marked
+      number_not_in_source while remaining in the reply. OPEN, and a ranking question rather than a correctness
+      one: the superseded document ranked first, so the answer is refused when a good answer was two places
+      down. Whether current documents should be boosted is a search-quality change to measure against the
+      golden set rather than guess at here.
   - id: RET-INGEST-001
     title: Ingestion is idempotent, so the same bytes are never embedded twice
     tier: [cloud, office, hosted]
