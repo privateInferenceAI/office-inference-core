@@ -900,3 +900,58 @@ def test_a_format_the_scorer_did_not_look_at_is_not_labelled_ocr():
                                 ("parse_score", "layout_score", "ocr_score")}) is False
     # And no report at all still assumes the safe direction.
     assert ingest._ocr_ran({}, None) is True
+
+
+# --------------------------------------------------------------------------- propagating a code change
+
+def test_a_payload_rule_change_re_derives_a_document_whose_bytes_did_not_change(tmp_path, wired):
+    """The gap that made a fix invisible.
+
+    The skip decision is made on the file's bytes, which is right for a file that was edited and wrong for a
+    change to the code that derives the payload from those bytes. Then the bytes match, the manifest still
+    believes its old claim, and the new logic never reaches the documents it was written for. It happened
+    twice in the ingestion step: once for how empty documents are refused, and once for is_ocr, where all 29
+    chunks of two HTML exhibits stayed labelled machine-read after the code that labelled them was fixed.
+
+    An earlier fix to the same staleness class caught only the zero-chunk case, which is a symptom. This is
+    the mechanism.
+    """
+    services = wired()
+    make_corpus(tmp_path, "company/policy.pdf", b"%PDF unchanged bytes")
+    manifest = ingest.MemoryManifest()
+
+    first = ingest.ingest_cycle(services, tmp_path, manifest)
+    assert first.new == 1
+    record = manifest.get("company/policy.pdf")
+    assert record["payload_version"] == ingest.PAYLOAD_VERSION
+
+    # An unchanged file under the current rules is still skipped.
+    assert ingest.ingest_cycle(services, tmp_path, manifest).skipped == 1
+
+    # Now the rules change, the way they did when is_ocr was corrected. The bytes are identical.
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(ingest, "PAYLOAD_VERSION", "payload-v3")
+        services.parsed_names.clear()
+        result = ingest.ingest_cycle(services, tmp_path, manifest)
+    assert result.skipped == 0, "an unchanged file under older rules must be re-derived"
+    assert result.changed == 1
+    assert services.parsed_names == ["company/policy.pdf"], "it must be parsed again to re-derive the payload"
+    assert manifest.get("company/policy.pdf")["payload_version"] == "payload-v3"
+
+
+def test_a_record_from_before_the_version_existed_is_also_re_derived(tmp_path, wired):
+    """Rows written before this column existed have no version, and a comparison against a missing value
+    must read as stale rather than as current. The alternative is a corpus that keeps its pre-fix labels
+    forever on the documents nobody happens to edit."""
+    services = wired()
+    make_corpus(tmp_path, "company/policy.pdf", b"%PDF old record")
+    manifest = ingest.MemoryManifest()
+    manifest.put("company/policy.pdf", {
+        "relpath": "company/policy.pdf", "root": "company",
+        "content_sha256": ingest.sha256_of(tmp_path / "company" / "policy.pdf")[0],
+        "chunk_count": 1, "failure_count": 0,
+        # No payload_version key at all, which is what migration 009 left behind.
+    })
+    result = ingest.ingest_cycle(services, tmp_path, manifest)
+    assert result.skipped == 0
+    assert result.changed == 1
