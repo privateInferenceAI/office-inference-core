@@ -29,7 +29,7 @@ def sample(**overrides) -> dict:
         "model_id": "BAAI/bge-m3", "model_sha": None, "model_dtype": "float32", "pooling": "cls",
         "normalise": True, "query_prefix": "", "passage_prefix": "",
         "max_input_length": 4096, "auto_truncate": True, "dimension": 1024,
-        "chunker_version": "chunker-v1", "embed_path": "/embed",
+        "chunker_version": "chunker-v1",
     }
     base.update(overrides)
     return base
@@ -172,3 +172,40 @@ def test_the_contract_module_is_in_the_image_that_imports_it():
         if (ROOT / "services" / "ingestion" / f"{name}.py").exists():
             assert f"{name}.py" in copied, (
                 f"ingest.py imports {name} from the same directory and the image does not copy it")
+
+
+def test_the_contract_holds_nothing_the_checking_process_computes_about_itself():
+    """The deployed failure, as a test.
+
+    The writer measured the dimension and remembered it on its own Services object; the reader had never
+    measured it, so its contract said None. The writer had not yet discovered which batch endpoint answers and
+    recorded None; the reader had discovered /embed. Two processes that agreed completely about the model
+    produced contracts that differed, and the check refused EVERY search on the deployment.
+
+    The eval harness reported all ten questions as misses, which is what a contract that refuses everything
+    looks like from one step up. The lesson is that a contract containing anything the checking process computes
+    about itself will differ between two processes that agree about the thing being checked.
+    """
+    fields = set(contract.CONTRACT_FIELDS)
+    assert "embed_path" not in fields, (
+        "the endpoint a client reached is how it talks to the service, not what the service is; two endpoints "
+        "serving different models differ in model_id")
+    # dimension stays, because it is a real property of the model, and it is passed in rather than read off the
+    # object so that a process which has never embedded anything still states it.
+    assert "dimension" in fields
+    signature = __import__("inspect").signature(contract.live_contract)
+    assert "dimension" in signature.parameters, (
+        "the dimension is read off the Services object again, which is what made a reader that had never "
+        "embedded anything disagree with a writer that had")
+
+    # And the reader measures it rather than trusting a field it may never have set.
+    source = (ROOT / "services" / "retrieval" / "retriever.py").read_text()
+    assert "ingest._get_vector_size(services)" in source
+
+
+def test_a_contract_that_differs_in_no_field_that_matters_is_not_a_mismatch():
+    """The other half: two contracts built by different processes for the same deployment must compare equal."""
+    writer = sample()
+    reader = sample()
+    assert contract.compare(writer, reader) == []
+    assert contract.fingerprint(writer) == contract.fingerprint(reader)
