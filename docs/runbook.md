@@ -2281,6 +2281,91 @@ the ceiling must be published rather than implied.
 - Nothing is refused at all: the answer has no `[n]` markers, so every claim is `uncited`. The marking
   convention is the prompt's to teach and this module cannot invent it.
 
+### 3.12 Redaction
+
+**Goal.** PII is redacted before any frontier-bound request leaves, and the redaction is recorded.
+`SEC-REDACT-001`, whose verify line asks that a question containing an SSN reaches Bedrock with the pattern
+replaced and that the audit shows the data class.
+
+**The audit module named this gap in Phase 0.** Its four patterns are documented as "not a compliance
+guarantee", with a note that "SEC-REDACT-001 in C2 owns the real engine, which has to run before anything
+leaves for a frontier model rather than only on the way into the record". This step is that engine.
+
+**Two jobs, and the order between them is the design.**
+
+*The gate asks whether the request may leave.* `services/egress/lane.py` reads `FRONTIER_CLASSES` from the
+rendered environment, which comes from `access.egress.frontier_classes` in the manifest. A class the client has
+not permitted is refused **before redaction is attempted**, because redacting a regulated document and sending
+the remainder answers a different question than the one the client decided.
+
+*The redaction asks what must not leave inside a request that may.* `services/egress/redaction.py` replaces the
+identifiers a business document carries and counts what it replaced.
+
+**It fails closed, and the direction is the whole point.** An unset permission set, an unknown class, a lane
+nobody configured: every one refuses. The alternative is a system that sends a client's confidential document
+to a provider because a variable was misspelled, and it does so silently because the call succeeds.
+
+**Three properties, each from a way this could succeed while doing nothing.**
+
+*It runs on the bytes that are sent.* `prepare()` takes the assembled request and returns what to send. There is
+no path that returns the original alongside it, because a function that returns both invites a caller to send
+the wrong one and the mistake is invisible since both are valid requests.
+
+*It walks every string, not a list of fields.* The question is typed by a person who knows what not to type; the
+**retrieved passages are whatever the corpus contained, and they are the part most likely to hold a client's
+identifiers.** A redactor that covers the question and skips the passages reports success on every request and
+leaves the actual risk untouched. Walking the whole structure means a field added in 2027 is covered without
+anyone remembering to cover it.
+
+*One pass, ordered alternatives.* Redacting in a loop over patterns re-scans the text it just wrote, so a value
+replaced with a label can be re-matched by a later pattern. A single combined pattern cannot re-match its own
+output. The alternative ordering is deliberate too: credentials first, because a key that reaches a provider's
+logs is not a privacy incident but an incident, and rotation is the only remedy.
+
+**The false-positive trade, made deliberately rather than hidden.** A 16-digit invoice number is not a card, and
+redacting it costs a legitimate question its reference. A card number reaching a frontier model is a payment
+incident. So **shape decides whether to redact** and the check digit decides only what the reader is told:
+`[REDACTED-CARD]` for a number that passes Luhn, `[REDACTED-LONG_NUMBER]` for one that does not, counted
+separately as `unverified_card_shapes`. A card whose digits OCR damaged fails the check and is still a card, so
+the check cannot be allowed to decide.
+
+Figures are the other direction and are tested: `145.00`, `1,500.00`, `418750` and `0.67` are not identifiers,
+and a pattern that catches them makes every answer about money unanswerable.
+
+**The honest bound.** This is pattern matching. It catches identifiers that have a shape and it **does not catch
+a person's name**, an address, or an account number written in words. It is a reduction in what leaves, not a
+guarantee about what cannot, and presenting it as a guarantee is how a client ends up sending something they
+would not have. There is a test asserting a name survives, so the bound cannot be quietly assumed away.
+
+**The record proves what was sent, not what was typed.** The hash is taken **after** redaction, because a hash
+of the original is a second copy of the thing being removed: it cannot be read, but it can be compared, which is
+enough to confirm a guess about a Social Security number. The audit column already says it holds "SHA-256 of the
+prompt as sent". The record carries the data class, the kinds and counts of what was removed, and never a value.
+
+**Commands.**
+
+    cd /opt/oi-core
+    git pull
+    # Re-render, because the egress policy is new and rendered/env is a generated file.
+    docker compose -f deploy/office/compose/docker-compose.yml --profile tools run --rm render
+    grep -E 'FRONTIER_CLASSES|EGRESS_REDACTION' rendered/env
+
+**Expected.** `dev-cloud` renders `FRONTIER_CLASSES=public,internal` and `EGRESS_REDACTION=on`. `dev-office`
+renders `FRONTIER_CLASSES=` empty, which is its policy and not an oversight: that build has no frontier lane,
+and the gate reads an empty set as "nothing is permitted" rather than as "no opinion".
+
+**If it breaks.**
+
+- Nothing leaves and the reason says no classes are permitted: `rendered/env` has not been re-rendered since
+  the manifest gained the policy, so `FRONTIER_CLASSES` is absent. Absent refuses, which is the intended
+  behaviour for an unconfigured deployment and a confusing one for a configured deployment whose env is stale.
+- A figure is being redacted: check `PATTERNS` for a shape that is too broad. The decimal and thousands
+  separators are the ones that matter, and there is a test for each.
+- A real identifier survives: it has no shape this recognises. Names and addresses are the known bound, and a
+  client whose documents are full of them needs a different mechanism rather than a longer pattern list.
+- The record holds the original text: the hash is taken from `cleaned` and the payload from the redaction.
+  Check the content mode as well, because `--store-payload` writes content the mode would otherwise not keep.
+
 ## Phase 4 — Assistant API  *(outline)*
 
 The single surface the client app talks to: ask, tasks, approvals, activity, settings.

@@ -26,6 +26,35 @@
           ],
           "default": "denied",
           "description": "silent: nothing is disclosed, and the answer is built from what the role can see. denied: the user is told that documents exist which may answer the question and that they lack access, with no count. counted: the same plus how many passages were withheld. The default is denied, because a silent system returns a partial answer that looks complete, which is the failure this product exists to avoid."
+        },
+        "egress": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "What may leave for a frontier model. The gate refuses rather than defaulting, so a deployment that declares nothing sends nothing off-box, which is the office shape and the safe direction for a cloud one to fail in. Classes are the four the audit record already uses.",
+          "properties": {
+            "frontier_classes": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "public",
+                  "internal",
+                  "confidential",
+                  "regulated"
+                ]
+              },
+              "uniqueItems": true,
+              "default": [],
+              "description": "Which data classes a client permits on a frontier lane. An empty list means nothing leaves, and it is the default because an unset permission must not become a permission. Listing regulated here is a client decision the system enforces and records rather than one it second-guesses."
+            },
+            "redaction": {
+              "enum": [
+                "on",
+                "off"
+              ],
+              "default": "on",
+              "description": "Whether identifiers are replaced before a request leaves. On by default: the cost of redacting something harmless is a question the model cannot answer, and the cost of not redacting a card number is a payment incident in a provider's logs. Turning it off is a client's decision to make and one they should have to make explicitly."
+            }
+          }
         }
       }
     },

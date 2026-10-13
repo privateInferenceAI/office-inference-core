@@ -130,6 +130,27 @@ items:
     phase: C2
     verify: a question containing an SSN reaches Bedrock with the pattern replaced, and the audit shows the data class
     status: open
+    note: >-
+      Built 2026-10-13, recorded in docs/runbook.md step 3.12. The audit module named this gap in Phase 0: its
+      four patterns are documented as not a compliance guarantee and this requirement owns the real engine,
+      which has to run before anything leaves for a frontier model rather than only on the way into the record.
+      Two jobs, and the order between them is the design. The gate asks whether the request may leave at all,
+      reading the permitted classes from the manifest, and it runs BEFORE redaction, because redacting a
+      regulated document and sending the remainder answers a different question than the one the client
+      decided. The redaction asks what must not leave inside a request that may. It fails closed: an unset
+      permission set, an unknown class and an unconfigured lane all refuse, because the alternative is a system
+      that sends a client's confidential document because a variable was misspelled, silently, since the call
+      succeeds. Three properties guard against doing nothing while reporting success, which is the failure this
+      codebase keeps hitting: the redaction runs on the payload that would actually be sent and there is no
+      code path returning the original alongside it; it walks every string rather than a list of fields,
+      because the retrieved passages are where a client's identifiers live and a redactor that covers only the
+      question leaves the actual risk untouched; and it is a single pass over ordered alternatives, so it cannot
+      re-match its own output. The false-positive trade is made deliberately: shape decides whether to redact
+      and the Luhn check only decides what the reader is told, because a card whose digits OCR damaged fails the
+      check and is still a card. THE BOUND: this is pattern matching, it catches identifiers with a shape, and
+      it does NOT catch a person's name, an address, or an account number written in words. It is a reduction
+      in what leaves, not a guarantee about what cannot. Status is open because the proof has to run on the
+      deployed store, writing to the real audit sink.
   - id: SEC-INJECT-001
     title: Prompt injection from document content cannot change the lane or the answer's boundary
     tier: [cloud, office, hosted]

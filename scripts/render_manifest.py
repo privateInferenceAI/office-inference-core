@@ -195,6 +195,13 @@ def main() -> int:
     access = manifest.get("access") or {}
     env["ACCESS_DENIAL_MODE"] = str(access.get("denial", "denied"))
 
+    # The egress policy. Written explicitly for every manifest, including the empty case, because the gate
+    # reads an unset variable as an empty permission set and a manifest that declares nothing must render to
+    # something rather than to an absence it relies on.
+    egress = access.get("egress") or {}
+    env["FRONTIER_CLASSES"] = ",".join(egress.get("frontier_classes") or [])
+    env["EGRESS_REDACTION"] = str(egress.get("redaction", "on"))
+
     # Offsite delivery of audit artifacts. Absent means this build keeps everything on the box,
     # which is a valid office shape and the default. Set and removed explicitly rather than
     # defaulted, so a manifest without a destination cannot inherit one from an earlier render.
