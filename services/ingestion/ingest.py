@@ -65,6 +65,21 @@ def is_transient(exc: BaseException) -> bool:
 # cannot be asked whether it is well, so it records the answer instead.
 STATE_PATH = Path(os.environ.get("INGEST_STATE_PATH", "/state/last-cycle.json"))
 
+# Bumped when the MEANING of a stored payload changes, which is a different thing from its content.
+#
+# The skip decision is made on the file's bytes, and that is right for a file that was edited. It is wrong
+# for a change to the code that derives the payload from those bytes, because then the bytes are identical,
+# the manifest still believes its old claim, and the new logic never reaches the documents it was written
+# for. That has happened twice in this step: once for how empty documents are refused, and once for is_ocr,
+# where all 29 chunks of the two HTML exhibits stayed labelled machine-read after the code that labelled
+# them was corrected.
+#
+# Bumping this makes every document look stale once, so the corpus is re-derived and the index and the
+# manifest agree with the code that is running. It is deliberately separate from the chunker's version: a
+# payload change does not change a chunk's text or its id, and forcing a re-parse for a labelling fix would
+# hide the difference between the two.
+PAYLOAD_VERSION = "payload-v2"
+
 # File types the pipeline accepts. Anything else is ignored rather than failed, because a client's
 # document folder will contain a .DS_Store and a shortcut sooner or later, and neither is an error.
 ACCEPTED_SUFFIXES = {".pdf", ".docx", ".pptx", ".xlsx", ".html", ".htm", ".md", ".markdown",
@@ -661,23 +676,23 @@ class PostgresManifest(Manifest):
         with self.connection.cursor() as cur:
             cur.execute(
                 "select relpath, root, content_sha256, bytes, page_count, chunk_count, "
-                "failure_count, failure_kind, last_error, ingested_at "
+                "failure_count, failure_kind, last_error, ingested_at, payload_version "
                 "from ingest_manifest where relpath = %s",
                 (relpath,))
             row = cur.fetchone()
         if not row:
             return None
         keys = ("relpath", "root", "content_sha256", "bytes", "page_count", "chunk_count",
-                "failure_count", "failure_kind", "last_error", "ingested_at")
+                "failure_count", "failure_kind", "last_error", "ingested_at", "payload_version")
         return dict(zip(keys, row))
 
     def all(self) -> dict[str, dict]:
         with self.connection.cursor() as cur:
             cur.execute("select relpath, root, content_sha256, chunk_count, failure_count, "
-                        "failure_kind, last_error from ingest_manifest")
+                        "failure_kind, last_error, payload_version from ingest_manifest")
             rows = cur.fetchall()
         keys = ("relpath", "root", "content_sha256", "chunk_count", "failure_count", "failure_kind",
-                "last_error")
+                "last_error", "payload_version")
         return {row[0]: dict(zip(keys, row)) for row in rows}
 
     def put(self, relpath: str, record: dict) -> None:
@@ -685,8 +700,8 @@ class PostgresManifest(Manifest):
             cur.execute(
                 """insert into ingest_manifest
                      (relpath, root, content_sha256, bytes, page_count, chunk_count,
-                      failure_count, failure_kind, last_error, ingested_at, updated_at)
-                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, now(), now())
+                      failure_count, failure_kind, last_error, payload_version, ingested_at, updated_at)
+                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now(), now())
                    on conflict (relpath) do update set
                      root = excluded.root,
                      content_sha256 = excluded.content_sha256,
@@ -696,12 +711,13 @@ class PostgresManifest(Manifest):
                      failure_count = excluded.failure_count,
                      failure_kind = excluded.failure_kind,
                      last_error = excluded.last_error,
+                     payload_version = excluded.payload_version,
                      ingested_at = excluded.ingested_at,
                      updated_at = now()""",
                 (relpath, record.get("root"), record.get("content_sha256"), record.get("bytes"),
                  record.get("page_count"), record.get("chunk_count", 0),
                  record.get("failure_count", 0), record.get("failure_kind"),
-                 record.get("last_error")))
+                 record.get("last_error"), record.get("payload_version")))
 
     def remove(self, relpath: str) -> None:
         with self.connection.cursor() as cur:
@@ -814,6 +830,14 @@ def ingest_cycle(services: Services, documents_root: Path, manifest: Manifest,
         failures = int((record or {}).get("failure_count") or 0)
         same_bytes = bool(record) and record.get("content_sha256") == content_sha256
 
+        # Same bytes, older payload rules. The document is re-derived from its parse rather than trusted,
+        # because what changed is how its labels are computed and the stored ones were computed the old way.
+        if same_bytes and (record.get("payload_version") or "") != PAYLOAD_VERSION:
+            print(f"  {document.relpath} was ingested under payload rules "
+                  f"{record.get('payload_version') or 'recorded before this field existed'} and this "
+                  f"worker writes {PAYLOAD_VERSION}; re-deriving it")
+            same_bytes = False
+
         # A record claiming success with no chunks is not a document that has been ingested, it is a bug's
         # residue. The first real corpus run wrote two contract exhibits as zero chunks before the worker
         # learned to refuse them, and those rows say "ingested, unchanged, 0 chunks" ever since, so the
@@ -871,6 +895,7 @@ def ingest_cycle(services: Services, documents_root: Path, manifest: Manifest,
                 "failure_count": failures if transient else failures + 1,
                 "failure_kind": "transient" if transient else "permanent",
                 "last_error": f"{type(exc).__name__}: {exc}"[:500],
+                "payload_version": (record or {}).get("payload_version") or PAYLOAD_VERSION,
             })
             continue
 
@@ -883,6 +908,7 @@ def ingest_cycle(services: Services, documents_root: Path, manifest: Manifest,
             "relpath": document.relpath, "root": document.root,
             "content_sha256": content_sha256, "bytes": size, "page_count": pages,
             "chunk_count": len(points), "failure_count": 0, "failure_kind": None, "last_error": None,
+            "payload_version": PAYLOAD_VERSION,
         })
         print(f"    {len(points)} chunks, {pages or '?'} pages")
 

@@ -1678,6 +1678,24 @@ both ask for a specific figure in a specific form, which is the case the referen
 the questions are mine and the answers were left null on purpose, so until the parsed pages are read there
 is no way to tell a retrieval miss from a question the corpus cannot answer.
 
+**A code change has to reach the documents it was written for.** The skip decision is made on a file's
+bytes, which is right for a file that was edited and wrong for a change to the code that derives the stored
+payload from those bytes. Then the bytes are identical, the manifest still believes its old claim, and the
+fix never arrives. It happened twice in this step. The first time was caught by a symptom: two exhibits were
+recorded as ingested with no chunks, so the worker learned to distrust that shape. The second time was
+`is_ocr`, where all 29 chunks of the two HTML exhibits stayed labelled machine-read after the code that
+labelled them was corrected, and the only sign was a per-page count that disagreed with the label.
+
+The mechanism is now explicit. `PAYLOAD_VERSION` in `services/ingestion/ingest.py` names the rules a stored
+payload was derived under, the manifest records it per document, and a record whose value differs from the
+running worker's is re-derived even though its bytes have not changed. It is deliberately separate from the
+chunker's version, because a payload change does not change a chunk's text or its chunk id, and forcing a
+re-parse for every labelling fix would hide the difference between the two.
+
+**Bump it when the meaning of a payload field changes**, and the next cycle re-derives the whole corpus
+once. That costs a re-parse of everything, which for this corpus is about ten minutes and for a client's is
+the price of not serving labels the code no longer produces.
+
 **Repairing a record written under an older rule.** A manifest row records a decision that was made by
 whatever code wrote it, and code changes. The first corpus run left two contract exhibits recorded as
 ingested with zero chunks behind them, and dead-lettered a 60-page PDF over two gateway timeouts. Neither
