@@ -302,6 +302,16 @@ def destroy_all(connection, reason: str, actor: str, vector_url: str, collection
     # reading the destruction record can see whether their content was ever stored there at all.
     attempt("audit_payload", "content stored in the audit record, which is append-only and cannot be cleared",
             lambda: _count_stored_payloads(connection), verb="still_stored")
+    # And if anything is still stored, the destruction is NOT complete. The single-document purge already says
+    # so and the teardown did not, which is the same situation reported two ways: 34 records still holding
+    # content beside `complete: true` is a record telling a client their data is gone when it is not.
+    still_there = int(stores.get("audit_payload", {}).get("still_stored") or 0)
+    if still_there:
+        stores["audit_payload"]["note"] = (
+            f"{still_there} audit record(s) still hold content and cannot be cleared. The audit table is "
+            f"append-only and the hash chain covers the stored payload, so this content is not destroyed by "
+            f"this run or by any later one. A deployment that needs its content to be destroyable must not "
+            f"store it there, which is what the hash content mode is for.")
     attempt("purge_history", "the record of earlier purges", clear_table("purge_records"))
     attempt("holds", "the record of holds", clear_table("legal_holds"))
 
@@ -312,11 +322,14 @@ def destroy_all(connection, reason: str, actor: str, vector_url: str, collection
         cur.execute("select count(*), row_hash from audit_events group by row_hash order by count(*) desc limit 1")
         head = cur.fetchone()
 
+    # Complete means two things: no store errored, and nothing is still stored that this could not clear. The
+    # first version checked only the first, so a run that left 34 records holding content reported complete.
+    audit_left = int(stores.get("audit_payload", {}).get("still_stored") or 0)
     record = {
         "requested_by": actor, "reason": reason, "destroyed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ",
                                                                              time.gmtime()),
         "stores": stores,
-        "complete": all("error" not in value for value in stores.values()),
+        "complete": all("error" not in value for value in stores.values()) and audit_left == 0,
         "audit_chain_head": head[1] if head else None,
         "note": ("The audit record is deliberately kept. It says which documents existed and that they were "
                  "destroyed, which is what lets this record be checked by someone who does not trust us."),
