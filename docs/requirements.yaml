@@ -377,6 +377,24 @@ items:
     phase: C2
     verify: an invented citation index is rejected; an unsupported sentence is marked, not silently kept
     status: open
+    note: >-
+      Built 2026-10-13, recorded in docs/runbook.md step 3.11. The mechanical layer only: seven deterministic
+      checks with no model and no new dependency, which is the scope the research sets for Layer 0. Fabricated
+      citations, page drift, missing quotes, numeric substitution, identifier substitution, superseded sources
+      and low-confidence scans. The literal identifier assertion within it is described in the research as the
+      cheapest item in the entire architecture and the highest value, and it reuses the step 3.9 extractor, so
+      the retrieval arm and the verifier cannot disagree about what counts as the same reference. An answer is
+      MARKED rather than dropped, because a reply that reads cleanly and lost the part that was wrong is the
+      failure the layer exists to prevent. Three rules keep the false-refusal rate down, since a check that
+      refuses correct answers gets turned off: normalisation drops trailing zeros only, supersession fires only
+      when EVERY cited passage is superseded, and the confidence gate applies to figures rather than prose.
+      TWO BOUNDS, both recorded rather than papered over. Entailment is NOT built, because it is Layer 1 and
+      needs a model the reply path does not have until Phase 4, so `supported` means every mechanical check
+      passed and is not the same as true. And the confidence gate is document-level rather than page-level,
+      because docling-serve does not populate the per-page confidence map this release exposes, so a page whose
+      digits were misread cannot be told from one read cleanly; the research names per-page confidence as the
+      Wave 4 item to verify. Status is open because the proof has to run on the deployed store against real
+      retrieved passages.
   - id: RET-INGEST-001
     title: Ingestion is idempotent, so the same bytes are never embedded twice
     tier: [cloud, office, hosted]

@@ -60,6 +60,30 @@ def normalize(token: str) -> str:
     return re.sub(r"[^a-z0-9]", "", token.lower())
 
 
+def canonical(token: str) -> str:
+    """A reference reduced to the one form every spelling of it shares.
+
+    `pub515`, `publication515` and a passage that writes either should compare equal, and comparing the
+    extracted lists directly does not do that: extraction is deliberately generous, so `Pub. 515` yields three
+    tokens and a passage saying `Publication 515` yields two, and the two sets overlap without being equal. A
+    verifier asking "is this reference in that passage" needs one form per reference, not a set that is
+    different depending on how the writer spelled it.
+
+    The alias table is the same one extraction uses, so the two cannot drift apart.
+    """
+    token = normalize(token)
+    match = re.match(r"^([a-z]+)(\d.*)$", token)
+    if not match:
+        return token
+    prefix, rest = match.groups()
+    return f"{ALIASES.get(prefix, prefix)}{rest}"
+
+
+def canonical_set(text: str) -> set[str]:
+    """Every reference in a piece of text, in canonical form."""
+    return {canonical(token) for token in extract(text)}
+
+
 def extract(text: str) -> list[str]:
     """Every reference in a piece of text, normalised and alias-expanded, deduplicated and ordered.
 
