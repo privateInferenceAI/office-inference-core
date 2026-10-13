@@ -361,7 +361,10 @@ services:
       VECTOR_URL: http://vector:6333
       COLLECTION: ${COLLECTION:-documents}
       QUESTIONS: /w/fixtures/corpus/questions.yaml
-      REPORT_OUT: /w/eval-report.json
+      # Under /tmp rather than the mounted checkout: the tool runs as an unprivileged user and the checkout is
+      # owned by the operator, so writing beside the questions failed with PermissionError after a full run had
+      # already been printed. /tmp is where a container can write, and the operator copies it out.
+      REPORT_OUT: /tmp/eval-report.json
       # Where the mounted checkout keeps the other services. `harness.py` sits in this image at /app and cannot
       # work that out from its own location, so the image is told.
       RETRIEVAL_PATH: /w/services/retrieval

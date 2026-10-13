@@ -210,14 +210,19 @@ class Report:
         categories: dict[str, dict] = {}
         for outcome in self.outcomes:
             bucket = categories.setdefault(outcome.category, {"n": 0, "retrieved": 0, "supported": 0,
-                                                              "answerable": 0})
+                                                              "answerable": 0, "support_measurable": 0})
             bucket["n"] += 1
             bucket["retrieved"] += int(outcome.retrieved_document)
             bucket["supported"] += int(outcome.supported)
             bucket["answerable"] += int(outcome.answerable)
+            bucket["support_measurable"] += int(outcome.answerable and outcome.support_measurable)
         for name, bucket in categories.items():
             bucket["retrieval_rate"] = bucket["retrieved"] / bucket["n"]
-            bucket["support_rate"] = bucket["supported"] / bucket["n"]
+            # `None` rather than zero where nothing could be measured. A category with no measurable question
+            # showing 0 percent support says the category failed, and what happened is that it was not asked.
+            # That is the same misleading number this module has spent the step removing, one level down.
+            bucket["support_rate"] = (bucket["supported"] / bucket["support_measurable"]
+                                      if bucket["support_measurable"] else None)
         return dict(sorted(categories.items()))
 
     def unanswerable_scores(self) -> list[float]:
@@ -286,8 +291,8 @@ class Report:
         lines.append("")
         lines.append(f"  {'category':<18}{'n':>3}{'retr':>7}{'supp':>7}")
         for name, bucket in self.by_category().items():
-            lines.append(f"  {name:<18}{bucket['n']:>3}{bucket['retrieval_rate']:>7.0%}"
-                         f"{bucket['support_rate']:>7.0%}")
+            support = "  n/a" if bucket["support_rate"] is None else f"{bucket['support_rate']:>6.0%}"
+            lines.append(f"  {name:<18}{bucket['n']:>3}{bucket['retrieval_rate']:>7.0%}{support:>7}")
         if self.supported_on_nominal_pages:
             lines.append("")
             lines.append(f"  supported answers from documents with no real pages: "
