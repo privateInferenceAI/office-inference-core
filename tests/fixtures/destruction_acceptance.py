@@ -156,6 +156,19 @@ def main() -> int:
         print(f"  ok  reported as {sorted(k for k in stored if k != 'description')}, which is what happened")
 
     print()
+    print("=== complete means nothing survived, not only that nothing errored ===")
+    stored_count = int(stored.get("still_stored") or 0)
+    print(f"  record says complete: {record['complete']}, audit records still holding content: {stored_count}")
+    if stored_count and record["complete"]:
+        problems.append("the record reports complete while the audit store says content survives")
+    elif not stored_count and not record["complete"]:
+        problems.append("the record reports incomplete and nothing survived, so the flag is wrong the other way")
+    else:
+        print(f"  ok  complete={record['complete']} is consistent with {stored_count} record(s) surviving")
+    if stored.get("note"):
+        print(f"  and it says why: {stored['note'][:130]}")
+
+    print()
     print("=== and the record survives the thing it records ===")
     with psycopg2.connect(os.environ["DATABASE_URL"]) as connection:
         with connection.cursor() as cur:
