@@ -2561,6 +2561,25 @@ ignored by the one they did not, which from the client's side is the same as no 
 **The destruction record is hashed, and the hash is of the record.** The client keeps the file; the hash is what
 lets them show later that it is the one we produced, and neither side has to trust the other's copy.
 
+**A conflict between two requirements, found by running the teardown, and the resolution.** `DATA-PURGE-001`
+says delete the content everywhere it is stored. **Content stored in the audit record cannot be deleted**, for
+two reasons that both come from the same property. The table is append-only: an UPDATE is refused by a trigger
+unless `oi.allow_audit_maintenance = on`, and that hatch exists for the planned purge of whole rows rather than
+for rewriting them. And opening it would not help, because **the chain covers `payload_sha256` and
+`payload_bytes`**: clearing a payload without updating those leaves the row failing verification, and updating
+them makes the chain a record of what somebody chose to leave in it.
+
+So the purge **counts** rather than clears, and **a non-zero count makes the purge incomplete**. A document
+whose text is still readable in the audit record has not been purged, whatever the other stores reported, and a
+purge that said otherwise would be the exact failure this requirement exists to prevent. The record carries the
+count and a note saying why it cannot be zero.
+
+**The mitigation is not to store it there, which is why the default content mode is `hash`.** A deployment that
+selects `full` is choosing to keep content it cannot later delete, and that is a decision a client has to make
+knowing the consequence. **This is the one place where the audit guarantee and the deletion guarantee genuinely
+conflict, and the resolution is to make the conflict visible rather than to resolve it silently in either
+direction.**
+
 **The audit chain is deliberately not destroyed**, and the record says so. It says which documents existed and
 that they were destroyed, which is what lets the destruction be checked by someone who does not trust us.
 Destroying it would leave the client unable to show anyone that we did what we said. The stored payloads are

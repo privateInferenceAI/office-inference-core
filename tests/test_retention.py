@@ -199,7 +199,13 @@ def test_the_audit_chain_survives_the_teardown_and_the_record_says_so():
     assert "deliberately kept" in source
     # And it is genuinely not deleted: no clear of the events table anywhere.
     assert "delete from audit_events" not in source, "the teardown deletes the audit chain"
-    assert "_clear_payloads" in source, "but the stored payloads are cleared"
+    # The stored payloads are counted rather than cleared, and that is a finding rather than a shortcut: the
+    # table is append-only and the chain covers payload_sha256, so clearing a payload leaves the row
+    # unverifiable and updating the hash makes the chain a record of what somebody chose to leave in it.
+    assert "_count_stored_payloads" in source
+    assert "update audit_events set payload" not in source, (
+        "the teardown tries to rewrite the audit record, which the append-only guarantee refuses and the hash "
+        "chain would break if it did not")
 
 
 def test_every_store_the_purge_knows_is_destroyed_by_the_teardown():
@@ -210,4 +216,33 @@ def test_every_store_the_purge_knows_is_destroyed_by_the_teardown():
     for table in ("chunk_index", "ingest_manifest", "purge_records", "legal_holds"):
         assert f'clear_table("{table}")' in teardown, f"the teardown does not clear {table}"
     assert 'attempt("vector"' in teardown
-    assert "_clear_payloads" in teardown
+    # Counted rather than cleared, for the reason the other test gives.
+    assert "_count_stored_payloads" in teardown
+
+
+def test_a_document_still_readable_in_the_audit_record_is_not_reported_as_purged():
+    """The conflict between two requirements, and the resolution.
+
+    DATA-PURGE-001 says delete the content everywhere it is stored. The audit record is append-only and its hash
+    chain covers the stored payload, so content in it cannot be removed: an UPDATE is refused by the trigger,
+    and clearing the payload without updating payload_sha256 leaves the row unverifiable while updating it makes
+    the chain a record of what somebody chose to leave in it.
+
+    The resolution is to count it and make the purge incomplete. A document whose text is still readable in the
+    audit record has not been purged, whatever the other stores reported, and a purge that said otherwise would
+    be the exact failure this requirement exists to prevent.
+    """
+    source = _purge_source()
+    assert "quoting_the_document" in source
+    assert "result.complete = False" in source
+    assert "cannot be cleared" in source
+    # And the mitigation is named, because a client hitting this needs to know what to do differently.
+    assert "hash content mode is for" in source or "not storing" in source
+
+
+def test_the_teardown_does_not_claim_to_have_cleared_what_it_cannot():
+    """The destruction record goes to the client, and a record saying a store was cleared when it was counted is
+    a false statement in the one document whose purpose is to be checkable."""
+    source = _purge_source()
+    teardown = source[source.index("def destroy_all"):]
+    assert "append-only and cannot be cleared" in teardown

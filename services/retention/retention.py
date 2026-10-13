@@ -194,15 +194,33 @@ def purge(connection, doc_id: str, reason: str, actor: str, vector_url: str, col
     except Exception as exc:  # noqa: BLE001
         result.fail("manifest", f"{type(exc).__name__}: {exc}")
 
-    # Any audit payload that quotes the document. Usually nothing, because the default content mode hashes the
-    # payload rather than storing it, and the count is recorded either way so "nothing was there" is visible
-    # rather than indistinguishable from "nobody looked".
+    # Any audit payload that quotes the document: COUNTED rather than cleared, and the difference matters.
+    #
+    # The first version tried to remove the text from the audit rows and it cannot be done, for two reasons that
+    # both come from the same property. The table is append-only: an UPDATE is refused by a trigger unless the
+    # maintenance hatch is open, and the hatch exists for the planned purge of whole rows rather than for
+    # rewriting them. And opening it would not help, because the chain covers payload_sha256 and payload_bytes,
+    # so clearing a payload without updating those makes the row fail verification and updating those makes the
+    # chain a record of what somebody chose to leave in it.
+    #
+    # So content stored in the audit record cannot be purged. That is a real consequence of the append-only
+    # property and the honest answer is to say so rather than to reach for the hatch: the mitigation is not to
+    # store it there, which is why the default content mode is hash, and a deployment that selects `full` is
+    # choosing to keep content it cannot later delete. The count is reported and a non-zero one makes the purge
+    # incomplete, because a document whose text is still readable in the audit record has not been purged
+    # whatever the other stores reported.
     try:
         with connection.cursor() as cur:
-            cur.execute("""
-                update audit_events set payload = payload - 'passages'
-                where payload ? 'passages' and payload::text like %s""", (f"%{doc_id}%",))
-            result.record("audit_payload", deleted=cur.rowcount)
+            cur.execute("select count(*) from audit_events where payload::text like %s",
+                        (f"%{doc_id}%",))
+            quoted = cur.fetchone()[0]
+        result.record("audit_payload", deleted=0, quoting_the_document=quoted)
+        if quoted:
+            result.complete = False
+            result.stores["audit_payload"]["note"] = (
+                f"{quoted} audit record(s) quote this document and cannot be cleared: the audit table is "
+                f"append-only and the hash chain covers the stored payload. Purgeable only by not storing "
+                f"content, which is what the hash content mode is for.")
     except Exception as exc:  # noqa: BLE001
         result.fail("audit_payload", f"{type(exc).__name__}: {exc}")
 
@@ -271,7 +289,12 @@ def destroy_all(connection, reason: str, actor: str, vector_url: str, collection
             clear_table("chunk_index"))
     attempt("manifest", "the ingestion manifest: what was ingested and its content hash",
             clear_table("ingest_manifest"))
-    attempt("audit_payload", "stored payloads in the audit record", lambda: _clear_payloads(connection))
+    # Counted, not cleared, for the same reason the single-document purge counts it: the audit table is
+    # append-only and the chain covers the payload, so content stored there cannot be removed without either
+    # leaving the row unverifiable or rewriting the record of what was kept. Reported as a number so a client
+    # reading the destruction record can see whether their content was ever stored there at all.
+    attempt("audit_payload", "content stored in the audit record, which is append-only and cannot be cleared",
+            lambda: _count_stored_payloads(connection))
     attempt("purge_history", "the record of earlier purges", clear_table("purge_records"))
     attempt("holds", "the record of holds", clear_table("legal_holds"))
 
@@ -304,7 +327,17 @@ def destroy_all(connection, reason: str, actor: str, vector_url: str, collection
     return record
 
 
-def _clear_payloads(connection) -> int:
+def _count_stored_payloads(connection) -> int:
+    """How many audit records hold content, which the teardown cannot remove.
+
+    A count rather than a deletion, and the destruction record carries it so the client can see whether their
+    content was ever stored in a place that cannot be cleared. Zero is the answer for every deployment on the
+    default hash content mode, and a non-zero one is a deployment that chose `full` and is keeping something it
+    cannot later destroy.
+    """
     with connection.cursor() as cur:
-        cur.execute("update audit_events set payload = null where payload is not null")
-        return cur.rowcount
+        cur.execute("select count(*) from audit_events where payload is not null")
+        stored = cur.fetchone()[0]
+        cur.execute("""select count(*) from information_schema.columns
+                       where table_name = 'audit_events' and column_name = 'payload'""")
+    return stored
