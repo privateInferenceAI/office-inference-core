@@ -76,18 +76,52 @@ def install_fixtures() -> None:
               "prove anything. Run with -v /opt/oi-core:/w:ro replaced by a writable mount.")
         return None
     root.mkdir(parents=True, exist_ok=True)
-    body = ("# Schedule of Fees\n\n"
-            "Standard labour, business hours ... {rate} per hour\n"
-            "Emergency attendance ................ 240.00 per callout\n"
-            "Mileage, client-owned vehicle ....... 0.67 per mile\n"
-            "Filter media, standard .............. 32.50 per unit\n"
-            "Refrigerant, R-410A ................. 18.75 per pound\n"
-            "After-hours multiplier .............. 1.5x of labour\n")
+    # A page rather than a stub, and the first version of this got that wrong in a way the floor caught. It
+    # wrote six lines, about 320 characters, and the duplicate was correctly not flagged because 320
+    # characters of identical text is a shared header rather than a shared document. The fixture was a stub
+    # pretending to be a fee schedule, so the comparison was right and the test was wrong.
+    body = (
+        "# Meridian Facilities Services\n"
+        "## Schedule of Fees and Reimbursable Rates\n\n"
+        "Effective from the first day of the fiscal year. Rates are stated in United States dollars and\n"
+        "exclude applicable sales and use taxes. Work requested outside the hours of 07:00 to 17:00 on a\n"
+        "business day is billed at the after-hours multiplier shown below. Parts are billed at cost plus\n"
+        "fifteen percent, with the exception of filter media and refrigerant, which are billed at the\n"
+        "rates in this schedule. Mileage applies to travel in a client-owned vehicle from the service\n"
+        "address to the site and back, and does not apply where a company vehicle is provided.\n\n"
+        "| Item | Basis | Rate |\n"
+        "|---|---|---|\n"
+        "| Standard labour, business hours | per hour | {rate} |\n"
+        "| After-hours multiplier | of labour | 1.5x |\n"
+        "| Weekend multiplier | of labour | 1.75x |\n"
+        "| Holiday multiplier | of labour | 2.0x |\n"
+        "| Emergency attendance | per callout | 240.00 |\n"
+        "| Callout fee, scheduled visit | per visit | 89.00 |\n"
+        "| Mileage, client-owned vehicle | per mile | 0.67 |\n"
+        "| Filter media, standard | per unit | 32.50 |\n"
+        "| Filter media, high-efficiency | per unit | 58.75 |\n"
+        "| Refrigerant, R-410A | per pound | 18.75 |\n"
+        "| Refrigerant, R-134a | per pound | 21.40 |\n"
+        "| Diagnostic fee, waived if work is authorised | per visit | 125.00 |\n"
+        "| After-hours callout surcharge | per callout | 75.00 |\n"
+        "| Equipment inspection, annual | per unit | 340.00 |\n"
+        "| Filter replacement labour | per unit | 45.00 |\n"
+        "| Belt replacement, standard | per unit | 62.00 |\n"
+        "| Thermostat calibration | per unit | 95.00 |\n\n"
+        "Invoices are issued on the first business day after the end of each calendar month and are\n"
+        "payable within thirty days of the invoice date. The client may dispute an invoice in writing\n"
+        "within twenty days of receipt, stating the amount in dispute and the grounds for the dispute.\n"
+        "Rates in this schedule are reviewed each January and take effect on the date of issue.\n")
     (root / "fee-schedule-2025.md").write_text(body.format(rate="132.00"))
     (root / "fee-schedule-2026.md").write_text(body.format(rate="145.00"))
     # Byte-identical to the later one under a different name, which is exactly RET-DUPE-001's case.
     (root / "fee-schedule-2026-copy.md").write_text(body.format(rate="145.00"))
-    print(f"  installed {VERSION_A}, {VERSION_B} and a byte-identical copy under a third name")
+    chars = len(body.format(rate="145.00"))
+    if chars < 500:
+        print(f"  the fixture is only {chars} characters, under the shared-text floor, so it would not be "
+              f"compared. A real schedule is longer than this.")
+    print(f"  installed {VERSION_A}, {VERSION_B} and a byte-identical copy under a third name "
+          f"({chars} characters each)")
     return root
 
 
