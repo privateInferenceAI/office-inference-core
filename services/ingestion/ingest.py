@@ -276,26 +276,41 @@ def parse_document(services: Services, path: Path, relpath: str) -> dict:
             f"the parser returned no structured output for {relpath}. Its status was "
             f"{payload.get('status')!r}; an empty json_content usually means the options were not "
             f"accepted, and the real option names are in the service's capabilities endpoint.")
-    return document
+    # The confidence report travels with the document because the chunker cannot see it and the worker needs
+    # it to decide whether these figures were recognised from an image. Step 3.4 established that per-page
+    # confidence does not survive into the wire schema, so this is the document-level report or nothing.
+    return {"document": document, "confidence": payload.get("confidence") or {}}
 
 
-def _ocr_ran(parsed: dict) -> bool:
-    """Whether the parser read this document with OCR rather than from a text layer.
+def _ocr_ran(parsed: dict, confidence: dict | None = None) -> bool:
+    """Whether the parser read this document with OCR rather than from a digital text layer.
 
-    Decided from whether any text item carries OCR provenance. Docling marks the origin of each item, so a
-    document with a text layer reports one origin and a scan reports another. Where the report is absent
-    the answer is True, because assuming OCR is the direction that keeps a machine-read figure labelled as
-    machine-read rather than presenting it as digital text.
+    Decided from the parser's own confidence report, because the first version of this looked for an
+    `origin` field on each item's provenance and this release does not emit one. Provenance carries
+    page_no, bbox and charspan and nothing else, so the search never matched, the fallback answered True
+    every time, and an HTML contract was labelled as machine-read text.
+
+    The signal that does exist is `parse_score`, which is the tenth percentile of DIGITAL text cells. It is
+    null when the document has no digital text at all, which is exactly the scanned case, and it is a
+    number when there is a text layer to have taken a percentile of. Measured on this box:
+
+        scanned fixture, no text layer    parse_score null, ocr_score 0.989
+        IRS publication, text layer       parse_score 1.0,  ocr_score 0.828
+
+    Where there is no confidence report the answer is True. That is the safe direction: it labels a figure
+    as machine-read when it might not have been, rather than presenting a machine's guess as text that was
+    already there.
     """
-    for item in parsed.get("texts") or []:
-        for prov in item.get("prov") or []:
-            origin = prov.get("origin")
-            if isinstance(origin, str):
-                if "ocr" in origin.lower():
-                    return True
-                if "native" in origin.lower() or "digital" in origin.lower():
-                    return False
-    return True
+    report = confidence if confidence is not None else (parsed.get("confidence") or {})
+    if not report:
+        return True
+    if report.get("parse_score") is None:
+        # No digital text cells at all, so every character came from a recognition step.
+        return True
+    # A text layer exists. It may still have been OCR'd, because ocr_score is present on both documents,
+    # but a document with digital text is not a document whose figures were read off an image, and the flag
+    # is a statement a reader acts on.
+    return False
 
 
 def embed_texts(services: Services, texts: list[str]) -> list[list[float]]:
@@ -460,7 +475,8 @@ def ingest_document(services: Services, document: Document, content_sha256: str,
     produces new ones, and a changed chunker produces new ones again. That is what makes a re-run an
     update rather than a duplication.
     """
-    parsed = parse_document(services, document.path, document.relpath)
+    parsed_result = parse_document(services, document.path, document.relpath)
+    parsed = parsed_result["document"]
     chunks = chunker.chunk_document(parsed, doc_id=document.relpath, source_sha256=content_sha256)
     pages = len(parsed.get("pages") or {}) or None
 
@@ -481,7 +497,7 @@ def ingest_document(services: Services, document: Document, content_sha256: str,
     # the wrong answer for a digital one, so it is corrected here from the parser's own report. A figure
     # read by OCR and a figure read from a text layer carry different risk, and the payload is where that
     # difference has to survive.
-    ocr_ran = _ocr_ran(parsed)
+    ocr_ran = _ocr_ran(parsed, parsed_result.get("confidence"))
 
     points: list[dict] = []
     for start in range(0, len(chunks), EMBED_BATCH):
