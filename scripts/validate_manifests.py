@@ -244,12 +244,37 @@ def check(manifest: dict, packs: set[str], path: Path) -> list[str]:
         # allowed then sends nothing, validation passes, and the first symptom is a model call that will not go
         # out. Three of the shipped example manifests had exactly this shape.
         egress = (manifest.get("access") or {}).get("egress") or {}
-        if not (egress.get("frontier_classes") or []):
+        # **`access.egress` is the authoritative declaration of what may leave, so an empty one is a
+        # configuration error rather than a policy.** The two shapes it arrives in are different mistakes and
+        # are reported differently, because the fix for each is different:
+        #
+        #   the block or the field is ABSENT   the manifest was written against the older table, where
+        #                                      `lanes.frontier.data_classes_allowed` was the only place to say
+        #                                      this. Nothing has been decided about egress.
+        #   the field is present and EMPTY     somebody wrote the policy out and left it permitting nothing,
+        #                                      while the lane above it says classes may go. The two disagree
+        #                                      and the empty one governs, so the manifest reads as permissive
+        #                                      and behaves as closed.
+        #
+        # Both refuse every frontier call, and both are errors rather than warnings: a warning beside a valid
+        # manifest is for a divergence a person should look at, and this is a deployment that cannot send
+        # anything at all. The reader is told to check the manifest either way, which is the point.
+        if "frontier_classes" not in egress:
             problems.append(
-                "the frontier lane is enabled but access.egress.frontier_classes is absent or empty. The gate "
-                "reads that field and renders it to FRONTIER_CLASSES, so this manifest would refuse every "
-                "frontier call while appearing to permit the classes in lanes.frontier.data_classes_allowed. "
-                "Declare access.egress.frontier_classes with the classes you intend, or switch the lane off")
+                "the frontier lane is enabled and access.egress declares nothing. The gate reads "
+                "access.egress.frontier_classes, renders it to FRONTIER_CLASSES, and refuses every call when "
+                "it is absent -- so this deployment would send nothing while lanes.frontier."
+                "data_classes_allowed appears to permit it. Declare the classes you intend, or switch the "
+                "lane off. **Check the manifest against the client's contract before choosing**: the lane "
+                "block and this field are two statements of one policy, and only this one is enforced")
+        elif not (egress.get("frontier_classes") or []):
+            problems.append(
+                "the frontier lane is enabled and access.egress.frontier_classes is empty. An empty list is "
+                "not 'unset': it is a decision that nothing may leave, and it overrides the classes named in "
+                "lanes.frontier.data_classes_allowed. **That is almost never what was intended**, because the "
+                "lane above says classes may go and this field makes the deployment refuse every call while "
+                "reading as permissive. Set it to the classes the client's contract allows, or set "
+                "lanes.frontier.enabled to false and let the empty list mean what it says")
 
     # A cloud build has no local lane, so switching the frontier lane off leaves it with no models at
     # all. The renderer used to emit frontier entries regardless on a cloud profile, which quietly

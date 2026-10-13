@@ -485,3 +485,53 @@ def test_a_warning_never_makes_a_valid_manifest_fail(packs):
     assert vm.divergences(manifest), "this manifest diverges"
     assert vm.check(copy.deepcopy(manifest), packs, Path("test-manifest.yaml")) == [], (
         "a divergence must not add a problem that fails validation")
+
+
+def test_an_absent_egress_field_and_an_empty_one_are_reported_differently(packs):
+    """Two shapes of the same failure, and the fix differs, so the message must too.
+
+    `access.egress` is what leaves, so an empty one is a configuration error rather than a policy: the lane
+    above it says classes may go and the empty list makes the deployment refuse every call while reading as
+    permissive.
+
+    An ABSENT field is a manifest written against the older table, where the lane block was the only place
+    to say this — nothing has been decided. A field PRESENT and EMPTY is somebody having written the policy
+    out and left it permitting nothing. Both fail; a reader needs to know which one they have.
+    """
+    absent = load(ROOT / "manifests" / "dev-cloud.yaml")
+    absent["access"]["egress"].pop("frontier_classes")
+    absent_problems = problems(absent, packs)
+    assert mentions(absent_problems, "access.egress declares nothing"), absent_problems
+
+    empty = load(ROOT / "manifests" / "dev-cloud.yaml")
+    empty["access"]["egress"]["frontier_classes"] = []
+    empty_problems = problems(empty, packs)
+    assert mentions(empty_problems, "is empty"), empty_problems
+    assert mentions(empty_problems, "override"), empty_problems
+
+    # The two must not produce the same text, or the distinction is decoration.
+    assert absent_problems != empty_problems
+
+
+def test_an_empty_egress_list_is_an_error_not_a_warning(packs):
+    """A warning is for a divergence a person should look at. This is a deployment that cannot send anything.
+
+    The distinction matters because warnings do not fail the run: a manifest with an empty authoritative
+    field would pass validation and then refuse every model call, which is the silent failure this rule
+    exists to prevent.
+    """
+    manifest = load(ROOT / "manifests" / "dev-cloud.yaml")
+    manifest["access"]["egress"]["frontier_classes"] = []
+    assert problems(manifest, packs), "an empty authoritative field must fail validation, not warn"
+
+
+def test_an_office_build_may_declare_an_empty_egress_list(packs):
+    """The rule is about an ENABLED lane. An office build's is off, and an empty list is its policy.
+
+    `dev-office.yaml` declares exactly that, and it is correct: the build has no frontier lane, so nothing
+    may leave, and the empty list says so. Turning that into a failure would be the rule overreaching.
+    """
+    manifest = load(ROOT / "manifests" / "dev-office.yaml")
+    assert manifest["lanes"]["frontier"]["enabled"] is False
+    assert manifest["access"]["egress"]["frontier_classes"] == []
+    assert problems(manifest, packs) == []
