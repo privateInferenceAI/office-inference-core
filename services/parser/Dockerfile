@@ -35,6 +35,11 @@ COPY parser_service.py /app/parser_service.py
 #
 # **The image runs as uid 1001 with `HOME=/opt/app-root/src`, which is writable.** That matters: LibreOffice
 # creates a user profile on first use and fails without somewhere to put it. It was checked, not assumed.
+# **`USER root` is required, and the base image's default user is why.** It sets `USER 1001`, so a plain
+# `RUN dnf install` fails with "This command has to be run with superuser privileges" -- the build runs as
+# the unprivileged account, which is a good default for a runtime and no help for a package manager. The
+# user is switched back immediately, so the image's runtime identity is unchanged.
+USER root
 RUN set -eux; \
     dnf install -y --setopt=install_weak_deps=False libreoffice-writer; \
     dnf clean all; \
@@ -42,6 +47,7 @@ RUN set -eux; \
     command -v soffice >/dev/null; \
     python -c "from docling.backend.docx.drawingml.utils import get_libreoffice_cmd; \
 assert get_libreoffice_cmd(), 'Docling cannot find LibreOffice, so .rtf will dead-letter again'"
+USER 1001
 
 ENV PYTHONUNBUFFERED=1 \
     PARSER_UPLOAD_DIR=/tmp/oi-parser
