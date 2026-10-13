@@ -459,17 +459,23 @@ def test_redaction_disagreeing_is_reported(packs):
     assert "access.egress.redaction disagree" in found[0]
 
 
-def test_the_two_shipped_manifests_that_diverge_are_reported(packs):
-    """A regression guard on the real files, so a quiet revert shows up here.
+def test_no_shipped_manifest_diverges(packs):
+    """Every manifest we ship must validate without a warning.
 
-    `dev-cloud` and `example-standard-cloud` both declare `redaction: false` in the lane block while the
-    access block says `on`. Either the manifests get corrected or this test gets corrected; what must not
-    happen is the warning silently disappearing.
+    **This reverses a test that deliberately asserted the opposite.** That one read: `dev-cloud` and
+    `example-standard-cloud` both declare `redaction: false` in the lane block while the access block says
+    `on`. Either the manifests get corrected or this test gets corrected; what must not happen is the warning
+    silently disappearing. The manifests were corrected, so this is the test being corrected, in the
+    direction that keeps the guarantee: a shipped example that warns is one a reader learns to ignore, and
+    there is no reason to ship one.
+
+    The divergence behaviour itself is still covered -- `test_a_manifest_declaring_one_policy_two_ways_is_
+    reported` builds the shape synthetically, so the rule is tested without needing a bad example on disk.
     """
-    for name in ("dev-cloud.yaml", "example-standard-cloud.yaml"):
-        manifest = load(ROOT / "manifests" / name)
+    for path in sorted((ROOT / "manifests").glob("*.yaml")):
+        manifest = load(path)
         found = vm.divergences(manifest)
-        assert any("redaction" in w for w in found), f"{name} should report its redaction divergence"
+        assert not found, f"{path.name} ships with a divergence warning: {found}"
 
 
 def test_a_warning_never_makes_a_valid_manifest_fail(packs):

@@ -37,7 +37,7 @@ lanes:
     # Deliberately the two lowest classes. Nothing confidential belongs on a development box.
     data_classes_allowed: [public, internal]
     requires_approval: false
-    redaction: false
+    redaction: true
 content:
   # What the record keeps, per data class: hash only, redacted, or full. The prompt and completion
   # hashes are recorded whatever this says, so the record can prove what was said without keeping it.

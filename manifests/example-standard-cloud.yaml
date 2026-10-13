@@ -25,7 +25,10 @@ lanes:
     account_owner: client
     data_classes_allowed: [public, internal, confidential]
     requires_approval: false
-    redaction: false
+    # True, matching access.egress.redaction below. The egress gate reads THAT value, so a lane block
+    # declining redaction while the gate enforces it is decoration rather than policy -- and it made this
+    # shipped example emit a divergence warning that a reader would learn to ignore.
+    redaction: true
 access:
   # Read this block, not the lane's list above. The egress gate renders from
   # access.egress.frontier_classes, so a manifest declaring only lanes.frontier.data_classes_allowed
