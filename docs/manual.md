@@ -1385,7 +1385,8 @@ data.
 A role is a name that maps to a model, with its own key and ceiling. Roles are a naming convention
 rather than a closed set, so a deployment can add as many as it needs. This example adds a `summarizer`
 role on the cheapest model, for a component that should only ever write short summaries. It takes two
-edits to the manifest and six commands.
+edits to the manifest — one under `models:`, one under `budgets.roles:` — and then validate, render,
+restart the gateway, mint the key, and probe it.
 
 **1. Add the role and its model.** In `manifests/dev-cloud.yaml`, under `models:`:
 
