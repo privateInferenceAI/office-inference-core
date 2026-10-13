@@ -362,8 +362,22 @@ def main() -> int:
     """Run against a deployment. The caller supplies the search function; this is the plain RAG one."""
     import os
     import sys
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "retrieval"))
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "ingestion"))
+
+    # Where the other services live. In the repository this file sits beside them and the relative paths work.
+    # In the tool's image it does not: `__file__` is /app/harness.py and the repository is mounted at /w, so the
+    # relative path resolves to /retrieval and the import fails with "No module named 'ingest'". Found by
+    # running it, and the environment variables are how the image says where the checkout is.
+    for candidate in (
+        Path(os.environ.get("RETRIEVAL_PATH", "")) if os.environ.get("RETRIEVAL_PATH") else None,
+        Path(os.environ.get("INGESTION_PATH", "")) if os.environ.get("INGESTION_PATH") else None,
+    ):
+        if candidate:
+            sys.path.insert(0, str(candidate))
+    for name in ("retrieval", "ingestion"):
+        beside = Path(__file__).resolve().parent.parent / name
+        if beside.is_dir():
+            sys.path.insert(0, str(beside))
+
     import ingest
     import retriever
 
