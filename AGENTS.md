@@ -6,6 +6,28 @@ The single core system for Office Inference, deployed two ways: into a client's 
 or onto hardware in a client's building. Read `docs/architecture.md` before changing anything,
 then `docs/service-inventory.md` for the service list and its location tags.
 
+### A step is not done until every requirement it names is verified
+
+The register is the authority, not the step list. A step plan is written from the architecture's
+build sequence and it does not necessarily cover every requirement in a phase. Phase 3 reached
+"3.14 complete" with seven of its eighteen requirements still open, and every one of them was
+discoverable in `docs/requirements.yaml` the whole time.
+
+So, before starting a step and before declaring one finished:
+
+    python3 -c "
+    import yaml
+    d = yaml.safe_load(open('docs/requirements.yaml'))
+    for i in d['items']:
+        if i.get('phase') == '<the phase>':
+            print(f\"  {i['status']:<9} {i['id']:<17} {i['title']}\")
+    "
+
+**When asked to move to the next step, say whether the current one is finished first.** If any
+requirement in the phase is still open, say so with the list before moving. The failure this
+prevents is not a missed requirement; it is reporting progress against a plan and calling it
+progress against the phase.
+
 ## Rules that are not negotiable
 
 1. **Nothing client-specific in this repo.** A client's differences live in a manifest under
