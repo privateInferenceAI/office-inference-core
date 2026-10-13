@@ -36,6 +36,8 @@ class StubServices(ingest.Services):
                  dims: int = 4) -> None:
         super().__init__()
         self.parsed = parsed or simple_document()
+        # A document with a digital text layer, which is what a simple fixture represents.
+        self.confidence: dict = {"parse_score": 1.0, "ocr_score": 0.9}
         self.fail_for = fail_for or set()
         self.dims = dims
         self.parsed_names: list[str] = []
@@ -66,7 +68,9 @@ def wired(monkeypatch):
         services.parsed_names.append(relpath)
         if relpath in services.fail_for:
             raise RuntimeError(f"parser refused {relpath}")
-        return services.parsed
+        # The real call returns the document with its confidence report beside it, because is_ocr is
+        # decided from that report. The stub mirrors the shape rather than the document alone.
+        return {"document": services.parsed, "confidence": services.confidence}
 
     def fake_embed(services, texts):
         services.embed_batches += 1
@@ -311,17 +315,26 @@ def test_the_same_bytes_produce_the_same_point_ids_across_runs(tmp_path, wired):
     assert first.chunks_written == second.chunks_written
 
 
-def test_is_ocr_reflects_the_parser_rather_than_defaulting(tmp_path, wired):
+def test_is_ocr_comes_from_the_confidence_report(tmp_path, wired):
     """A figure read by OCR and a figure read from a text layer carry different risk, and the payload is
-    where that difference has to survive. The chunker defaults the flag to True because a scanned pipeline
-    is the common case; a digital document must not inherit that default."""
-    assert ingest._ocr_ran({"texts": [{"prov": [{"origin": "native"}]}]}) is False
-    assert ingest._ocr_ran({"texts": [{"prov": [{"origin": "ocr"}]}]}) is True
-    assert ingest._ocr_ran({}) is True, "an absent report must assume OCR, the safe direction"
+    where that difference has to survive.
+
+    The first version looked for an `origin` field on each item's provenance. This parser does not emit
+    one: provenance carries page_no, bbox and charspan and nothing else. The search never matched, the
+    fallback answered True every time, and an HTML contract was labelled as machine-read text. These are
+    the measured values from the box, so the test fails if the signal changes.
+    """
+    # A scan: no digital text cells, so parse_score is null.
+    assert ingest._ocr_ran({}, {"parse_score": None, "ocr_score": 0.989}) is True
+    # A text PDF: a text layer exists, so parse_score is a number.
+    assert ingest._ocr_ran({}, {"parse_score": 1.0, "ocr_score": 0.828}) is False
+    # No report at all: assume OCR, which labels a figure as machine-read rather than presenting a
+    # machine's guess as text that was already there.
+    assert ingest._ocr_ran({}, None) is True
+    assert ingest._ocr_ran({}, {}) is True
 
     services = wired()
-    services.parsed = simple_document()
-    services.parsed["texts"][0]["prov"][0]["origin"] = "native"
+    services.confidence = {"parse_score": 1.0}
     make_corpus(tmp_path)
     ingest.ingest_cycle(services, tmp_path, ingest.MemoryManifest())
     assert all(point["payload"]["is_ocr"] is False for point in services.upserted)
@@ -741,7 +754,8 @@ def test_parsing_uses_the_async_endpoint_rather_than_the_capped_one(tmp_path):
     # The async path contains the sync path as a prefix, so the check has to be the suffix rather than
     # the absence of the shorter one.
     assert seen["url"].endswith("/v1/convert/file/async"), seen["url"]
-    assert document["texts"], "the parsed document should come back"
+    assert document["document"]["texts"], "the parsed document should come back"
+    assert "confidence" in document, "the confidence report travels with the document"
     assert polls.calls == 1, "the task should be waited for rather than assumed"
 
 
