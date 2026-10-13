@@ -2094,6 +2094,72 @@ there rather than asserting the results look right.
   store does not hold is counted in `withheld` rather than skipped, because that is a reconciliation fault
   worth seeing.
 
+### 3.10 Versioning and duplicates
+
+**Goal.** A superseded document is not cited while its replacement exists, and the same document under two
+filenames is flagged rather than indexed twice. `RET-VERSION-001` and `RET-DUPE-001`.
+
+**Commands.**
+
+    cd /opt/oi-core
+    git pull
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      --profile tools run --rm audit migrate
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env up -d --build ingestion
+    docker logs ingestion --tail 20
+
+    docker exec ingestion python3 /app/ingest.py --versions
+
+**Expected.** The migration applies `011_document_versions.sql`. `--versions` prints the declarations and any
+unresolved near-duplicate flags.
+
+**The design is the research's, and it is deliberately not clever.** A document version registry with an
+explicit `is_current` flag, set at ingest and reviewable by a human. Nothing here guesses which of two
+documents is current. A guess that is wrong is invisible; a flag that is unresolved is not.
+
+Three pieces.
+
+*A registry.* `document_versions` holds `is_current`, the replacement, the date, and a note. Every document
+is current by default, so a corpus that never touches this behaves exactly as it did before the table existed.
+Declaring is one command:
+
+    docker exec ingestion python3 /app/ingest.py --supersede company/fee-2025.pdf \
+      --by company/fee-2026.pdf --note "2026 schedule in force"
+
+*Near-duplicate detection that flags rather than acts.* The signature is the set of chunk ids, which are
+already a hash of each chunk's text, so the lexical index holds exactly what a comparison needs and no new
+table was added for it. The share is over the **smaller** document: a five-chunk summary of a hundred-chunk
+report is entirely contained in it, and an overlap over the larger would read as 5 percent while one over the
+smaller reads as 100. Neither is "these are the same document", which is why the pair is recorded and a person
+decides.
+
+    docker exec ingestion python3 /app/ingest.py --versions
+    docker exec ingestion python3 /app/ingest.py --distinct company/policy-copy.pdf \
+      --note "a separate policy, not a copy"
+
+**Two things this deliberately does not do.** It does not delete the second copy, because losing a document a
+client put in a folder deliberately is worse than keeping two. And it does not drop a superseded passage from
+the results: the research is explicit that an answer supported only by a non-current document is **refused with
+the reason `superseded`**, which means the passage has to reach the verifier carrying the fact. Dropping it
+here would answer the question from a different document with no sign that the right one existed and had been
+excluded, which is a wrong answer wearing a correct one's clothes.
+
+So a passage carries `is_current` and the result carries the list of superseded documents among its passages.
+Step 3.11 is what refuses on it.
+
+**If it breaks.**
+
+- `--versions` prints nothing: no document has a declaration, which is the default state and not a fault.
+  Every document is current until somebody says otherwise.
+- A duplicate pair is not flagged: the comparison needs both documents in `chunk_index` and at least five
+  chunks on each side, so two one-chunk documents that agree are not evidence of anything. Check
+  `select count(*) from chunk_index where doc_id = '...'`.
+- A pair is flagged that is genuinely two documents: resolve it with `--distinct`, which records the decision
+  and clears the flag without superseding anything. The flag is the feature working, not a false positive: the
+  system cannot tell two policies apart from one policy stored twice, and it is not supposed to try.
+- The same pair appears twice: it cannot, because the pair is stored ordered with a unique constraint. If it
+  does, the ordering in `near_duplicates` has been changed.
+
 ## Phase 4 — Assistant API  *(outline)*
 
 The single surface the client app talks to: ask, tasks, approvals, activity, settings.

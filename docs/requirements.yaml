@@ -409,12 +409,34 @@ items:
     phase: C2
     verify: with two versions indexed, the answer cites the current one
     status: open
+    note: >-
+      Built 2026-10-13, recorded in docs/runbook.md step 3.10. The design is the research's rather than
+      invented here: a version registry with an explicit is_current flag, set at ingest and reviewable by a
+      human, with an answer supported only by a non-current document refused with the reason `superseded`.
+      Nothing infers which of two documents is current, because a wrong guess is invisible and an unresolved
+      flag is not. Every document is current by default, so a corpus that never touches the registry behaves
+      exactly as it did before it existed. A superseded passage is MARKED rather than dropped from the
+      results: dropping it would answer the question from a different document with no sign that the right one
+      existed and had been excluded, which is a wrong answer wearing a correct one's clothes. The refusal
+      itself is step 3.11's, and this step carries the fact to it. Status is open because the proof has to run
+      on the deployed store with two versions actually indexed.
   - id: RET-DUPE-001
     title: Near-duplicate documents are detected at ingest
     tier: [cloud, office, hosted]
     phase: C2
     verify: the same document under two filenames is flagged rather than indexed twice
     status: open
+    note: >-
+      Built 2026-10-13, recorded in docs/runbook.md step 3.10. The signature is the set of chunk ids, which
+      are already a hash of each chunk's text, so the lexical index holds what a comparison needs and no new
+      table was added for it. The share is over the SMALLER document, because a five-chunk summary of a
+      hundred-chunk report is entirely contained in it and an overlap over the larger would read as 5 percent
+      while one over the smaller reads as 100, and neither is "these are the same document". A pair is
+      recorded and never acted on: deleting the second copy loses a document a client put there deliberately,
+      and keeping both silently means an answer cites whichever the retriever happened to rank first. The pair
+      is stored ordered with a unique constraint so it is recorded once whichever document arrived second, and
+      a count floor of five chunks keeps two small documents that happen to agree from being flagged. Status
+      is open because the proof has to run on the deployed store with a real duplicate pair.
   - id: RET-FORMAT-001
     title: Email, spreadsheets, and slides are ingested
     tier: [cloud, office, hosted]

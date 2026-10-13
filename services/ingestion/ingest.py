@@ -503,6 +503,13 @@ def upsert_points(services: Services, points: list[dict]) -> None:
           {"points": points}, services.timeout, method="PUT")
 
 
+# The share of the smaller document's chunks that two documents have in common, above which the pair is
+# flagged for a human. Chosen rather than tuned, and the choice is explained in the runbook: too low and every
+# pair of documents in a series is flagged, too high and a genuine second copy slips through because one page
+# differs. Half is the point where "these are substantially the same document" stops being a judgement.
+DUPLICATE_OVERLAP_THRESHOLD = 0.5
+
+
 def index_for_lexical(manifest: "Manifest", points: list[dict]) -> None:
     """Write the lexical arm's copy of these chunks, beside the vectors.
 
@@ -676,6 +683,23 @@ class Manifest:
         """Write the lexical arm's rows. A no-op in a manifest that has no database behind it."""
         return None
 
+    def near_duplicates(self, doc_id: str, threshold: float) -> list[tuple[str, float]]:
+        """Other documents sharing at least `threshold` of this one's chunks. Empty without a database."""
+        return []
+
+    def set_current(self, doc_id: str, is_current: bool, superseded_by: str | None = None,
+                    note: str | None = None) -> None:
+        """Declare whether a document may be relied on. A human's decision, never inferred."""
+        return None
+
+    def current_documents(self) -> dict[str, bool]:
+        """doc_id to is_current, for the documents that have a declaration."""
+        return {}
+
+    def unresolved_duplicates(self) -> list[dict]:
+        """Near-duplicate pairs nobody has resolved yet."""
+        return []
+
     def remove_chunks(self, doc_id: str) -> None:
         """Remove a document's rows from the lexical arm."""
         return None
@@ -690,6 +714,11 @@ class Manifest:
 class MemoryManifest(Manifest):
     def __init__(self) -> None:
         self.records: dict[str, dict] = {}
+        # chunk ids per document, which is the signature duplicate detection compares, and the declared
+        # currency of each document. Both are supplied by a test rather than derived, because deriving them
+        # is what the database does.
+        self.chunks: dict[str, list[str]] = {}
+        self.versions: dict[str, bool] = {}
 
     def get(self, relpath: str) -> dict | None:
         return self.records.get(relpath)
@@ -702,6 +731,32 @@ class MemoryManifest(Manifest):
 
     def remove(self, relpath: str) -> None:
         self.records.pop(relpath, None)
+
+    def near_duplicates(self, doc_id: str, threshold: float) -> list[tuple[str, float]]:
+        """The same comparison the database does, over chunk ids the test has put in the manifest. A memory
+        manifest holds no chunks, so a test that wants duplicate detection supplies them itself."""
+        mine = set(self.chunks.get(doc_id, []))
+        if len(mine) < 5:
+            return []
+        found = []
+        for other, theirs in sorted(self.chunks.items()):
+            if other == doc_id:
+                continue
+            shared = len(mine & set(theirs))
+            smaller = min(len(mine), len(theirs))
+            if smaller >= 5 and shared / smaller >= threshold:
+                found.append((other, shared / smaller))
+        return found
+
+    def set_current(self, doc_id: str, is_current: bool, superseded_by: str | None = None,
+                    note: str | None = None) -> None:
+        self.versions[doc_id] = is_current
+
+    def current_documents(self) -> dict[str, bool]:
+        return dict(self.versions)
+
+    def unresolved_duplicates(self) -> list[dict]:
+        return []
 
     def clear_failures(self, relpath: str | None = None) -> int:
         cleared = 0
@@ -817,6 +872,88 @@ class PostgresManifest(Manifest):
         with self.connection.cursor() as cur:
             cur.execute("delete from chunk_index where doc_id = %s", (doc_id,))
 
+    def near_duplicates(self, doc_id: str, threshold: float) -> list[tuple[str, float]]:
+        """Documents sharing at least `threshold` of this one's chunks.
+
+        The signature is the set of chunk ids, which are already a hash of each chunk's text, so no new table
+        is needed: the lexical index holds exactly the information a comparison wants. The share is over the
+        SMALLER document so a two-page extract of a long report reads as a small overlap rather than a
+        complete one, and the overlap is computed in the database rather than by fetching every id.
+
+        The comparison excludes exact matches of the whole file, which the content hash already caught before
+        this ran, and it needs at least a handful of chunks on both sides so two one-chunk documents that
+        happen to agree are not flagged as near-duplicates of each other.
+        """
+        with self.connection.cursor() as cur:
+            cur.execute("""
+                with mine as (
+                  select chunk_id from chunk_index where doc_id = %(doc)s
+                ),
+                theirs as (
+                  select doc_id, chunk_id from chunk_index
+                  where doc_id <> %(doc)s and doc_id <> %(doc)s
+                ),
+                shared as (
+                  select t.doc_id,
+                         count(*) as common,
+                         (select count(*) from mine) as mine_count,
+                         (select count(*) from theirs x where x.doc_id = t.doc_id) as their_count
+                  from theirs t
+                  where t.chunk_id in (select chunk_id from mine)
+                  group by t.doc_id
+                )
+                select doc_id, common::float / least(mine_count, their_count)
+                from shared
+                where least(mine_count, their_count) >= 5
+                  and common::float / least(mine_count, their_count) >= %(threshold)s
+                order by doc_id
+            """, {"doc": doc_id, "threshold": threshold})
+            found = [(row[0], float(row[1])) for row in cur.fetchall()]
+
+            for other, overlap in found:
+                # Ordered so a pair is one row whichever document arrived second, which is what makes the
+                # uniqueness constraint mean what it says rather than allowing both orders.
+                first, second = sorted((doc_id, other))
+                cur.execute("""
+                    insert into duplicate_flags (doc_id, other_doc_id, chunk_overlap)
+                    values (%s, %s, %s)
+                    on conflict (doc_id, other_doc_id) do update set chunk_overlap = excluded.chunk_overlap
+                """, (first, second, overlap))
+            return found
+
+    def set_current(self, doc_id: str, is_current: bool, superseded_by: str | None = None,
+                    note: str | None = None) -> None:
+        with self.connection.cursor() as cur:
+            cur.execute("""
+                insert into document_versions (doc_id, is_current, superseded_by, superseded_at, note,
+                                               updated_at)
+                values (%s, %s, %s, case when %s then null else now() end, %s, now())
+                on conflict (doc_id) do update set
+                  is_current = excluded.is_current,
+                  superseded_by = excluded.superseded_by,
+                  superseded_at = excluded.superseded_at,
+                  note = excluded.note,
+                  updated_at = now()
+            """, (doc_id, is_current, superseded_by, is_current, note))
+            # Resolving one side of a pair settles the flag, because somebody has now looked at it.
+            cur.execute("""
+                update duplicate_flags set resolved_at = now(), resolution = %s
+                where resolved_at is null and (doc_id = %s or other_doc_id = %s)
+            """, (note or ("current" if is_current else "superseded"), doc_id, doc_id))
+
+    def current_documents(self) -> dict[str, bool]:
+        with self.connection.cursor() as cur:
+            cur.execute("select doc_id, is_current from document_versions")
+            return {row[0]: row[1] for row in cur.fetchall()}
+
+    def unresolved_duplicates(self) -> list[dict]:
+        with self.connection.cursor() as cur:
+            cur.execute("""select doc_id, other_doc_id, chunk_overlap, detected_at
+                           from duplicate_flags where resolved_at is null
+                           order by chunk_overlap desc, doc_id""")
+            return [{"doc_id": row[0], "other_doc_id": row[1], "overlap": float(row[2]),
+                     "detected_at": row[3]} for row in cur.fetchall()]
+
     def start_run(self) -> int | None:
         with self.connection.cursor() as cur:
             cur.execute("insert into ingest_runs default values returning id")
@@ -850,6 +987,8 @@ class CycleResult:
     documents_removed: int = 0
     failures: list[str] = field(default_factory=list)
     aborted: str | None = None
+    # Near-duplicate pairs found this cycle, for the summary. Recorded rather than acted on.
+    duplicates: list[tuple[str, str, float]] = field(default_factory=list)
 
     def as_counts(self) -> dict:
         return {"seen": self.seen, "new": self.new, "changed": self.changed, "skipped": self.skipped,
@@ -965,6 +1104,16 @@ def ingest_cycle(services: Services, documents_root: Path, manifest: Manifest,
             # vector point matches and that the fusion would then rank.
             manifest.remove_chunks(document.relpath)
             index_for_lexical(manifest, points)
+
+            # Near-duplicates, asked after the rows are written because the comparison reads them. A pair is
+            # recorded and never acted on: two documents a client put in the same folder may be two documents,
+            # and a system that deletes one because it looks like the other is worse than one that asks.
+            for other, overlap in manifest.near_duplicates(document.relpath,
+                                                           DUPLICATE_OVERLAP_THRESHOLD):
+                print(f"    near-duplicate: {overlap:.0%} of the smaller document's chunks are shared with "
+                      f"{other}. Flagged for review rather than acted on; resolve with --supersede or "
+                      f"--distinct.")
+                result.duplicates.append((document.relpath, other, overlap))
         except Exception as exc:  # noqa: BLE001 - one bad document must not stop the cycle
             transient = is_transient(exc)
             result.failed += 1
@@ -1080,6 +1229,17 @@ def main(argv: list[str] | None = None) -> int:
                         help="accepted for symmetry with the scheduled form; a single cycle is the default")
     parser.add_argument("--status", action="store_true",
                         help="report the last cycle's outcome and exit; this is the healthcheck")
+    parser.add_argument("--supersede", metavar="RELPATH",
+                        help="declare that a document has been replaced, so an answer may not rely on it. "
+                             "Takes --by to name the replacement and --note to say why.")
+    parser.add_argument("--by", metavar="RELPATH",
+                        help="the document that replaces the one named by --supersede")
+    parser.add_argument("--distinct", metavar="RELPATH",
+                        help="declare that a flagged near-duplicate is genuinely a separate document, so "
+                             "the flag is resolved without superseding anything")
+    parser.add_argument("--note", help="why, in your words. A registry entry without one cannot be reviewed.")
+    parser.add_argument("--versions", action="store_true",
+                        help="show the declared currency of every document and any unresolved duplicate flag")
     parser.add_argument("--clear-failures", metavar="RELPATH", nargs="?", const="",
                         help="forget recorded failures so dead-lettered documents are tried again. "
                              "With no argument, all of them. Use after a failure rule changes, because "
@@ -1090,6 +1250,42 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.status:
         return cmd_status(Path(args.state))
+
+    if args.versions:
+        shown = build_manifest(os.environ.get("DATABASE_URL"))
+        declared = shown.current_documents()
+        print(f"{len(declared)} document(s) with a declaration:")
+        for doc_id, is_current in sorted(declared.items()):
+            print(f"  {'current  ' if is_current else 'SUPERSEDED'} {doc_id}")
+        pending = shown.unresolved_duplicates()
+        print()
+        if pending:
+            print(f"{len(pending)} unresolved near-duplicate flag(s):")
+            for flag in pending:
+                print(f"  {flag['overlap']:.0%} shared  {flag['doc_id']}  <->  {flag['other_doc_id']}")
+            print()
+            print("Resolve each with --supersede A --by B, or --distinct A if they are separate documents.")
+        else:
+            print("no unresolved near-duplicate flags")
+        return 0
+
+    if args.supersede or args.distinct:
+        if args.dry_run:
+            print("a declaration needs the real manifest, not a dry run")
+            return 1
+        declared = build_manifest(os.environ.get("DATABASE_URL"))
+        if args.supersede:
+            declared.set_current(args.supersede, False, superseded_by=args.by,
+                                 note=args.note or f"superseded by {args.by or 'an unstated document'}")
+            print(f"{args.supersede} is now superseded"
+                  + (f" by {args.by}" if args.by else " by an unstated document")
+                  + ". An answer whose only support is this document will be refused rather than answered.")
+        if args.distinct:
+            # Marking it current is the declaration: it was already current by default, and the point is that
+            # somebody looked and resolved the flag.
+            declared.set_current(args.distinct, True, note=args.note or "confirmed as a separate document")
+            print(f"{args.distinct} is confirmed as a separate document and stays current.")
+        return 0
 
     if args.clear_failures is not None:
         # Dry runs have no manifest to repair, and saying so beats silently reporting zero.
@@ -1138,6 +1334,8 @@ def main(argv: list[str] | None = None) -> int:
               f"skipped {result.skipped}, failed {result.failed}")
         print(f"chunks written {result.chunks_written}, chunks removed {result.chunks_removed}, "
               f"documents removed {result.documents_removed}")
+        if result.duplicates:
+            print(f"near-duplicate pairs flagged for review: {len(result.duplicates)}")
         for failure in result.failures:
             print(f"  failed: {failure}")
 

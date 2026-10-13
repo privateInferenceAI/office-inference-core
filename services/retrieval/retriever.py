@@ -84,6 +84,13 @@ class Passage:
     page_is_nominal: bool = False
     table_id: str | None = None
     row_index: int | None = None
+    # Whether an answer may rely on this passage's document. True unless a human has declared otherwise, so a
+    # corpus with no declarations behaves exactly as it did before the registry existed. This is a MARK rather
+    # than a filter: the research is explicit that a claim supported only by a non-current document is refused
+    # with the reason `superseded`, which means the passage has to reach the verifier carrying the fact.
+    # Dropping it here would turn a refusal into a wrong answer from a different document.
+    is_current: bool = True
+    superseded_by: str | None = None
 
     @classmethod
     def from_payload(cls, payload: dict, score: float | None,
@@ -169,11 +176,38 @@ class Result:
     # Which arms returned anything. A caller reading an empty result needs to know whether the lexical arm
     # ran and found nothing or did not run at all, because those are different faults.
     arms: dict[str, int] = field(default_factory=dict)
+    # Documents a returned passage came from that a human has declared replaced. The caller decides what to
+    # do about it: step 3.11 refuses an answer whose only support is one of these, and until then the fact is
+    # carried so it can be reported rather than silently dropped.
+    superseded: list[str] = field(default_factory=list)
 
 
 def embed_query(services: ingest.Services, texts: list[str]) -> list[list[float]]:
     """The query's vector. A seam of its own so a test can watch what is embedded."""
     return ingest.embed_texts(services, texts)
+
+
+def document_versions(services: ingest.Services) -> dict[str, bool]:
+    """Which documents may be relied on, from the registry.
+
+    Absent for a document with no declaration, which reads as current. A corpus that has never used the
+    registry therefore behaves as though every document is current, which is what it did before this existed.
+    """
+    if not services.database_url:
+        return {}
+    try:
+        import psycopg2
+        with psycopg2.connect(services.database_url) as connection:
+            with connection.cursor() as cur:
+                cur.execute("select doc_id, is_current from document_versions")
+                return {row[0]: row[1] for row in cur.fetchall()}
+    except Exception as exc:  # noqa: BLE001
+        # A registry that cannot be read must not stop retrieval. Every document reads as current, which is
+        # the permissive direction, so this says so rather than failing quietly: the alternative is refusing
+        # answers because a table was unreachable.
+        print(f"could not read the version registry, so every document is treated as current: "
+              f"{type(exc).__name__}: {exc}")
+        return {}
 
 
 def lexical_search(services: ingest.Services, question: str, roots: frozenset[str],
@@ -448,6 +482,7 @@ def search(services: ingest.Services, question: str, role: str, limit: int = 10,
     if missing:
         by_id.update(_fetch_payloads(services, missing, roots))
 
+    versions = document_versions(services)
     for chunk_id, _score in fused:
         if len(result.passages) >= limit:
             break
@@ -458,7 +493,12 @@ def search(services: ingest.Services, question: str, role: str, limit: int = 10,
             # one place and not the other is a reconciliation fault worth seeing.
             result.withheld += 1
             continue
-        result.passages.append(Passage.from_payload(payload, similarities.get(chunk_id), _score))
+        passage = Passage.from_payload(payload, similarities.get(chunk_id), _score)
+        # Default true, so only a declaration can mark a passage. A document nobody has ruled on is usable.
+        passage.is_current = versions.get(passage.doc_id, True)
+        if not passage.is_current:
+            result.superseded.append(passage.doc_id)
+        result.passages.append(passage)
 
     # Whether content the role may not see would have answered BETTER than anything it can see. This runs in
     # every mode, including silent, because the record has to be able to report that a partial answer was
