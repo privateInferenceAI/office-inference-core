@@ -336,8 +336,24 @@ def _ocr_ran(parsed: dict, confidence: dict | None = None) -> bool:
     report = confidence if confidence is not None else (parsed.get("confidence") or {})
     if not report:
         return True
+
+    # "Unspecified" means the parser scored nothing, which is what it returns for a format it does not run
+    # the scoring stages over: HTML, Markdown, plain text. The report is not empty in that case, it is a
+    # full set of nulls with both grades set to "unspecified", and testing only for emptiness let one of
+    # those through to the parse_score branch below. Measured on the corpus's two HTML contract exhibits:
+    #
+    #     {"parse_score": null, ..., "mean_grade": "unspecified", "low_grade": "unspecified"}
+    #
+    # A document with no digital text cells is a scanned document. A document the scorer did not look at is
+    # a format with no pages, and calling that OCR presents text as machine-read when nothing read it.
+    grade = str(report.get("mean_grade") or "").lower()
+    scores = [report.get(name) for name in
+              ("parse_score", "layout_score", "table_score", "ocr_score", "mean_score", "low_score")]
+    if grade == "unspecified" or all(score is None for score in scores):
+        return False
+
     if report.get("parse_score") is None:
-        # No digital text cells at all, so every character came from a recognition step.
+        # No digital text cells, and the scorer did run, so every character came from a recognition step.
         return True
     # A text layer exists. It may still have been OCR'd, because ocr_score is present on both documents,
     # but a document with digital text is not a document whose figures were read off an image, and the flag
