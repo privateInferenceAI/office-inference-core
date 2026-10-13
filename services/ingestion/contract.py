@@ -43,8 +43,22 @@ CONTRACT_FIELDS = (
     "auto_truncate",     # whether it truncates silently
     "dimension",         # the size, which is also checked in the collection itself
     "chunker_version",   # the chunk boundaries the vectors describe
-    "embed_path",        # the endpoint that answered, because two endpoints are not always the same model
 )
+
+# Two fields were in this contract and are not, and the deployed run is what said so. Both are DISCOVERY STATE
+# belonging to the process that happened to be running rather than properties of the vectors, so the writer's
+# contract and the reader's described the same model and still differed:
+#
+#   dimension   the writer measured 1024 and remembered it on its own Services object; the reader had never
+#               measured it, so its contract said None and every search was refused as a mismatch.
+#   embed_path  the writer had not yet discovered which batch endpoint answers and recorded None; the reader had
+#               discovered /embed. The endpoint is how a client reaches the service, not what the service is, and
+#               two endpoints serving two different models differ in model_id rather than in their path.
+#
+# The lesson is worth keeping in the file rather than only in the commit. A contract that includes anything the
+# checking process computes about itself will differ between two processes that agree about the thing being
+# checked, and the failure is not a near miss: it refused EVERY search on the deployment, and the eval harness
+# reported all ten questions as misses before anybody read the reason.
 
 
 @dataclass
@@ -81,7 +95,7 @@ def read_embedding_service(embed_url: str, timeout: int = 15) -> dict:
     return info
 
 
-def live_contract(services, info: dict | None = None) -> dict:
+def live_contract(services, info: dict | None = None, dimension: int | None = None) -> dict:
     """The contract in force now, from the server and from our own configuration.
 
     The prefixes and the chunker version are ours rather than the server's, and they belong in the same
@@ -101,9 +115,10 @@ def live_contract(services, info: dict | None = None) -> dict:
         "passage_prefix": getattr(services, "passage_prefix", ""),
         "max_input_length": info.get("max_input_length"),
         "auto_truncate": info.get("auto_truncate"),
-        "dimension": getattr(services, "dimension", None),
+        # Measured, not read off the object. A process that has not embedded anything yet has never measured it,
+        # and reading an unmeasured field is what made the reader's contract differ from the writer's.
+        "dimension": dimension or getattr(services, "dimension", None),
         "chunker_version": chunker.CHUNKER_VERSION,
-        "embed_path": getattr(services, "embed_path", None),
     }
 
 

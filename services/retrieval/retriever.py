@@ -218,11 +218,13 @@ def verify_contract(services: ingest.Services, connection=None) -> None:
         import psycopg2
         connection = psycopg2.connect(services.database_url)
     try:
-        live = contract_module.live_contract(services, info=contract_module.read_embedding_service(
-            services.embed_url))
-        # The measured size, because the contract written at ingest time carries the size the collection was
-        # built at and the live one would otherwise carry whatever this process happens to have.
-        live["dimension"] = live.get("dimension") or getattr(services, "dimension", None)
+        # Measured here rather than read off the Services object. A reader that has not embedded anything has
+        # never measured the size, and a contract carrying None for a field the writer filled in refuses every
+        # search: that is what happened on the deployed run, and the eval harness reported all ten questions as
+        # misses before anybody read the reason.
+        live = contract_module.live_contract(
+            services, info=contract_module.read_embedding_service(services.embed_url),
+            dimension=ingest._get_vector_size(services))
         contract_module.check(connection, services.collection, live)
     finally:
         if owned:
