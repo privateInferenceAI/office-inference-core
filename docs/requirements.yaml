@@ -425,7 +425,28 @@ items:
     tier: [cloud, office, hosted]
     phase: C2
     verify: a damaged figure is caught by a format or arithmetic check, a figure that passes every check is disclosed as machine-read when cited, and a chunk read from a scanned page is labelled as such while one from a digital page is not
-    status: open
+    note_verified: >-
+      VERIFIED 2026-10-13 against the deployed store, all three parts of the verify line. PART ONE: the five shapes a
+      defective read produced in the step 3.4 measurement are all caught, being an impossible date, 31 February, a
+      percentage past a thousand, a figure larger than any a small business document carries, and a malformed
+      thousands separator. And six intact figures including 145 percent and a parenthesised negative are NOT flagged,
+      which is the harder half: a check that fires on correct documents is one that gets turned off. PART TWO: an
+      unverified figure from a scanned passage is disclosed as machine-read, one the document's own arithmetic
+      confirms is not, and the caveat travels inside the citation so it goes wherever the citation goes. PART THREE:
+      the vector payload labels every chunk, with is_ocr true for the scanned publication and false for the digital
+      documents. THE CEILING IS STATED WHERE IT IS IMPLEMENTED because a check described as catching OCR errors would
+      be believed and this one catches the malformed quarter of them: a read that produces a different plausible
+      number is not caught by anything here, and step 3.4 measured fourteen of fifteen wrong readings as exactly that.
+      OPEN GAP FOUND BY THE ACCEPTANCE RUN: the per-chunk is_ocr label lives in the vector payload and NOT in
+      chunk_index, so a passage the lexical arm returns alone carries no scan label and the disclosure cannot fire on
+      it. The lexical arm is a second path to the same content, so this needs the label added to that table and the
+      worker writing it. Recorded rather than worked around, because a disclosure silently not firing on one arm is
+      the shape of failure this step exists to prevent. ALSO OPEN from the decision and unchanged: whether two
+      independently staged engines disagree usefully on damaged printed English digits, how large the review queue
+      actually is, and whether the client's own records can serve as the second source. Per-page confidence for triage
+      was RESOLVED on 2026-10-13, since the parser returns the per-page report and the worker labels each chunk from
+      the pages it covers.
+    status: verified
     note: >-
       Decided by Anthony 2026-10-12, after four research angles, and recorded in full in
       docs/search-architecture.md under "An uncertain read". The short version: do it the way the

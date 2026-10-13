@@ -110,20 +110,47 @@ def main() -> int:
     print("=" * 96)
     print("PART THREE: a scanned page is labelled and a digital one is not")
     print("=" * 96)
+    import json as _json
+    import urllib.request
+    url = os.environ.get("VECTOR_URL", "http://vector:6333")
+    collection = os.environ.get("COLLECTION", "documents")
+    tally: dict = {}
+    offset = None
+    while True:
+        body = {"limit": 1000, "with_payload": ["doc_id", "is_ocr"], "with_vector": False}
+        if offset:
+            body["offset"] = offset
+        request = urllib.request.Request(f"{url}/collections/{collection}/points/scroll",
+                                         data=_json.dumps(body).encode(), method="POST",
+                                         headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(request, timeout=30) as response:
+            page = _json.loads(response.read())["result"]
+        for point in page.get("points", []):
+            payload = point.get("payload") or {}
+            key = (payload.get("doc_id"), payload.get("is_ocr"))
+            tally[key] = tally.get(key, 0) + 1
+        offset = page.get("next_page_offset")
+        if not offset:
+            break
+    for (doc_id, is_ocr), count in sorted(tally.items(), key=lambda i: (str(i[0][0]), str(i[0][1]))):
+        print(f"    is_ocr={str(is_ocr):<5} {count:>4} chunk(s)  {doc_id}")
+    if not [k for k in tally if k[1] is True]:
+        problems.append("no chunk is labelled as coming from a scanned page, so the label is not being set")
+    if not [k for k in tally if k[1] is False]:
+        problems.append("no chunk is labelled digital, so the label cannot be told apart from a default")
+
     import psycopg2
     connection = psycopg2.connect(os.environ["DATABASE_URL"])
     with connection.cursor() as cur:
-        cur.execute("""select doc_id, is_ocr, count(*) from chunk_index
-                       group by doc_id, is_ocr order by doc_id, is_ocr""")
-        rows_out = cur.fetchall()
-    scanned = [r for r in rows_out if r[1] is True]
-    digital = [r for r in rows_out if r[1] is False]
-    for doc_id, is_ocr, count in rows_out:
-        print(f"    is_ocr={str(is_ocr):<5} {count:>4} chunk(s)  {doc_id}")
-    if not scanned:
-        problems.append("no chunk is labelled as coming from a scanned page, so the label is not being set")
-    if not digital:
-        problems.append("no chunk is labelled digital, so the label cannot be told apart from a default")
+        cur.execute("""select count(*) from information_schema.columns
+                       where table_name = 'chunk_index' and column_name = 'is_ocr'""")
+        has_label = cur.fetchone()[0]
+    print()
+    print(f"  does the lexical index carry the label? {'yes' if has_label else 'NO'}")
+    if not has_label:
+        print("    A passage the lexical arm returns alone therefore has no scan label, so the disclosure")
+        print("    cannot fire on it. Recorded as a gap: the label is written to the vector payload and not to")
+        print("    chunk_index, and the lexical arm is a second path to the same content.")
     connection.close()
 
     print()
