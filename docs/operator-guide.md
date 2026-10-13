@@ -833,3 +833,208 @@ Two consequences worth stating plainly, because they bound what you can promise 
 So the honest sentence to a client is not "every answer is verified". It is **"every citation is checked
 mechanically, a figure that is not in the source is refused, and a claim resting on a replaced document is
 refused. Nothing here tells you a sentence is true."**
+
+---
+
+# Stage 8: access control, and the four ways it can look right
+
+**Goal:** be confident that a role cannot reach a document outside its roots, and know how the system tells
+a user so.
+
+Two retrieval roles exist, `staff` and `executive`, and they map to folders. `staff` sees `company`;
+`executive` sees both. **There is no manifest field for that map and no way to add a role without editing
+the code**, which is a real limitation rather than a convention: per-user and per-group permissions are C3.
+
+There is a second vocabulary in this system that shares the word "role" and means something else entirely.
+The model roles — `analyst`, `front_desk` and so on — decide which model answers and what the caller may
+spend. They are in the manifest and they have nothing to do with document access. A search asked for
+`analyst` is refused rather than guessed at, because a default would grant the broader of two permissions
+to a typo.
+
+## 8a. Prove the filter, don't assume it
+
+```
+docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
+  -e ACCESS_DENIAL_MODE=counted \
+  -v /opt/oi-core:/w -w /w \
+  --entrypoint python oi-core/ingestion:local \
+  /w/tests/fixtures/acl_probe.py
+```
+
+```
+=== what is in the index, by label ===
+  company      1245 points
+  executive    10 points
+denial mode: counted (configured counted)
+```
+
+**The `-e ACCESS_DENIAL_MODE=…` is not optional, and leaving it out is a trap.** The mode is read from the
+environment **at import time**, and a bare `docker run` passes no environment at all. So the probe without
+`-e` prints `denial mode: denied (configured denied)` — the *library default* rather than your deployment's
+setting, which your manifest and `rendered/env` both declare as `counted`. The line is honest about the
+distinction, but a reader who runs the command as written in an older draft concludes the manifest is not
+being honoured. That is what happened here.
+
+The probe then walks each role and question and prints whether the denial fired plus the disclosure a user
+would see. The two figures to read are `withheld` and `restricted_best`:
+
+- **`withheld: 0`** on every question is the filter working. It counts passages the store returned that the
+  role may not see, and the query's filter clause means it should never be non-zero. **A non-zero `withheld`
+  is a security fault** — the first line of defence failed and only the second caught it.
+- **`restricted_best`** is the best score found among passages outside the role's roots. It is what makes
+  "the answer may be incomplete" a measured statement rather than a guess.
+
+## 8b. The direct test, which is the one that convinces people
+
+The probe ends by searching for the restricted figures themselves:
+
+```
+=== the direct test: does a staff query reach the restricted document at all? ===
+  staff search for '418,750': 10 passages, figure present False
+  staff search for '62.5 percent': 10 passages, figure present False
+
+PASSED: a staff role reaches no restricted passage by any of these questions, and an executive role reaches them
+```
+
+**A grep rather than a count, on purpose.** A count can be right while a figure still reaches a caller
+through some field the count does not cover. Looking for the string does not care which field it was in.
+
+**Checkpoint.** `figure present False` for both, and an executive role receiving its own document. If the
+figure appears, stop and treat it as a disclosure: the filter is not doing its job and nothing else on the
+page matters until it is fixed.
+
+## 8c. What a denied user is told, and why it is a client's decision
+
+The system always knows it withheld something. What it *says* is policy, declared in the manifest as
+`access.denial`, and there are three defensible answers:
+
+| Mode | What the user sees | What it costs |
+|---|---|---|
+| `silent` | Nothing. The answer is built from what the role can see | **An incomplete answer is indistinguishable from a complete one** |
+| `denied` | That documents exist which answer this more directly, with no count | Reveals that restricted content exists |
+| `counted` | The same, plus how many passages matched | Reveals existence and implies how many documents hold it |
+
+```
+-e ACCESS_DENIAL_MODE=silent
+  DISCLOSURE: none, which is the silent policy working
+```
+
+**The default is `denied`, and the reasoning is the product's own.** A silent system returns a partial
+answer with no way for a user to tell it from a complete one, which is precisely the confidently-wrong
+failure this design exists to fight. But the trade is the client's to make: a firm that weighs the leak of
+*existence* more heavily sets `silent` and gets no disclosure at all.
+
+**This is a contract conversation, not a configuration detail.** Ask the client which they want, and record
+the answer. "We told you nothing on purpose" is a defensible position; "we did not think about it" is not.
+
+**Checkpoint.** Run the probe with `-e ACCESS_DENIAL_MODE=silent` and see the disclosure lines become
+`none`. Then put it back. If silent still discloses, the environment is not reaching the process and the
+mode in `rendered/env` is stale.
+
+**How this breaks.**
+
+- A denial appears when the client declared `silent`: `grep ACCESS_DENIAL_MODE rendered/env`. A manifest
+  that declares silent with an env file that was never re-rendered still discloses.
+- `withheld` above zero on an ordinary query: the store returned something the role may not see. Check the
+  query body the retriever builds and confirm `filter.must` carries the `acl` clause.
+- Fewer passages than the limit with nothing withheld: the overfetch is too low or the corpus is small.
+- `restricted_best` is `None` for every question as `executive`: correct. Nothing is restricted from that
+  role, so there is no second search to run.
+
+---
+
+# Stage 9: redaction, and what actually leaves the building
+
+**Goal:** see an identifier removed on the way out, and understand the two decisions that govern it.
+
+Everything so far has been about what the system may *read*. This stage is about what it may *send*, which
+is a different question with a different control.
+
+## 9a. The two gates
+
+A frontier call has to pass two checks that are easy to confuse:
+
+| Control | The question it answers | Where it is declared |
+|---|---|---|
+| The **egress gate** | *May material of this data class leave at all?* | `access.egress.frontier_classes` |
+| **Redaction** | *What must be stripped from it before it goes?* | `access.egress.redaction` |
+
+They fail differently and both fail closed. The gate refuses outright; redaction lets the call through with
+the identifiers replaced. A deployment can permit a class and still redact inside it.
+
+**The gate refuses rather than defaulting.** A manifest that declares nothing sends nothing off-box, and
+the refusal names what *is* permitted rather than saying "denied". That is deliberate: a refusal a person
+cannot act on is one they route around.
+
+## 9b. Watch an identifier being replaced
+
+```
+docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+  run --rm --entrypoint python -v /opt/oi-core:/w -w /w audit \
+  /w/tests/fixtures/egress_acceptance.py
+```
+
+The probe prints the deployment's permitted classes and whether redaction is on, the request as assembled,
+what would reach the frontier model, and then a class the deployment does not permit. The generated corpus
+contains a document written for exactly this: `company/pii-new-starter.md` carries an SSN and a
+card-shaped number in reserved test ranges.
+
+**What to look for.** The assembled request contains the identifiers. The version that would be sent does
+not. A figure such as `145.00` survives, because a figure is not an identifier — **and that is the whole
+point of the pattern list being narrow.** A redactor that stripped every number would remove the answers
+along with the identifiers, and the deployment would be useless in a way that looks safe.
+
+**Checkpoint.** The probe reports redactions of the expected kinds and a count above zero, and the regulated
+class is refused with no payload at all rather than a payload with a flag beside it.
+
+## 9c. What the record keeps, which depends on the class
+
+This is the part people find surprising, and it is worth reading twice.
+
+```
+grep CONTENT_MODE rendered/env
+```
+
+Four modes decide what the **audit record** keeps, per data class, and they are independent of whether the
+call was redacted:
+
+| Mode | What the record keeps |
+|---|---|
+| `hash` | A hash of the payload and nothing readable |
+| `redacted` | The payload with identifiers replaced in place |
+| `full` | Everything |
+| `prompt` | The prompt, not the response |
+
+**The default is `hash`, and a deployment will usually set `internal: redacted`.** That means for ordinary
+internal material the record holds the actual request, with the identifiers replaced — so the record shows
+what the model was asked while the thing that must not be stored is not in it.
+
+An earlier draft of the manual said the payload was stored as a hash and would never contain text. For a
+`redacted` class that is false, and it is false in the direction that matters: a reader who believed it
+would promise a client something the record does not do. **The honest statement is that the content mode
+decides, and you should check which mode is in force for each class before describing the record to
+anyone.**
+
+**Checkpoint.**
+
+```
+grep -E 'CONTENT_MODE|CONTENT_DEFAULT' rendered/env
+```
+
+Read the four lines and be able to say what each means for a client's material. If `CONTENT_MODE_INTERNAL`
+is `full`, the record holds internal material verbatim and cannot later be purged — the audit table is
+append-only and the chain covers the payload, so content stored there is content you keep.
+
+## 9d. What cannot be purged, and why that is a design decision
+
+The audit table is append-only. That is what makes the record worth something, and it has a consequence
+that belongs in a client conversation rather than a troubleshooting section:
+
+**Content stored in the audit record cannot be deleted later.** The purge path counts rows that quote a
+document and reports them; it does not clear them, because clearing a payload without updating its hash
+makes the row fail verification, and updating the hash makes the chain a record of what somebody chose to
+leave in it.
+
+So the mitigation is not to store it in the first place, which is what the `hash` and `redacted` modes are
+for. A deployment that selects `full` is choosing to keep content it cannot delete, and should be told so
+before it does.
