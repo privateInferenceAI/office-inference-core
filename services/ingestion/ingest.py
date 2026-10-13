@@ -758,6 +758,11 @@ class Manifest:
         """doc_id to is_current, for the documents that have a declaration."""
         return {}
 
+    def failed_documents(self) -> list[dict]:
+        """Nothing is recorded in memory, so nothing has failed. The Postgres manifest is the one that
+        remembers, and `--failures` reads it."""
+        return []
+
     def unresolved_duplicates(self) -> list[dict]:
         """Near-duplicate pairs nobody has resolved yet."""
         return []
@@ -829,6 +834,11 @@ class MemoryManifest(Manifest):
 
     def current_documents(self) -> dict[str, bool]:
         return dict(self.versions)
+
+    def failed_documents(self) -> list[dict]:
+        """Nothing is recorded in memory, so nothing has failed. The Postgres manifest is the one that
+        remembers, and `--failures` reads it."""
+        return []
 
     def unresolved_duplicates(self) -> list[dict]:
         return []
@@ -1031,6 +1041,24 @@ class PostgresManifest(Manifest):
         with self.connection.cursor() as cur:
             cur.execute("select doc_id, is_current from document_versions")
             return {row[0]: row[1] for row in cur.fetchall()}
+
+    def failed_documents(self) -> list[dict]:
+        """Every document with a recorded failure, the reason, and whether it is still being retried.
+
+        **This reads the MANIFEST rather than the last cycle's record, and that is the whole point.**
+        `--status` reports what failed in the cycle that just ran, so a document that has been dead-lettered
+        drops out of it: the next cycle skips the file, succeeds, and the deployment reports healthy while a
+        client's document is silently not in the index. The manifest is the only place that remembers, and
+        until this method nothing read it.
+        """
+        with self.connection.cursor() as cur:
+            cur.execute("""
+                select relpath, failure_count, failure_kind, last_error
+                from ingest_manifest
+                where coalesce(failure_count, 0) > 0 or failure_kind is not null
+                order by relpath""")
+            return [{"relpath": row[0], "failure_count": row[1], "failure_kind": row[2],
+                     "last_error": row[3]} for row in cur.fetchall()]
 
     def unresolved_duplicates(self) -> list[dict]:
         with self.connection.cursor() as cur:
