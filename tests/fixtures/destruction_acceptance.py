@@ -159,14 +159,23 @@ def main() -> int:
     print("=== and the record survives the thing it records ===")
     with psycopg2.connect(os.environ["DATABASE_URL"]) as connection:
         with connection.cursor() as cur:
-            cur.execute("select count(*), max(record_sha256) from destruction_records")
+            # Counted, not asserted to be one. A second teardown legitimately adds a second record: these are
+            # append-only evidence, and a system that overwrote its own destruction record would be a system
+            # whose record of a destruction can be replaced by a later one. The first version asserted exactly
+            # one and failed on a re-run, which read as the record being destroyed rather than as the assertion
+            # being wrong.
+            cur.execute("""select count(*), (select record_sha256 from destruction_records
+                                             order by id desc limit 1)
+                           from destruction_records""")
             count, stored_hash = cur.fetchone()
             cur.execute("select count(*) from audit_events")
             events = cur.fetchone()[0]
-    print(f"  destruction_records: {count} (expected 1, and purge_records is deliberately cleared)")
+    print(f"  destruction_records: {count} (at least one, and purge_records is deliberately cleared)")
     print(f"  audit_events: {events} kept, deliberately")
-    if count != 1:
+    if count < 1:
         problems.append("the destruction record was itself destroyed")
+    elif stored_hash != claimed:
+        problems.append("the newest stored record is not the one this run produced")
     if stored_hash != claimed:
         problems.append("the stored hash is not the one in the record returned")
     if events == 0:
