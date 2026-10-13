@@ -255,9 +255,16 @@ def destroy_all(connection, reason: str, actor: str, vector_url: str, collection
 
     stores: dict[str, dict] = {}
 
-    def attempt(name: str, description: str, action) -> None:
+    def attempt(name: str, description: str, action, verb: str = "deleted") -> None:
+        """Record what a store reported, under the verb that is true of it.
+
+        The verb is a parameter because the first version hard-coded `deleted`, and the store that counts rather
+        than clears reported `"deleted": 34` when nothing had been deleted from it. The destruction record is the
+        one document whose purpose is to be checkable by a client who does not trust us, and a record that says
+        something false is worse there than anywhere else.
+        """
         try:
-            stores[name] = {"description": description, "deleted": action()}
+            stores[name] = {"description": description, verb: action()}
         except Exception as exc:  # noqa: BLE001
             stores[name] = {"description": description, "error": f"{type(exc).__name__}: {exc}"}
 
@@ -294,7 +301,7 @@ def destroy_all(connection, reason: str, actor: str, vector_url: str, collection
     # leaving the row unverifiable or rewriting the record of what was kept. Reported as a number so a client
     # reading the destruction record can see whether their content was ever stored there at all.
     attempt("audit_payload", "content stored in the audit record, which is append-only and cannot be cleared",
-            lambda: _count_stored_payloads(connection))
+            lambda: _count_stored_payloads(connection), verb="still_stored")
     attempt("purge_history", "the record of earlier purges", clear_table("purge_records"))
     attempt("holds", "the record of holds", clear_table("legal_holds"))
 

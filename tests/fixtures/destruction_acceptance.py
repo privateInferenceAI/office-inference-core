@@ -147,8 +147,13 @@ def main() -> int:
     print("  stored payload, so clearing it leaves the row unverifiable and updating the hash makes the chain a")
     print("  record of what somebody chose to leave in it. The count is reported instead, and a non-zero one")
     print("  makes the purge incomplete. On the default hash content mode the count is zero.")
-    if int(stored.get("deleted") or 0) != 0:
-        problems.append("the teardown claims to have cleared the audit payloads, and it cannot")
+    # The verb matters. The first teardown reported `"deleted": 34` for a store it had only counted, and this
+    # check used to look for that key, so it was reading a count as a deletion and reporting a failure for the
+    # right reason and the wrong one at once.
+    if "deleted" in stored:
+        problems.append(f"the teardown reports the audit store under the word deleted: {stored}")
+    else:
+        print(f"  ok  reported as {sorted(k for k in stored if k != 'description')}, which is what happened")
 
     print()
     print("=== and the record survives the thing it records ===")

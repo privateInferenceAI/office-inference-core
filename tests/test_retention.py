@@ -246,3 +246,20 @@ def test_the_teardown_does_not_claim_to_have_cleared_what_it_cannot():
     source = _purge_source()
     teardown = source[source.index("def destroy_all"):]
     assert "append-only and cannot be cleared" in teardown
+
+
+def test_a_store_that_counts_does_not_report_that_it_deleted():
+    """The bug the deployed teardown found, as a test.
+
+    The audit store is append-only, so the teardown counts what it holds rather than clearing it. The reporting
+    helper hard-coded the key `deleted`, so the record said `"deleted": 34` for a store where nothing had been
+    deleted. The destruction record is the one document whose purpose is to be checkable by a client who does
+    not trust us, and a record that says something false is worse there than anywhere else.
+
+    The verb is a parameter now, so a store reports under the word that is true of it.
+    """
+    source = _purge_source()
+    assert "verb: str = \"deleted\"" in source, "the reporting helper cannot describe a counted store"
+    assert 'verb="still_stored"' in source, "the audit store reports a count under the wrong word"
+    # And nothing claims the audit store was cleared.
+    assert '"audit_payload": {"deleted"' not in source
