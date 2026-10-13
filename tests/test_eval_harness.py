@@ -300,3 +300,24 @@ def test_a_question_naming_a_document_by_its_manifest_id_still_matches_the_file(
         "a question naming the manifest id did not match the file the corpus holds")
     # And the root directory is not part of the manifest's path, so the comparison is on the stem.
     assert passage[0].doc_id.startswith("company/")
+
+
+def test_a_category_with_nothing_measurable_reports_not_applicable_rather_than_zero():
+    """Found by running it. The per-category table showed 0 percent support for the paraphrase and
+    two-document categories, which is where support is excluded because the answers carry no figure.
+
+    A zero says the category failed. What happened is that it was not asked. It is the same misleading number
+    the module spent the step removing from its own rates, arriving one level down in the table beside them.
+    """
+    answer = "the units are forfeited on termination"
+    report = harness.run([q(id="Q10", category="paraphrase", reference_answer=answer, reference_figure=None)],
+                         lambda _: [Passage("company/apple-ex10-1-2024.htm", "shall terminate")], k=10)
+    bucket = report.by_category()["paraphrase"]
+    assert bucket["support_rate"] is None, bucket
+    assert bucket["support_measurable"] == 0
+    assert "n/a" in report.render()
+
+    # And a category that CAN be measured still reports its rate.
+    measurable = harness.run([q(id="Q01", category="table-cell")],
+                             lambda _: [Passage("company/irs-p15.pdf", "184,500 dollars")], k=10)
+    assert measurable.by_category()["table-cell"]["support_rate"] == 1.0
