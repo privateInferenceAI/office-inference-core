@@ -32,6 +32,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "ingestion"))
 
 import ingest  # noqa: E402
 
+# The reranker, imported defensively because a deployment without one is a configuration rather than a fault:
+# the office build decides its own reranking on hardware that does not exist yet.
+try:
+    import rerank as rerank_module  # noqa: E402
+except Exception:  # noqa: BLE001
+    rerank_module = None
+
 # The normalisation shared with the ingestion worker, imported from where the worker keeps it. It lives beside
 # `ingest.py` rather than here because the ingestion image copies a fixed file list, and a module both images
 # need has to sit inside one of their build contexts. The dependency already ran this way: this module imports
@@ -177,6 +184,10 @@ class Result:
     # reports, because the number it used to report was `withheld`, which is zero on every question by
     # construction: the filter works, so nothing restricted is ever returned to be counted.
     restricted_matched: int = 0
+    # What reranking did, or why it did not. Reported rather than assumed for the same reason the arms are:
+    # a deployment answering from the fused order while believing it reranked is one whose measurements
+    # describe a configuration it is not running.
+    rerank: dict = field(default_factory=dict)
     # Which arms returned anything. A caller reading an empty result needs to know whether the lexical arm
     # ran and found nothing or did not run at all, because those are different faults.
     arms: dict[str, int] = field(default_factory=dict)
@@ -507,7 +518,7 @@ def _disclose(mode: DenialMode, role: str, withheld: int) -> Disclosure | None:
 
 
 def search(services: ingest.Services, question: str, role: str, limit: int = 10,
-           denial: str | None = None) -> Result:
+           denial: str | None = None, rerank_passages: bool = True) -> Result:
     """Retrieve the passages a role may see, with the restriction applied by the store.
 
     The filter is a clause in the query, and the check afterwards is a second line. Both are present because
@@ -565,6 +576,27 @@ def search(services: ingest.Services, question: str, role: str, limit: int = 10,
     # Fusion decides the order; the payloads come from whichever arm has them. A chunk only the lexical arm
     # returned needs its payload fetched, because a citation needs the text and the page.
     fused = reciprocal_rank_fusion([dense, lexical])
+
+    # The reranker reads the question against the candidate texts, so it needs the texts. They are fetched here
+    # rather than after a limit is applied, because the passages it must see are the ones the fusion put in its
+    # head and not the ones a limit happened to keep.
+    if rerank_passages and fused and rerank_module is not None:
+        head_ids = [chunk_id for chunk_id, _score in fused[:rerank_module.RERANK_DEPTH]]
+        need = [chunk_id for chunk_id in head_ids if chunk_id not in by_id]
+        if need:
+            by_id.update(_fetch_payloads(services, need, roots))
+        head_passages = [Passage.from_payload(by_id[chunk_id], similarities.get(chunk_id), 0.0)
+                         for chunk_id in head_ids if chunk_id in by_id]
+        outcome = rerank_module.rerank(question, head_passages)
+        result.rerank = outcome.as_record()
+        if outcome.ran and outcome.order:
+            reordered = rerank_module.apply_order(head_passages, outcome)
+            # The order is over positions in the head, so the head ids are reordered in place and the fusion's
+            # tail keeps its order behind them. A reranker that saw the top of a list cannot reorder the rest.
+            position = {id(passage): index for index, passage in enumerate(head_passages)}
+            new_head = [head_ids[position[id(passage)]] for passage in reordered if id(passage) in position]
+            new_head.extend(head_ids[len(new_head):])
+            fused = [(chunk_id, 0.0) for chunk_id in new_head] + fused[len(head_ids):]
     missing = [chunk_id for chunk_id, _ in fused[:limit] if chunk_id not in by_id]
     if missing:
         by_id.update(_fetch_payloads(services, missing, roots))
