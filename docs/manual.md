@@ -6,11 +6,12 @@ this project and is comfortable in a terminal.
 Everything here has been run. Where a command's output matters, the manual shows what you should see.
 Where something is not built yet, it says so rather than leaving you to discover it.
 
-**About the examples.** Every command output in this manual is real, taken from a development
-deployment on 2026-10-11. They were captured at different moments in that deployment's life, so the
-event ids, counts and hashes do not agree between sections, and one section may show a state that a later
-purge removed. Read the shape and the wording, not the arithmetic. On your deployment the numbers will be
-your own, which is the point of a hash chain.
+**About the examples.** Every command output in this manual is real, taken from a development deployment.
+They were captured at different moments in that deployment's life — most of C1's in the days around
+2026-10-11, and the C2 pages re-captured on 2026-10-13 after a review found five of them quoting a state
+the deployment had left behind. So the event ids, counts and hashes do not agree between sections, and one
+section may show a state that a later purge removed. Read the shape and the wording, not the arithmetic.
+On your deployment the numbers will be your own, which is the point of a hash chain.
 
 **Status when this was written:** phases C1 and C2 complete. The system runs, answers through a
 gateway, records what it did, ships that record off the machine, and can prove the record was not
