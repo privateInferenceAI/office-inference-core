@@ -509,9 +509,17 @@ def upsert_points(services: Services, points: list[dict]) -> None:
 # differs. Half is the point where "these are substantially the same document" stops being a judgement.
 DUPLICATE_OVERLAP_THRESHOLD = 0.5
 
-# The fewest chunks a document must have before it can be compared. Two small documents that agree are not
-# evidence of a duplicate, and a flag nobody can act on teaches people to ignore flags.
-DUPLICATE_MIN_CHUNKS = 5
+# How much identical text makes two documents the same document rather than two documents that share a line.
+#
+# Measured in characters rather than chunks, and the first version got this wrong in a way that suppressed the
+# most likely duplicates. A floor of five chunks meant a one-page fee schedule exported twice was never
+# compared, and single-page documents are exactly what a small business duplicates: a policy, a schedule, a
+# price list. What the floor is for is boilerplate, and a shared cover line is not evidence while a shared page
+# is, so the threshold is on the amount of identical text.
+#
+# Five hundred characters is roughly a page of a fee schedule or half a page of prose. Below that two documents
+# agreeing is a coincidence worth ignoring; above it, somebody should look.
+DUPLICATE_MIN_SHARED_CHARS = 500
 
 
 def index_for_lexical(manifest: "Manifest", points: list[dict]) -> None:
@@ -691,6 +699,10 @@ class Manifest:
         """Other documents sharing at least `threshold` of this one's chunks. Empty without a database."""
         return []
 
+    def all_document_ids(self) -> list[str]:
+        """Every document the lexical index holds, for a scan that is not driven by a file arriving."""
+        return []
+
     def set_current(self, doc_id: str, is_current: bool, superseded_by: str | None = None,
                     note: str | None = None) -> None:
         """Declare whether a document may be relied on. A human's decision, never inferred."""
@@ -721,7 +733,9 @@ class MemoryManifest(Manifest):
         # Hash of each chunk's TEXT per document, which is the signature duplicate detection compares, and
         # the declared currency of each document. A test supplies these rather than deriving them, because
         # deriving them is what the database does.
-        self.chunk_hashes: dict[str, list[str]] = {}
+        # doc_id -> [(md5 of the chunk's text, its length in characters)], which is what the comparison
+        # needs: identity for the overlap and length for the floor on how much text has to be identical.
+        self.chunk_hashes: dict[str, list[tuple[str, int]]] = {}
         self.versions: dict[str, bool] = {}
 
     def get(self, relpath: str) -> dict | None:
@@ -736,6 +750,9 @@ class MemoryManifest(Manifest):
     def remove(self, relpath: str) -> None:
         self.records.pop(relpath, None)
 
+    def all_document_ids(self) -> list[str]:
+        return sorted(self.chunk_hashes)
+
     def near_duplicates(self, doc_id: str, threshold: float) -> list[tuple[str, float]]:
         """The same comparison the database does, over a hash of each chunk's TEXT.
 
@@ -743,17 +760,21 @@ class MemoryManifest(Manifest):
         to and comparing ids can never match two copies of the same file. Supplying ids by hand is how the
         first version of this test passed while the query it was testing was broken.
         """
-        mine = set(self.chunk_hashes.get(doc_id, []))
-        if len(mine) < DUPLICATE_MIN_CHUNKS:
+        # The memory form takes (hash, characters) pairs so the same floor applies here as in the query.
+        mine = dict(self.chunk_hashes.get(doc_id, []))
+        if not mine:
             return []
         found = []
-        for other, theirs in sorted(self.chunk_hashes.items()):
+        for other, theirs_list in sorted(self.chunk_hashes.items()):
             if other == doc_id:
                 continue
-            shared = len(mine & set(theirs))
+            theirs = dict(theirs_list)
+            shared = set(mine) & set(theirs)
+            shared_chars = sum(mine[sig] for sig in shared)
             smaller = min(len(mine), len(theirs))
-            if smaller >= DUPLICATE_MIN_CHUNKS and shared / smaller >= threshold:
-                found.append((other, shared / smaller))
+            if smaller and shared_chars >= DUPLICATE_MIN_SHARED_CHARS \
+                    and len(shared) / smaller >= threshold:
+                found.append((other, len(shared) / smaller))
         return found
 
     def set_current(self, doc_id: str, is_current: bool, superseded_by: str | None = None,
@@ -880,6 +901,11 @@ class PostgresManifest(Manifest):
         with self.connection.cursor() as cur:
             cur.execute("delete from chunk_index where doc_id = %s", (doc_id,))
 
+    def all_document_ids(self) -> list[str]:
+        with self.connection.cursor() as cur:
+            cur.execute("select distinct doc_id from chunk_index order by doc_id")
+            return [row[0] for row in cur.fetchall()]
+
     def near_duplicates(self, doc_id: str, threshold: float) -> list[tuple[str, float]]:
         """Documents sharing at least `threshold` of this one's chunks.
 
@@ -898,14 +924,17 @@ class PostgresManifest(Manifest):
         with self.connection.cursor() as cur:
             cur.execute("""
                 with mine as (
-                  select md5(text) as sig from chunk_index where doc_id = %(doc)s
+                  select md5(text) as sig, length(text) as chars
+                  from chunk_index where doc_id = %(doc)s
                 ),
                 theirs as (
-                  select doc_id, md5(text) as sig from chunk_index where doc_id <> %(doc)s
+                  select doc_id, md5(text) as sig, length(text) as chars
+                  from chunk_index where doc_id <> %(doc)s
                 ),
                 shared as (
                   select t.doc_id,
                          count(*) as common,
+                         sum(t.chars) as shared_chars,
                          (select count(*) from mine) as mine_count,
                          (select count(*) from theirs x where x.doc_id = t.doc_id) as their_count
                   from theirs t
@@ -914,10 +943,11 @@ class PostgresManifest(Manifest):
                 )
                 select doc_id, common::float / least(mine_count, their_count)
                 from shared
-                where least(mine_count, their_count) >= %(floor)s
+                where shared_chars >= %(floor_chars)s
                   and common::float / least(mine_count, their_count) >= %(threshold)s
                 order by doc_id
-            """, {"doc": doc_id, "threshold": threshold, "floor": DUPLICATE_MIN_CHUNKS})
+            """, {"doc": doc_id, "threshold": threshold,
+                  "floor_chars": DUPLICATE_MIN_SHARED_CHARS})
             found = [(row[0], float(row[1])) for row in cur.fetchall()]
 
             for other, overlap in found:
@@ -1248,6 +1278,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="declare that a flagged near-duplicate is genuinely a separate document, so "
                              "the flag is resolved without superseding anything")
     parser.add_argument("--note", help="why, in your words. A registry entry without one cannot be reviewed.")
+    parser.add_argument("--scan-duplicates", action="store_true",
+                        help="compare every indexed document against every other and record the pairs worth "
+                             "a look. Needed because detection otherwise runs only when a file arrives, so a "
+                             "corpus that predates the check is never examined.")
     parser.add_argument("--versions", action="store_true",
                         help="show the declared currency of every document and any unresolved duplicate flag")
     parser.add_argument("--clear-failures", metavar="RELPATH", nargs="?", const="",
@@ -1260,6 +1294,21 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.status:
         return cmd_status(Path(args.state))
+
+    if args.scan_duplicates:
+        scanned = build_manifest(os.environ.get("DATABASE_URL"))
+        ids = scanned.all_document_ids()
+        print(f"comparing {len(ids)} document(s) against each other")
+        total = 0
+        for doc_id in ids:
+            for other, overlap in scanned.near_duplicates(doc_id, DUPLICATE_OVERLAP_THRESHOLD):
+                total += 1
+        print(f"{total} near-duplicate pair(s) recorded, {len(scanned.unresolved_duplicates())} "
+              f"unresolved")
+        print()
+        print("A pair is recorded, never acted on. Resolve each with --supersede A --by B, or")
+        print("--distinct A if they are genuinely two documents. --versions lists what is outstanding.")
+        return 0
 
     if args.versions:
         shown = build_manifest(os.environ.get("DATABASE_URL"))
