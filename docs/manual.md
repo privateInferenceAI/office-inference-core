@@ -2211,6 +2211,10 @@ Five things that output tells you, and each one is a line you would otherwise ha
 # ask as the privileged role, and watch `restricted matched` go to 0 because nothing is restricted from it
 … /w/tests/fixtures/ask.py -q "What is the chief executive officer's base salary?" --role executive
 
+# override the configured denial mode for this one call, to see the other two
+… /w/tests/fixtures/ask.py -q "…" --role staff --denial silent
+… /w/tests/fixtures/ask.py -q "…" --role staff --denial counted
+
 # check a candidate answer's citations against what was actually retrieved
 … /w/tests/fixtures/ask.py -q "What is the standard labour rate?" --role staff \
     --verify "The standard labour rate is 145.00 per hour. [5]"
