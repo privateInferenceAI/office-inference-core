@@ -122,18 +122,48 @@ def live_contract(services, info: dict | None = None, dimension: int | None = No
     }
 
 
+# A field that is absent, shown in a refusal as this. `None` is a value the server stated; absent is a field
+# the contract does not have. Printed differently because they are different facts.
+ABSENT = "<not in the contract>"
+
+
 def compare(recorded: dict, live: dict) -> list[Mismatch]:
     """Every field that moved, so a refusal can say which rather than that two hashes differ.
 
     Iterated over the union of both contracts rather than over `CONTRACT_FIELDS`, so a field added to one side
     and not the other shows up as a difference instead of being skipped. That is the same reasoning as the
     fingerprint: the list is not what makes this safe.
+
+    **A key that is absent and a key whose value is None are different, and the first version of this could not
+    tell them apart.** It compared `.get(field)` on both sides, so a field present with a null value and a field
+    missing entirely both read as None and compared equal, while the fingerprints over the two dictionaries
+    differed. The deployed result was a refusal reading "the difference is ... : ." with an empty list: a message
+    that named nothing because the comparison could not see what the fingerprint could.
+
+    This is the same distinction the module already makes about `model_sha`, where a server that reports null and
+    a server that says nothing are recorded differently, and it took the same bug in a second place to notice it
+    had been written twice.
     """
     out: list[Mismatch] = []
     for field in sorted(set(recorded) | set(live)):
-        if recorded.get(field) != live.get(field):
-            out.append(Mismatch(field, recorded.get(field), live.get(field)))
+        if field not in recorded:
+            out.append(Mismatch(field, ABSENT, live.get(field)))
+        elif field not in live:
+            out.append(Mismatch(field, recorded.get(field), ABSENT))
+        elif recorded[field] != live[field]:
+            out.append(Mismatch(field, recorded[field], live[field]))
     return out
+
+
+def only_schema_differences(differences: list[Mismatch]) -> bool:
+    """Whether every difference is a field present on one side and absent on the other.
+
+    That is a change to the contract's SHAPE rather than to what built the vectors, and it needs a different
+    response: the recorded description is out of date, not the collection. Re-recording is a correction, and
+    starting a generation for it would say the vectors were built under a different contract, which is false.
+    """
+    return bool(differences) and all(
+        ABSENT in (m.recorded, m.live) for m in differences)
 
 
 def check(connection, collection: str, live: dict, allow_change: bool = False,
@@ -167,6 +197,22 @@ def check(connection, collection: str, live: dict, allow_change: bool = False,
         return {"status": "unchanged", "fingerprint": live_fp, "generation": generation}
 
     differences = compare(recorded, live)
+    if only_schema_differences(differences):
+        # The contract's shape moved, not its content. Re-recorded in place at the same generation, because
+        # starting a new one would say the vectors were built under a different contract and they were not: the
+        # description of them was incomplete.
+        with connection.cursor() as cur:
+            cur.execute("""update collection_contracts set contract = %s, fingerprint = %s, recorded_at = now()
+                           where collection = %s""",
+                        (json.dumps(live, sort_keys=True), live_fp, collection))
+            cur.execute("""insert into collection_contract_history (collection, contract, fingerprint,
+                                                                    generation, reason)
+                           values (%s, %s, %s, %s, %s)""",
+                        (collection, json.dumps(live, sort_keys=True), live_fp, generation,
+                         "the contract's fields changed, not the vectors built under it"))
+        return {"status": "rerecorded", "fingerprint": live_fp, "generation": generation,
+                "differences": [(m.field, m.recorded, m.live) for m in differences]}
+
     if allow_change:
         with connection.cursor() as cur:
             cur.execute("""update collection_contracts set contract = %s, fingerprint = %s,

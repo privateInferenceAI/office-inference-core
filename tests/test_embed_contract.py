@@ -209,3 +209,51 @@ def test_a_contract_that_differs_in_no_field_that_matters_is_not_a_mismatch():
     reader = sample()
     assert contract.compare(writer, reader) == []
     assert contract.fingerprint(writer) == contract.fingerprint(reader)
+
+
+def test_a_field_that_is_absent_and_a_field_that_is_null_are_different():
+    """The deployed failure, in its second form.
+
+    The comparison used `.get(field)` on both sides, so a field present with a null value and a field missing
+    entirely both read as None and compared equal, while the fingerprints over the two dictionaries differed.
+    The result was a refusal reading "the difference is ... : ." with an empty list: a message naming nothing,
+    because the comparison could not see what the fingerprint could.
+
+    It is the same distinction the module already makes about model_sha, where a server reporting null and a
+    server saying nothing are recorded differently. Writing it twice in one file is what made it worth a test.
+    """
+    # Built by adding and removing a key rather than by overriding one, because the field is no longer in the
+    # contract at all: the point is a dictionary that HAS a key with a null value against one that does not
+    # have the key.
+    recorded = sample()
+    recorded["some_field"] = None
+    live = sample()
+    differences = contract.compare(recorded, live)
+    assert len(differences) == 1
+    assert differences[0].field == "some_field"
+    assert differences[0].live == contract.ABSENT
+    assert differences[0].recorded is None
+    # And the fingerprint agrees with the comparison, which is the property that was broken.
+    assert contract.fingerprint(recorded) != contract.fingerprint(live)
+
+
+def test_two_nulls_compare_equal():
+    """The other direction, so the fix does not turn every null into a difference and refuse on a contract
+    nobody changed. `model_sha` is null on this build and stays null."""
+    assert contract.compare(sample(), sample()) == []
+    assert contract.compare(sample(model_sha=None), sample(model_sha=None)) == []
+
+
+def test_a_shape_change_is_told_apart_from_a_content_change():
+    """A field added to or removed from the contract changes its description, not the vectors. Re-recording is
+    the correction, and starting a generation for it would say the vectors were built under a different
+    contract, which is false."""
+    schema_only = contract.compare(sample(extra_field=1), sample())
+    assert contract.only_schema_differences(schema_only)
+
+    content = contract.compare(sample(pooling="cls"), sample(pooling="mean"))
+    assert not contract.only_schema_differences(content)
+
+    # A field that was there with a value and is now gone is a shape change; a field that moved is not.
+    both = contract.compare(sample(extra_field=1, pooling="cls"), sample(pooling="mean"))
+    assert not contract.only_schema_differences(both)
