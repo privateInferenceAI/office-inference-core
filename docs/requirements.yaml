@@ -129,7 +129,7 @@ items:
     tier: [cloud, hosted]
     phase: C2
     verify: a question containing an SSN reaches Bedrock with the pattern replaced, and the audit shows the data class
-    status: open
+    status: verified
     note: >-
       Built 2026-10-13, recorded in docs/runbook.md step 3.12. The audit module named this gap in Phase 0: its
       four patterns are documented as not a compliance guarantee and this requirement owns the real engine,
@@ -162,7 +162,16 @@ items:
       chain's canonical string covers twelve fields and not the four new ones, so a hand-edited redaction count
       would still verify. Extending a hash chain's canonical form invalidates every existing row's hash, so it
       needs a version column and a verifier that reads the version per row. It is the first item for 3.14, which
-      owns the audit record's lifecycle.
+      owns the audit record's lifecycle. VERIFIED 2026-10-13 against the deployed store. The request as
+      assembled carried an SSN in the question and an SSN plus a card in a retrieved passage; what would have
+      been sent carries neither, and the fee figure 145.00 survives because a figure is not an identifier. A
+      regulated request is refused with no payload at all rather than a payload with a flag beside it. The
+      audit, written through the deployment's own CLI and read back from Postgres, shows data_class=internal,
+      redaction_count=3, redactions of two ssn and one card, and egress_allowed true, on the default content
+      mode where the payload itself is stored as a hash and not as text: the run printed "content mode stored
+      the payload as: None" beside "redactions={'ssn': 2, 'card': 1}", which is the fix visible in one line.
+      The recorded prompt hash equals the one the module computed, which was the probe's own fault when it did
+      not.
   - id: SEC-INJECT-001
     title: Prompt injection from document content cannot change the lane or the answer's boundary
     tier: [cloud, office, hosted]
