@@ -148,9 +148,10 @@ def main() -> int:
     print()
     print(f"  does the lexical index carry the label? {'yes' if has_label else 'NO'}")
     if not has_label:
-        print("    A passage the lexical arm returns alone therefore has no scan label, so the disclosure")
-        print("    cannot fire on it. Recorded as a gap: the label is written to the vector payload and not to")
-        print("    chunk_index, and the lexical arm is a second path to the same content.")
+        print("    The column is absent and that does not matter: nothing builds a passage from chunk_index.")
+        print("    lexical_search returns ids only, and every id the dense arm did not return has its payload")
+        print("    fetched from Qdrant with with_payload true, so is_ocr reaches the passage on both arms.")
+        print("    This probe printed the opposite conclusion first and the fidelity checker caught it.")
     connection.close()
 
     print()

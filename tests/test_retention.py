@@ -278,3 +278,34 @@ def test_the_teardown_is_incomplete_when_content_survives_in_the_audit_record():
     assert "audit_left" in teardown, "the teardown does not consider what it could not clear"
     assert 'and audit_left == 0' in teardown, "the teardown reports complete while content survives"
     assert "still_stored" in source
+
+
+def test_a_refused_purge_is_recorded(tmp_path):
+    """The refusal left no trace at all, and the manual said it was recorded.
+
+    `purge` returned at the hold check, before the `insert into purge_records` at the end of the function, so a
+    purge blocked by a legal hold wrote nothing. Measured on the deployed store: purge_records 2 before and 2
+    after, 0 rows naming the document, audit_events 40 before and 40 after.
+
+    A purge that was blocked is a fact about the deployment somebody will ask about. **A record that only exists
+    for purges that succeeded cannot answer the question**, and the answer it implies is the wrong one: that
+    nobody ever tried.
+    """
+    source = (ROOT / "services" / "retention" / "retention.py").read_text()
+
+    # The refusal path must reach the writer before it returns.
+    refusal = source[source.index('result.refused = "legal_hold"'):]
+    refusal = refusal[:refusal.index("_record_purge") + len("_record_purge")]
+    assert "_record_purge" in refusal, "the hold branch does not record the attempt"
+
+    # And there is one writer rather than two, so the two paths cannot drift. Counted over the CODE with the
+    # comments removed, because the first version counted the string in the comment that explains the bug and
+    # reported a duplicate that is not there.
+    code = "\n".join(line.split("#")[0] if line.strip().startswith("#") else line
+                      for line in source.splitlines())
+    code = re.sub(r"#.*", "", code)
+    assert code.count("insert into purge_records") == 1, (
+        "the insert is duplicated, which is how the refusal path came to be missing it")
+    # Three occurrences of the name and two of them are calls: the definition is one.
+    assert code.count("_record_purge(connection") == 3, "the definition plus two call sites"
+    assert code.count("    _record_purge(connection") == 2, "both paths call it"

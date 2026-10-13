@@ -320,7 +320,8 @@ def parse_document(services: Services, path: Path, relpath: str) -> dict:
         raise RuntimeError(
             f"the parser returned no structured output for {relpath}. Its status was "
             f"{payload.get('status')!r}; an empty json_content usually means the options were not "
-            f"accepted, and the real option names are in the service's capabilities endpoint.")
+            f"accepted, and the real option names come back in the parser's own 422, which lists every "
+            f"field it accepts.")
     # Both confidence reports travel with the document, because the chunker cannot see them and the worker
     # needs them to decide whether a figure was recognised from an image. `confidence` is the document
     # rollup and `confidence_pages` is the per-page map, which is the one that can name a scanned page:

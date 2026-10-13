@@ -424,11 +424,14 @@ items:
       documents. THE CEILING IS STATED WHERE IT IS IMPLEMENTED because a check described as catching OCR errors would
       be believed and this one catches the malformed quarter of them: a read that produces a different plausible
       number is not caught by anything here, and step 3.4 measured fourteen of fifteen wrong readings as exactly that.
-      OPEN GAP FOUND BY THE ACCEPTANCE RUN: the per-chunk is_ocr label lives in the vector payload and NOT in
-      chunk_index, so a passage the lexical arm returns alone carries no scan label and the disclosure cannot fire on
-      it. The lexical arm is a second path to the same content, so this needs the label added to that table and the
-      worker writing it. Recorded rather than worked around, because a disclosure silently not firing on one arm is
-      the shape of failure this step exists to prevent. ALSO OPEN from the decision and unchanged: whether two
+            THE GAP THE ACCEPTANCE RUN REPORTED IS NOT REAL, corrected 2026-10-13 by the fidelity checker. The run found
+      that chunk_index has no is_ocr column and concluded that a passage the lexical arm returns alone carries no scan
+      label. The column is absent and that does not matter, because nothing builds a passage from that table.
+      lexical_search returns chunk ids only, and for any id the dense arm did not return, search fetches the payload
+      from Qdrant with with_payload true (retriever.py _fetch_payloads), so Passage.from_payload reads is_ocr from the
+      vector payload on BOTH arms. Adding the column would be redundant work on a false premise. Recorded rather than
+      deleted because the probe printed it and a reader of the probe would otherwise reach the same wrong conclusion.
+      ALSO OPEN from the decision and unchanged: whether two
       independently staged engines disagree usefully on damaged printed English digits, how large the review queue
       actually is, and whether the client's own records can serve as the second source. Per-page confidence for triage
       was RESOLVED on 2026-10-13, since the parser returns the per-page report and the worker labels each chunk from

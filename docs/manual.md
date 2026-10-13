@@ -1610,7 +1610,7 @@ the service ignores looks like a missing feature rather than a malformed request
   is unset or Postgres is unreachable. It says so at the top of its output rather than doing it quietly.
   Check `docker exec ingestion env | grep DATABASE_URL`, and that `postgres` is healthy.
 - `the parser returned no structured output`: the conversion options were not accepted. They are sent as
-  separate multipart fields, and the parser's `/v1/capabilities` is the authority on their names.
+  separate multipart fields, and the parser's own refusal is the authority on their names: a request naming a field it does not know returns a 422 listing every field it accepts.
 - Chunk counts far above the page count the run prints: OCR read a page as several regions. Compare against
   the page count before assuming the chunker is wrong.
 - A cycle exits non-zero with no failure in the log: the exit code is non-zero when any document failed,
@@ -1852,8 +1852,7 @@ guarantee: most figures carry no caveat because there was nothing to disclose, n
 
 `supported` means every mechanical check passed. It is not the same as true. Entailment is Layer 1, it needs a
 model, and the reply path does not have one until Phase 4, so a sentence can be supported and still not be
-entailed by the passage it cites. The verifier's own false-negative rate sets the ceiling on what the product
-can claim, and that ceiling is published rather than implied.
+entailed by the passage it cites. The research is explicit that the verifier's own false-negative rate sets the ceiling on what the product can claim and that the ceiling has to be published rather than implied. **It is not published yet**, because measuring it needs entailment, which is not built and is named as open work. The one error rate this product has measured is the figure checks': fourteen of fifteen wrong readings produce a different plausible number and pass every check. That is a different number and does not stand in for this one.
 
 Support grading needs entailment for prose, which is why the eval harness measures support by finding the
 answer's own figure in a passage. A question whose reference answer carries no figure is excluded from the
@@ -1865,8 +1864,10 @@ a figure in their answer, reported as a measure of retrieval quality.
 document-level rather than page-level, because docling-serve does not populate the per-page confidence map
 this release exposes, so a page whose digits were misread cannot be told from a page read cleanly.
 Separately, the gate compares the passage's own parse score, and that score lives in the vector payload: the
-retriever's `Passage` copies `is_ocr` from the payload and not `parse_score`, so as the code stands the gate
-does not refuse anything on the retrieve-and-verify path. The unit tests exercise it with a passage that
+gate reads `parse_score`, which the worker records per document, and refuses a claim that states a number or
+an identifier and rests on a passage scored below the floor. It cannot fire on a page the parser never scored,
+and it is document-level rather than per page, so a scan whose bad page the parser was confident about passes
+it. The unit tests exercise it with a passage that
 carries the score.
 
 ### Trying it on the deployment
@@ -2279,8 +2280,10 @@ mismatch means the file was edited, and it is not something to reconcile.
 
 The audit chain itself is deliberately not destroyed, and the record says so. It says which documents existed
 and that they were destroyed, which is what lets the destruction be checked by someone who does not trust us.
-Destroying it would leave the client unable to show anyone that we did what we said. Stored payloads are
-cleared and the events are kept.
+Destroying it would leave the client unable to show anyone that we did what we said. The events are kept and
+stored payloads are not: the run counts the audit rows that still hold content and reports the destruction as
+incomplete while any exist, because the table is append-only and that content cannot be removed by this run or
+by any later one.
 
 This is a different command from the audit record's own retention in section 13. `audit purge` deletes old
 events from the record and leaves a tombstone. `retention` destroys documents and conversations.

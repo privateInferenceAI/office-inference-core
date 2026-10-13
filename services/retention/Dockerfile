@@ -8,7 +8,10 @@ FROM python:3.12-slim
 RUN pip install --no-cache-dir "psycopg[binary]==3.2.3"
 
 WORKDIR /app
-COPY retention.py cli.py ./
+# policy.py is imported by cli.py's --set-retention and --enforce branches. It was missing, so both commands
+# died with ModuleNotFoundError on a fresh build while the acceptance probe passed: the probe ran the
+# module from the mounted checkout, which is the same gap as the worker's image missing contract.py.
+COPY retention.py cli.py policy.py ./
 
 RUN useradd --create-home --uid 10002 retention
 

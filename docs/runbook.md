@@ -1705,7 +1705,8 @@ polls, which separates whether the parser accepted the work from how long the wo
 *Two of the four conversion options did not exist.* `do_ocr`, `do_table_structure` and `table_mode` are not
 options of docling-serve 1.36; the stages take `ocr_preset` and `table_structure_preset`, and an unknown
 field is ignored while the service answers success. This is the same trap step 3.4 recorded, which is why
-the runbook now names `/v1/capabilities` as the authority on option names and the option set is asserted by
+the runbook names the parser's own 422 as the authority on option names, because it serves no capabilities
+endpoint, and the option set is asserted by
 a test.
 
 *`is_ocr` was a constant.* The code searched each item's provenance for an `origin` field that this release
