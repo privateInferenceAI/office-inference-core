@@ -1356,6 +1356,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="compare every indexed document against every other and record the pairs worth "
                              "a look. Needed because detection otherwise runs only when a file arrives, so a "
                              "corpus that predates the check is never examined.")
+    parser.add_argument("--failures", action="store_true",
+                        help="every document that has failed, with the reason and whether it is still "
+                             "being retried. Reads the manifest rather than the last cycle, so a "
+                             "dead-lettered document is visible")
     parser.add_argument("--versions", action="store_true",
                         help="show the declared currency of every document and any unresolved duplicate flag")
     parser.add_argument("--clear-failures", metavar="RELPATH", nargs="?", const="",
@@ -1382,6 +1386,42 @@ def main(argv: list[str] | None = None) -> int:
         print()
         print("A pair is recorded, never acted on. Resolve each with --supersede A --by B, or")
         print("--distinct A if they are genuinely two documents. --versions lists what is outstanding.")
+        return 0
+
+    if args.failures:
+        shown = build_manifest(os.environ.get("DATABASE_URL"))
+        stuck = shown.failed_documents()
+        if not stuck:
+            print("no documents have failed. Every document the worker has seen is indexed.")
+            return 0
+        print(f"{len(stuck)} document(s) have failed at some point:")
+        print()
+        for record in stuck:
+            count = record.get("failure_count") or 0
+            kind = record.get("failure_kind") or "unknown"
+            dead = count >= MAX_FAILURES
+            state = ("DEAD-LETTERED, not retried until its bytes change" if dead
+                     else "will be retried")
+            print(f"  {record['relpath']}")
+            print(f"    failures: {count} ({kind}), {state}")
+            # The reason, which is the whole point of this command. It is stored on every failure and
+            # until now nothing read it: `--status` reports the LAST CYCLE's failures, so once a document
+            # is dead-lettered and a later cycle succeeds, the document disappears from the one place an
+            # operator looks and the deployment reports healthy while a file is silently unindexed.
+            error = " ".join(str(record.get("last_error") or "").split())
+            if error:
+                print(f"    last error: {error[:300]}{'...' if len(error) > 300 else ''}")
+            if dead:
+                print(f"    try it again with: docker exec ingestion python3 /app/ingest.py "
+                      f"--clear-failures {record['relpath']}")
+            print()
+        # The distinction that matters, stated because getting it wrong wastes an afternoon in one
+        # direction and hides a broken document in the other.
+        print("Read the error before deciding what to do: **a missing system dependency and a corrupt")
+        print("client document both arrive here as `permanent`**, and their fixes have nothing in common.")
+        print("A parser refusal naming a tool or a format is ours to fix; a refusal on content is the")
+        print("client's file, and the honest answer is to tell them. `docs/manual.md` section 13a lists")
+        print("the formats the parser reads and what it needs installed.")
         return 0
 
     if args.versions:
