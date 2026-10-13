@@ -226,6 +226,22 @@ def test_the_record_reports_the_data_class_and_what_was_removed():
     assert "123-45-6789" not in str(record), "the record must not keep what it removed"
 
 
+def test_the_caller_does_not_have_to_serialise_the_payload_again():
+    """The probe serialised the payload a second time with different separators and recorded a hash that did not
+    match the one this module computed. The record looked correct and proved nothing about what was sent, which
+    is worse than an error because nothing failed.
+
+    So the string whose hash is recorded is handed out. A caller that passes it gets the matching hash by
+    construction rather than by remembering which separators were used.
+    """
+    prepared = egress.prepare({"question": "q", "model": "m"}, "internal",
+                              permitted=permitted("internal"))
+    assert prepared.sent_text is not None
+    assert redaction.sha256_of(prepared.sent_text) == prepared.prompt_sha256
+    import json
+    assert json.loads(prepared.sent_text) == prepared.payload
+
+
 def test_the_same_request_hashes_the_same_way_twice():
     """Key order in a dict is insertion order, so a request assembled in a different order would hash
     differently and the record could not be used to confirm that two calls sent the same thing."""
@@ -245,3 +261,42 @@ def test_redaction_can_be_turned_off_and_is_on_by_default():
 
     on = egress.prepare({"question": "SSN 123-45-6789"}, "internal", permitted=permitted("internal"))
     assert "123-45-6789" not in on.payload["question"], "and on is what happens without being asked"
+
+
+# --------------------------------------------------------------------------- the record on the default mode
+
+def test_the_redaction_summary_is_recorded_whatever_the_content_mode():
+    """The gap the deployed probe found, as a test.
+
+    The summary was being put in the audit payload, and the default content mode is `hash`, which stores a hash
+    of the payload and not the payload. So on the arrangement the system ships with and recommends, the record
+    proved that a call happened and proved nothing about the redaction: an operator asking "was anything removed
+    from this request" got a null.
+
+    A redaction summary is metadata about the request, not content. It says how many things of which kind were
+    removed and never what they were, so storing it is not storing the client's data and it must not be governed
+    by a setting about whether to store content.
+    """
+    import json as _json
+    import subprocess
+
+    service = ROOT / "services" / "audit" / "audit.py"
+    source = service.read_text()
+    # The summary reaches columns of its own rather than only the payload.
+    for column in ("redaction_count", "redactions", "unverified_card_shapes", "egress_allowed"):
+        assert column in source, f"{column} is not written by the audit service"
+    assert "--redactions" in source, "the CLI does not accept a redaction summary"
+
+    # And the columns exist independently of the payload, which is what makes them survive hash mode.
+    migration = (ROOT / "db" / "migrations" / "012_redaction_record.sql").read_text()
+    assert "add column if not exists redactions jsonb" in migration
+    assert "not governed by a setting" in migration or "content mode" in migration
+
+    prepared = egress.prepare({"question": "SSN 123-45-6789"}, "internal",
+                              permitted=permitted("internal"))
+    record = prepared.as_record()
+    assert record["redactions"] == {"ssn": 1}
+    assert record["redaction_count"] == 1
+    assert record["egress_allowed"] is True
+    # The summary never carries a value, so writing it to a column is not writing the client's data.
+    assert "123-45-6789" not in _json.dumps(record)

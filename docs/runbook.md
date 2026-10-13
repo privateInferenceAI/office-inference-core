@@ -2337,6 +2337,25 @@ a person's name**, an address, or an account number written in words. It is a re
 guarantee about what cannot, and presenting it as a guarantee is how a client ends up sending something they
 would not have. There is a test asserting a name survives, so the bound cannot be quietly assumed away.
 
+**The summary is recorded whatever the content mode, and the first version was not.** The redaction summary was
+being put in the audit payload, and the default content mode is `hash`, which stores a hash of the payload and
+not the payload. So on the arrangement this system ships with and recommends, **the record proved that a call
+happened and proved nothing about the redaction**: an operator asking "was anything removed from this request"
+got a null. The probe found it on its first run.
+
+A redaction summary is not content. It says how many things of which kind were removed and never what they
+were, so storing it is not storing the client's data, and it must not be governed by a setting about whether to
+store content. Migration `012_redaction_record.sql` gives it four columns of its own: `redaction_count`,
+`redactions`, `unverified_card_shapes` and `egress_allowed`.
+
+**Open, and it is a tamper-evidence question rather than a correctness one.** The audit chain's canonical string
+covers twelve fields and **not the four new ones**, so a row whose `redactions` value was edited by hand would
+still verify. That is a real gap in a mechanism whose whole purpose is detecting exactly that. It is recorded
+rather than fixed here because extending a hash chain's canonical form invalidates every existing row's hash:
+the formula is what the stored hashes were computed with, so a change needs a version column and a verifier that
+reads the version per row, and doing that hastily at the end of another step is how a working security property
+gets broken. It is the first item for 3.14, which owns the audit record's lifecycle.
+
 **The record proves what was sent, not what was typed.** The hash is taken **after** redaction, because a hash
 of the original is a second copy of the thing being removed: it cannot be read, but it can be compared, which is
 enough to confirm a guess about a Social Security number. The audit column already says it holds "SHA-256 of the
