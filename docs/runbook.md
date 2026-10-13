@@ -2126,12 +2126,17 @@ Declaring is one command:
     docker exec ingestion python3 /app/ingest.py --supersede company/fee-2025.pdf \
       --by company/fee-2026.pdf --note "2026 schedule in force"
 
-*Near-duplicate detection that flags rather than acts.* The signature is the set of chunk ids, which are
-already a hash of each chunk's text, so the lexical index holds exactly what a comparison needs and no new
-table was added for it. The share is over the **smaller** document: a five-chunk summary of a hundred-chunk
-report is entirely contained in it, and an overlap over the larger would read as 5 percent while one over the
-smaller reads as 100. Neither is "these are the same document", which is why the pair is recorded and a person
-decides.
+*Near-duplicate detection that flags rather than acts.* The signature is a hash of each chunk's **text**. The
+share is over the **smaller** document: a five-chunk summary of a hundred-chunk report is entirely contained in
+it, and an overlap over the larger would read as 5 percent while one over the smaller reads as 100. Neither is
+"these are the same document", which is why the pair is recorded and a person decides.
+
+**The first version of this compared chunk ids and could never have fired.** An id is
+`uuid5(doc_id, source_sha256, chunker_version, ordinal, content_hash)`, so it contains the document it belongs
+to: two byte-identical files produce ids that all differ, the overlap is structurally zero, and an exact copy
+in the corpus is reported as no duplicate at all. Its unit test passed because the fixture supplied shared ids
+by hand, which is a fixture agreeing with itself rather than modelling the data. The test now derives ids the
+way the chunker does and compares text hashes, so a regression to id comparison fails it.
 
     docker exec ingestion python3 /app/ingest.py --versions
     docker exec ingestion python3 /app/ingest.py --distinct company/policy-copy.pdf \
