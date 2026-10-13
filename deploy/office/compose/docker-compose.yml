@@ -345,6 +345,25 @@ services:
       - ${OI_ROOT}/rendered:/app/rendered
     networks: [ai-net]
 
+  eval:
+    # The evaluation harness, run when called and exits like the other tools.
+    #
+    # Its own image because it needs a YAML parser for the question set and the retrieval half of the codebase,
+    # which the worker does not. The retriever and ingestion modules come from the mounted checkout so the image
+    # cannot carry a stale second copy of them.
+    build:
+      context: ${OI_ROOT}/services/eval
+    image: oi-core/eval:local
+    profiles: ["tools"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      EMBED_URL: http://embeddings:80
+      VECTOR_URL: http://vector:6333
+      COLLECTION: ${COLLECTION:-documents}
+      QUESTIONS: /w/fixtures/corpus/questions.yaml
+      REPORT_OUT: /w/eval-report.json
+    networks: [ai-net]
+
   retention:
     # The commands that delete a client's document and, at the end, everything. A tool rather than a service,
     # like the audit sink, because it runs when called and exits.
