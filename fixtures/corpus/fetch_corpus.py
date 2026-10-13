@@ -132,8 +132,12 @@ def main(argv: list[str] | None = None) -> int:
         fetched += 1
         time.sleep(delay)
 
+    # The lockfile is only rewritten when something was actually fetched or verified against it. The first
+    # version wrote it on every run, so a plain run against files that were already present left a tracked
+    # file modified and the next `git pull` refused. Re-verifying present files changes nothing, so it
+    # should write nothing.
     lock["corpus_version"] = manifest.get("corpus_version")
-    if not args.verify:
+    if not args.verify and fetched:
         LOCKFILE.write_text(json.dumps(lock, indent=2, sort_keys=True) + "\n")
 
     print()

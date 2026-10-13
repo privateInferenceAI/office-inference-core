@@ -44,6 +44,23 @@ EMBED_BATCH = int(os.environ.get("INGEST_EMBED_BATCH", "16"))
 # failure is usually transient and an unreadable file stays unreadable.
 MAX_FAILURES = int(os.environ.get("INGEST_MAX_FAILURES", "2"))
 
+
+def is_transient(exc: BaseException) -> bool:
+    """Whether a failure says something about the moment rather than about the document.
+
+    The distinction matters because dead-lettering is for documents, not for outages. The first real corpus
+    run dead-lettered a 60-page PDF after two 504s from the parser, and the document was fine: the stage
+    behind it is slow and something in front of it gave up. Counting that against the file means a
+    permanently unreadable corpus that no retry will fix and no log explains, because the entry says the
+    document failed rather than that the service did.
+
+    Transient means a gateway error, a timeout, a refused or dropped connection. Everything else is treated
+    as a property of the document, because guessing the other way would retry a corrupt file forever.
+    """
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code in RETRY_STATUSES
+    return isinstance(exc, (urllib.error.URLError, TimeoutError, ConnectionError, OSError))
+
 # Where the last cycle's result is written, for the healthcheck to read. A worker with no listening socket
 # cannot be asked whether it is well, so it records the answer instead.
 STATE_PATH = Path(os.environ.get("INGEST_STATE_PATH", "/state/last-cycle.json"))
@@ -474,21 +491,23 @@ class PostgresManifest(Manifest):
         with self.connection.cursor() as cur:
             cur.execute(
                 "select relpath, root, content_sha256, bytes, page_count, chunk_count, "
-                "failure_count, last_error, ingested_at from ingest_manifest where relpath = %s",
+                "failure_count, failure_kind, last_error, ingested_at "
+                "from ingest_manifest where relpath = %s",
                 (relpath,))
             row = cur.fetchone()
         if not row:
             return None
         keys = ("relpath", "root", "content_sha256", "bytes", "page_count", "chunk_count",
-                "failure_count", "last_error", "ingested_at")
+                "failure_count", "failure_kind", "last_error", "ingested_at")
         return dict(zip(keys, row))
 
     def all(self) -> dict[str, dict]:
         with self.connection.cursor() as cur:
-            cur.execute("select relpath, root, content_sha256, chunk_count, failure_count, last_error "
-                        "from ingest_manifest")
+            cur.execute("select relpath, root, content_sha256, chunk_count, failure_count, "
+                        "failure_kind, last_error from ingest_manifest")
             rows = cur.fetchall()
-        keys = ("relpath", "root", "content_sha256", "chunk_count", "failure_count", "last_error")
+        keys = ("relpath", "root", "content_sha256", "chunk_count", "failure_count", "failure_kind",
+                "last_error")
         return {row[0]: dict(zip(keys, row)) for row in rows}
 
     def put(self, relpath: str, record: dict) -> None:
@@ -496,8 +515,8 @@ class PostgresManifest(Manifest):
             cur.execute(
                 """insert into ingest_manifest
                      (relpath, root, content_sha256, bytes, page_count, chunk_count,
-                      failure_count, last_error, ingested_at, updated_at)
-                   values (%s, %s, %s, %s, %s, %s, %s, %s, now(), now())
+                      failure_count, failure_kind, last_error, ingested_at, updated_at)
+                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, now(), now())
                    on conflict (relpath) do update set
                      root = excluded.root,
                      content_sha256 = excluded.content_sha256,
@@ -505,12 +524,14 @@ class PostgresManifest(Manifest):
                      page_count = excluded.page_count,
                      chunk_count = excluded.chunk_count,
                      failure_count = excluded.failure_count,
+                     failure_kind = excluded.failure_kind,
                      last_error = excluded.last_error,
                      ingested_at = excluded.ingested_at,
                      updated_at = now()""",
                 (relpath, record.get("root"), record.get("content_sha256"), record.get("bytes"),
                  record.get("page_count"), record.get("chunk_count", 0),
-                 record.get("failure_count", 0), record.get("last_error")))
+                 record.get("failure_count", 0), record.get("failure_kind"),
+                 record.get("last_error")))
 
     def remove(self, relpath: str) -> None:
         with self.connection.cursor() as cur:
@@ -609,12 +630,17 @@ def ingest_cycle(services: Services, documents_root: Path, manifest: Manifest,
         # there.
         failures = int((record or {}).get("failure_count") or 0)
         same_bytes = bool(record) and record.get("content_sha256") == content_sha256
-        if same_bytes and failures >= MAX_FAILURES:
+        # The dead-letter limit counts only failures that are about the document. A transient one says
+        # something about the moment, so the document is tried again on the next cycle: skipping it here
+        # would mean it never recovers when the service comes back, which is the opposite of the point.
+        # `failure_count` is not advanced for a transient failure, so this comparison cannot fire on one.
+        if same_bytes and record and record.get("failure_kind") != "transient" \
+                and failures >= MAX_FAILURES:
             result.skipped += 1
             result.failures.append(
                 f"{document.relpath}: dead-lettered after {failures} failures, waiting for the file to change")
             continue
-        if same_bytes and failures == 0:
+        if same_bytes and failures == 0 and record.get("failure_kind") is None:
             result.skipped += 1
             continue
 
@@ -632,8 +658,11 @@ def ingest_cycle(services: Services, documents_root: Path, manifest: Manifest,
                 delete_document(services, document.relpath)
             upsert_points(services, points)
         except Exception as exc:  # noqa: BLE001 - one bad document must not stop the cycle
+            transient = is_transient(exc)
             result.failed += 1
-            result.failures.append(f"{document.relpath}: {type(exc).__name__}: {exc}")
+            result.failures.append(
+                f"{document.relpath}: {type(exc).__name__}: {exc}"
+                + (" [transient, stays retryable]" if transient else ""))
             manifest.put(document.relpath, {
                 "relpath": document.relpath, "root": document.root,
                 # The hash of the bytes that FAILED, so the dead-letter check can match them. Keeping a
@@ -642,7 +671,11 @@ def ingest_cycle(services: Services, documents_root: Path, manifest: Manifest,
                 "content_sha256": content_sha256,
                 "bytes": size, "page_count": (record or {}).get("page_count"),
                 "chunk_count": (record or {}).get("chunk_count") or 0,
-                "failure_count": failures + 1, "last_error": f"{type(exc).__name__}: {exc}"[:500],
+                # The count only advances for failures that are about the document. A transient one
+                # records itself so the next cycle knows to try again, and leaves the count alone.
+                "failure_count": failures if transient else failures + 1,
+                "failure_kind": "transient" if transient else "permanent",
+                "last_error": f"{type(exc).__name__}: {exc}"[:500],
             })
             continue
 
@@ -654,7 +687,7 @@ def ingest_cycle(services: Services, documents_root: Path, manifest: Manifest,
         manifest.put(document.relpath, {
             "relpath": document.relpath, "root": document.root,
             "content_sha256": content_sha256, "bytes": size, "page_count": pages,
-            "chunk_count": len(points), "failure_count": 0, "last_error": None,
+            "chunk_count": len(points), "failure_count": 0, "failure_kind": None, "last_error": None,
         })
         print(f"    {len(points)} chunks, {pages or '?'} pages")
 

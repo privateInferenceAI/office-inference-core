@@ -70,6 +70,10 @@ def split_schedule_document() -> dict:
         ["Filter media, standard", "per unit", "32.50"],
         ["Refrigerant, R-410A", "per pound", "18.75"]], COLUMNS_RIGHT)
     return {
+        # Real parser output always carries a pages object, and its absence is what marks a document as
+        # having no page structure. The fixtures that omitted it were unrealistic and made every document
+        # look like HTML.
+        "pages": {"1": {}},
         "body": {"children": [{"$ref": "#/texts/0"}, {"$ref": "#/texts/1"},
                               {"$ref": "#/tables/0"}, {"$ref": "#/tables/1"}]},
         "texts": [
@@ -167,7 +171,8 @@ def test_prose_never_crosses_a_page():
          "prov": [{"page_no": page, "bbox": {"l": 53, "t": 700, "b": 660}}]}
         for i, page in enumerate((1, 1, 2, 2))
     ]
-    document = {"body": {"children": [{"$ref": t["self_ref"]} for t in texts]}, "texts": texts,
+    document = {"pages": {str(p): {} for p in (1, 2)},
+                "body": {"children": [{"$ref": t["self_ref"]} for t in texts]}, "texts": texts,
                 "tables": []}
     chunks = chunker.chunk_document(document, "doc", "sha")
     for chunk in chunks:
@@ -238,6 +243,7 @@ def test_a_single_item_larger_than_the_budget_is_split_not_appended():
     """
     huge = "This is a sentence about fees and schedules. " * 90      # well over 512 tokens
     document = {
+        "pages": {"1": {}},
         "body": {"children": [{"$ref": "#/texts/0"}]},
         "texts": [{"self_ref": "#/texts/0", "label": "paragraph", "text": huge,
                    "prov": [{"page_no": 1, "bbox": {"l": 53, "t": 700, "b": 660}}]}],
@@ -263,6 +269,7 @@ def test_a_page_that_fits_stays_one_chunk():
     """The ceiling is a ceiling, not a target. Padding a short page up to 384 tokens would mean
     inventing text, and splitting a page that fits would cost a citation its context."""
     document = {
+        "pages": {"1": {}},
         "body": {"children": [{"$ref": "#/texts/0"}]},
         "texts": [{"self_ref": "#/texts/0", "label": "paragraph", "text": "A short policy note.",
                    "prov": [{"page_no": 1, "bbox": {"l": 53, "t": 700, "b": 660}}]}],
@@ -271,3 +278,37 @@ def test_a_page_that_fits_stays_one_chunk():
     chunks = chunker.chunk_document(document, "doc", "sha")
     assert len(chunks) == 1
     assert chunker.estimate_tokens(chunks[0].text) < chunker.MIN_TOKENS
+
+
+def test_a_document_with_no_pages_is_retrieved_rather_than_dropped():
+    """The cause the probe found, which was not the cause I had guessed.
+
+    Two HTML contract exhibits were lost on the first real corpus run. They parse to 158 text items with no
+    page and no bounding box, because HTML has no pages. The chunker dropped every one of them for having
+    no page number, since the page is the citation unit. The body was complete and the traversal worked:
+    the documents simply have no pages to cite.
+
+    Dropping them is the one outcome that cannot be explained to a client. The text is there, the question
+    is answerable, and the answer says nothing. The whole document becomes page 1, marked nominal.
+    """
+    document = {
+        "body": {"children": [{"$ref": f"#/texts/{i}"} for i in range(4)]},
+        "texts": [{"self_ref": f"#/texts/{i}", "label": "text" if i else "title",
+                   "text": f"Clause {i}: the parties agree to the following terms."}
+                  # No prov at all, which is what HTML gives.
+                  for i in range(4)],
+        "tables": [],
+        # No pages key, which is the signal.
+    }
+    chunks = chunker.chunk_document(document, "doc", "sha")
+    assert chunks, "a pageless document must still be retrievable"
+    for chunk in chunks:
+        assert chunk.page_start == 1 and chunk.page_end == 1
+        assert chunk.page_is_nominal is True, "page 1 of a pageless file is nominal, not measured"
+
+
+def test_a_document_with_pages_is_not_marked_nominal():
+    """The flag has to mean something: a scanned page and page 1 of an HTML file are not the same claim."""
+    chunks = chunker.chunk_document(split_schedule_document(), "doc", "sha")
+    for chunk in chunks:
+        assert chunk.page_is_nominal is False

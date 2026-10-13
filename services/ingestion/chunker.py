@@ -90,6 +90,7 @@ class Chunk:
     headings: list[str] = field(default_factory=list)
     prev_chunk_id: str | None = None
     next_chunk_id: str | None = None
+    page_is_nominal: bool = False
     chunk_id: str = ""
 
     def sealed(self) -> "Chunk":
@@ -114,6 +115,10 @@ class Chunk:
             "kind": self.kind,
             "page_start": self.page_start,
             "page_end": self.page_end,
+            # True when the source format has no pages, so the page number is nominal rather than
+            # measured. A citation panel should not present page 1 of an HTML file the way it presents
+            # page 1 of a 90-page filing.
+            "page_is_nominal": self.page_is_nominal,
             "table_id": self.table_id,
             "row_index": self.row_index,
             "bbox_start": self.bbox_start,
@@ -339,6 +344,16 @@ def serialise_table(group: list[TableFragment], headings: list[str], caption: st
 
 # --------------------------------------------------------------------------- prose
 
+def has_no_pages(document: dict) -> bool:
+    """Whether the parser found no page structure, which is the case for HTML, Markdown and text.
+
+    Kept as its own question because the answer changes what a citation means rather than only how a
+    chunk is built: page 1 of a document with no pages is nominal, and a citation panel should not present
+    it the way it presents page 1 of a 90-page filing.
+    """
+    return not (document.get("pages") or {})
+
+
 def page_texts(document: dict) -> list[tuple[int, str, dict, list[str]]]:
     """The document's prose in reading order, one entry per text item, with its page and headings.
 
@@ -358,12 +373,11 @@ def page_texts(document: dict) -> list[tuple[int, str, dict, list[str]]]:
     order = _walk_order(body, document)
 
     # The body's children ARE the reading order, so a text item not referenced from there is invisible
-    # however much content it holds. That is not hypothetical: two HTML contract exhibits parsed to
-    # nothing on the first real corpus run, both the worker and the chunker reported success, and the
-    # index gained two documents that look retrievable and contain no text. An empty result is worse than
-    # a failure, so when the walk finds nothing but the document has text, fall back to every text item in
-    # page and position order. The order is worse than the body's and it is enormously better than
-    # nothing, and the fallback announces itself so a wrong traversal is visible rather than quiet.
+    # however much content it holds. This was written against the wrong diagnosis of the lost exhibits,
+    # which turned out to have a complete body and no pages rather than an empty body. It is kept because
+    # the failure it guards against is real and silent: an unlinked document would produce an empty result
+    # that looks like success, and an empty document is worse than a failed one. It announces itself so a
+    # genuinely broken traversal is visible rather than quiet.
     if not order and (document.get("texts") or []):
         order = [t.get("self_ref") for t in document.get("texts") or [] if t.get("self_ref")]
         print(f"  warning: the document body references no items, so reading order is unavailable. "
@@ -383,7 +397,17 @@ def page_texts(document: dict) -> list[tuple[int, str, dict, list[str]]]:
             level = item.get("level") or 1
             headings = headings[: max(0, level - 1)] + [text]
             continue
-        if not text or page_no is None:
+        if not text:
+            continue
+        # A document with no page structure at all. The first real corpus run lost two HTML contract
+        # exhibits this way: they parse to 158 text items with no page and no bounding box, because HTML
+        # has no pages, and this function dropped every one of them for having no page number. The page is
+        # the citation unit, so a document without pages cannot be cited precisely, but dropping it is the
+        # one outcome that cannot be explained to a client: the text is there and the answer says nothing.
+        # The whole document becomes page 1, which is coarse and honest, and the payload records that the
+        # page is nominal rather than measured.
+        if page_no is None:
+            items.append((1, text, {}, list(headings)))
             continue
         items.append((int(page_no), text, prov.get("bbox") or {}, list(headings)))
     # Deliberately NOT re-sorted by position. The body walk returns reading order, and on a two-column
@@ -492,12 +516,13 @@ def chunk_document(document: dict, doc_id: str, source_sha256: str,
                     coord_origin=bbox.get("coord_origin"), headings=headings,
                 ))
 
+    nominal = has_no_pages(document)
     for page_no, text, bbox, headings in _group_prose(page_texts(document)):
         chunks.append(Chunk(
             text=text, page_start=page_no, page_end=page_no, kind="prose",
             doc_id=doc_id, source_sha256=source_sha256,
             bbox_start=bbox, bbox_end=bbox, coord_origin=bbox.get("coord_origin"),
-            headings=headings,
+            headings=headings, page_is_nominal=nominal,
         ))
 
     for ordinal, chunk in enumerate(chunks):
