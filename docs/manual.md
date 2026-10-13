@@ -12,9 +12,14 @@ event ids, counts and hashes do not agree between sections, and one section may 
 purge removed. Read the shape and the wording, not the arithmetic. On your deployment the numbers will be
 your own, which is the point of a hash chain.
 
-**Status when this was written:** phase C1 complete. The system runs, answers through a gateway,
-records what it did, ships that record off the machine, and can prove the record was not altered. It
-cannot read a client's documents until it is deployed with the ingestion worker. That arrived in C2.
+**Status when this was written:** phases C1 and C2 complete. The system runs, answers through a
+gateway, records what it did, ships that record off the machine, and can prove the record was not
+altered. It reads a client's documents: ingestion, hybrid retrieval, citation verification, access
+control, egress redaction and retention are sections 13a to 13f.
+
+Sections 1 to 25 are ordered by when they were written rather than by what a reader needs first, so
+the six C2 pages sit between section 20 and the troubleshooting part rather than beside the audit
+section they are numbered next to. The contents below lists them where they are.
 
 ---
 
@@ -500,7 +505,15 @@ loop, and it does not promise that the number is never exceeded: the call that c
 completes, and in a fast burst more than one can slip through before the recorded figure catches up.
 Promise a client that the loop stops, not that the number is untouchable.
 
-## 13. The audit record, command by command
+13. The audit record, command by command
+
+**Part 3b, reading documents (phase C2)**
+13a. Ingesting documents
+13b. Retrieval
+13c. Citations and verification
+13d. Access control
+13e. Redaction and the egress gate
+13f. Retention and deletion
 
 The `audit` tool writes and checks one append-only record. Every command below is run the same way:
 
@@ -1151,12 +1164,18 @@ by the validator's own two rules, which refuse an empty list and refuse `regulat
 `redaction: false` on a cloud build, and by nothing at call time, because nothing labels a request with
 its data class. `lanes.frontier.requires_approval` is in the schema, read by no validator rule and
 by no service. `lanes.frontier.redaction` is checked by one validator rule, which refuses `false`
-together with `regulated` on a cloud build, and **nothing redacts anything on the way out**; the
-redaction service is sold in the compliance pack and is not built. What redacts today is the record's
-own content mode, which decides what is kept rather than what is sent.
+together with `regulated` on a cloud build.
 
-All three become controls in C2 and C3. Until then, treat them as the client's intent recorded in the
-contract rather than something that will stop a call.
+**C2 changed two of those three, and this paragraph is the correction.** As of C2 the egress gate is
+built and redaction runs on the way out, both declared under `access.egress` and rendered to
+`FRONTIER_CLASSES` and `EGRESS_REDACTION`; section 13e is the operating page. What that leaves is an
+overlap rather than a gap: `lanes.frontier.data_classes_allowed` and `access.egress.frontier_classes`
+carry the same enum, mean the same thing, and are two places to declare one policy. **The gate reads
+the second.** The first is the field this table lists and it is now the one nothing reads at call
+time, which is the reverse of what this paragraph said before C2 and is recorded as an open decision
+rather than quietly resolved by deleting a row.
+
+`lanes.frontier.requires_approval` remains in the schema read by no validator rule and no service.
 
 Run it before you render anything:
 
