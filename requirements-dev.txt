@@ -6,3 +6,17 @@
 # "No module named pytest", which is not a passing test.
 pytest>=8.0,<10.0
 PyYAML>=6.0,<7.0
+
+# The corpus generator. `fixtures/generate_corpus.py` writes a test corpus covering every file format
+# the ingestion worker accepts, and eleven of the fifteen come from here. Without it that script still
+# runs and writes the four authored formats, reporting the gap rather than failing.
+#
+# **The extras are named rather than `[all]`.** `all` drags in Django, PyTorch, WeasyPrint and the cloud
+# storage backends, none of which this script uses and one of which is GPL. The seven below are the
+# formats that need a library; TXT, CSV, RTF and EML are produced from the core package, which is why
+# they are absent from the list even though the generator writes them. Naming an extra the package does
+# not declare makes pip refuse the whole line, so this list is checked against PyPI rather than guessed.
+#
+# The PDF route runs through reportlab (BSD) rather than pdfkit plus wkhtmltopdf (LGPLv3), which the
+# script selects explicitly.
+faker-file[docx,xlsx,pptx,odt,ods,odp,pdf]>=0.19,<0.20
