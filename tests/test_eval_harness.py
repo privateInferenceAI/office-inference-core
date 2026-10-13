@@ -262,17 +262,25 @@ def test_a_rate_that_excludes_a_question_says_so():
     assert "not measurable on 1" in report.render()
 
 
-def test_a_document_named_by_its_publication_identity_does_not_match_its_filename():
-    """The other half of the same run, kept as a test so the fixture cannot drift back.
+def test_a_question_naming_a_document_by_its_manifest_id_still_matches_the_file():
+    """The naming mismatch, fixed on the side that was wrong.
 
-    The question set named `irs-p15-2026`, which is the publication's identity, and the corpus holds
-    `company/irs-p15.pdf`. `apple-10k-2024` happened to match because the filename contains it. So two questions
-    were scored as retrieval failures for a naming mismatch, and a retrieval rate that is wrong in the direction
-    of looking bad is still wrong.
+    The question set names a document by its manifest id, which is the publication's identity: `irs-p15-2026` is
+    Publication 15 for 2026. The corpus holds `company/irs-p15.pdf`. The harness compared the first against the
+    second, so Q01 and Q02 were scored as retrieval failures for a naming mismatch, and `apple-10k-2024` only
+    escaped because the filename happens to contain the id.
+
+    My first fix changed the question set, and the corpus validator refused it: it will not accept a source that
+    is not a manifest id, which settles that the ids are the contract and the filenames are an implementation
+    detail of how the corpus was assembled. So the harness resolves the id through the manifest.
     """
+    manifest = harness.load_document_paths(
+        ROOT / "fixtures" / "corpus" / "manifest.yaml")
+    assert manifest.get("irs-p15-2026") == "irs-p15.pdf", manifest.get("irs-p15-2026")
+
     passage = [Passage("company/irs-p15.pdf", "The social security wage base limit is 184,500 dollars.")]
-    named_by_identity = harness.grade(q(source_document="irs-p15-2026"), passage, k=10)
-    assert not named_by_identity.retrieved_document, (
-        "the harness now matches a publication name to a filename, so the fixture no longer has to")
-    named_by_path = harness.grade(q(source_document="irs-p15"), passage, k=10)
-    assert named_by_path.retrieved_document
+    outcome = harness.grade(q(source_document="irs-p15-2026"), passage, k=10, document_paths=manifest)
+    assert outcome.retrieved_document, (
+        "a question naming the manifest id did not match the file the corpus holds")
+    # And the root directory is not part of the manifest's path, so the comparison is on the stem.
+    assert passage[0].doc_id.startswith("company/")
