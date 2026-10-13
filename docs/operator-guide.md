@@ -679,3 +679,157 @@ you see zero, check the environment before you believe the index is empty.
   `docker logs embeddings`.
 - Passages come back from the wrong document: that is a corpus or ranking question rather than a fault.
   Stage 6a is how you tell the difference.
+
+## 6a. Reading the arms, and the one line that lies
+
+Before the citations stage, one diagnostic deserves its own section because it is the most misread line in
+the tool's output.
+
+```
+arms:     {'dense': 15, 'lexical': 6}
+```
+
+`dense` is how many the vector arm returned. `lexical` is how many the lexical arm returned. **`lexical: 0`
+does not mean "the lexical arm found nothing" and it does not mean "the lexical arm did not run" — it means
+one of those two, and the line cannot tell you which.**
+
+The key is always present. It is set from the length of a list, and that list is empty both when the arm ran
+and matched nothing and when it never ran at all because `DATABASE_URL` was missing. There is no
+missing-key case to read.
+
+So when `lexical` is zero and you expected hits, check the environment rather than the index:
+
+```
+docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+  run --rm --entrypoint python eval -c "import os; print('DATABASE_URL set:', bool(os.environ.get('DATABASE_URL')))"
+```
+
+`False` means the arm is not running and the count is meaningless. `True` means it ran and the corpus
+genuinely holds nothing exact for that question, which is a different investigation.
+
+**Why this matters enough to have its own section.** A reviewer reading an earlier draft was told `lexical:
+0` meant the arm was skipped, and the same page in another place said it meant the arm ran and found
+nothing. Both readings cannot be right, and a reader who acts on the wrong one either chases a healthy
+index or trusts a broken one.
+
+---
+
+# Stage 7: citations, and the one refusal that saves you
+
+**Goal:** understand what the verifier refuses, and see a real document be refused for a real reason.
+
+Every citation a model produces is checked before a reader sees it. The check is mechanical — it does not
+know whether a sentence is true, it knows whether the cited passage contains the figure and whether the
+document may be relied on. What it catches is the failure this whole product exists to fight: a wrong
+number with a real citation, which looks exactly like a right one.
+
+## 7a. The five outcomes
+
+```
+docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
+  -v /opt/oi-core:/w -w /w \
+  --entrypoint python oi-core/ingestion:local \
+  /w/tests/fixtures/citations_acceptance.py
+```
+
+The probe builds an answer containing four kinds of sentence and prints a verdict for each. The four
+verdicts are the whole vocabulary you will meet:
+
+| Verdict | What it means |
+|---|---|
+| `ok` | Every mechanical check passed. **This is not the same as true** — see 7c |
+| `number_not_in_source` | The sentence states a figure the cited passage does not contain. This is the check that catches a substituted digit |
+| `citation_not_found` | The sentence cites `[9]` and only five passages were retrieved, so it cites something that was never in front of the model |
+| `no_citation` | The sentence carries no `[n]` marker, so none of the checks could be run on it |
+| `superseded` | Every passage it cites is from a document a person has declared replaced |
+
+**A markerless sentence is refused, not passed.** That is deliberate and it surprises people: an answer
+written as clean prose with no `[n]` markers verifies as entirely unsupported. The verifier is not being
+harsh, it is refusing to certify what it cannot check.
+
+**Checkpoint.** `refusals by reason` shows at least one `number_not_in_source` and at least one
+`citation_not_found`. If both counters are zero, the probe is not exercising the verifier and something
+upstream has changed.
+
+## 7b. Supersession, which is the refusal worth seeing
+
+This is the one that requires no model at all, and it is the reason the version registry exists. Do it by
+hand, because watching the marker appear is the point.
+
+**First, look before you declare anything.** The generated corpus contains a 2025 schedule and a 2026 one.
+Neither is marked, so the system treats both as usable:
+
+```
+docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+  run --rm --entrypoint python -v /opt/oi-core:/w:ro -w /w eval /w/tests/fixtures/ask.py \
+  -q "What is the standard labour rate per hour?" --role staff
+```
+
+Both schedules come back, with no marker on either. **Nothing is wrong**: a document nobody has ruled on is
+usable, which is the permissive default and the right one, because the alternative refuses answers over a
+table nobody filled in.
+
+**Now declare the replacement.**
+
+```
+docker exec ingestion python3 /app/ingest.py --supersede company/og-fee-schedule-2025.md \
+  --by company/og-fee-schedule-2026.md --note "the 2026 schedule is in force"
+```
+
+```
+company/og-fee-schedule-2025.md is now superseded by company/og-fee-schedule-2026.md. An answer whose
+only support is this document will be refused rather than answered.
+```
+
+**Run the same question again:**
+
+```
+[1] company/og-fee-schedule-2025.md  pages 1-1  acl=company  score=0.6367  ** NOT CURRENT, superseded by company/og-fee-schedule-2026.md
+[2] company/og-fee-schedule-2026.md  pages 1-1  acl=company  score=0.6385
+```
+
+**The passage is still returned, and that is the design.** Dropping it would answer the question from a
+different document with no sign that the right one existed and had been excluded — a wrong answer wearing a
+correct one's clothes. The passage carries the fact instead, and the verifier acts on it:
+
+```
+--verify "The standard labour rate is 132.00 per hour. [1]"
+  [REFUSED (superseded)] The standard labour rate is 132.00 per hour. [1]
+      every passage it cites is from a document a person has declared replaced, so the figure may be
+      real and out of date
+
+--verify "The standard labour rate is 145.00 per hour. [2]"
+  [supported] The standard labour rate is 145.00 per hour. [2]
+```
+
+**Checkpoint.** The first claim is refused with the reason `superseded` and the second is supported. The
+figures are both real, both from real documents, on real pages, and neither is invented. The difference is
+that one document has been replaced and a person said so.
+
+**How this breaks.**
+
+- The marker never appears: the declaration did not reach the registry. `--versions` lists what is
+  declared, and `--status` confirms the database is reachable.
+- `superseded by None`: the replacement name was not recorded. That was a real bug — `search()` read the
+  registry's boolean and never its `superseded_by` column — and it is fixed. If you see it, the retrieval
+  code is older than this guide.
+- A claim is refused when you are sure the document is current: check the *cited passage's* document, not
+  the document the question names. A question can be answered from a document you did not expect.
+
+## 7c. What `supported` does not mean
+
+**`supported` means every mechanical check passed. It does not mean the sentence is true.** Entailment —
+deciding whether a passage actually implies a claim, rather than merely containing its numbers — needs a
+model and is not built here. It arrives with the answer layer.
+
+Two consequences worth stating plainly, because they bound what you can promise a client:
+
+- **The figure checks have a ceiling.** They catch the malformed quarter of misreads: impossible dates,
+  impossible percentages, implausible magnitudes, malformed numbers. A digit substituted in a plausible
+  way — `184,500` becoming `184,900` — passes every check unless another document contradicts it.
+- **The verifier's false-negative rate is not published.** The research says it must be, and that is an
+  obligation rather than a fact about today.
+
+So the honest sentence to a client is not "every answer is verified". It is **"every citation is checked
+mechanically, a figure that is not in the source is refused, and a claim resting on a replaced document is
+refused. Nothing here tells you a sentence is true."**
