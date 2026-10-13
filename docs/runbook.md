@@ -2724,6 +2724,65 @@ does, and the client's own sixty arrive in C8 under `QLT-GOLDEN-001`.
 - A figure question misses: check the figure is stated on the question and that it appears in the corpus at all.
   `select doc_id, page_start from chunk_index where text ilike '%391,035%'`.
 
+### 3.16 The reranker, verified
+
+**`RET-RERANK-001` proved on 2026-10-13, and its two halves landed differently.**
+
+    questions reranked: 10 of 10
+    per question: slowest 428 ms, average 344 ms
+    budget 5000 ms: WITHIN
+
+    WHAT IT CHANGED
+      Q07: rank 10 -> 1
+      Q01: rank 1 -> 2
+      Q06: rank 1 -> 2
+
+**Latency is measured and comfortably inside the budget**, and it agrees with the third-of-a-second figure the
+architecture records for a fifty-candidate pool, which was measured separately through the AWS API before the
+reranker was wired in.
+
+**The quality half is at ceiling and therefore shows no movement.** Retrieval and support were already 100 percent
+without the reranker, so the comparison reports `+0%` and there is nothing for it to improve. **Reporting that as
+evidence that reranking does not help would be the same mistake this phase has spent its time removing**, so the
+summary says "same" rather than claiming a benefit or denying one.
+
+**The evidence that it works is in the ranks rather than the rates.** Q07 moved **from rank 10 to rank 1**, which
+is precisely the case the requirement is about: a passage the fusion barely kept inside the window became the top
+passage, and **at rank 10 it was one place from being dropped**. Q01 and Q06 each moved from 1 to 2, so the
+reranker demotes as well as promotes.
+
+**A ten-question set cannot resolve a reranker's benefit when both rates are at their maximum.** The client's
+sixty questions in C8 under `QLT-GOLDEN-001` are where the second half becomes measurable, and that is recorded
+as the reason rather than as a gap.
+
+**It was blocked and then unblocked, and the block is worth keeping.** The model needs a **paid AWS Marketplace
+subscription**, 0.002 dollars per search unit, which is one query against up to 100 documents and therefore **one
+unit per question** at our depth of 50. The first attempt failed with a 403 whose body named the missing actions
+precisely:
+
+    Model access is denied due to IAM user or service role is not authorized to perform the required AWS
+    Marketplace actions (aws-marketplace:ViewSubscriptions, aws-marketplace:Subscribe)
+
+**The mechanism under test reported its own absence rather than falling back to the fused order**, which is why
+the cause was findable at all: a reranker that silently answered from the fused list would have produced a
+comparison showing no difference between two identical runs.
+
+**The IAM change and its state.** `oi-core-dev-bedrock-invoke` listed four text models and the reranker was
+simply absent from the list. `cohere.rerank-v3-5:0` was added to it, and the two marketplace actions the error
+named were added in a second statement whose Sid says why they are there. A separate policy was created first and
+then removed in favour of one list, because two policies saying the same thing is two places for it to drift.
+**The role carries the same three policies it carried before the work.**
+
+**If it breaks.**
+
+- `HTTP Error 403` with the marketplace message: the subscription has lapsed or the account changed. It is a
+  paid agreement, not a permission, and no policy change substitutes for it.
+- `reranked: false` on every question with a reason: read the reason. The mechanism reports rather than falls
+  back, so the reason is the diagnosis and not a guess at one.
+- The rates do not move: check whether they were at ceiling before the change. A reranker measured against a
+  system already at 100 percent is being measured on ranks, and the comparison prints the rank movements for
+  exactly that reason.
+
 ## Phase 4 — Assistant API  *(outline)*
 
 The single surface the client app talks to: ask, tasks, approvals, activity, settings.
