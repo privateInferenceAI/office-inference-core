@@ -1696,3 +1696,238 @@ back, **stop** — that is the access filter failing, and stage 8d is where to g
 vector collection and one role map. The unit of isolation is the deployment, and a second client means a
 second deployment. That is a real architectural limit and worth saying to a client who asks whether they can
 share.
+
+---
+
+# Stage 15: the end of a contract
+
+**Goal:** destroy everything and leave the client evidence that it happened.
+
+`DATA-EXIT-001` is the requirement: termination destroys the client's data and produces evidence. It was
+verified against the deployed store on 2026-10-13, and this stage describes what it does.
+
+**This guide does not run it, and neither should you until the contract has actually ended.** It is the one
+command in the system that empties everything, and on this deployment it would take the corpus with it.
+
+## 15a. What it destroys, and the two things it does not
+
+```
+oi run --rm retention --destroy-all --reason "contract ended 2026-10-13"
+```
+
+| Store | What happens |
+|---|---|
+| The vector index | **The collection is dropped** — every embedding, every passage, every access label |
+| The lexical index | `chunk_index` cleared: passage text, search terms, references |
+| The ingestion manifest | Cleared: what was ingested and each document's hash |
+| The purge history | Cleared |
+| The legal holds | Cleared |
+| The audit record's stored payloads | **Not cleared. Counted, and the run reports incomplete if any remain** |
+| The audit chain | **Not destroyed, deliberately** |
+| **The client's files** | **Not touched** — see below |
+
+**The audit chain survives on purpose.** It records that the documents existed and that they were destroyed,
+and it is the thing that proves the destruction happened. Destroying it would leave the client unable to show
+anyone that we did what we said.
+
+**The audit payload count is why a teardown can report incomplete.** If any audit row still holds content,
+the run says so, because a record telling a client their data is gone while content sits in the record is the
+worst kind of false claim. The fix is at deployment time, not here: a `hash` content mode never stores
+content, so there is nothing to leave behind.
+
+**`destroy-all` does not delete the client's documents from disk.** Their folder is theirs; deleting the
+copies the system holds is what this does. If the contract requires the corpus removed as well, that is a
+separate, deliberate act, and it is not this command.
+
+## 15b. The destruction record
+
+The run writes a record the client keeps, and **its hash recomputes from its own contents** — which is the
+check they can run without trusting us. It names every store with the verb that is true of it: `deleted`
+where rows went, `still_stored` where content remains, so the record cannot describe a partial destruction as
+a complete one.
+
+It also carries the chain head, so the deletion sits at a known point in the audit chain rather than being
+asserted.
+
+**Checkpoint, for a deployment whose contract has ended.** The record names every store, the hash recomputes
+to itself, `still_stored` is zero or explained, and the collection is gone:
+
+```
+docker run --rm --network ai-net curlimages/curl -sS http://vector:6333/collections
+```
+
+## 15c. Stopping the machine, which is not teardown
+
+The installation and the contract are different things, and the difference is where the money is:
+
+```
+# the instance, from wherever you administer AWS
+aws ec2 stop-instances --profile oi-credits --region us-east-1 --instance-ids <the instance>
+```
+
+**Stopping costs nothing and destroys nothing.** The address survives a stop, the data survives on the
+volume, and the containers restart themselves. This is what you do at the end of a working day.
+
+A teardown is a contract event: it destroys data and produces evidence. **Never stop the instance expecting
+data to be gone**, and never run `--destroy-all` expecting to save money.
+
+**A standing rule worth repeating:** stop the instance when you finish. An m7i.4xlarge runs at roughly
+0.81 USD an hour, which is about 20 dollars a day, and it is easy to leave running for a week.
+
+---
+
+# Stage 16: when something is wrong
+
+**Goal:** get from a symptom to a cause without reading the whole manual.
+
+Every entry here is a symptom, the one command that discriminates, and what each answer means. Work down;
+the causes are ordered by how often they are the answer.
+
+## The stack will not come up
+
+```
+oi ps                                    # what is actually running
+docker logs <service> --tail 40          # the one that is not
+```
+
+| Symptom | Cause |
+|---|---|
+| A container restarting in a loop with no log output | It is downloading a model. `parser` and `embeddings` do this on first start and are silent while it happens |
+| `postgres` unhealthy | Its data directory was initialised with a different password than `rendered/env` holds. The two must match |
+| `oi ps` shows fewer services than you expect | A pack you removed took its services with it. `rendered/services.txt` is what the manifest declared |
+| Everything up, nothing reachable | No container publishes a port. Use `docker run --rm --network ai-net curlimages/curl` to talk to them |
+
+## A model call fails
+
+```
+oi run --rm keys --probe analyst
+```
+
+| Symptom | Cause |
+|---|---|
+| `403` naming a model the key cannot reach | The probe is asking for a model outside the key's scope. That is the control working |
+| `422` budget exceeded | The ceiling, working. `keys --set-budget ROLE AMOUNT` is the emergency brake |
+| `AccessDenied` from the provider | The IAM policy allows a bare model id and the rendered config names a prefixed one, or the reverse. Stage 1 has the four names |
+| Nothing at all, and it hangs | The instance has no AWS credentials. The instance role is what makes this keyless |
+
+## A document will not ingest
+
+```
+docker exec ingestion python3 /app/ingest.py --status
+```
+
+| Symptom | Cause |
+|---|---|
+| `seen 0` | The path is wrong. `--documents /documents` is the container's view of `${OI_ROOT}/documents` |
+| `seen` lower than your file count | Unsupported suffixes are ignored silently, by design. Stage 5b has the regex that compares the right two numbers |
+| `failed` above zero | Dead-lettered after two attempts. It is not retried until its bytes change, and `--clear-failures`'s own output is not evidence that it worked — stage 5c |
+| `failed` with a parser refusal on a format in the accepted list | **`.rtf` is accepted by the worker and refused by the parser.** It dead-letters, which is the designed response to an unreadable file and a misleading one for a supported format |
+| A document is ingested and no search finds it | Its top-level folder is not a root in the role map. It is indexed and unreachable, and nothing reports it. Stage 4b |
+
+## A question returns the wrong thing
+
+```
+docker compose … run --rm --entrypoint python -v /opt/oi-core:/w:ro -w /w eval \
+  /w/tests/fixtures/ask.py -q "…" --role staff
+```
+
+| Symptom | Cause |
+|---|---|
+| `lexical: 0` | **Ambiguous.** Either the arm found nothing or it never ran. Check `DATABASE_URL` before believing the index is empty — stage 6a |
+| Passages from a document you did not expect | The corpus, not the code. That document answers the question too |
+| No `NOT CURRENT` marker on a document you superseded | Either the declaration did not land (`--versions`) or the probe ran without a database — stage 7b |
+| Fewer passages than the limit, `withheld: 0` | The overfetch is low or the corpus is small |
+| `withheld` above zero | Two causes and the output does not say which: a store returning out-of-role content is a **security** fault, index drift is a reconciliation fault — stage 6 |
+
+## A denial, or a lack of one
+
+```
+docker run … -e ACCESS_DENIAL_MODE=counted … /w/tests/fixtures/acl_probe.py
+```
+
+| Symptom | Cause |
+|---|---|
+| The probe prints `configured denied` when your manifest says `counted` | You did not pass `-e`, so it is reading the library default. Stage 8a |
+| No denial when content is restricted | Either nothing restricted matched, or the mode is `silent`. Both are legitimate; check `restricted_matched` to tell them apart |
+| A denial names a count of zero | The count is `restricted_matched`, not `withheld`. `withheld` is honestly zero on every question by construction |
+
+## Redaction
+
+| Symptom | Cause |
+|---|---|
+| Nothing leaves, and the reason says no classes are permitted | `FRONTIER_CLASSES` is empty. Re-render, or declare `access.egress.frontier_classes` — stage 9 |
+| A figure was redacted | The pattern list is too broad. Decimal and thousands separators are the ones to check |
+| A real identifier survives | It has no shape the pattern list recognises. Names and addresses are the known bound |
+
+## Retention
+
+| Symptom | Cause |
+|---|---|
+| `destroyed 0, examined 0` | Nothing is past the cutoff. Check `cutoff` and the document's `ingested_at` |
+| `destroyed 0, examined 1, held 1` | A hold. `--holds`, including a deployment-scope one |
+| `failed: 1` with `PermissionError` | The container cannot unlink. It runs as the operator for that reason — stage 10 |
+| `INCOMPLETE` and the run says re-running is safe | **Read stage 10c before re-running.** It is true about the stores and misleading about the file |
+| A document is gone from search and the file is still on disk | A previous run destroyed the stores and failed on the file. There is no command that finishes it |
+
+## The verification commands disagree
+
+| Symptom | Cause |
+|---|---|
+| `audit verify --anchor` fails on a file nobody touched | **Known defect.** A daily export is a slice of the chain and the anchor is the whole of it. Stage 11c |
+| `--clear-failures` says it cleared one and the document stays skipped | Its count is not evidence. Stage 5c |
+| `find | wc -l` disagrees with `seen` | Use the suffix-restricted regex. A plain count includes what the worker ignores — stage 5b |
+
+---
+
+# Appendix: the commands, by what they touch
+
+Ordered by how much damage a mistake does, not alphabetically. Everything in the first two groups is safe
+to run.
+
+**Read-only, always safe**
+
+```
+oi ps                                    docker logs <service> --tail 40
+oi run --rm audit list [--type T]        oi run --rm audit verify <file>
+oi run --rm audit export --date D        oi run --rm retention --holds
+oi run --rm retention --purges           oi run --rm retention --retention-runs
+docker exec ingestion python3 /app/ingest.py --status
+docker exec ingestion python3 /app/ingest.py --versions
+docker exec postgres psql -U oicore -d oicore -c '<sql>'
+```
+
+**Rehearsals and read-mostly**
+
+```
+oi run --rm audit migrate                # applies migrations; additive
+oi run --rm audit export                  # writes files under exports/
+oi run --rm retention --enforce D --dry-run      # reports, destroys nothing
+oi run --rm retention --purge DOC --dry-run      # reports, destroys nothing
+oi run --rm audit purge --before D --dry-run     # reports, destroys nothing
+docker exec ingestion python3 /app/ingest.py --documents /documents
+```
+
+**Changes state**
+
+```
+oi run --rm keys                          # mints or updates role keys
+oi run --rm keys --set-budget ROLE AMOUNT
+oi run --rm retention --set-retention D --days N --legal-basis "..."
+oi run --rm retention --hold DOC --reason "..."
+oi run --rm retention --release-hold ID   # exits 1 if the hold is not in force
+docker exec ingestion python3 /app/ingest.py --supersede A --by B --note "..."
+docker exec ingestion python3 /app/ingest.py --distinct DOC --note "..."
+oi restart <service>                      # a container re-reads its mounted config
+```
+
+**Destroys data**
+
+```
+oi run --rm retention --purge DOC --reason "..."        # one document's indexes; leaves the file
+oi run --rm retention --enforce D                       # everything past the period, INCLUDING the file
+oi run --rm audit purge --before D --reason "..."       # old audit rows, with a tombstone
+oi run --rm retention --destroy-all --reason "..."      # every index, at the end of a contract
+```
+
+**The three things to do before anything in that last group:** run the `--dry-run` form, know which document
+or date it will reach, and check `--holds` in case a hold is already covering it.
