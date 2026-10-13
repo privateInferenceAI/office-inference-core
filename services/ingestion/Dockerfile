@@ -26,7 +26,9 @@ RUN pip install --no-cache-dir "psycopg2-binary==2.9.13"
 WORKDIR /app
 # Only what this worker runs. chunker.py is here because it is the module that decides what a citation
 # points at, and ingest.py is the policy around it.
-COPY chunker.py ingest.py ./
+# identifiers.py is the normalisation shared with the retriever, which imports it from this directory. One
+# implementation, so a reference normalises the same way on the way in and on the way out of the search.
+COPY chunker.py ingest.py identifiers.py ./
 
 # The state directory holds the last cycle's result, which the healthcheck reads. Created here so the
 # container can write it as a non-root user.

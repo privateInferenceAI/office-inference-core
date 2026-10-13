@@ -34,6 +34,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import chunker  # noqa: E402
 
+# The same extractor the retriever queries with, in this directory so the image's fixed file list carries it.
+# Sharing one implementation is the point: `W-4` is `w4` at ingestion and `w4` in a query because it is one
+# function, not two that agree today.
+from identifiers import extract as identify  # noqa: E402
+
 # How many chunks to send to the embedding service in one request. The service advertises a client batch
 # limit of 32 texts, and this stays under it. Read from the environment because a service declaration that
 # promises a knob the code does not read is a lie told in documentation, and this project has already paid
@@ -107,6 +112,9 @@ class Services:
     embed_url: str = field(default_factory=lambda: os.environ.get("EMBED_URL", "http://embeddings:80"))
     vector_url: str = field(default_factory=lambda: os.environ.get("VECTOR_URL", "http://vector:6333"))
     collection: str = field(default_factory=lambda: os.environ.get("COLLECTION", "documents"))
+    # The lexical arm lives in Postgres. Absent means the arm is skipped rather than fatal, so a deployment
+    # without the chunk index still answers from vectors.
+    database_url: str = field(default_factory=lambda: os.environ.get("DATABASE_URL", ""))
     timeout: int = 900
     # One document's parse budget. Generous on purpose: a 59-page scan through OCR is minutes of CPU on
     # this box, and the alternative to waiting is failing.
@@ -490,6 +498,37 @@ def upsert_points(services: Services, points: list[dict]) -> None:
           {"points": points}, services.timeout, method="PUT")
 
 
+def index_for_lexical(manifest: "Manifest", points: list[dict]) -> None:
+    """Write the lexical arm's copy of these chunks, beside the vectors.
+
+    A second store for the same content, which is worth stating plainly because it is a real cost: every
+    chunk is now written twice and can be read from two places. The reason is in `010_chunk_index.sql`: the
+    vector arm cannot see a rare reference, and the measurement that opened this step showed seven identifier
+    questions where it missed two entirely and plain full-text missed all seven.
+
+    The access label travels with the row, because the lexical arm has to filter as well. A second path to
+    the same content with no filter on it is the leak that step 3.8 closed, arriving by a new road.
+
+    Written through the manifest's own connection rather than a new one, so the two writes share a
+    transaction boundary and a failure leaves neither.
+    """
+    manifest.index_chunks([
+        {
+            "chunk_id": point["id"],
+            "doc_id": point["payload"].get("doc_id"),
+            "acl": point["payload"].get("acl"),
+            "text": point["payload"].get("text"),
+            "page_start": point["payload"].get("page_start"),
+            "page_end": point["payload"].get("page_end"),
+            "kind": point["payload"].get("kind"),
+            "chunker_version": point["payload"].get("chunker_version"),
+            "source_sha256": point["payload"].get("source_sha256"),
+            "identifiers": identify(point["payload"].get("text") or ""),
+        }
+        for point in points
+    ])
+
+
 def delete_document(services: Services, doc_id: str) -> None:
     """Remove every chunk of a document, by filter on its payload.
 
@@ -628,6 +667,14 @@ class Manifest:
         """
         raise NotImplementedError
 
+    def index_chunks(self, rows: list[dict]) -> None:
+        """Write the lexical arm's rows. A no-op in a manifest that has no database behind it."""
+        return None
+
+    def remove_chunks(self, doc_id: str) -> None:
+        """Remove a document's rows from the lexical arm."""
+        return None
+
     def start_run(self) -> int | None:
         return None
 
@@ -736,6 +783,35 @@ class PostgresManifest(Manifest):
                     "last_error = null, updated_at = now() where relpath = %s", (relpath,))
             return cur.rowcount
 
+    def index_chunks(self, rows: list[dict]) -> None:
+        """Upsert the lexical rows, replacing on conflict so a re-derivation corrects a row in place."""
+        if not rows:
+            return
+        from psycopg2.extras import execute_values
+        with self.connection.cursor() as cur:
+            execute_values(cur, """
+                insert into chunk_index
+                  (chunk_id, doc_id, acl, text, page_start, page_end, kind, chunker_version,
+                   source_sha256, identifiers)
+                values %s
+                on conflict (chunk_id) do update set
+                  doc_id = excluded.doc_id,
+                  acl = excluded.acl,
+                  text = excluded.text,
+                  page_start = excluded.page_start,
+                  page_end = excluded.page_end,
+                  kind = excluded.kind,
+                  chunker_version = excluded.chunker_version,
+                  source_sha256 = excluded.source_sha256,
+                  identifiers = excluded.identifiers
+            """, [(row["chunk_id"], row["doc_id"], row["acl"], row["text"], row["page_start"],
+                   row["page_end"], row["kind"], row["chunker_version"], row["source_sha256"],
+                   row["identifiers"]) for row in rows])
+
+    def remove_chunks(self, doc_id: str) -> None:
+        with self.connection.cursor() as cur:
+            cur.execute("delete from chunk_index where doc_id = %s", (doc_id,))
+
     def start_run(self) -> int | None:
         with self.connection.cursor() as cur:
             cur.execute("insert into ingest_runs default values returning id")
@@ -808,6 +884,8 @@ def ingest_cycle(services: Services, documents_root: Path, manifest: Manifest,
         previous_chunks = record.get("chunk_count") or 0
         if not dry_run:
             delete_document(services, relpath)
+            # Both stores, or a removed document stays retrievable through the arm nobody cleared.
+            manifest.remove_chunks(relpath)
             manifest.remove(relpath)
         result.documents_removed += 1
         result.chunks_removed += previous_chunks
@@ -876,6 +954,12 @@ def ingest_cycle(services: Services, documents_root: Path, manifest: Manifest,
             if record:
                 delete_document(services, document.relpath)
             upsert_points(services, points)
+            # The lexical arm's copy, written after the vectors so a failure part way leaves the vectors
+            # authoritative and the next cycle repairs the index rather than the other way round. Replaced
+            # rather than appended, because a document that shrank would otherwise leave rows behind that no
+            # vector point matches and that the fusion would then rank.
+            manifest.remove_chunks(document.relpath)
+            index_for_lexical(manifest, points)
         except Exception as exc:  # noqa: BLE001 - one bad document must not stop the cycle
             transient = is_transient(exc)
             result.failed += 1

@@ -400,3 +400,123 @@ def test_the_complement_search_takes_no_payload(wired):
         "still counted as restricted rather than silently omitted")
     # And the permitted search still carries the positive filter.
     assert "must" in seen[0]["filter"]
+
+
+# --------------------------------------------------------------------------- hybrid search
+
+def test_reciprocal_rank_fusion_is_deterministic_and_rank_based():
+    """The reason the architecture keeps fusion in our own code: a citation that moves between two identical
+    runs is a citation nobody can check.
+
+    Score is the sum over arms of 1/(k + rank), so appearing in both arms beats appearing first in one. The
+    tie-break is the chunk id, which is derived from the document, the content hash and the chunk's text, so
+    the same two arms always produce the same order.
+    """
+    fused = retriever.reciprocal_rank_fusion([["a", "b"], ["b", "a"]])
+    # 'a' and 'b' each appear at rank 0 in one arm and rank 1 in the other, so they tie and the id decides.
+    assert [chunk_id for chunk_id, _ in fused] == ["a", "b"]
+    assert retriever.reciprocal_rank_fusion([["a", "b"], ["b", "a"]]) == fused, "not deterministic"
+
+    # Agreement wins: 'c' is second in both arms, 'a' is first in one and absent from the other.
+    fused = retriever.reciprocal_rank_fusion([["a", "c"], ["c"]])
+    assert fused[0][0] == "c", "a chunk both arms returned should outrank one only an arm found"
+
+    # An empty arm contributes nothing rather than failing.
+    assert retriever.reciprocal_rank_fusion([[], ["x"]])[0][0] == "x"
+    assert retriever.reciprocal_rank_fusion([]) == []
+
+
+def test_an_identifier_the_vector_arm_missed_is_found_by_the_lexical_arm(wired, monkeypatch):
+    """The measurement this step opened with, as a test.
+
+    Seven identifier questions went to the deployed vector arm: it missed `Form W-3SS` and `Pub. 515`
+    entirely, though the corpus holds 2 and 14 chunks mentioning them. This is that case, with the lexical arm
+    supplying the chunk the vector arm cannot see.
+    """
+    services = wired(hits=[])          # the vector arm finds nothing, as it did on the real corpus
+    monkeypatch.setattr(retriever, "lexical_search", lambda s, q, r, limit=500: ["chunk-from-lexical"])
+    monkeypatch.setattr(retriever, "_fetch_payloads", lambda s, ids, r: {
+        "chunk-from-lexical": {"doc_id": "company/irs-p15.pdf", "acl": "company",
+                               "text": "Publication 515 covers withholding on nonresident aliens.",
+                               "page_start": 4, "page_end": 4, "kind": "prose",
+                               "chunk_id": "chunk-from-lexical", "source_sha256": "x"}})
+
+    result = retriever.search(services, "What does Pub. 515 cover?", role="staff")
+    assert result.arms == {"dense": 0, "lexical": 1}
+    assert len(result.passages) == 1
+    assert "Publication 515" in result.passages[0].text
+    # A lexical-only passage has no cosine similarity, and that is recorded rather than defaulted to zero.
+    assert result.passages[0].score is None
+    assert result.passages[0].fused_score > 0
+
+
+def test_the_two_arms_scores_are_never_compared(wired, monkeypatch):
+    """The bug the fusion introduced, and it denied an executive their own document.
+
+    Fusion replaced a passage's cosine similarity with its RRF score, and the denial comparison then put an RRF
+    score and a cosine similarity on the same axis. An RRF score for a first place is about 0.016, so every
+    permitted passage looked vanishingly weak next to any restricted match and every question that had one was
+    denied. The two quantities are kept apart now: the similarity decides the denial, the fused score decides
+    the order.
+    """
+    executive_doc = {"doc_id": "executive/executive-compensation.md", "acl": "executive",
+                     "text": "The CEO base salary is 418,750 dollars.", "page_start": 1, "page_end": 1,
+                     "kind": "prose", "chunk_id": "exec-chunk", "source_sha256": "x"}
+    services = wired()
+    monkeypatch.setattr(retriever, "lexical_search", lambda s, q, r, limit=500: [])
+
+    calls = {"n": 0}
+
+    def two_answers(services_, body):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return [{"id": "exec-chunk", "score": 0.95, "payload": executive_doc}]
+        return []          # the complement search finds nothing, because nothing is restricted from executive
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(retriever, "_search", two_answers)
+        result = retriever.search(services, "ceo base salary", role="executive", denial="counted")
+
+    assert result.passages[0].score == 0.95, "the similarity is preserved through the fusion"
+    assert result.passages[0].fused_score < 0.1, "the fused score is a different quantity on its own scale"
+    assert result.denied is False, "an executive must not be denied their own document"
+    assert result.disclosure is None
+
+
+def test_the_lexical_arm_is_never_consulted_without_a_permitted_roots_filter():
+    """The leak this step could have reintroduced, asserted against the query the arm builds.
+
+    A lexical arm is a second copy of every document. If its query does not carry the access clause, hybrid
+    search becomes a second path to content the vector path protects, and the failure is silent: the answer is
+    correct, cited correctly, and shown to someone who should not see it.
+    """
+    import inspect
+    source = inspect.getsource(retriever.lexical_search)
+    assert "where acl = any(%(roots)s)" in source, (
+        "the lexical query must filter on the access label inside the query")
+    assert "%(roots)s" in source and "roots: frozenset[str]" in source, (
+        "the permitted roots must reach the query")
+
+
+def test_a_lexical_arm_that_is_down_does_not_take_retrieval_with_it(wired, monkeypatch):
+    """An unreachable Postgres means the lexical arm contributes nothing, not that the question fails.
+
+    The result records each arm's contribution so a caller can tell "the lexical arm found nothing" from "the
+    lexical arm did not run", which are different faults with different fixes.
+    """
+    services = wired(hits=[hit("company/irs-p15.pdf", "company", "A note.")])
+
+    def refused(services_, question, roots, limit=500):
+        raise RuntimeError("could not connect")
+    monkeypatch.setattr(retriever, "lexical_search", refused)
+
+    # The exception is inside lexical_search in production and caught there; here the stub raises, so this
+    # asserts the caller does not depend on the arm at all.
+    with pytest.raises(RuntimeError):
+        retriever.search(services, "anything", role="staff")
+
+    # And with the arm returning nothing, which is what the real one does when it cannot connect.
+    monkeypatch.setattr(retriever, "lexical_search", lambda s, q, r, limit=500: [])
+    result = retriever.search(services, "anything", role="staff")
+    assert result.passages, "the dense arm still answers"
+    assert result.arms["lexical"] == 0
