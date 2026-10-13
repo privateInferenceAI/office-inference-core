@@ -1988,6 +1988,80 @@ counts.
 - Fewer passages than the limit with nothing withheld: overfetch is too low, or the corpus is small. The
   store is asked for three times the limit because withheld passages consume part of the result set.
 
+### 3.9 Hybrid search
+
+**Goal.** An exact reference a vector search cannot see is found by the lexical arm. `RET-HYBRID-001`, and its
+verify line asks for a question where hybrid on succeeds and hybrid off fails.
+
+**The measurement first, because the arm is the largest piece of this step.** Seven questions built from
+identifiers that genuinely appear in the corpus were put to the deployed vector arm and to plain Postgres
+full-text, before anything was built.
+
+| Identifier | Chunks mentioning it | Vector found it | Plain full-text |
+|---|---|---|---|
+| Form W-3SS | 2 | **missed** | **missed** |
+| Pub. 515 | 14 | **missed** | **missed** |
+| Pub. 519 | 15 | found, not first | **missed** |
+| Form W-3 | 10 | found | **missed** |
+| Pub. 15 | 53 | found | **missed** |
+| Form W-2 | 36 | found | **missed** |
+| Form W-4 | 32 | found | **missed** |
+
+**The vector arm misses the rare identifiers**, which is the opposite of harmless: a person types an exact
+reference precisely because it is unusual enough that they had to look it up. Everything common is found and
+everything uncommon is not.
+
+**And plain full-text matched none of the seven.** Two faults, both read from the database rather than
+guessed:
+
+    What does Pub. 515 cover?        ->  'pub' & '515' & 'cover'      matches nothing
+    When must Form W-3SS be filed?   ->  'must'&'form'&'w-3ss'&'w'&'3ss'&'file'
+    How long must I keep a Form W-4? ->  'long'&'must'&'keep'&'form'&'w'&'-4'
+
+`plainto_tsquery` ANDs every term of a natural question, so a chunk saying "Pub. 515" without the word "cover"
+cannot match. And Postgres splits a reference unpredictably: `Form W-4` becomes `'w' & '-4'`, `Form W-3SS`
+becomes three tokens. Stemming is right for prose and wrong for a reference, and no configuration of a
+text-search parser makes `W-4` stable.
+
+**So the arm normalises references itself.** `services/ingestion/identifiers.py` extracts them with a pattern
+that requires a leading capital and reduces them to letters and digits, so `Form W-4`, `W-4` and `w4` all
+become `w4` on both sides of the search. It lives beside the worker rather than in the retriever because the
+ingestion image copies a fixed file list and a module both images need has to sit inside one build context.
+The dependency already ran that way, since the retriever imports the worker for its Services record.
+
+Two things the measurement forced, and both are in the module's tests. A pattern without the leading capital
+pulled `is67` out of "the mileage rate is 67 cents per mile", which would have matched ordinary sentences on a
+numeral. And normalisation alone could not match `Pub. 515` to a document saying `Publication 515`, so a small
+alias table expands the abbreviation. That is the same corpus-mined glossary the architecture calls for on the
+query side.
+
+**The store.** `010_chunk_index.sql` adds a table with the chunk text, the access label, a generated `tsvector`
+for prose, and a normalised `identifiers text[]` with a GIN index. The worker writes it beside the vectors, and
+clears a document's rows when the document changes or goes, because a row no vector point matches is a row the
+fusion would still rank.
+
+**The fusion is ours**, `k=60`, equal weights, tie-broken on chunk id. The architecture keeps it out of the
+database for determinism, and a citation that moves between two identical runs is a citation nobody can check.
+
+**The leak this step could have reintroduced.** A lexical arm is a second copy of every document. Without the
+access clause in its query it becomes a second path to content the vector path protects, and the failure is
+silent: the answer is correct, cited correctly, and shown to someone who should not see it. So `acl` is a
+clause in the lexical query exactly as it is in the vector one, and there is a test asserting the clause is
+there rather than asserting the results look right.
+
+**If it breaks.**
+
+- No identifier hits at all: the lexical arm is not running. It returns an empty list when `DATABASE_URL` is
+  unset or unreachable and prints why, and `result.arms` records `lexical: 0`, which is how a caller tells
+  "found nothing" from "did not run".
+- An identifier hits the wrong document: check `identifiers.extract` on both the question and the chunk text.
+  The two sides share one function, so a disagreement means a chunk was indexed before the normalisation
+  changed, which `PAYLOAD_VERSION` handles by re-deriving the corpus.
+- A question with no reference in it returns nothing from the lexical arm: expected, and the dense arm answers.
+- Fewer passages than the limit: the two stores have drifted. A chunk the lexical arm names and the vector
+  store does not hold is counted in `withheld` rather than skipped, because that is a reconciliation fault
+  worth seeing.
+
 ## Phase 4 — Assistant API  *(outline)*
 
 The single surface the client app talks to: ask, tasks, approvals, activity, settings.

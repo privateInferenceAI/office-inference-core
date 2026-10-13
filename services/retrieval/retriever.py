@@ -32,6 +32,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "ingestion"))
 
 import ingest  # noqa: E402
 
+# The normalisation shared with the ingestion worker, imported from where the worker keeps it. It lives beside
+# `ingest.py` rather than here because the ingestion image copies a fixed file list, and a module both images
+# need has to sit inside one of their build contexts. The dependency already ran this way: this module imports
+# `ingest` for the Services record, so the two are one unit whichever directory they are filed under.
+import identifiers  # noqa: E402
+
+# Reciprocal rank fusion's constant. The architecture fixes it at 60, and the value is conventional rather
+# than tuned here: it damps the difference between the top few ranks so one arm's confident first place does
+# not simply win, which is the behaviour that makes a second arm worth having.
+RRF_K = 60
+
+# Candidates taken from each arm before fusing. Equal weights, as the architecture specifies, so the number is
+# the same for both arms and the fusion is the only thing that decides an order.
+ARM_DEPTH = 500
+
 # Which document roots a role may retrieve from. A role absent from this map is refused rather than
 # defaulted, because the failure a default would cause is the worst kind: a typo or a missing session field
 # silently granting the broader of two permissions.
@@ -58,14 +73,21 @@ class Passage:
     page_end: int
     kind: str
     chunk_id: str
-    score: float = 0.0
+    # The vector arm's cosine similarity, or None for a chunk only the lexical arm returned. This is the
+    # number the denial comparison uses, because it is the only one comparable across arms: an RRF score is a
+    # rank-derived quantity on a different scale, and comparing the two is what made a permitted passage look
+    # weaker than a restricted one and denied an executive their own document.
+    score: float | None = None
+    # The fused score, kept for ordering and for a caller that wants to see why something ranked where it did.
+    fused_score: float = 0.0
     is_ocr: bool = False
     page_is_nominal: bool = False
     table_id: str | None = None
     row_index: int | None = None
 
     @classmethod
-    def from_payload(cls, payload: dict, score: float) -> "Passage":
+    def from_payload(cls, payload: dict, score: float | None,
+                     fused_score: float = 0.0) -> "Passage":
         return cls(
             doc_id=payload.get("doc_id") or "",
             acl=payload.get("acl") or "",
@@ -75,6 +97,7 @@ class Passage:
             kind=payload.get("kind") or "prose",
             chunk_id=payload.get("chunk_id") or "",
             score=score,
+            fused_score=fused_score,
             is_ocr=bool(payload.get("is_ocr")),
             page_is_nominal=bool(payload.get("page_is_nominal")),
             table_id=payload.get("table_id"),
@@ -143,11 +166,131 @@ class Result:
     # The best score found among passages this role may not see, kept for the record rather than shown to a
     # user. It is what makes "the answer may be incomplete" a measured statement rather than a guess.
     restricted_best_score: float | None = None
+    # Which arms returned anything. A caller reading an empty result needs to know whether the lexical arm
+    # ran and found nothing or did not run at all, because those are different faults.
+    arms: dict[str, int] = field(default_factory=dict)
 
 
 def embed_query(services: ingest.Services, texts: list[str]) -> list[list[float]]:
     """The query's vector. A seam of its own so a test can watch what is embedded."""
     return ingest.embed_texts(services, texts)
+
+
+def lexical_search(services: ingest.Services, question: str, roots: frozenset[str],
+                   limit: int = ARM_DEPTH) -> list[str]:
+    """Chunk ids from the lexical arm, best first, restricted to the roots the role may see.
+
+    Two match strategies in one query, because they answer different questions and the measurement showed
+    neither alone is enough:
+
+      identifiers  exact references, matched with `&&` against the normalised tokens. This is what finds
+                   `Pub. 515` and `Form W-3SS`, and it is the reason the arm exists at all.
+      tsv          stemmed words, which is what full-text is good at and what catches a phrasing the vector
+                   arm reads past.
+
+    An identifier match outranks a word match, because a question that contains a reference is usually asking
+    about that reference. Within each group the order is the database's rank with the chunk id as a final
+    tie-break, so two identical queries cannot return different orders.
+
+    The access label is a clause in this query, exactly as it is in the vector one. A lexical arm without it
+    would be a second path to the same content with no filter on it, which is the leak step 3.8 closed
+    arriving by a new road.
+    """
+    dsn = services.database_url
+    if not dsn:
+        return []
+    tokens = identifiers.extract(question)
+
+    import psycopg2
+    sql = """
+        with permitted as (
+          select chunk_id, tsv, identifiers
+          from chunk_index
+          where acl = any(%(roots)s)
+        ),
+        by_identifier as (
+          select chunk_id, 0 as tie, 0 as arm_rank
+          from permitted
+          where identifiers && %(tokens)s
+          order by chunk_id
+          limit %(limit)s
+        ),
+        by_word as (
+          select chunk_id, 1 as tie,
+                 row_number() over (
+                   order by ts_rank(tsv, websearch_to_tsquery('english', %(question)s)) desc, chunk_id
+                 ) as arm_rank
+          from permitted
+          where tsv @@ websearch_to_tsquery('english', %(question)s)
+          order by ts_rank(tsv, websearch_to_tsquery('english', %(question)s)) desc, chunk_id
+          limit %(limit)s
+        )
+        select chunk_id from (
+          select chunk_id, tie, arm_rank from by_identifier
+          union all
+          select chunk_id, tie, arm_rank from by_word
+        ) as both
+        order by tie, arm_rank, chunk_id
+        limit %(limit)s
+    """
+    try:
+        with psycopg2.connect(dsn) as connection:
+            with connection.cursor() as cur:
+                cur.execute(sql, {"roots": sorted(roots), "tokens": tokens or [""],
+                                  "question": question, "limit": limit})
+                return [row[0] for row in cur.fetchall()]
+    except Exception as exc:  # noqa: BLE001
+        # A lexical arm that is down must not take retrieval with it. The dense arm still answers, and the
+        # result records that the lexical arm contributed nothing so a caller can see the difference between
+        # "no lexical match" and "no lexical arm".
+        print(f"lexical arm unavailable: {type(exc).__name__}: {exc}")
+        return []
+
+
+def reciprocal_rank_fusion(arms: list[list[str]], k: int = RRF_K) -> list[tuple[str, float]]:
+    """Fuse ranked id lists into one ranking, by reciprocal rank.
+
+    The reason the architecture keeps this in our own code rather than using a store's: determinism. A citation
+    that moves between two identical runs is a citation nobody can check, and a fusion implemented inside a
+    database is one whose tie-breaking we do not control.
+
+    Score is the sum over arms of 1/(k + rank). Ties break on chunk id, which is derived from the document, the
+    content hash and the chunk's own text, so the order is stable across processes and runs.
+    """
+    scores: dict[str, float] = {}
+    for arm in arms:
+        for rank, chunk_id in enumerate(arm):
+            scores[chunk_id] = scores.get(chunk_id, 0.0) + 1.0 / (k + rank + 1)
+    return sorted(scores.items(), key=lambda item: (-item[1], item[0]))
+
+
+def _fetch_payloads(services: ingest.Services, chunk_ids: list[str],
+                    roots: frozenset[str]) -> dict[str, dict]:
+    """Payloads for chunk ids the vector arm did not return, restricted to the permitted roots.
+
+    The filter is applied here as well as in the lexical query, because this call reaches the vector store
+    directly by id: it is a second path to content, and a second path is where a missing filter hides.
+    """
+    if not chunk_ids:
+        return {}
+    body = {"ids": chunk_ids, "with_payload": True,
+            "filter": {"must": [{"key": "acl", "match": {"any": sorted(roots)}}]}}
+    request = urllib.request.Request(
+        f"{services.vector_url}/collections/{services.collection}/points",
+        data=json.dumps(body).encode(), method="POST",
+        headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=services.timeout) as response:
+            points = json.loads(response.read()).get("result") or []
+    except Exception as exc:  # noqa: BLE001
+        print(f"could not fetch payloads for the lexical arm: {type(exc).__name__}: {exc}")
+        return {}
+    out: dict[str, dict] = {}
+    for point in points:
+        payload = point.get("payload") or {}
+        if (payload.get("acl") or "") in roots:
+            out[payload.get("chunk_id") or point.get("id") or ""] = payload
+    return out
 
 
 def _restricted_best_score(services: ingest.Services, vector: list[float],
@@ -276,30 +419,73 @@ def search(services: ingest.Services, question: str, role: str, limit: int = 10,
     }
     raw = _search(services, body)
 
+    dense: list[str] = []
+    by_id: dict[str, dict] = {}
+    similarities: dict[str, float] = {}
     for item in raw:
         payload = item.get("payload") or {}
         acl = payload.get("acl") or ""
         if acl not in roots:
-            # The store returned something the role may not see. It should not have, given the query, and
-            # this is the line that keeps a store bug from becoming a disclosure.
+            # The store returned something the role may not see. It should not have, given the query, and this
+            # is the line that keeps a store bug from becoming a disclosure.
             result.withheld += 1
             continue
+        chunk_id = payload.get("chunk_id") or item.get("id") or ""
+        if chunk_id:
+            dense.append(chunk_id)
+            by_id[chunk_id] = payload
+            similarities[chunk_id] = float(item.get("score") or 0.0)
+    result.arms["dense"] = len(dense)
+
+    # The lexical arm, filtered by the same roots inside its own query.
+    lexical = lexical_search(services, question, roots)
+    result.arms["lexical"] = len(lexical)
+
+    # Fusion decides the order; the payloads come from whichever arm has them. A chunk only the lexical arm
+    # returned needs its payload fetched, because a citation needs the text and the page.
+    fused = reciprocal_rank_fusion([dense, lexical])
+    missing = [chunk_id for chunk_id, _ in fused[:limit] if chunk_id not in by_id]
+    if missing:
+        by_id.update(_fetch_payloads(services, missing, roots))
+
+    for chunk_id, _score in fused:
         if len(result.passages) >= limit:
+            break
+        payload = by_id.get(chunk_id)
+        if payload is None:
+            # The lexical arm named a chunk the vector store does not hold, which means the two stores have
+            # drifted. Counted as withheld rather than skipped silently, because a chunk that is findable in
+            # one place and not the other is a reconciliation fault worth seeing.
+            result.withheld += 1
             continue
-        result.passages.append(Passage.from_payload(payload, float(item.get("score") or 0.0)))
+        result.passages.append(Passage.from_payload(payload, similarities.get(chunk_id), _score))
 
     # Whether content the role may not see would have answered BETTER than anything it can see. This runs in
     # every mode, including silent, because the record has to be able to report that a partial answer was
     # returned — that is precisely what an auditor asks about, and a silent organisation is the one most
     # likely to be asked.
-    best_permitted = max((p.score for p in result.passages), default=None)
+    # Vector similarity only, because that is the one scale both sides of this comparison share. A passage the
+    # lexical arm alone returned has no similarity and cannot be compared, so it is skipped rather than
+    # treated as zero, which would deny every question the lexical arm answered.
+    permitted_scores = [p.score for p in result.passages if p.score is not None]
+    best_permitted = max(permitted_scores, default=None)
     restricted_best = _restricted_best_score(services, vectors[0], roots)
 
     result.restricted_best_score = restricted_best
     if restricted_best is not None:
         # Only a BETTER match counts. A weak match exists for almost any question, and denying on one would
         # train users to ignore a warning that fires constantly, which costs the disclosure its only job.
-        if best_permitted is None or restricted_best > best_permitted:
+        if best_permitted is None:
+            # The permitted side returned nothing with a similarity, so there is no scale to compare on. A
+            # restricted match is treated as decisive, because the alternative is silence while content that
+            # answers the question exists.
+            result.denied = True
+            result.reason = (
+                f"nothing available to the {role!r} role matched this question, and a passage it may not see "
+                f"did.")
+            result.disclosure = _disclose(mode, role, result.withheld)
+            return result
+        if restricted_best > best_permitted:
             result.denied = True
             # The facts, which are accurate in every mode and belong to the record.
             if result.withheld:

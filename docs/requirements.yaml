@@ -349,8 +349,25 @@ items:
     title: Hybrid search returns exact identifiers that vector search alone misses
     tier: [cloud, office, hosted]
     phase: C2
-    verify: a golden question containing a procedure code retrieves the right passage with hybrid on and fails with it off
+    verify: a golden question containing an exact reference retrieves the right passage with the lexical arm on and fails with it off
     status: open
+    note: >-
+      Built 2026-10-13, recorded in docs/runbook.md step 3.9. Measured before building, and the measurement
+      changed the design twice. Seven identifier questions went to the deployed vector arm: it missed Form
+      W-3SS and Pub. 515 entirely, though the corpus holds 2 and 14 chunks mentioning them, and found every
+      common identifier. The failures are the rare ones, which is the opposite of harmless because a person
+      types an exact reference precisely when it is unusual enough that they had to look it up. Plain Postgres
+      full-text matched none of the seven: plainto_tsquery ANDs every term of a natural question, and the
+      parser splits Form W-4 into 'w' & '-4'. So references are normalised by a shared extractor rather than
+      matched by a text-search configuration, with a small alias table closing the Pub./Publication gap. The
+      store is a chunk_index table with a generated tsvector for prose and a normalised identifiers array for
+      references, both GIN indexed. Fusion is our own reciprocal rank, k=60, tie-broken on chunk id, because
+      the architecture keeps it out of the database for determinism. The lexical arm carries the access clause
+      in its own query, since a second copy of every document without a filter is the leak step 3.8 closed
+      arriving by a new road, and a test asserts the clause rather than the results. Status is open because the
+      acceptance test has to run on the deployed store: a unit test can assert the query is built and only the
+      store can show it returns the right chunk. Still open for the same item: the fusion has not been measured
+      against a reranker, so whether the fused order is better than either arm alone is unproven.
   - id: RET-CITE-001
     title: Every citation is verified against the retrieved set, the page, and entailment
     tier: [cloud, office, hosted]
