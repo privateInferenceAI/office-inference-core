@@ -178,10 +178,16 @@ def main() -> int:
             print(f"REFUSED: {result.refusal_reason}")
             return 1
         if result.dry_run:
-            total = sum(int(v.get("would_delete") or 0) for v in result.stores.values())
+            # Every value here is a per-store dictionary. It is summed defensively anyway, because the note
+            # used to live inside this map as a bare string and this line died with `'str' object has no
+            # attribute 'get'` on the one case it exists for: a document id that matches nothing.
+            counts = [int(v.get("would_delete") or 0) for v in result.stores.values() if isinstance(v, dict)]
+            total = sum(counts)
             print()
             print(f"DRY RUN, nothing was changed. A real purge would remove {total} object(s) across "
-                  f"{len([k for k, v in result.stores.items() if int(v.get('would_delete') or 0)])} store(s).")
+                  f"{len([c for c in counts if c])} store(s).")
+            if result.note:
+                print(result.note)
             if not result.complete:
                 print("It would be INCOMPLETE for the reason recorded under audit_payload.")
             return 0

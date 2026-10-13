@@ -64,6 +64,12 @@ class PurgeResult:
     # Whether this was a rehearsal. It is part of the record because a reader of `--purges` has to be able to
     # tell a purge that happened from one that was counted, and because the CLI's summary line keys off it.
     dry_run: bool = False
+    # A note about the run as a whole, and it lives here rather than inside `stores` because `stores` is a map
+    # of per-store dictionaries. A string in there broke every caller that iterates the values: the dry run's
+    # summary line did `v.get("would_delete")` over all of them and died with `'str' object has no attribute
+    # 'get'`, on exactly the case it exists for — a document id that matches nothing, which is the first thing
+    # a cautious operator tries.
+    note: str | None = None
 
     def record(self, name: str, **counts) -> None:
         self.stores[name] = counts
@@ -77,9 +83,12 @@ class PurgeResult:
         return sum(int(v.get("deleted") or 0) for v in self.stores.values())
 
     def as_record(self) -> dict:
-        return {"doc_id": self.doc_id, "complete": self.complete, "stores": self.stores,
-                "refused": self.refused, "refusal_reason": self.refusal_reason,
-                "dry_run": self.dry_run}
+        record = {"doc_id": self.doc_id, "complete": self.complete, "stores": self.stores,
+                  "refused": self.refused, "refusal_reason": self.refusal_reason,
+                  "dry_run": self.dry_run}
+        if self.note:
+            record["note"] = self.note
+        return record
 
 
 # --------------------------------------------------------------------------- holds
@@ -190,7 +199,7 @@ def _report_what_would_be_destroyed(connection, doc_id: str, vector_url: str, co
                            "unknown. Pass --documents-root or set DOCUMENTS_ROOT to find out.")
 
     if not any(int(v.get("would_delete") or 0) for v in result.stores.values()):
-        result.stores["note"] = (
+        result.note = (
             "nothing matches this document in any store, so a real purge would remove nothing. Check the "
             "path against ingest_manifest: a misspelled document id purges silently and reports success.")
 

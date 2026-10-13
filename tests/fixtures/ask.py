@@ -63,7 +63,12 @@ def main() -> int:
 
     try:
         roots = retriever.permitted_roots(args.role)
-    except KeyError as exc:
+    except (KeyError, ValueError) as exc:
+        # Two refusals, both exit 2. KeyError is an unknown role. ValueError is a role whose permission set is
+        # empty, which `permitted_roots` raises rather than treating as "sees nothing": a role that may see
+        # nothing is a configuration error, and calling it a legitimate role makes a mistake look like a user
+        # with no documents. Only the first was caught until a review noticed the second escaped as a
+        # traceback and exit 1.
         print(f"error: {exc}", file=sys.stderr)
         return 2
 

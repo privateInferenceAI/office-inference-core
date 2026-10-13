@@ -1258,10 +1258,10 @@ no data classes are permitted on the frontier lane. This is what an unconfigured
 and it refuses rather than guessing a default.
 ```
 
-Every request refused, on a manifest that says three classes are allowed. Nothing errors at validation, and
-the first symptom is a model call that will not go out. A validator rule requiring `access.egress` whenever
-the frontier lane is enabled would catch it, and that rule does not exist yet; the three examples now
-declare both blocks, with a comment saying which one is read.
+Every request refused, on a manifest that says three classes are allowed. The first symptom is a model call
+that will not go out, and **before this round nothing errored at validation at all.** A validator rule now
+refuses the shape — it is the last bullet under "What the validator refuses" below — and the three examples
+declare both blocks, each with a comment saying which one is read.
 
 This was found by a review, not by a failure, and it is left standing on purpose. Resolving it means
 either deleting a field that section 16 documents and clients may have written, or changing which field a
@@ -1636,7 +1636,7 @@ against the number the worker reports:
 # every file in the handover, and then only the ones the worker will look at
 find /opt/oi-core/documents -type f | wc -l
 find /opt/oi-core/documents -type f \
-  -regextype posix-extended -regex '.*\.(pdf|docx|pptx|xlsx|html?|md|markdown|txt|csv|rtf|odt|ods|odp|eml)' | wc -l
+  -regextype posix-extended -iregex '.*\.(pdf|docx|pptx|xlsx|html?|md|markdown|txt|csv|rtf|odt|ods|odp|eml)' | wc -l
 
 docker exec ingestion python3 /app/ingest.py --documents /documents
 ```
@@ -1646,6 +1646,11 @@ obvious check is the wrong one: the worker counts only files whose suffix is in 
 client's handover folder will contain a `.DS_Store`, a `.msg` export and a couple of `.doc` files that it
 deliberately ignores. A first number that is higher than `seen` is the filter working, and chasing it wastes
 an afternoon. The question worth asking is whether the *second* number matches:
+
+**The `-iregex` matters.** The worker compares a lowercased suffix, so `INVOICE.PDF` is ingested, while a
+case-sensitive `-regex` would not count it and the second number would read low for no real reason. That is
+the kind of discrepancy the table below would then send you chasing, so the two lists are kept matching
+character for character — all fifteen suffixes, and the case flag.
 
 - **Second number higher than `seen`:** a file in an accepted format was missed. Check the worker's own
   `failed` count, then the parser's log for that filename.
@@ -1844,12 +1849,24 @@ The counts depend on the corpus and on the chunker version. On this deployment, 
 points, measured from the index:
 
 **Twelve documents, and only four of them were fetched.** `fixtures/corpus/manifest.yaml` declares both
-lists and is the authority: four real filings from SEC EDGAR and the IRS under `documents`, with the
-licence read at the source, and eight fixtures this project wrote under `authored_fixtures`, each naming
-the `tests/fixtures/*.py` script that builds it and the control it exists to prove. The eight land in the
-deployed corpus because their builders write straight into the documents root, so an index holding twelve
-is correct rather than a sign that something was ingested twice. `python3 fixtures/corpus/validate_corpus.py`
-checks that every authored fixture names a builder that exists.
+lists and is the authority: four real filings from SEC EDGAR and the IRS under `documents`, with the licence
+read at the source, and eight fixtures this project wrote under `authored_fixtures`, each naming the
+`tests/fixtures/*.py` script that builds it, the control it exists to prove, and **how it arrives in a
+deployed corpus — which is not the same for all eight:**
+
+| How it arrives | How many | Which |
+|---|---|---|
+| `written-directly` — the builder writes into `/w/documents`, so running it installs the file | 4 | the three fee schedules, `onboarding-notes.md` |
+| `copied-by-hand` — the builder writes into the repository and an operator copies it in | 1 | `executive-compensation.md`, by runbook step 3.12 |
+| `no-install-step` — nothing in the repository places it | 3 | `callout-rate-approval.eml`, `rate-card-2026.xlsx`, `dispatch-review-q1.pptx` |
+
+So an index holding twelve is correct rather than a sign that something was ingested twice, and **a reader
+rebuilding this corpus from the repository alone will find three files missing.** That is recorded as a gap
+rather than tidied: the three are the format fixtures from `RET-FORMAT-001`, and the honest statement is that
+they were installed by hand during the build and the step was never written down. The same `cp` the runbook
+gives for the executive fixture would place them.
+
+`python3 fixtures/corpus/validate_corpus.py` checks that every authored fixture names a builder that exists.
 
 | Document | Chunks | Notes |
 |---|---|---|
@@ -2056,9 +2073,11 @@ For the other three it was tested and passed. That is the honest ceiling on what
 checking, and it is a stronger result than the inversion of it would be.
 
 **Which questions are affected is not a fixed fact about the question set**, since a rerun can support the same
-question from a different chunk. Six of the ten questions draw on the pageless filings — `Q01`, `Q05`, `Q06`,
-`Q07` and `Q10`, with `Q05` drawing on two of them — so a change to ranking is enough to move the number, which
-is why the harness reports it per run rather than recording it as a property of the corpus.
+question from a different chunk. **Four** of the ten can draw on a pageless chunk — `Q05`, `Q06`, `Q07` and
+`Q10`, with `Q05` drawing on two exhibits — and that is four questions across five question-to-document pairs.
+`Q01` is not among them: it draws only on the IRS publication, whose every chunk carries a real page. So a
+change to ranking is enough to move the number, which is why the harness reports it per run rather than
+recording it as a property of the corpus.
 
 **Then one line per question**, and this is the part worth reading rather than skimming. Each carries the
 question's category, the rank the answering passage was found at, and — for a question the corpus cannot
@@ -2094,9 +2113,11 @@ is exactly the failure that question exists to catch. The question set is in `fi
 
 **`eval` takes no arguments and prints no usage.** It parses no argv at all, so `--help` is silently ignored
 and a full evaluation runs instead. Its controls are environment variables — `K` (default 10),
-`CONFIGURATION`, `ROLE` (default `staff`), `QUESTIONS`, `REPORT_OUT` — and it **requires the checkout mounted
-at `/w`**, because the harness imports the retriever and the ingestion worker from there rather than carrying
-its own copy:
+`CONFIGURATION`, `ROLE` (default `staff`), `QUESTIONS`, `CORPUS_MANIFEST`, `REPORT_OUT` — and it **requires the
+checkout mounted at `/w`**, because the harness imports the retriever and the ingestion worker from there
+rather than carrying its own copy. `CORPUS_MANIFEST` is the one that matters if you point `QUESTIONS` at your
+own set: it is what maps a question's document id to the file the corpus holds, and the default is the
+fixture corpus:
 
 ```
 # without the mount: fails, because the image is not the code
@@ -2256,9 +2277,10 @@ Five things that output tells you, and each one is a line you would otherwise ha
 
 - **`role` and `roots`** are the retrieval role and the folders it may read. `--role executive` widens
   `roots` to `['company', 'executive']`, and a role that is not in the map exits 2 rather than defaulting.
-- **`arms`** is what each search contributed. `lexical: 0` means the lexical arm ran and found nothing;
-  a *missing* `lexical` key means it did not run, which is what happens if `DATABASE_URL` is not in the
-  environment. Those are different faults, so they are reported differently.
+- **`arms`** is what each search contributed, and **`lexical: 0` does not mean what it looks like.** The key
+  is always present, and `0` is recorded both when the arm ran and matched nothing and when it never ran
+  because `DATABASE_URL` was missing. There is no missing-key case to read. Check the environment rather than
+  the count, as "What each arm contributed" above sets out.
 - **`rerank`** is the reranker's own account of itself: the depth it saw, what it cost in milliseconds,
   whether that was inside the budget, and which model did it. `reranked: false` comes with a
   `rerank_reason` rather than a silent fallback to the fused order — the module reports that it did not
@@ -2315,8 +2337,9 @@ A sentence with no marker comes back `REFUSED (no_citation)` — *the sentence c
 none of the checks could be run on it*. That is the check being honest rather than lenient, and it means an
 answer written in prose without markers verifies as entirely unsupported. The verifier works from the
 passages `ask.py` retrieved, which is why the passage numbers in your answer must match the output above it.
-It is the same verifier section 13c documents, so a claim can also be refused for being `superseded` when the
-figures are right.
+It is the same verifier that **Citations and verification** documents — the page the contents lists as 13c,
+which shares this heading in the file — so a claim can also be refused for being `superseded` when the figures
+are right.
 
 **The exit codes are the contract**, because this is the only piece of the C2 path a script can call. There
 are three of them and they key off whether anything came back, not off whether the answer was denied:
@@ -2959,7 +2982,10 @@ oi run --rm retention --holds
 oi run --rm retention --purge company/tax.pdf --reason "client asked"
 ```
 
-A hold refuses a purge and changes nothing, and the refusal is recorded. `--hold` with a document places a
+A hold refuses a purge and changes nothing, and **the refusal is recorded in `purge_records`** — read it with
+`retention --purges`, which prints the `hold` store entry with the hold's id. It is *not* written to
+`audit_events`: a purge record is auditable but not tamper-evident, which is the distinction section 23's
+glossary draws. If you need a refused purge in the hash-chained record, it is not there today. `--hold` with a document places a
 document-scope hold. `--hold` with no document places a deployment-scope hold, which covers every document
 including ones uploaded after it was placed. A hold that only covered what existed at the time would have a
 gap in it, and the gap is where the document that matters ends up. The hold is checked in one query before
@@ -2983,7 +3009,7 @@ So the sequence is: **list, read the id, then release it.** Never guess the numb
 ```
 $ oi run --rm retention --holds
   3  document    company/tax.pdf                          'litigation in progress' by retention-job at 2026-10-13 19:45:36.569158+00:00
-  4  deployment  (whole deployment)                        'litigation in progress' by retention-job at 2026-10-13 19:45:40.977896+00:00
+  4  deployment  (whole deployment)                       'litigation in progress' by retention-job at 2026-10-13 19:45:40.977896+00:00
 
 $ oi run --rm retention --release-hold 4
 hold 4 released by retention-job
@@ -3052,27 +3078,24 @@ docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
   /w/tests/fixtures/retention_policy_acceptance.py
 ```
 
-```
-NO POLICY MEANS NOTHING IS DESTROYED
-  retain_days=0 examined=0 destroyed=0
-A HOLD BEATS A PERIOD
-  examined=1 destroyed=0 held=1
-A DRY RUN CHANGES NOTHING AND TELLS THE TRUTH
-  examined=1 expired=1 destroyed=0
-THE RUN, for real
-  destroyed=1 failed=0
+Its four scenarios, and what each proves:
 
-DATA-RETAIN-001: gone from the vector index, the object store and the answer
-  vector index:  0
-  lexical index: 0
-  manifest:      0
-  object store:  GONE
-  asking about it returned no passage from it
-```
+| Scenario | What the probe prints | What it proves |
+|---|---|---|
+| A period with no policy | `without a policy: retain_days=0 examined=0 destroyed=0` | **No policy destroys nothing.** An invented default would destroy a client's documents on a number they never agreed to |
+| A hold beats a period | `with a hold: examined=1 destroyed=0 held=1` | The hold is checked before any store is touched, and the document is counted as held rather than as destroyed |
+| A dry run | `dry run: examined=1 expired=1 destroyed=0 held=0` | The rehearsal finds the expired document, reports it, and destroys nothing |
+| The run | the `retention_runs` record as JSON, then `vector index:  0`, `lexical index: 0`, `manifest:      0`, `object store:  GONE` | The document is gone from every store **and the client's own file is gone too**, which is the half a job built by reusing the purge would miss |
+
+It then asks a question about the destroyed document and prints `asking about it returned: [...]`, which must
+not name it, and ends `PASSED` or `FAILED with N problem(s)`.
 
 **That probe writes a thirteenth file into the documents root and destroys it**, so it is not a read-only
 check: run it on a deployment whose corpus is disposable, and never on a client's. It is a fixture rather than
-a procedure for exactly that reason.
+a procedure for exactly that reason, which is also why the table above describes its output instead of quoting
+a full transcript — **it has not been run against this deployment**, because that would destroy a document the
+corpus needs. The behaviour it covers is the same `--enforce` path the dry run above exercises; what this adds
+is the file and the aged fixture.
 
 Age is measured from `ingested_at`, not from the file's modification time. The file's date is a fact about
 the client's filesystem, and copying a folder resets every modification time, so a document whose date was
@@ -3423,8 +3446,9 @@ wins.
 | `ACCESS_DENIAL_MODE` | `denied` | What a denied user is told: `silent`, `denied`, `counted`. **This deployment sets it to `counted`** through the renderer, because the manifest declares `access.denial` | retrieval |
 | `INGEST_PARSE_TIMEOUT` | `3600` | One document's parse budget in seconds. Deliberately generous: a 59-page scan through OCR is minutes of CPU | ingestion |
 | `EMBED_CONTRACT_ALLOW_CHANGE` | unset | The escape hatch for a deliberate embedding-model change. Truthy values are `1`, `true`, `yes` | ingestion |
-| `EMBED_QUERY_PREFIX`, `EMBED_PASSAGE_PREFIX` | empty | Text prepended to a query and to a passage before embedding. **These are part of the recorded contract**, so changing one is a contract change and is refused without the escape hatch above | ingestion, retrieval |
-| `EMBED_NORMALISE` | `true` | Whether vectors are normalised before storage. Also part of the recorded contract, and only the exact string `false` turns it off | ingestion |
+| `EMBED_PASSAGE_PREFIX` | empty | Text prepended before embedding. **It is applied to the query as well as to passages**, because both go through the same `embed_texts` call | ingestion, retrieval |
+| `EMBED_QUERY_PREFIX` | empty | **Recorded and not applied.** It is read into the service record and copied into the contract fingerprint, and nothing prepends it to anything. Setting it changes the recorded contract — so it can demand the escape hatch above and force a re-embed — while changing no vector |
+| `EMBED_NORMALISE` | `true` | **Recorded and not applied, the same way.** Nothing normalises a vector; the value only enters the contract fingerprint. Only the exact string `false` turns it off | ingestion |
 | `EMBED_CONTRACT_REASON` | unset | The reason recorded alongside an allowed contract change. **Set this or the change is recorded with no stated reason** | ingestion |
 | `DOCUMENTS_ROOT` | `/documents` | Where the client's files are, inside the container. Both the worker's `--documents` and retention's `--documents-root` default to it, and the compose file sets it on the retention service only | ingestion, retention |
 
@@ -3450,13 +3474,19 @@ detectable. Precisely: a row's hash covers thirteen of its columns, the last of 
 hash, ordering is by id, the first row chains to nothing, and a purge continues the chain rather than
 restarting it, because the tombstone is itself a row that chains from the head before the deletion.
 
-The thirteen are the timestamp, event type, actor, actor role, deployment, data class, outcome, tool,
-model, request id, payload hash, payload size and the previous hash. **Four columns are outside them**:
-`approval`, `prompt_sha256`, `completion_sha256` and `occurred_at`. Editing one of those four in the
-database would not break the chain or fail a verify, so they are recorded evidence rather than chained
-evidence. That matters most for `occurred_at`, because the retention purge cuts on it. It is a known gap
-rather than a design choice, tracked as `AUD-HASH-001`, and closing it means a versioned hash so that rows
-written before the change still verify.
+**The hash covers seventeen columns on any row written since C2, and thirteen on the rows before it.** The
+original thirteen are the timestamp, event type, actor, actor role, deployment, data class, outcome, tool,
+model, request id, payload hash, payload size and the previous hash. `chain_version` 2 adds `redaction_count`,
+the redaction summary, `unverified_card_shapes` and `egress_allowed`, which is the change section 13e
+describes: those four are the ones a reader would most want to edit quietly, and editing them now fails a
+verify rather than passing one. Rows written before the change keep version 1 and still verify, so the
+untouched history is not rewritten to match.
+
+**Four columns are still outside the hash**: `approval`, `prompt_sha256`, `completion_sha256` and
+`occurred_at`. Editing one of those four in the database would not break the chain or fail a verify, so they
+are recorded evidence rather than chained evidence. That matters most for `occurred_at`, because the retention
+purge cuts on it. It is a known gap rather than a design choice, tracked as `AUD-HASH-001`, and closing it
+means another versioned hash so that rows written before the change still verify.
 
 **Content mode.** What the record keeps for a data class: `hash`, `redacted`, or `full`. The prompt and
 completion hashes are recorded whatever the mode.

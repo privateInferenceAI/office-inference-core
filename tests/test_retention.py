@@ -432,3 +432,43 @@ def test_the_cli_passes_dry_run_through(monkeypatch):
     source = (ROOT / "services" / "retention" / "cli.py").read_text()
     purge_branch = source.split("if args.purge:", 1)[1]
     assert "dry_run=args.dry_run" in purge_branch, "the purge branch does not forward --dry-run"
+
+
+def test_a_dry_run_that_matches_nothing_still_reports(monkeypatch):
+    """**The zero-match dry run used to crash, and it is the first thing a cautious operator runs.**
+
+    When no store matched, the result carried its explanation as a bare string inside `stores`. `stores` is a
+    map of per-store dictionaries, so the CLI's summary line summing over its values died with
+    `AttributeError: 'str' object has no attribute 'get'` and exited 1 — indistinguishable from a real
+    failure, on the reheasal a careful operator tries before the real thing.
+
+    The note is a field on the result now, and the summary skips anything that is not a dictionary as well,
+    because the type of a mapping is not something a caller should have to trust.
+    """
+    retention = _purge_module(monkeypatch)
+    _DELETES.clear()
+    monkeypatch.setattr(retention, "_count_in_vector", lambda url, coll, doc, timeout: 0)
+
+    # Every store has to report zero for the note to appear, so the cursor is made to agree.
+    class EmptyCursor(_FakeCursor):
+        def execute(self, sql, params=None):
+            super().execute(sql, params)
+            self._row = (0,)
+
+    result = retention.purge(_FakeConnection(EmptyCursor), "company/does-not-exist.pdf", "rehearsal",
+                             "tester", "http://vector:6333", "documents", dry_run=True,
+                             documents_root="/nonexistent-root")
+
+    assert result.dry_run is True
+    assert _DELETES == []
+    assert result.note and "nothing matches" in result.note
+    # The record has to stay machine-readable: a string among dictionaries is what broke the summary.
+    assert all(isinstance(v, dict) for v in result.stores.values()), result.stores
+    assert result.as_record()["note"] == result.note
+
+
+def test_the_cli_summary_survives_a_non_dict_store_value():
+    """The defensive half. A summary that sums a mapping should not assume what is in it."""
+    source = (ROOT / "services" / "retention" / "cli.py").read_text()
+    dry_branch = source.split("if result.dry_run:", 1)[1].split("return 0", 1)[0]
+    assert "isinstance(v, dict)" in dry_branch, "the summary sums store values without checking their shape"
