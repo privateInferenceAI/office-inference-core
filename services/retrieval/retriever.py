@@ -173,6 +173,10 @@ class Result:
     # The best score found among passages this role may not see, kept for the record rather than shown to a
     # user. It is what makes "the answer may be incomplete" a measured statement rather than a guess.
     restricted_best_score: float | None = None
+    # How many passages outside the role's roots matched the question. This is the number a `counted` denial
+    # reports, because the number it used to report was `withheld`, which is zero on every question by
+    # construction: the filter works, so nothing restricted is ever returned to be counted.
+    restricted_matched: int = 0
     # Which arms returned anything. A caller reading an empty result needs to know whether the lexical arm
     # ran and found nothing or did not run at all, because those are different faults.
     arms: dict[str, int] = field(default_factory=dict)
@@ -372,6 +376,30 @@ def _fetch_payloads(services: ingest.Services, chunk_ids: list[str],
     return out
 
 
+def _restricted_reach(services: ingest.Services, vector: list[float],
+                      roots: frozenset[str], limit: int = 50) -> tuple[float | None, int]:
+    """The best score among passages this role may NOT see, and how many there are.
+
+    The count is here because the requirement's `counted` mode says a denial carries a number, and the number
+    it carried was zero. The reason is the design that made the denial work at all: the access filter is in the
+    query and the store honours it, so nothing restricted is ever RETURNED and `withheld` is honestly zero on
+    every question. **A mode whose purpose is to say how many passages were withheld was therefore always
+    silent about the number**, which is the disclosure doing nothing in the case it was written for.
+
+    What it counts instead is how many restricted passages matched, which is the fact the user is being told
+    about: not what was filtered out of this answer, but how much exists that would have answered. The count is
+    over the same limit as the search, so it reads "at least this many" rather than an exact total, and the
+    message says so.
+    """
+    forbidden = {"must_not": [{"key": "acl", "match": {"any": sorted(roots)}}]}
+    hits = _search(services, {"vector": vector, "limit": limit, "with_payload": False,
+                              "filter": forbidden})
+    if not hits:
+        return None, 0
+    best = max(float(hit.get("score") or 0.0) for hit in hits)
+    return best, len(hits)
+
+
 def _restricted_best_score(services: ingest.Services, vector: list[float],
                            roots: frozenset[str]) -> float | None:
     """The best score among passages this role may NOT see, or None if there are none.
@@ -456,11 +484,21 @@ def _disclose(mode: DenialMode, role: str, withheld: int) -> Disclosure | None:
     if mode is DenialMode.SILENT:
         return None
     if mode is DenialMode.COUNTED:
+        # The count is how many restricted passages matched, not how many were withheld, and the wording says
+        # which. `withheld` is zero by construction on a working filter, so a disclosure built on it would
+        # always report a number it does not have.
+        if not withheld:
+            return Disclosure(
+                mode=mode.value,
+                message=(f"Documents that answer this more directly exist and are not available to the {role!r} "
+                         f"role. The answer below is drawn from what you can see and may be incomplete."),
+                count=None)
         return Disclosure(
             mode=mode.value,
-            message=(f"Documents that answer this more directly exist and are not available to the {role!r} "
-                     f"role. The answer below is drawn from what you can see and may be incomplete."),
-            count=withheld or None)
+            message=(f"At least {withheld} passage(s) that answer this more directly exist and are not "
+                     f"available to the {role!r} role. The answer below is drawn from what you can see and may "
+                     f"be incomplete."),
+            count=withheld)
     return Disclosure(
         mode=mode.value,
         message=(f"Documents that answer this more directly exist and are not available to the {role!r} "
@@ -558,7 +596,7 @@ def search(services: ingest.Services, question: str, role: str, limit: int = 10,
     # treated as zero, which would deny every question the lexical arm answered.
     permitted_scores = [p.score for p in result.passages if p.score is not None]
     best_permitted = max(permitted_scores, default=None)
-    restricted_best = _restricted_best_score(services, vectors[0], roots)
+    restricted_best, restricted_count = _restricted_reach(services, vectors[0], roots)
 
     result.restricted_best_score = restricted_best
     if restricted_best is not None:
@@ -572,7 +610,8 @@ def search(services: ingest.Services, question: str, role: str, limit: int = 10,
             result.reason = (
                 f"nothing available to the {role!r} role matched this question, and a passage it may not see "
                 f"did.")
-            result.disclosure = _disclose(mode, role, result.withheld)
+            result.restricted_matched = restricted_count
+            result.disclosure = _disclose(mode, role, restricted_count)
             return result
         if restricted_best > best_permitted:
             result.denied = True
@@ -586,5 +625,6 @@ def search(services: ingest.Services, question: str, role: str, limit: int = 10,
                     f"a passage the {role!r} role may not see matched this question better than any passage "
                     f"it may see, so the answer drawn from what is available is incomplete by construction.")
             # The disclosure, which is governed by the client's policy and is the only part a user sees.
-            result.disclosure = _disclose(mode, role, result.withheld)
+            result.restricted_matched = restricted_count
+            result.disclosure = _disclose(mode, role, restricted_count)
     return result
