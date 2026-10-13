@@ -229,7 +229,7 @@ def lexical_search(services: ingest.Services, question: str, roots: frozenset[st
           select chunk_id, tie, arm_rank from by_identifier
           union all
           select chunk_id, tie, arm_rank from by_word
-        ) as both
+        ) as merged
         order by tie, arm_rank, chunk_id
         limit %(limit)s
     """
