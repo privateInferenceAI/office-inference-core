@@ -218,3 +218,86 @@ def test_no_answer_is_a_result_rather_than_an_error(wired):
     assert result.passages == []
     assert result.denied is False
     assert result.withheld == 0
+
+
+# --------------------------------------------------------------------------- the client's denial policy
+
+@pytest.mark.parametrize("mode,expect_disclosure,expect_count", [
+    ("silent", False, None),
+    ("denied", True, None),
+    ("counted", True, 1),
+])
+def test_the_client_decides_whether_a_denied_user_is_told(wired, mode, expect_disclosure,
+                                                          expect_count):
+    """The three modes, which are a client's business decision rather than ours.
+
+    A silent organisation discloses nothing and accepts that its users cannot tell an incomplete answer from
+    a complete one. A disclosing organisation accepts that the existence of restricted content becomes
+    visible, in exchange for a user who knows to ask someone with access. Both are defensible and the choice
+    is not ours to make.
+    """
+    services = wired(hits=[
+        hit("executive/executive-compensation.md", "executive", "The CEO base salary is 418,750 dollars."),
+    ])
+    result = retriever.search(services, "ceo base salary", role="staff", denial=mode)
+
+    if expect_disclosure:
+        assert result.disclosure is not None, f"{mode} should disclose something"
+        assert result.disclosure.mode == mode
+        assert result.disclosure.count == expect_count
+        assert result.disclosure.message
+    else:
+        assert result.disclosure is None, "silent must disclose nothing at all"
+    # And the restricted text is absent from the result in every mode.
+    assert "418,750" not in repr(result)
+
+
+def test_the_record_keeps_the_fact_in_every_mode(wired):
+    """Suppressing the SIGNAL is not the same as not knowing.
+
+    `withheld` and `denied` stay accurate in silent mode, because the record and any audit trail have to be
+    able to report what happened. Collapsing the fact into the disclosure would make silent mean "we withheld
+    nothing", which is a lie the record would then carry — and the record is the artifact a client's auditor
+    reads.
+    """
+    services = wired(hits=[
+        hit("executive/executive-compensation.md", "executive", "The CEO base salary is 418,750 dollars."),
+    ])
+    result = retriever.search(services, "ceo base salary", role="staff", denial="silent")
+    assert result.disclosure is None
+    assert result.denied is True, "the system still knows something was withheld"
+    assert result.withheld == 1
+    assert "restricted" in result.reason.lower(), "the internal reason stays accurate"
+
+
+def test_no_withholding_means_no_disclosure_in_any_mode(wired):
+    """A disclosure only ever appears when something was actually withheld. A mode that emitted a standing
+    warning would train users to ignore it, which costs the disclosure its only job."""
+    services = wired(hits=[hit("company/irs-p15.pdf", "company", "The rate is 67 cents.")])
+    for mode in ("silent", "denied", "counted"):
+        result = retriever.search(services, "mileage rate", role="staff", denial=mode)
+        assert result.disclosure is None, f"{mode} disclosed without withholding anything"
+        assert result.denied is False
+
+
+def test_an_unknown_mode_is_refused_rather_than_defaulted(wired):
+    """A typo in a client's manifest must not silently select the more disclosing of two behaviours, which is
+    the same reason an unknown role is refused."""
+    services = wired()
+    with pytest.raises(ValueError):
+        retriever.search(services, "anything", role="staff", denial="denyed")
+    assert services.searches == [], "the refusal must happen before any search runs"
+
+
+def test_the_mode_comes_from_the_environment_when_not_passed(monkeypatch):
+    """The wiring from a client's declared policy to the behaviour, which is the part that rots silently. A
+    renderer that stopped writing the variable would leave every deployment on the default, and the default
+    discloses."""
+    monkeypatch.setenv("ACCESS_DENIAL_MODE", "counted")
+    import importlib
+    importlib.reload(retriever)
+    try:
+        assert retriever.denial_mode() is retriever.DenialMode.COUNTED
+    finally:
+        monkeypatch.delenv("ACCESS_DENIAL_MODE", raising=False)
+        importlib.reload(retriever)

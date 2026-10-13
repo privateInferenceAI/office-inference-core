@@ -209,3 +209,45 @@ def test_the_render_names_the_files_it_writes(tmp_path):
     assert render(DEV_CLOUD, out).returncode == 0
     written = sorted(p.name for p in out.iterdir())
     assert written == ["env", "litellm.yaml", "manifest.json", "services.txt"], written
+
+
+def test_the_denial_policy_reaches_the_env_file(tmp_path):
+    """A client's declared policy has to arrive where the retriever reads it.
+
+    This is the wiring that rots silently: the retriever reads `ACCESS_DENIAL_MODE` from the environment and
+    falls back to its own default if the variable is absent, so a renderer that stopped writing it would
+    leave every deployment on `denied` while its manifest said `silent`. The wrong behaviour would be a
+    disclosure the client had explicitly turned off, and nothing would report it.
+    """
+    out = tmp_path / "rendered"
+    out.mkdir()
+    result = render(DEV_CLOUD, out)
+    assert result.returncode == 0, result.stderr
+    env = dict(
+        line.split("=", 1)
+        for line in (out / "env").read_text().splitlines()
+        if line and not line.startswith("#") and "=" in line
+    )
+    assert "ACCESS_DENIAL_MODE" in env, "the retriever reads this variable and would fall back silently"
+    # The dev cloud manifest declares counted, so the renderer must carry that rather than the default.
+    assert env["ACCESS_DENIAL_MODE"] == "counted"
+
+    out2 = tmp_path / "rendered-office"
+    out2.mkdir()
+    assert render(OFFICE, out2).returncode == 0
+    env2 = dict(
+        line.split("=", 1)
+        for line in (out2 / "env").read_text().splitlines()
+        if line and not line.startswith("#") and "=" in line
+    )
+    assert env2["ACCESS_DENIAL_MODE"] == "denied"
+
+
+def test_every_shipped_manifest_declares_a_valid_denial_mode():
+    """A typo would be refused at runtime by the retriever, which is the right behaviour and a bad way to
+    find out. The schema validates the enum, so this checks the shipped manifests actually satisfy it."""
+    for manifest in MANIFESTS:
+        declared = yaml.safe_load(manifest.read_text()).get("access") or {}
+        if "denial" in declared:
+            assert declared["denial"] in ("silent", "denied", "counted"), (
+                f"{manifest.name} declares denial: {declared['denial']!r}")

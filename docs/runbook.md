@@ -1845,11 +1845,31 @@ client's folder tree is organised, and two roles permitted one or both. Per-user
 are `SEC-ACL-002`, a later phase. A model with two roles can be read in full and tested exhaustively, and
 getting the inside-the-search part right matters more than having more roles.
 
-**The decision worth arguing about.** A staff question whose answer lives in a restricted document returns
-`denied: true` with a count of what was withheld. That discloses that restricted content exists, which is a
-real leak and is a deliberate trade: the alternative is a user who cannot tell a wrong answer from an
-unavailable one. What it never discloses is the content, which document holds it, or anything beyond a
-count. `SEC-ACL-003` records the trade rather than leaving it to be discovered.
+**What a denied user is told is the client's policy, not ours.** Anthony's decision, 2026-10-13: this
+should be something a client turns on or off rather than a behaviour we choose for them. So it is declared
+in the manifest under `access.denial`, and there are three modes because the trade has three defensible
+answers.
+
+| Mode | What the user is told | What it costs |
+|---|---|---|
+| `silent` | Nothing. The answer is built from what the role can see | An incomplete answer is indistinguishable from a complete one |
+| `denied` | Documents exist that may answer this and they lack access, with no count | Reveals that restricted content EXISTS |
+| `counted` | The same, plus how many passages were withheld | Reveals existence and implies how many documents hold it |
+
+**The default is `denied`**, and the reasoning is the product's own: a silent system returns a partial
+answer with no way for a user to tell it from a complete one, which is the confidently-wrong failure this
+whole design exists to fight. A client who weighs the leak of existence more heavily sets `silent` and gets
+no disclosure at all. The dev cloud manifest declares `counted`, because a developer debugging a missing
+passage wants the number and there is no client to weigh the trade.
+
+**The fact and the disclosure are separate, and that separation is the point.** `withheld` and `denied` stay
+accurate in every mode, so the record and any audit trail can report what happened; only `disclosure` is
+governed by policy, and it is `None` in silent mode rather than an empty message. Collapsing the two would
+make silent mean "we withheld nothing", which is a lie the record would then carry — and the record is the
+artifact a client's auditor reads.
+
+`SEC-ACL-003` records the trade, and the schema description says it belongs in the contract under a
+compliance profile, the same way the content modes do.
 
 **The fixture is restricted content, and it had to come first.** The corpus is four documents, all under
 `company/`. Before this step there was nothing restricted to leak, so a permission test would have passed
@@ -1865,6 +1885,9 @@ counts.
 - The probe reports a staff store return above zero: the query's filter clause is not reaching Qdrant.
   Print the body the retriever builds and check that `filter.must` carries the `acl` clause, rather than
   checking the results, because the results are what a missing filter also produces.
+- A denial appears when the client declared `silent`: the renderer did not write `ACCESS_DENIAL_MODE`, so
+  the retriever fell back to its default. Check `grep ACCESS_DENIAL_MODE rendered/env`, because the
+  fallback is silent by design and the symptom is a disclosure rather than an error.
 - `withheld` above zero on a normal query: the store returned something the role may not see. That is a
   second line rather than the first, so it working is good news and it firing means the first line is not.
 - Fewer passages than the limit with nothing withheld: overfetch is too low, or the corpus is small. The

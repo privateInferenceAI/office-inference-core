@@ -189,6 +189,12 @@ def main() -> int:
     for data_class in sorted(DATA_CLASSES):
         env[f"CONTENT_MODE_{data_class.upper()}"] = declared.get(data_class, default_mode)
 
+    # What a denied user is told. A client's declared policy, so the renderer writes it explicitly and
+    # the retriever reads it rather than holding a default of its own. Written in every case, including
+    # the default, so a deployment reads a decision rather than applying a fallback.
+    access = manifest.get("access") or {}
+    env["ACCESS_DENIAL_MODE"] = str(access.get("denial", "denied"))
+
     # Offsite delivery of audit artifacts. Absent means this build keeps everything on the box,
     # which is a valid office shape and the default. Set and removed explicitly rather than
     # defaulted, so a manifest without a destination cannot inherit one from an earlier render.

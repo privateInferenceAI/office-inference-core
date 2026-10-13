@@ -20,3 +20,12 @@ lanes:
 compliance:
   profile: none
   audit_retention_days: 90
+access:
+  # What a user is told when their role excludes content that would answer the question. silent tells them
+  # nothing; denied says documents exist that they cannot see; counted also says how many passages were
+  # withheld. The trade is the client's: disclosing reveals that restricted content EXISTS, and staying
+  # silent makes a partial answer look complete.
+  #
+  # This build says denied, the default. The cloud development manifest says counted, because a developer
+  # debugging a missing passage wants the number and there is no client to weigh the trade.
+  denial: denied

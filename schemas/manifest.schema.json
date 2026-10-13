@@ -13,8 +13,41 @@
   ],
   "additionalProperties": false,
   "properties": {
-    "manifest_version": {
-      "const": 1
+    "access": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What a user is told when a query is denied because content exists that their role may not see. The choice is the client's because the trade is theirs: disclosing reveals that restricted content EXISTS, and staying silent means an incomplete answer is indistinguishable from a complete one. Under a compliance profile this belongs in the contract, the same way the content modes do.",
+      "properties": {
+        "denial": {
+          "enum": [
+            "silent",
+            "denied",
+            "counted"
+          ],
+          "default": "denied",
+          "description": "silent: nothing is disclosed, and the answer is built from what the role can see. denied: the user is told that documents exist which may answer the question and that they lack access, with no count. counted: the same plus how many passages were withheld. The default is denied, because a silent system returns a partial answer that looks complete, which is the failure this product exists to avoid."
+        }
+      }
+    },
+    "budgets": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Per-role ceilings in USD over a period. A hard cap: the gateway refuses over-budget requests rather than alerting about them. Internal cost control, not client billing. Required wherever the frontier lane is enabled, because a remote call costs money.",
+      "properties": {
+        "period_days": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 30
+        },
+        "roles": {
+          "type": "object",
+          "description": "One amount per model role declared in this manifest.",
+          "additionalProperties": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          }
+        }
+      }
     },
     "client": {
       "type": "object",
@@ -52,35 +85,123 @@
         }
       }
     },
-    "profile": {
-      "enum": [
-        "cloud",
-        "office",
-        "hybrid"
-      ]
-    },
-    "packs": {
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "type": "string"
-      },
-      "description": "Pack ids from packs/catalog.yaml. The Core pack is implicit."
-    },
-    "models": {
+    "compliance": {
       "type": "object",
-      "description": "One entry per role. A role is a name a caller asks for, mapped to a model, with its own key and ceiling, so a deployment may add its own. The three named in required are the ones every build needs; coder and anything else are additional.",
-      "required": [
-        "analyst",
-        "front_desk",
-        "reader"
-      ],
-      "patternProperties": {
-        "^[a-z][a-z0-9_]*$": {
-          "$ref": "#/$defs/modelRole"
+      "additionalProperties": false,
+      "properties": {
+        "profile": {
+          "enum": [
+            "none",
+            "contractual",
+            "hipaa",
+            "glba",
+            "sec-17a4",
+            "itar-cui",
+            "ferpa",
+            "pci"
+          ]
+        },
+        "baa_with_provider": {
+          "type": "boolean"
+        },
+        "baa_with_office_inference": {
+          "type": "boolean"
+        },
+        "worm_storage": {
+          "type": "boolean"
+        },
+        "data_residency": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "audit_retention_days": {
+          "type": "integer",
+          "minimum": 30
         }
-      },
-      "additionalProperties": false
+      }
+    },
+    "content": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What the record keeps per data class. Prompt and completion hashes are recorded whatever this says; only the text is governed here. Under a compliance profile this is a client decision that belongs in the contract, because 'full' means the record holds what was said.",
+      "properties": {
+        "default": {
+          "enum": [
+            "hash",
+            "redacted",
+            "full"
+          ],
+          "default": "hash"
+        },
+        "classes": {
+          "type": "object",
+          "additionalProperties": {
+            "enum": [
+              "hash",
+              "redacted",
+              "full"
+            ]
+          }
+        }
+      }
+    },
+    "integrations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "interface": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "branding": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "display_name": {
+              "type": "string"
+            },
+            "accent": {
+              "type": "string"
+            },
+            "logo": {
+              "type": "string"
+            }
+          }
+        },
+        "show_lane_indicator": {
+          "type": "boolean",
+          "default": true
+        },
+        "features": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
     },
     "lanes": {
       "type": "object",
@@ -139,87 +260,23 @@
         }
       }
     },
-    "content": {
-      "type": "object",
-      "additionalProperties": false,
-      "description": "What the record keeps per data class. Prompt and completion hashes are recorded whatever this says; only the text is governed here. Under a compliance profile this is a client decision that belongs in the contract, because 'full' means the record holds what was said.",
-      "properties": {
-        "default": {
-          "enum": [
-            "hash",
-            "redacted",
-            "full"
-          ],
-          "default": "hash"
-        },
-        "classes": {
-          "type": "object",
-          "additionalProperties": {
-            "enum": [
-              "hash",
-              "redacted",
-              "full"
-            ]
-          }
-        }
-      }
+    "manifest_version": {
+      "const": 1
     },
-    "compliance": {
+    "models": {
       "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "profile": {
-          "enum": [
-            "none",
-            "contractual",
-            "hipaa",
-            "glba",
-            "sec-17a4",
-            "itar-cui",
-            "ferpa",
-            "pci"
-          ]
-        },
-        "baa_with_provider": {
-          "type": "boolean"
-        },
-        "baa_with_office_inference": {
-          "type": "boolean"
-        },
-        "worm_storage": {
-          "type": "boolean"
-        },
-        "data_residency": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "audit_retention_days": {
-          "type": "integer",
-          "minimum": 30
+      "description": "One entry per role. A role is a name a caller asks for, mapped to a model, with its own key and ceiling, so a deployment may add its own. The three named in required are the ones every build needs; coder and anything else are additional.",
+      "required": [
+        "analyst",
+        "front_desk",
+        "reader"
+      ],
+      "patternProperties": {
+        "^[a-z][a-z0-9_]*$": {
+          "$ref": "#/$defs/modelRole"
         }
-      }
-    },
-    "budgets": {
-      "type": "object",
-      "additionalProperties": false,
-      "description": "Per-role ceilings in USD over a period. A hard cap: the gateway refuses over-budget requests rather than alerting about them. Internal cost control, not client billing. Required wherever the frontier lane is enabled, because a remote call costs money.",
-      "properties": {
-        "period_days": {
-          "type": "integer",
-          "minimum": 1,
-          "default": 30
-        },
-        "roles": {
-          "type": "object",
-          "description": "One amount per model role declared in this manifest.",
-          "additionalProperties": {
-            "type": "number",
-            "exclusiveMinimum": 0
-          }
-        }
-      }
+      },
+      "additionalProperties": false
     },
     "offsite": {
       "type": "object",
@@ -264,61 +321,20 @@
         "ship"
       ]
     },
-    "integrations": {
+    "packs": {
       "type": "array",
+      "minItems": 1,
       "items": {
-        "type": "object",
-        "required": [
-          "id"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "enabled": {
-            "type": "boolean",
-            "default": true
-          },
-          "scopes": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        }
-      }
+        "type": "string"
+      },
+      "description": "Pack ids from packs/catalog.yaml. The Core pack is implicit."
     },
-    "interface": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "branding": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "display_name": {
-              "type": "string"
-            },
-            "accent": {
-              "type": "string"
-            },
-            "logo": {
-              "type": "string"
-            }
-          }
-        },
-        "show_lane_indicator": {
-          "type": "boolean",
-          "default": true
-        },
-        "features": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        }
-      }
+    "profile": {
+      "enum": [
+        "cloud",
+        "office",
+        "hybrid"
+      ]
     },
     "support": {
       "type": "object",
