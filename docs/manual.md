@@ -706,6 +706,9 @@ is an identity, not a word.
 | `--approval` | JSON describing an approval, for the `approval` type |
 | `--payload` | JSON, or `@file` to read a file, or `-` to read standard input |
 | `--prompt`, `--completion` | The text sent and returned. Both hashes are always recorded; the text is kept according to the content mode |
+| `--redactions` | JSON, the kinds and counts of what redaction removed. **These four are what section 13e's record is made of**, and they are covered by the row hash from `chain_version` 2 rather than being commentary beside it |
+| `--unverified-card-shapes` | How many card-shaped numbers failed the check digit. A non-zero value is a number that looked like a card and is not one |
+| `--egress-allowed` | Whether the gate permitted the request to leave. The record's own account of a decision the gate made |
 | `--deployment-id` | Overrides the deployment this event belongs to. Rarely needed |
 
 **Two warnings go to standard error**, so they appear in your terminal but not in the JSON on standard
@@ -1298,7 +1301,12 @@ by what the rule protects.
 - A compliance profile on a cloud or hybrid build with no `compliance.data_residency`, since residency
   decides which model forms are allowed.
 - `regulated` in `data_classes_allowed` on a cloud build with `redaction: false`.
-- A frontier lane enabled with an empty `data_classes_allowed`, which would allow everything.
+- A frontier lane enabled with an empty `data_classes_allowed`. **The reason is intent rather than egress:** this
+  field is read by the validator and not by the gate, so an empty list here cannot allow anything. The rule below
+  is the one that governs what actually leaves.
+- **A frontier lane enabled with no `access.egress.frontier_classes`.** The gate renders that field, an absent
+  block renders empty, and an empty permission set refuses every call — so this is the shape that silently stops a
+  deployment sending anything while the manifest appears to permit three classes.
 
 *Agreements and accountability:*
 
@@ -1625,14 +1633,29 @@ outside the set because whether the parser reads it is unverified. Count the fil
 against the number the worker reports:
 
 ```
+# every file in the handover, and then only the ones the worker will look at
 find /opt/oi-core/documents -type f | wc -l
+find /opt/oi-core/documents -type f \
+  -regextype posix-extended -regex '.*\.(pdf|docx|pptx|xlsx|html?|md|markdown|txt|csv|rtf|odt|ods|odp|eml)' | wc -l
+
 docker exec ingestion python3 /app/ingest.py --documents /documents
 ```
 
-If those two numbers disagree, find out why before telling the client it is done. The worker prints
-`seen`, `new`, `changed`, `skipped` and `failed`; a file in an accepted format that is absent from `seen`
-was filtered by suffix, and one counted in `failed` is dead-lettered after two attempts and will not be
-retried until its bytes change.
+**Compare the second number with `seen`, not the first.** The two `find` commands are there because the
+obvious check is the wrong one: the worker counts only files whose suffix is in the accepted set, and a
+client's handover folder will contain a `.DS_Store`, a `.msg` export and a couple of `.doc` files that it
+deliberately ignores. A first number that is higher than `seen` is the filter working, and chasing it wastes
+an afternoon. The question worth asking is whether the *second* number matches:
+
+- **Second number higher than `seen`:** a file in an accepted format was missed. Check the worker's own
+  `failed` count, then the parser's log for that filename.
+- **Second number lower than `seen`:** two paths resolved to the same relative path, or a file was added
+  between the two commands.
+- **`failed` above zero:** those documents are dead-lettered after two attempts and will not be retried until
+  their bytes change. `docker exec ingestion python3 /app/ingest.py --status` names them.
+
+Tell the client which files were skipped and why before saying the corpus is loaded. An ignored `.doc` is a
+fact they should hear from you rather than discover when a question about it has no answer.
 
 **Four: run one question per root and read the answer.** This is the acceptance test for a corpus, and it
 takes two minutes. It catches a corpus laid out under the wrong root, a parser that cannot read the
@@ -2230,10 +2253,14 @@ Five things that output tells you, and each one is a line you would otherwise ha
   whether that was inside the budget, and which model did it. `reranked: false` comes with a
   `rerank_reason` rather than a silent fallback to the fused order — the module reports that it did not
   run instead of pretending the fused order was the reranked one.
-- **`withheld` and `restricted matched`** are the access facts. `withheld` counts passages the role may not
-  see that the store returned anyway, which should always be 0 because the filter is in the query.
-  `restricted matched` counts what a second search found outside the role's roots, and it is the number a
-  `counted` denial reports.
+- **`restricted matched`** is the access measurement: what a second search found outside the role's roots. It
+  is the number a `counted` denial reports.
+- **`withheld` has two causes and they are worth telling apart, because it should be 0 on a healthy
+  deployment for the first one.** It counts (a) a passage the store returned that the role may not see, which
+  means the query's filter clause is not working, and (b) a chunk the lexical arm named that the vector store
+  does not hold, which means the two indexes have drifted apart. **(a) is a security fault and (b) is a
+  reconciliation fault.** The output does not say which, so treat a non-zero `withheld` as worth investigating
+  rather than as a diagnosis: run the access probe in section 13d for (a) and the hybrid probe below for (b).
 - **`score`** is the vector arm's cosine similarity, or `n/a` for a passage only the lexical arm returned.
   It is not comparable across arms, which is why a passage from the lexical arm shows `n/a` rather than a
   misleadingly small number.
@@ -2980,16 +3007,49 @@ oi run --rm retention --enforce documents
 oi run --rm retention --retention-runs
 ```
 
-The recorded run on the reference instance, over a fixture aged 800 days:
+**What the dry run prints**, and it is JSON rather than prose because the command reports a record:
+
+```
+$ oi run --rm retention --enforce documents --dry-run
+{
+  "cutoff": "2025-10-13T20:24:42.192625+00:00",
+  "dataset": "documents",
+  "destroyed": 0,
+  "dry_run": true,
+  "examined": 0,
+  "expired": 0,
+  "failed": 0,
+  "failures": [],
+  "held": 0,
+  "retain_days": 365
+}
+
+destroyed 0, held 0, failed 0 (dry run, nothing was changed)
+```
+
+`examined 0` here is correct rather than a fault: this deployment's whole corpus was ingested today, so a
+365-day period has nothing old enough to look at. **`cutoff` is the line to read** — it is the date the period
+reaches back to, and a cutoff that is not what the client agreed means the policy is not what you think.
+
+**The four scenarios in one run are proved by the acceptance probe**, which ages a fixture rather than waiting
+800 days for a real document to expire, and which is why its output is labelled here rather than shown as
+though the commands above produce it:
+
+```
+docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
+  -v /opt/oi-core:/w -w /w --env-file rendered/env \
+  --entrypoint python oi-core/retention:local \
+  /w/tests/fixtures/retention_policy_acceptance.py
+```
 
 ```
 NO POLICY MEANS NOTHING IS DESTROYED
   retain_days=0 examined=0 destroyed=0
 A HOLD BEATS A PERIOD
   examined=1 destroyed=0 held=1
-A DRY RUN CHANGES NOTHING
+A DRY RUN CHANGES NOTHING AND TELLS THE TRUTH
   examined=1 expired=1 destroyed=0
-THE RUN
+THE RUN, for real
   destroyed=1 failed=0
 
 DATA-RETAIN-001: gone from the vector index, the object store and the answer
@@ -2999,6 +3059,10 @@ DATA-RETAIN-001: gone from the vector index, the object store and the answer
   object store:  GONE
   asking about it returned no passage from it
 ```
+
+**That probe writes a thirteenth file into the documents root and destroys it**, so it is not a read-only
+check: run it on a deployment whose corpus is disposable, and never on a client's. It is a fixture rather than
+a procedure for exactly that reason.
 
 Age is measured from `ingested_at`, not from the file's modification time. The file's date is a fact about
 the client's filesystem, and copying a folder resets every modification time, so a document whose date was
@@ -3349,6 +3413,8 @@ wins.
 | `ACCESS_DENIAL_MODE` | `denied` | What a denied user is told: `silent`, `denied`, `counted`. **This deployment sets it to `counted`** through the renderer, because the manifest declares `access.denial` | retrieval |
 | `INGEST_PARSE_TIMEOUT` | `3600` | One document's parse budget in seconds. Deliberately generous: a 59-page scan through OCR is minutes of CPU | ingestion |
 | `EMBED_CONTRACT_ALLOW_CHANGE` | unset | The escape hatch for a deliberate embedding-model change. Truthy values are `1`, `true`, `yes` | ingestion |
+| `EMBED_QUERY_PREFIX`, `EMBED_PASSAGE_PREFIX` | empty | Text prepended to a query and to a passage before embedding. **These are part of the recorded contract**, so changing one is a contract change and is refused without the escape hatch above | ingestion, retrieval |
+| `EMBED_NORMALISE` | `true` | Whether vectors are normalised before storage. Also part of the recorded contract, and only the exact string `false` turns it off | ingestion |
 | `EMBED_CONTRACT_REASON` | unset | The reason recorded alongside an allowed contract change. **Set this or the change is recorded with no stated reason** | ingestion |
 | `DOCUMENTS_ROOT` | `/documents` | Where the client's files are, inside the container. Both the worker's `--documents` and retention's `--documents-root` default to it, and the compose file sets it on the retention service only | ingestion, retention |
 
