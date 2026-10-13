@@ -68,6 +68,33 @@ items:
     phase: C2
     verify: a staff-role query for executive content returns a denial and zero restricted passages in the trace
     status: open
+    note: >-
+      Built 2026-10-12, recorded in docs/runbook.md step 3.8. The filter is a clause in the Qdrant query
+      rather than a step after the search, because a retriever that fetches ten and discards three produces
+      the right answer while the restricted text leaves the store, is counted, and sits one logging
+      statement from a leak. Ten tests ship with it, written before the module existed as the build order
+      requires: the decisive one asserts the acl clause is present in the query, because every other test in
+      the file passes against a retriever that fetches everything and filters afterwards. Two roles over two
+      document roots; per-user and per-group permissions are SEC-ACL-002 in C3. Status is open rather than
+      verified because the proof has to run against the deployed store: a unit test can assert the clause is
+      built, and only the store can show it is honoured.
+  - id: SEC-ACL-003
+    title: A denial discloses that restricted content exists, and nothing about it
+    tier: [cloud, hosted]
+    phase: C2
+    verify: a denied query reports a count and a reason, and the response contains no restricted text, no
+      document name, and no field carrying either
+    status: open
+    note: >-
+      The trade this step makes deliberately, recorded rather than left to be discovered. A staff question
+      whose answer lives in a restricted document returns denied with a count of what was withheld, which
+      discloses that restricted content EXISTS. The alternative is a user who cannot tell a wrong answer
+      from an unavailable one, which for a compensation question is the difference between "we have no
+      record" and "you may not see it". What the denial never discloses is the content, the document, or
+      anything beyond a count, and one test asserts the restricted figure appears nowhere in the result
+      object rather than only in the passages, because a debug field is the same leak with a different
+      name. Worth revisiting with a client: a smaller organisation may prefer a silent empty result, and
+      that preference changes this behaviour rather than the filter.
   - id: SEC-ACL-002
     title: Per-user and per-group document permissions beyond two folder roles
     tier: [cloud, hosted]

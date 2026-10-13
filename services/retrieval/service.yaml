@@ -1,0 +1,40 @@
+name: retrieval
+location: either
+# A module rather than a container, and that is the first thing to say about it. It holds no state, loads no
+# model and listens on nothing: it embeds a question through the embeddings service, searches the vector
+# store, and applies the access rule. What it needs is a caller, and the caller is the assistant API in
+# Phase 4.
+#
+# Kept out of the running stack on purpose. A service whose only job is to make two calls and apply a
+# permission check is two containers' worth of operational surface for no isolation, and the permission
+# decision belongs somewhere it can be read and tested rather than somewhere it can be configured.
+build: null
+packs: [document-chat]
+depends_on: [embeddings, vector]
+ports: {}
+gpu:
+  required: false
+data_class: confidential
+config_schema:
+  roles:
+    type: object
+    default: {"staff": ["company"], "executive": ["company", "executive"]}
+    description: >-
+      Which document roots each role may retrieve from. Two roles rather than a permission language, and the
+      smallness is a decision: a model this size can be read in full and tested exhaustively, and per-user
+      and per-group permissions are SEC-ACL-002 in a later phase.
+  overfetch:
+    type: integer
+    default: 3
+    description: >-
+      How many candidates to ask the store for per passage wanted. Withheld passages consume part of the
+      result set, so asking for exactly the limit returns fewer than the limit whenever anything is withheld.
+substrate:
+  office:
+    notes: >-
+      The same module, called in-process by whatever serves the office build. Nothing about the permission
+      check changes with the substrate, which is the point of keeping it out of the store.
+  cloud:
+    notes: >-
+      Called in-process by the assistant API. The restriction is applied as a filter clause in the Qdrant
+      query, so a passage a role may not see is never fetched, never counted and never logged.
