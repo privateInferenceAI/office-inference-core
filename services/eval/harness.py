@@ -56,6 +56,28 @@ class Question:
         return self.pages or ([self.page] if self.page else [])
 
 
+def load_document_paths(manifest_path: str | Path | None) -> dict[str, str]:
+    """Manifest id to the file the corpus holds, so a question's source can be matched to a retrieved passage.
+
+    The question set names a document by its manifest id, which is the publication's identity: `irs-p15-2026` is
+    Publication 15 for 2026. The corpus holds a file called `irs-p15.pdf`. Those are two names for one document
+    and the harness was comparing the first against the second, so Q01 and Q02 were scored as retrieval failures
+    for a naming mismatch.
+
+    The fix belongs here rather than in the question set, and the corpus validator is what settled it: it refuses
+    a question whose source is not a manifest id, which means the ids are the contract and the filenames are an
+    implementation detail of how the corpus was assembled.
+    """
+    if not manifest_path:
+        return {}
+    path = Path(manifest_path)
+    if not path.exists():
+        return {}
+    import yaml
+    data = yaml.safe_load(path.read_text()) or {}
+    return {doc["id"]: doc.get("path") or doc["id"] for doc in (data.get("documents") or [])}
+
+
 def load_questions(path: str | Path) -> list[Question]:
     import yaml
     data = yaml.safe_load(Path(path).read_text())
@@ -291,7 +313,7 @@ class Report:
         return "\n".join(lines)
 
 
-def grade(question: Question, passages: list, k: int) -> Outcome:
+def grade(question: Question, passages: list, k: int, document_paths: dict[str, str] | None = None) -> Outcome:
     """Score one question's passages.
 
     Support is checked by looking for the answer's figures in the passage text rather than for the answer string,
@@ -310,15 +332,26 @@ def grade(question: Question, passages: list, k: int) -> Outcome:
         outcome.detail = question.note or "not answerable from this corpus"
         return outcome
 
+    # Resolved through the manifest when one is supplied, so a question can name a document by its identity and
+    # still be matched against the filename the corpus holds. Without a manifest the id is used as it stands,
+    # which is what a test supplies.
+    resolve = document_paths or {}
+
+    def file_for(doc_id: str) -> str:
+        return resolve.get(doc_id) or doc_id
+
     wanted_docs = set()
     if question.source_document == "both":
         wanted_docs = {"apple-ex10-1-2024", "apple-ex10-22-2024"}
     elif question.source_document:
-        wanted_docs = {question.source_document}
+        wanted_docs = {file_for(question.source_document)}
 
     for rank, passage in enumerate(passages[:k], start=1):
         doc = getattr(passage, "doc_id", "") or ""
-        if any(wanted in doc for wanted in wanted_docs):
+        # Compared on the stem, because the manifest records `irs-p15.pdf` and the chunk records
+        # `company/irs-p15.pdf`: the root directory is part of the ingested identity and not part of the corpus
+        # manifest's.
+        if any(Path(wanted).stem in doc for wanted in wanted_docs):
             outcome.retrieved_document = True
             break
     if not wanted_docs:
@@ -366,7 +399,8 @@ def grade(question: Question, passages: list, k: int) -> Outcome:
     return outcome
 
 
-def run(questions: list[Question], search, k: int = 10, configuration: str = "default") -> Report:
+def run(questions: list[Question], search, k: int = 10, configuration: str = "default",
+        document_paths: dict[str, str] | None = None) -> Report:
     """Ask every question and grade it. `search` takes a question and returns passages, best first."""
     report = Report(configuration=configuration, k=k)
     for question in questions:
@@ -379,7 +413,7 @@ def run(questions: list[Question], search, k: int = 10, configuration: str = "de
                 question_id=question.id, category=question.category, answerable=question.answerable,
                 detail=f"{type(exc).__name__}: {exc}"))
             continue
-        report.outcomes.append(grade(question, passages, k))
+        report.outcomes.append(grade(question, passages, k, document_paths))
     return report
 
 
@@ -440,6 +474,7 @@ def main() -> int:
     import retriever
 
     questions_path = os.environ.get("QUESTIONS", "/w/fixtures/corpus/questions.yaml")
+    manifest_path = os.environ.get("CORPUS_MANIFEST", "/w/fixtures/corpus/manifest.yaml")
     role = os.environ.get("ROLE", "staff")
     k = int(os.environ.get("K", "10"))
     configuration = os.environ.get("CONFIGURATION", "fused")
@@ -448,7 +483,8 @@ def main() -> int:
     def search(question: str):
         return retriever.search(services, question, role=role, limit=k).passages
 
-    report = run(load_questions(questions_path), search, k=k, configuration=configuration)
+    report = run(load_questions(questions_path), search, k=k, configuration=configuration,
+                 document_paths=load_document_paths(manifest_path))
     print(report.render())
     out = os.environ.get("REPORT_OUT")
     if out:
