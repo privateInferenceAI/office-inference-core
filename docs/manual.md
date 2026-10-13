@@ -46,6 +46,18 @@ section they are numbered next to. The contents below lists them where they are.
 14. Shipping evidence off the machine
 15. The routine checks
 
+**Part 3b, reading documents (phase C2)**
+
+These six pages sit in the file after section 20, as the front matter explains. They are numbered as part
+of 13 because they are operations like the rest of it.
+
+13a. Ingesting documents
+13b. Retrieval
+13c. Citations and verification
+13d. Access control
+13e. Redaction and the egress gate
+13f. Retention and deletion
+
 **Part 4, changing things**
 16. The manifest, field by field
 17. Adding a role
@@ -114,11 +126,18 @@ proves and, more usefully, what it does not.
 
 | Piece | What it is | In this deployment |
 |---|---|---|
-| The machine | One AWS EC2 instance running Docker. No GPU, because the models live at the provider | `i-096bebd46308d1673`, an m7i.4xlarge: 16 cores, 64 GB RAM, 200 GB disk, Ubuntu 24.04 |
+| The machine | One AWS EC2 instance running Docker. No GPU: the generation models live at the provider, and the embedding and reranking work is done on CPU | `i-096bebd46308d1673`, an m7i.4xlarge: 16 vCPU, 64 GB RAM, 200 GB disk, Ubuntu 24.04. Check it with `nproc` and `free -g` rather than trusting this row on a deployment you did not build |
 | `postgres` | The database. Holds the gateway's keys and spend, and our own audit record | A container, on the box |
 | `litellm` | The gateway. Every AI call goes through it. It authenticates the caller, checks the role's budget and model permissions, calls the model, and writes down what it cost | A container, on the box |
 | `audit` | The tool that writes and checks the audit record. Runs when you call it, not as a service | A container, started on demand |
 | `keys` | The tool that mints per-role API keys and their ceilings | A container, started on demand |
+| `retention` | The tool that deletes: a document a client asks to remove, and everything a retention period has run out on. It is the only component that unlinks a client's file | A container, started on demand |
+| `eval` | The tool that runs the fixed question set against retrieval, so a change to search is measured rather than assumed | A container, started on demand |
+| `ingestion` | The worker that reads documents, chunks and embeds them, and reconciles deletions. Runs as a service on a fifteen-minute cycle | A container, on the box |
+| `parser` | Turns a document into structured text with page numbers, tables and OCR | A container, on the box |
+| `vector` | The vector store: chunk embeddings plus the access label each chunk carries | A container, on the box |
+| `embeddings` | bge-m3 through TEI, on CPU. Turns text into the vectors the store holds | A container, on the box |
+| `reranker` | Reorders the fused head of a search. **Not running on this deployment**: the cloud build reranks at Bedrock, and the container here sits behind a bench profile because on CPU it cannot meet the latency budget | On Bedrock in the cloud build; a profile elsewhere |
 | `llamacpp` | A local model server, used by the office build only | A container, switched off in the cloud build by a compose profile |
 | The models | Frontier AI models, reached through the provider's API | Amazon Bedrock, us-east-1: four models, Nova and DeepSeek. The Claude models appear in the lifecycle table and the example manifests, not in this deployment |
 | The bucket | Where the evidence goes, so the machine cannot erase it | `oi-core-audit-dev`, with Object Lock |
@@ -323,18 +342,34 @@ cd /opt/oi-core
 docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env ps
 ```
 
-You should see `postgres` healthy and `litellm` running. Compose prints seven columns and the sample
-below drops the last one for width. That column is worth knowing about: `PORTS` shows the exposed ports
-with no host binding, which is how you confirm from the outside that nothing is reachable:
+You should see six services running, five of them healthy. Compose prints seven columns; the sample below
+keeps them all, because two of them carry information the others do not. `IMAGE` is where a digest-pinned
+image shows whether the box is running what the repository says it should, and `PORTS` shows the exposed
+ports with no host binding, which is how you confirm from the outside that nothing is reachable:
 
 ```
-NAME       IMAGE                    COMMAND     SERVICE    CREATED      STATUS
-litellm    ghcr.io/berriai/litellm…            litellm    4 hours ago  Up 4 hours
-postgres   postgres:16-alpine                   postgres   4 hours ago  Up 4 hours (healthy)
+NAME         IMAGE                                        COMMAND                  SERVICE      CREATED          STATUS                    PORTS
+embeddings   ghcr.io/huggingface/text-embeddings-inf…     "text-embeddings-rou…"   embeddings   20 hours ago     Up 20 hours (healthy)     
+ingestion    sha256:cc07ecc167dc80290ddc66ed29fde6c7…     "/bin/sh -c 'while t…"   ingestion    25 minutes ago   Up 25 minutes (healthy)   
+litellm      ghcr.io/berriai/litellm@sha256:3d88bd75…     "docker/prod_entrypo…"   litellm      2 days ago       Up 2 days                 
+parser       sha256:7693fc6d37a7dd055405dc2c378e39a5…     "container-entrypoin…"   parser       10 hours ago     Up 10 hours (healthy)     
+postgres     postgres:16-alpine                           "docker-entrypoint.s…"   postgres     2 days ago       Up 2 days (healthy)       
+vector       qdrant/qdrant@sha256:b7b0444c4c351c970b98…    "./entrypoint.sh"        vector       20 hours ago     Up 20 hours               
 ```
 
-`ps` shows only the two long-running services. `audit` and `keys` are behind the compose `tools`
-profile, so they never appear here and `oi up -d` never starts them. They run when you call them.
+**Six, and the number matters.** Three of them arrived with C2 and none of the three is optional:
+`vector` holds the chunk embeddings, `embeddings` turns text into them, `parser` turns a document into
+text with page numbers, and `ingestion` is the worker that drives both. A `ps` showing two services is a
+deployment that cannot read a client's documents at all, and it is what an older copy of this manual
+showed.
+
+Two of the six are not healthy and that is correct. `litellm` and `vector` declare no healthcheck, so
+compose has nothing to report; for those two, `Up` is the whole of the information. `postgres`,
+`ingestion`, `parser` and `embeddings` do declare one, and healthy means something specific in each case
+— for `ingestion` it means the last cycle finished with no failures, not that the process is alive.
+
+`ps` shows only the long-running services. `audit`, `keys`, `retention` and `eval` are behind the compose
+`tools` profile, so they never appear here and `oi up -d` never starts them. They run when you call them.
 
 Two facts about the output. A `docker compose run` prints its own preamble above whatever the tool
 says, and how much of it depends on what the service depends on: the audit tool waits for postgres, so
@@ -505,9 +540,14 @@ loop, and it does not promise that the number is never exceeded: the call that c
 completes, and in a fast burst more than one can slip through before the recorded figure catches up.
 Promise a client that the loop stops, not that the number is untouchable.
 
-13. The audit record, command by command
+## 13. The audit record, command by command
 
 **Part 3b, reading documents (phase C2)**
+
+These six pages are numbered as part of 13 because they are operations like the rest of it, but they sit
+in the file after section 20 so that everything added by C2 is in one block rather than scattered through
+pages that C1 wrote. The heading sequence in the file is not the reading order; this contents list is.
+
 13a. Ingesting documents
 13b. Retrieval
 13c. Citations and verification
@@ -533,10 +573,12 @@ skip    003_purge_events.sql (already applied)
 skip    004_purge_needs_the_hatch.sql (already applied)
 skip    005_content_modes.sql (already applied)
 skip    006_feed_tells_the_truth.sql (already applied)
-0 migration(s) applied, 5 already present
+…
+skip    016_retention_policy.sql (already applied)
+0 migration(s) applied, 15 already present
 ```
 
-On a fresh machine the same command prints `applied` for each in order and `5 migration(s) applied, 0
+On a fresh machine the same command prints `applied` for each in order and `15 migration(s) applied, 0
 already present`. Migrations are ordered and checksummed, and editing one that has already been applied
 is refused rather than silently accepted, so a schema change means a new file:
 
@@ -544,6 +586,81 @@ is refused rather than silently accepted, so a schema change means a new file:
 error: 005_content_modes.sql was applied but has changed since. Applied 6ed11a69cf48, now c6b031dad94a.
 Write a new migration instead of editing an applied one.
 ```
+
+**The count is `16 files, 15 recorded`, and the difference is not an off-by-one.** The numbering starts at
+`002` because `001` was folded into the service before it shipped, and `schema_migrations` itself is
+created by `audit migrate` rather than by a migration file. So the table's row count is one less than the
+number of files in `db/migrations/`. Both numbers are in the output above if you read it closely, and the
+summary line reports the row count.
+
+### Adding a migration
+
+The section above tells you to write a new migration instead of editing an applied one. Here is how, and
+it is four steps because the fourth is the one people skip.
+
+**1. Take the next number.** List what exists and pick the next integer, zero-padded to three digits:
+
+```
+ls db/migrations/
+```
+
+```
+002_audit_events.sql
+…
+016_retention_policy.sql
+```
+
+The next one here would be `017_`. **The number decides the order, and the order is the only ordering
+mechanism**: files are sorted by name and applied in that sequence, so `017_` runs after `016_` on every
+machine. Do not renumber an existing file to make room.
+
+**2. Write the file.** Plain SQL, in `db/migrations/`. Two conventions, both of which exist in the files
+already there and both of which matter more than they look:
+
+- **Make it idempotent where you can.** `create table if not exists`, `add column if not exists`. The
+  runner records what it applied and will not re-run it, so this is belt and braces rather than the
+  mechanism — but it turns a half-applied migration on a machine that died mid-run into something you can
+  simply run again.
+- **Comment why, not what.** Read `016_retention_policy.sql` for the house style: the comments say what the
+  requirement is and why the shape is what it is, including the alternatives that were rejected. A
+  migration is the only record of a decision that a later reader will not find anywhere else.
+
+**3. Apply it and read the output:**
+
+```
+oi run --rm audit migrate
+```
+
+```
+applied 017_your_change.sql
+1 migration(s) applied, 15 already present
+```
+
+`applied` is the word to look for. `skip` means the file was already recorded, and `error` means it was
+recorded with a different checksum — which is the runner telling you that you edited a file that already
+ran, not that the database is broken.
+
+**4. Check it landed, from the database rather than the runner.** The runner records an intent; the
+catalog is the fact. Both of these are read-only:
+
+```
+oi run --rm --entrypoint python audit -c "
+import os, psycopg
+with psycopg.connect(os.environ['DATABASE_URL']) as c, c.cursor() as cur:
+    cur.execute(\"select filename, applied_at from schema_migrations order by filename desc limit 3\")
+    for row in cur.fetchall(): print(row)
+"
+```
+
+```
+docker exec postgres psql -U oicore -d oicore -c '\d your_table'
+```
+
+**What a migration is not for.** It changes the schema, not the data in a running system. A migration that
+backfills a column runs inside the same transaction as the schema change and can hold a lock on a table
+the deployment is using; if a change needs a backfill, do it as a separate step with the migration and say
+so in the file's comment. And a migration cannot be rolled back: there is no `down` file and no undo, so a
+destructive change wants a backup taken first. Section 14 and `docs/backup-restore.md` cover that.
 
 ### Writing an event by hand
 
@@ -578,7 +695,7 @@ is an identity, not a word.
 |---|---|
 | `--type` | `model_call`, `tool_call`, `approval`, `access`, `config_change`, `login`. Required |
 | `--actor` | Who did it. Required, and refused without `--dev` |
-| `--actor-role` | Their role, for a human: `admin`, `staff`, or a role name |
+| `--actor-role` | Free text, recorded in the row's `actor_role` column and printed by `audit list`. **Nothing validates it and nothing reads it to make a decision** — `admin` and `staff` are conventions of ours, not values the code recognises. Do not confuse it with a retrieval role (13d) or a model role (12); it is a label for a human reading the record |
 | `--dev` | Says out loud that a human typed this actor rather than a session supplying it |
 | `--data-class` | `public`, `internal`, `confidential`, `regulated`. Default `internal`. It decides the content mode |
 | `--outcome` | `ok`, `denied`, `error`, `pending`. Default `ok` |
@@ -1036,6 +1153,11 @@ content:
   classes:
     public: full
     internal: redacted
+access:
+  denial: counted
+  egress:
+    frontier_classes: [public, internal]
+    redaction: "on"
 budgets:
   period_days: 30
   roles:
@@ -1091,8 +1213,11 @@ validator refuses, because an appliance that can reach a provider is not an offi
 | `compliance.audit_retention_days` | How long the record is kept. Six years is enforced for `sec-17a4` |
 | `compliance.data_residency` | Required by any compliance profile other than `none` or `contractual` on a cloud or hybrid build, so the contract records where the client's data must stay. The validator checks that it is named rather than comparing it with anything, so the global-profile refusal follows from the compliance profile itself |
 | `compliance.baa_with_office_inference` | Required by any compliance profile other than `none` or `contractual` on a hardware build, and it must be true. We need a signed agreement before holding that data on a client's machine |
-| `lanes.frontier.redaction` | Whether prompts are redacted before leaving. One validator rule refuses `false` with `regulated` on a cloud build, and nothing redacts yet |
+| `lanes.frontier.redaction` | Whether prompts are redacted before leaving. One validator rule refuses `false` with `regulated` on a cloud build. **As of C2 this is superseded in practice by `access.egress.redaction`**, which is the field the egress gate reads; this one is still validated and still read by nothing at call time. The overlap is recorded rather than resolved — see the note under this table |
 | `lanes.frontier.requires_approval` | A human approval step before a remote call. In the schema, read by no rule and no service; C3 owns the gate |
+| `access.denial` | **What a denied user is told** when their retrieval role excludes content that would answer the question: `silent`, `denied`, or `counted`. Read by the retriever at call time, rendered to `ACCESS_DENIAL_MODE`. The trade each mode makes is the client's, and section 13d sets it out. Default `denied`; an unrecognised value is refused rather than defaulted |
+| `access.egress.frontier_classes` | **Which data classes may leave for a frontier model.** Rendered to `FRONTIER_CLASSES`. The gate refuses rather than defaulting, so a deployment that declares nothing sends nothing off-box. Confidential and regulated are absent rather than listed as false, which is what makes a refusal name what *is* permitted |
+| `access.egress.redaction` | Whether the egress gate redacts before the call leaves: `"on"` or `"off"`, rendered to `EGRESS_REDACTION`. Default `on`. This is the field section 13e documents, and the one that turned the `lanes.frontier.redaction` story around |
 | `lanes.frontier.provider` | `bedrock` (the schema also allows `api`). Required when the lane is on, and omitted entirely by a build with no remote lane |
 | `offsite.provider`, `offsite.region`, `offsite.account_owner` | Where evidence ships: `s3`, the Region, and whose account the bucket is in |
 | `offsite` | Where evidence ships, and which artifacts may leave: `anchors`, `exports`, `backups`. `backups` is accepted today and nothing consumes it until C8 |
@@ -1105,7 +1230,24 @@ Those last four rows matter when you write a manifest for a client: a field can 
 validation, and still do nothing, because the schema describes the contract we intend while the services
 implement what exists. The fields that change behaviour today are the ones named in the sections above:
 which models a role uses, whether a lane is on, the budgets, the content policy, the compliance profile,
-and the offsite block. Section 25 lists what exists.
+the access block, and the offsite block. Section 25 lists what exists.
+
+**One overlap is recorded here rather than resolved, because it is an architecture decision.**
+`lanes.frontier.data_classes_allowed` and `access.egress.frontier_classes` carry the **same enum and the
+same meaning**. Both are `[public, internal]` in this deployment. They are two places to declare one
+policy, and **the gate reads the second**. The first is read by the validator's own two rules — it refuses
+an empty list, and refuses `regulated` alongside `redaction: false` on a cloud build — and by nothing at
+call time.
+
+So a client's manifest can say one thing in `lanes.frontier.data_classes_allowed` and another in
+`access.egress.frontier_classes`, pass validation, and be governed by the second without anyone noticing
+the first disagrees. Until the overlap is resolved, **set both, and treat `access.egress` as the one that
+decides.** The same applies to `lanes.frontier.redaction` against `access.egress.redaction`: set both.
+
+This was found by a review, not by a failure, and it is left standing on purpose. Resolving it means
+either deleting a field that section 16 documents and clients may have written, or changing which field a
+security control reads, and both are decisions for the owner of the product rather than for whoever
+happens to be editing this page.
 
 **What the validator refuses.** The script is the authoritative list; this is what it covers, grouped
 by what the rule protects.
@@ -1420,6 +1562,91 @@ systemctl list-timers 'oi-core-*'
 Expect two timers with a NEXT time within the hour and within the day. Both are `Persistent`, so a run
 missed while the machine was stopped happens once at the next start.
 
+### Onboarding the client's corpus
+
+**Step 6 is where a deployment stops being a stack and starts being useful, and it was missing from this
+list.** Nothing is searchable until the client's documents are in the right place with the right labels,
+and the six steps above never mention a document. Here is the seventh step, and it is the one that
+decides whether the client's questions have answers.
+
+**One: agree the access roots before you copy anything.** A root is a top-level folder under
+`/opt/oi-core/documents`, and **its name is the access label** — there is no separate place to declare it
+and no way to relabel a file afterwards without re-ingesting. Two questions for the client, and both are
+contract-level rather than technical:
+
+- **Who may see what?** Two roots exist in code today (`company` and `executive`, in the `ROLES` map in
+  `services/retrieval/retriever.py`), and adding a third is a code change and a redeploy, not a setting.
+  So the roots a client needs have to be known before their corpus is laid out, or the corpus gets
+  rearranged later.
+- **Is there anything one group must not see?** Whatever goes in a restricted root, the client should
+  understand that a search by a role without that root returns a denial rather than an answer, and that
+  `access.denial` decides whether they are told that at all. Section 13d sets out the trade.
+
+**Two: lay the corpus out and copy it in.** The folder name is the label, subfolders are read recursively,
+and every file under a root carries that root's label:
+
+```
+/opt/oi-core/documents/
+  company/            <- labelled `company`, readable by the staff role
+    handbook/
+    invoices/
+  executive/          <- labelled `executive`, readable by the executive role only
+```
+
+A file directly under `documents/` with no root folder is indexed under the label `documents`, which no
+role's map contains, so **no search ever returns it**. It fails quietly. Put every file under a root.
+
+Copy with `scp` or `rsync`, as the `ubuntu` user, and check the ownership afterwards: the worker reads the
+mount as an unprivileged user inside the container, so a file the host cannot read is a failure the worker
+reports rather than a file it skips.
+
+**Three: check the formats before the client is told the corpus is loaded.** The accepted set is `.pdf`,
+`.docx`, `.pptx`, `.xlsx`, `.html`, `.htm`, `.md`, `.markdown`, `.txt`, `.csv`, `.rtf`, `.odt`, `.ods`,
+`.odp` and `.eml`. Everything else is ignored rather than failed, and it is not reported. In particular
+`.doc` and `.xls` — anything saved by an Office older than 2007 — are ignored, and `.msg` is deliberately
+outside the set because whether the parser reads it is unverified. Count the files in the client's handover
+against the number the worker reports:
+
+```
+find /opt/oi-core/documents -type f | wc -l
+docker exec ingestion python3 /app/ingest.py --documents /documents
+```
+
+If those two numbers disagree, find out why before telling the client it is done. The worker prints
+`seen`, `new`, `changed`, `skipped` and `failed`; a file in an accepted format that is absent from `seen`
+was filtered by suffix, and one counted in `failed` is dead-lettered after two attempts and will not be
+retried until its bytes change.
+
+**Four: run one question per root and read the answer.** This is the acceptance test for a corpus, and it
+takes two minutes. It catches a corpus laid out under the wrong root, a parser that cannot read the
+client's format, and a role map that does not match what was agreed:
+
+```
+docker run --rm --network ai-net -v /opt/oi-core:/w:ro -w /w \
+  --env-file rendered/env --entrypoint python oi-core/eval:local \
+  /w/tests/fixtures/ask.py -q "<a question the client says must work>" --role staff
+
+docker run --rm --network ai-net -v /opt/oi-core:/w:ro -w /w \
+  --env-file rendered/env --entrypoint python oi-core/eval:local \
+  /w/tests/fixtures/ask.py -q "<a restricted question>" --role staff
+```
+
+The first should return passages from the root you expect. The second should return nothing, or return a
+denial naming how many passages were withheld — and **if it returns restricted content, stop.** That is
+the access filter failing, not a corpus problem, and section 13d's troubleshooting is where to go.
+
+**Five: set the retention period before there is anything to retain.** The manifest records the contract's
+period and the deployment holds it in `retention_policies`. Both have to agree, and the policy is what
+`retention --enforce` reads:
+
+```
+oi run --rm retention --set-retention documents --days <the period the client agreed> \
+  --legal-basis "<the period, in the client's or their regulator's words>"
+```
+
+`--legal-basis` is not decoration: a retention period with no stated basis is one nobody can defend to an
+auditor. Section 13f covers the enforcement run and its dry run.
+
 **What is not in this manual:** how to build the machine itself. Creating the account, the VPC, the
 instance, the security group, the instance role, the bucket with its lock, and the timers is the
 installer's job, and it is written down in `docs/runbook.md` (Phase 0 and Phase 1 for the cloud build,
@@ -1468,6 +1695,63 @@ fifteen minutes, and it is the only component that writes the document indexes.
 Each chunk carries the label of the top-level folder it was found under, so `company/handbook/policy.pdf`
 is labelled `company`. The label is attached here rather than worked out during a search, because the
 search filters on it. Section 13d covers what enforces it.
+
+### Putting a document where the worker will find it
+
+**The folder is `/opt/oi-core/documents` on the host.** That is the whole answer to "where do I put the
+file", and this deployment's corpus shows what a populated one looks like:
+
+```
+$ ls /opt/oi-core/documents
+company  executive
+
+$ find /opt/oi-core/documents -type f | head -4
+/opt/oi-core/documents/company/fee-schedule-2026.md
+/opt/oi-core/documents/company/irs-p15.pdf
+/opt/oi-core/documents/company/dispatch-review-q1.pptx
+/opt/oi-core/documents/executive/executive-compensation.md
+```
+
+Three rules and nothing else:
+
+1. **The file goes under a top-level folder**, and that folder's name is its access label. There is no
+   separate place to declare the label, and no way to label a file individually. A file sitting directly
+   in `documents/` with no subfolder is not unlabelled: it takes the name of the documents folder itself,
+   so it is stored as `documents` and **no role's map contains that label, which means no search returns
+   it.** It is indexed and unreachable, which is the quietest way to lose a document. Put files in a
+   folder whose name is a root.
+2. **Subfolders are read recursively.** Depth is free, and every file under a root carries that root's
+   label however deep it sits. A folder inside a root does not create a new label.
+3. **The extension decides whether it is read at all.** The accepted set is `.pdf`, `.docx`, `.pptx`,
+   `.xlsx`, `.html`, `.htm`, `.md`, `.markdown`, `.txt`, `.csv`, `.rtf`, `.odt`, `.ods`, `.odp` and
+   `.eml`. Anything else is **ignored rather than failed**, and it is not counted as a document either:
+   the worker does not report it, because a client's document folder will contain a `.DS_Store` and a
+   shortcut sooner or later and neither is an error. So a file in an accepted format that does not appear
+   in the index is a failure to investigate, and a file in an unsupported format that does not appear is
+   the filter working. `.msg` is deliberately not in the set: whether the parser reads it is unverified,
+   and adding a suffix is a promise that files with it are ingested. A client with Outlook exports should
+   be told that before they drop a folder of them in.
+4. **Legacy binary Office formats are not read.** `.doc` and `.xls` are outside the set, so an old
+   `.doc` is ignored in exactly the way above. Modern `.docx` and `.xlsx` are read. A client whose archive
+   predates 2007 needs to re-save before ingesting, and that is worth saying in the contract rather than
+   discovering in the index.
+
+To add a document, copy it in and wait for the next cycle, or run one now rather than waiting up to
+fifteen minutes:
+
+```
+scp -i ~/ai-stack/ai-stack-key.pem myfile.pdf ubuntu@52.204.202.66:/opt/oi-core/documents/company/
+ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@52.204.202.66 \
+  'cd /opt/oi-core && docker exec ingestion python3 /app/ingest.py --documents /documents'
+```
+
+The mount is **read-only** for the worker, which is deliberate: this component never writes to a client's
+documents, and a mount that cannot be written to is the cheapest way to keep that true. It also means a
+permissions problem on the host shows up as a failure to read rather than as a file quietly modified.
+
+Retention mounts the same directory **read-write**, because a retention period running out destroys the
+file as well as the indexes. That is the only thing in the system that deletes a client's document, and
+section 13f covers it.
 
 **Apply the schema, then start the worker:**
 
@@ -1634,9 +1918,16 @@ seven phrasings, because `plainto_tsquery` ANDs every term of a natural question
 `Form W-4` into pieces. So references are normalised by an extractor both the ingestion worker and the
 retriever share, and a small alias table closes the gap between `Pub. 515` and `Publication 515`.
 
-Reranking runs on the fused head. The reranker scores the question against the top 50 candidates, which is
-`RERANK_DEPTH`, and it can promote a passage the fusion barely kept or demote one it ranked first. The tail
-keeps its order behind the head, because a reranker that saw the top of a list cannot reorder the rest.
+Reranking runs on the fused head. The reranker scores the question against the top candidates from the fused
+list, up to `RERANK_DEPTH` of them, and it can promote a passage the fusion barely kept or demote one it
+ranked first. The tail keeps its order behind the head, because a reranker that saw the top of a list cannot
+reorder the rest.
+
+**`RERANK_DEPTH` is a ceiling, not a count, and the two are easily confused.** It defaults to 50 and is set
+nowhere in this deployment, so the effective number is however many candidates the arms actually returned —
+on the recorded run above that was 15, which is why `rerank_depth` reads 15 rather than 50. The probe prints
+the number it really saw, so read `rerank_depth` from the output rather than assuming the configured ceiling
+was reached. On a large corpus the ceiling is what binds; on this one it is not.
 
 **The yardstick first:**
 
@@ -1751,7 +2042,90 @@ believing it reranked is not a state this code can reach.
 - The rates do not move after a change: check whether they were at their maximum before it. A change measured
   against a system already at 100 percent is being measured on ranks.
 
-## 13c. Citations and verification
+### Asking one question
+
+**There is no ask endpoint yet, and this is the part of the manual worth being honest about.** The
+retrieval path is a function, `search()` in `services/retrieval/retriever.py`, and the assistant API that
+would expose it — sessions, caller identity, streaming — is C3. What exists is a probe that runs one
+question through the whole path, and it is the way to answer "what does the system return for this?"
+today. Section 25 records the gap.
+
+```
+cd /opt/oi-core
+docker run --rm --network ai-net -v /opt/oi-core:/w:ro -w /w \
+  --env-file rendered/env --entrypoint python oi-core/eval:local \
+  /w/tests/fixtures/ask.py --question "What is the emergency callout rate for 2026?" --role staff
+```
+
+```
+question: What is the emergency callout rate for 2026?
+role:     staff   roots: ['company']
+arms:     {'dense': 15, 'lexical': 0}
+rerank:   {'reranked': True, 'rerank_depth': 15, 'rerank_ms': 283.1, 'rerank_budget_ms': 5000,
+           'rerank_within_budget': True, 'rerank_model': 'cohere.rerank-v3-5:0', 'rerank_reason': None}
+withheld: 0   denied: False   restricted matched: 0
+
+[1] company/callout-rate-approval.eml  pages 1-1  acl=company  score=0.7354
+    From: R. Okafor <r.okafor@meridian.example>
+    …
+[2] company/rate-card-2026.xlsx  pages 1-1  acl=company  score=0.5584
+    Meridian Facilities | Rate card 2026
+    Service | Unit | Rate | Notes
+    Emergency callout | per visit | 8,475.50 | Outside contracted hours
+    …
+```
+
+Five things that output tells you, and each one is a line you would otherwise have to guess at:
+
+- **`role` and `roots`** are the retrieval role and the folders it may read. `--role executive` widens
+  `roots` to `['company', 'executive']`, and a role that is not in the map exits 2 rather than defaulting.
+- **`arms`** is what each search contributed. `lexical: 0` means the lexical arm ran and found nothing;
+  a *missing* `lexical` key means it did not run, which is what happens if `DATABASE_URL` is not in the
+  environment. Those are different faults, so they are reported differently.
+- **`rerank`** is the reranker's own account of itself: the depth it saw, what it cost in milliseconds,
+  whether that was inside the budget, and which model did it. `reranked: false` comes with a
+  `rerank_reason` rather than a silent fallback to the fused order — the module reports that it did not
+  run instead of pretending the fused order was the reranked one.
+- **`withheld` and `restricted matched`** are the access facts. `withheld` counts passages the role may not
+  see that the store returned anyway, which should always be 0 because the filter is in the query.
+  `restricted matched` counts what a second search found outside the role's roots, and it is the number a
+  `counted` denial reports.
+- **`score`** is the vector arm's cosine similarity, or `n/a` for a passage only the lexical arm returned.
+  It is not comparable across arms, which is why a passage from the lexical arm shows `n/a` rather than a
+  misleadingly small number.
+
+**Useful variations:**
+
+```
+# see the fused order instead of the reranked one
+… /w/tests/fixtures/ask.py -q "…" --no-rerank
+
+# ask as the privileged role, and watch `restricted matched` go to 0 because nothing is restricted from it
+… /w/tests/fixtures/ask.py -q "What is the chief executive officer's base salary?" --role executive
+
+# check a candidate answer's citations against what was actually retrieved
+… /w/tests/fixtures/ask.py -q "…" --verify "Emergency callout is 8,475.50 per visit."
+
+# machine-readable, for piping
+… /w/tests/fixtures/ask.py -q "…" --json
+```
+
+`--verify` is the bridge to section 13c: it splits the candidate answer into claims and checks each one
+against the passages that were retrieved, so a figure that is not in any of them is refused rather than
+reported. It is the same verifier the harness uses, which is why a claim can be refused for being
+superseded even when the number is right.
+
+**The exit codes are the contract**, because this is the only piece of the C2 path a script can call:
+`0` when something was returned, **`0` when the role was denied** — a denial is the control working, not a
+failure — `1` when nothing was returned, and `2` when the role is unknown. A monitoring script that
+treated a denial as an error would page someone every time the access filter did its job.
+
+**What this probe is not.** It does not call a model. Handing these passages to one, with the citation
+rules and the confidence gate attached, is the steps in section 13c; putting that behind an API that a
+person can reach is C3. So the manual can demonstrate the retrieval half end to end today, and the
+generation half only through the fixture harness.
+
+
 
 The verifier is the layer that checks an answer against what it cites. Everything below it checks whether the
 answer matches the source, and none of it checks whether the source is the right source or was read correctly.
@@ -1916,9 +2290,43 @@ measure against the golden set rather than guess at, so it is recorded as open.
 
 ## 13d. Access control
 
-Two roles exist today, `staff` and `executive`, over two document roots, `company` and `executive`. A role's
-permitted roots are the folders its search may read: `staff` sees `company`, and `executive` sees both.
-Per-user and per-group permissions are a later phase, so roles are all there is for now.
+### Two kinds of role, and the words are not interchangeable
+
+This is the point in the manual where two vocabularies meet, and the earlier draft used the same word for
+both. They are different things, defined in different files, and a role of one kind has no meaning as the
+other.
+
+| | **Model role** | **Retrieval role** |
+|---|---|---|
+| What it is | A name a caller asks the gateway for | A name the retriever maps to document roots |
+| What it decides | Which model answers, and what the caller may spend | Which folders a search may read |
+| The names | `front_desk`, `analyst`, `reader`, `coder` | `staff`, `executive` |
+| Where it is defined | `manifests/<client>.yaml`, under `models:` and `budgets.roles:`. Section 12 covers minting keys from it | **`services/retrieval/retriever.py`, in the `ROLES` map. There is no manifest field for it.** |
+| What a caller does with it | Passes it to the gateway, usually as the model name | Passes it to `search()`, which refuses a name not in the map |
+| Add one by | Adding it to the manifest and re-running `keys` | Editing the map in code and redeploying |
+| If it is wrong | The gateway refuses: 403 on a model the key cannot reach | The retriever raises `KeyError` and names the known roles |
+
+**The four model roles in this deployment**, for reference, are in section 12 with their ceilings. **The
+two retrieval roles** are:
+
+```python
+# services/retrieval/retriever.py
+ROLES: dict[str, frozenset[str]] = {
+    "staff": frozenset({"company"}),
+    "executive": frozenset({"company", "executive"}),
+}
+```
+
+A role's permitted roots are the folders its search may read: `staff` sees `company`, and `executive` sees
+both. **There is no manifest field for the role map and no way to add a role without editing this code**,
+which is a real limitation rather than a convention: per-user and per-group permissions are a later phase.
+The four model roles are not retrieval roles, and a search asked for `analyst` is refused rather than
+guessed at, because a default would grant the broader of two permissions to a typo.
+
+So a caller that wants an answer grounded in documents has to supply both: a retrieval role to decide what
+may be read, and a model role to decide who answers and who pays. Section 13b's `search()` takes the first;
+`keys --probe` exercises the second. Nothing in C2 wires the two together end to end, which is what C3's
+assistant API adds — section 25 records that.
 
 The filter is a clause in the search query itself, in both arms, so a restricted passage never leaves the
 store. There is a second check afterwards that counts anything the store returned that the role may not see.
@@ -2007,12 +2415,28 @@ is one command:
 
 ```
 docker exec ingestion python3 /app/ingest.py --versions
-docker exec ingestion python3 /app/ingest.py --supersede company/fee-2025.pdf \
-  --by company/fee-2026.pdf --note "2026 schedule in force"
+docker exec ingestion python3 /app/ingest.py --supersede company/fee-schedule-2025.md \
+  --by company/fee-schedule-2026.md --note "2026 schedule in force"
 docker exec ingestion python3 /app/ingest.py --scan-duplicates
-docker exec ingestion python3 /app/ingest.py --distinct company/policy-copy.pdf \
+docker exec ingestion python3 /app/ingest.py --distinct company/fee-schedule-2026-copy.md \
   --note "a separate policy, not a copy"
 ```
+
+**`--supersede` and `--distinct` do not check that the document exists.** Neither command reads the
+manifest before writing the declaration, so **both succeed silently on a path that was never ingested or
+was misspelled**, and the result is worse than an error: a superseded document that does not exist will
+never be cited, and the document that should have been superseded is still current. Check the path
+against the manifest first, because a typo here is invisible in the output:
+
+```
+docker exec ingestion python3 /app/ingest.py --status
+docker exec postgres psql -U oicore -d oicore -c \
+  'select relpath, is_current, superseded_by from document_versions order by relpath'
+```
+
+The same caution applies to `--by`: nothing checks that the replacement exists either, so a declaration can
+name a document that is not in the corpus and the refusal it produces will say `superseded` while pointing
+at nothing. Use the real relative path, exactly as the manifest records it, with no leading slash.
 
 `--versions` prints every declaration and any unresolved near-duplicate flag. A superseded passage is
 deliberately not dropped from the results: it reaches the verifier marked `is_current` false, and a claim
@@ -2501,6 +2925,11 @@ the manual also asks you to type.
 | `oi run --rm keys` | Mint or update every role's key from the manifest |
 | `oi run --rm keys --set-budget ROLE AMOUNT` | Cap one role now |
 | `oi run --rm keys --probe ROLE [--as-model M]` | One small call with that role's key |
+| `oi run --rm eval` | Run the fixed question set against retrieval. Section 13b |
+| `oi run --rm retention --holds` | List the legal holds in force. Section 13f |
+| `oi run --rm retention --purge DOC_ID [--dry-run]` | Delete one document from every store. Refused if a hold covers it |
+| `oi run --rm retention --enforce DATASET [--dry-run]` | Destroy what a retention period has run out on. Needs a policy to exist |
+| `docker run … oi-core/eval:local /w/tests/fixtures/ask.py -q "…" --role staff` | **Ask one question against the corpus.** The whole command is in section 13b |
 | `./deploy/cloud/ship/oi-core-ship.sh anchors\|exports` | Ship an artifact and prove it arrived |
 | `systemctl list-timers 'oi-core-*'` | The shipping schedule |
 | `journalctl -u oi-core-anchor.service -n 40` | What the anchor job did |
@@ -2532,10 +2961,22 @@ the manual also asks you to type.
 | `/opt/oi-core/rendered/litellm.yaml` | The gateway's model list |
 | `/opt/oi-core/exports/<date>/` | A day's JSONL and manifest |
 | `/opt/oi-core/exports/anchors/` | Anchors written on this machine |
+| **`/opt/oi-core/documents/`** | **A client's documents. This is the folder you drop files into.** The ingestion worker reads it, retention deletes from it, and nothing else writes to it |
+| `/opt/oi-core/documents/<root>/` | One top-level folder per access root: `company` and `executive` in this deployment. **The folder name is the access label** — a file under `documents/company/` is labelled `company`, and that label is what section 13d filters on |
+| `/opt/oi-core/documents/<root>/<any/depth>/` | Subfolders are read recursively, and every file under a root carries that root's label. `documents/company/handbook/policy.pdf` is labelled `company` |
 | `/opt/oi-core/data/postgres/` | The database's files |
+| `/opt/oi-core/data/qdrant/` | The vector store's files |
+| `/opt/oi-core/data/hf-cache/` | The embedding model's weights, downloaded once at build |
+| `/opt/oi-core/data/docling-cache/` | The parser's own model cache |
 | `/opt/oi-core/db/migrations/` | Schema migrations, applied by `audit migrate` |
 | `/opt/oi-core/data/model-lifecycle.json` | Model status and replacements, read by the lifecycle check |
 | `/etc/systemd/system/oi-core-*.{service,timer}` | The shipping schedule |
+
+**The documents root is the one path a reader is most likely to get wrong**, so here is the whole chain
+in one place. The host path is `/opt/oi-core/documents`. Compose mounts it into two containers: read-only
+at `/documents` for `ingestion`, and read-write at `/documents` for `retention`, which has to be able to
+unlink a file at the end of a retention period. Both mounts come from `${OI_ROOT}/documents`, so moving
+the repository moves the documents with it, and there is no second copy anywhere.
 
 ### What the renderer writes into `rendered/env`
 
@@ -2560,6 +3001,36 @@ most likely to want:
 Four environment variables are set by the compose file rather than by the renderer, which matters when
 you point a tool at another deployment: `LITELLM_URL` (default `http://litellm:4000`) and
 `RENDERED_DIR` for the keys tool, and `MIGRATIONS_DIR` and `EXPORTS_DIR` for the audit tool.
+
+### Settings that are read from the environment but written by nothing
+
+There is a third category, and until now the manual named these variables in prose without saying where
+they come from or what happens if you do not set them. **None of them is in `rendered/env`, none is in the
+manifest, and no script writes them** — a service reads each one from its own environment with a default
+compiled into the code. So they are set by editing the compose file, and the defaults are what this
+deployment runs because nothing overrides them.
+
+| Variable | Default | What it decides | Read by |
+|---|---|---|---|
+| `RERANK_ENABLED` | `true` | Whether the reranker runs at all. Only the exact string `false` disables it | retrieval, so `eval` and the probes |
+| `RERANK_DEPTH` | `50` | The **ceiling** on how many fused candidates the reranker scores. The real number is whatever the arms returned, up to this | retrieval |
+| `RERANK_BUDGET_MS` | `5000` | The budget a rerank is measured against, and the HTTP timeout is derived from it (`budget/1000 + 5` seconds) | retrieval |
+| `RERANK_MODEL` | `cohere.rerank-v3-5:0` | Which Bedrock reranker model is called | retrieval |
+| `ACCESS_DENIAL_MODE` | `denied` | What a denied user is told: `silent`, `denied`, `counted`. **This deployment sets it to `counted`** through the renderer, because the manifest declares `access.denial` | retrieval |
+| `INGEST_PARSE_TIMEOUT` | `3600` | One document's parse budget in seconds. Deliberately generous: a 59-page scan through OCR is minutes of CPU | ingestion |
+| `EMBED_CONTRACT_ALLOW_CHANGE` | unset | The escape hatch for a deliberate embedding-model change. Truthy values are `1`, `true`, `yes` | ingestion |
+| `EMBED_CONTRACT_REASON` | unset | The reason recorded alongside an allowed contract change. **Set this or the change is recorded with no stated reason** | ingestion |
+| `DOCUMENTS_ROOT` | `/documents` | Where the client's files are, inside the container. Both the worker's `--documents` and retention's `--documents-root` default to it, and the compose file sets it on the retention service only | ingestion, retention |
+
+**Two of those are worth acting on rather than reading.** `EMBED_CONTRACT_ALLOW_CHANGE` is the documented
+way out of the contract refusal: an operator who has decided to move the embedding model sets it with
+`EMBED_CONTRACT_REASON` and re-ingests, rather than editing the check. And `RERANK_DEPTH` being unset is
+why the probe in section 13b prints `rerank_depth` 15 rather than 50 — the ceiling was never reached.
+
+**Changing any of these means editing `deploy/office/compose/docker-compose.yml` and restarting the
+container**, because none of them is read from a file at run time. `oi up -d <service>` reconciles a
+changed definition; `oi restart <service>` re-reads a mounted file such as a new model list. Those are
+different operations and this is the first kind.
 
 ## 24. Glossary
 
@@ -2618,7 +3089,8 @@ provider. A build may have one or both.
 **Profile.** `cloud`, `office`, or `hybrid`. The difference between the builds.
 
 **Role.** A name a caller asks for, mapped to a model, with its own key and ceiling. Four today:
-`front_desk`, `analyst`, `reader`, `coder`.
+`front_desk`, `analyst`, `reader`, `coder`. **Not the same thing as a retrieval role**, which is `staff`
+or `executive` and decides which document folders a search may read. Section 13d has both, side by side.
 
 **Tombstone.** The event a retention purge writes, carrying the chain head before and after, so a gap
 is explained.
@@ -2627,17 +3099,27 @@ is explained.
 
 ## 25. Not built yet
 
-| Phase | What it adds |
-|---|---|
-| C2 | Reading documents: Docling ingestion with OCR and tables, Qdrant, embeddings and reranking, hybrid search, and the verifier that checks every citation |
-| C3 | The assistant API: sessions, roles from tokens, streaming, retries, a degraded mode when the provider throttles |
-| C4 | The client application: Ask, Do, Review, Activity |
-| C5 | Workflows and the first connector, with an approval gate |
-| C6 | The agent runtime and the MCP gateway |
-| C7 | Ingress, TLS, identity, and the Terraform that creates a client's account |
-| C8 | Alarms, backups, a restore drill, the sixty golden questions, vulnerability scanning, drift reporting |
-| C9 | The demonstration |
+| Phase | What it adds | State |
+|---|---|---|
+| C1 | The record: gateway, keys and budgets, the hash-chained audit record, export and anchoring | **Built.** Sections 11 to 14 |
+| C2 | Reading documents: Docling ingestion with OCR and tables, Qdrant, embeddings and reranking, hybrid search, and the verifier that checks every citation | **Built.** Sections 13a to 13f |
+| C3 | The assistant API: sessions, roles from tokens, streaming, retries, a degraded mode when the provider throttles | Not built |
+| C4 | The client application: Ask, Do, Review, Activity | Not built |
+| C5 | Workflows and the first connector, with an approval gate | Not built |
+| C6 | The agent runtime and the MCP gateway | Not built |
+| C7 | Ingress, TLS, identity, and the Terraform that creates a client's account | Not built |
+| C8 | Alarms, backups, a restore drill, the sixty golden questions, vulnerability scanning, drift reporting | Not built |
+| C9 | The demonstration | Not built |
 
-Until C2, this system answers from a model's general knowledge and cannot read a client's files. Until
-C4 there is no screen for a client to look at. What exists is the foundation and the evidence, and the
-next phase builds the part clients actually ask for first.
+**What exists today, said plainly.** The system stores a client's documents, finds the passages that
+answer a question, checks every citation it makes, refuses to answer from a superseded version, filters
+by role, redacts before anything leaves for a frontier model, and destroys material when a retention
+period runs out. It records all of it in a tamper-evident chain and ships that record off the machine.
+
+**What does not exist, and this is the honest gap.** There is no endpoint a client can ask a question
+through. Retrieval is a function — `search()` in `services/retrieval/retriever.py` — and the only things
+that call it today are the fixture probes under `tests/fixtures/`. **Section 13b documents how to run a
+question through that function, and that is a developer's path rather than a client's.** The API that
+turns a question into a call, with sessions and caller identity, is C3. The screen a client looks at is
+C4. So the capabilities are real and demonstrated on the box, and the way a person uses them does not
+exist yet.
