@@ -20,6 +20,27 @@ def connect():
     return psycopg.connect(os.environ["DATABASE_URL"], autocommit=True)
 
 
+def _purge_for(vector_url: str, collection: str):
+    """`retention.purge` with the two settings `policy.enforce` cannot supply.
+
+    `enforce` calls its `purge` argument with four arguments — connection, doc_id, reason, actor — because it
+    is deciding *whether* to destroy rather than *where*. The store locations are the caller's, so the caller
+    binds them.
+
+    **This function exists because the `--enforce` branch passed the bare `retention.purge` instead**, which
+    takes six arguments and therefore raised `TypeError: purge() missing 2 required positional arguments` on
+    every document it tried to destroy. The failure was safe in the sense that nothing was destroyed and the
+    run recorded `failed: 1` — and it was invisible for as long as it lasted, because `--dry-run` returns
+    before reaching the call, so every rehearsal passed while the real run could never do anything at all.
+
+    **That is the shape of bug this project has been caught by repeatedly: the rehearsal exercised a path the
+    real command does not take.** A dry run that returns early tests the dry run.
+    """
+    def bound(connection, doc_id: str, reason: str, actor: str):
+        return retention.purge(connection, doc_id, reason, actor, vector_url, collection)
+    return bound
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Purge a client's document everywhere it is stored.")
     parser.add_argument("--purge", metavar="DOC_ID",
@@ -75,7 +96,8 @@ def main() -> int:
         from pathlib import Path as _Path
         with connect() as connection:
             run = policy_module.enforce(connection, args.enforce, _Path(args.documents_root),
-                                        retention.purge, actor=args.actor, dry_run=args.dry_run)
+                                        _purge_for(args.vector_url, args.collection),
+                                        actor=args.actor, dry_run=args.dry_run)
         print(json.dumps(run.as_record(), indent=2, sort_keys=True))
         if run.retain_days == 0:
             print()

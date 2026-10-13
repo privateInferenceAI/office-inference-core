@@ -472,3 +472,57 @@ def test_the_cli_summary_survives_a_non_dict_store_value():
     source = (ROOT / "services" / "retention" / "cli.py").read_text()
     dry_branch = source.split("if result.dry_run:", 1)[1].split("return 0", 1)[0]
     assert "isinstance(v, dict)" in dry_branch, "the summary sums store values without checking their shape"
+
+
+# --------------------------------------------------------------------------- the callback enforce receives
+
+def test_enforce_gets_a_callback_it_can_call(monkeypatch):
+    """**The real run could never destroy anything, and every rehearsal passed.**
+
+    `policy.enforce` calls its `purge` argument with four arguments, because it decides *whether* to destroy
+    rather than *where*. `retention.purge` takes six. The `--enforce` branch passed the bare function, so
+    every document it tried to destroy raised `TypeError: purge() missing 2 required positional arguments`.
+
+    Nothing caught it because `--dry-run` returns before the call: the rehearsal passed, the real run failed
+    once per document, and the failure looked like a store problem rather than a wiring mistake. That is the
+    same shape as the bug this suite already has a test for, one layer down.
+
+    So this asserts the contract rather than the implementation: whatever the CLI hands `enforce` for the
+    non-dry-run path must accept exactly the four arguments `enforce` passes.
+    """
+    import inspect
+
+    sys.path.insert(0, str(ROOT / "services" / "retention"))
+    import cli as retention_cli
+
+    callback = retention_cli._purge_for("http://vector:6333", "documents")
+    params = list(inspect.signature(callback).parameters)
+    assert params == ["connection", "doc_id", "reason", "actor"], (
+        f"enforce calls its purge callback with (connection, doc_id, reason, actor); this one takes {params}")
+
+    # And it really forwards the two bound values, rather than accepting them and dropping them.
+    seen = {}
+
+    def fake_purge(connection, doc_id, reason, actor, vector_url, collection):
+        seen.update(doc_id=doc_id, vector_url=vector_url, collection=collection)
+        return "ok"
+
+    monkeypatch.setattr(retention_cli.retention, "purge", fake_purge)
+    again = retention_cli._purge_for("http://vector:6333", "documents")
+    assert again(None, "company/x.md", "why", "someone") == "ok"
+    assert seen == {"doc_id": "company/x.md", "vector_url": "http://vector:6333",
+                    "collection": "documents"}
+
+
+def test_the_enforce_branch_does_not_pass_the_bare_purge():
+    """The specific mistake, asserted against the source so a revert is caught.
+
+    A future change could reintroduce it by tidying the wrapper away, and the symptom would be silent: the
+    dry run would keep passing and destruction would keep failing.
+    """
+    source = (ROOT / "services" / "retention" / "cli.py").read_text()
+    enforce_branch = source.split("if args.enforce:", 1)[1].split("if args.retention_runs", 1)[0]
+    assert "_purge_for(" in enforce_branch, (
+        "the enforce branch must pass a callback that already knows the store locations; passing "
+        "`retention.purge` directly raises TypeError on every document")
+    assert "policy_module.enforce(connection, args.enforce, _Path(args.documents_root), retention.purge," not in enforce_branch
