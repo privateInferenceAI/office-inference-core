@@ -2783,6 +2783,89 @@ then removed in favour of one list, because two policies saying the same thing i
   system already at 100 percent is being measured on ranks, and the comparison prints the rank movements for
   exactly that reason.
 
+### 3.17 Time-based retention
+
+**Goal.** `DATA-RETAIN-001`: retention and deletion defined for documents and conversations, not only the audit
+log. The verify line names three places a document has to be gone from, and the run checks all three.
+
+    cd /opt/oi-core
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      --profile tools run --rm audit migrate
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      --profile tools build retention
+
+    # A period, with the reason it exists.
+    ... retention --set-retention documents --days 365 --legal-basis "tax law"
+    ... retention --set-retention conversations --days 90 --legal-basis "client policy"
+
+    # What it would do, then what it does.
+    ... retention --enforce documents --dry-run
+    ... retention --enforce documents
+    ... retention --retention-runs
+
+**The result, 2026-10-13, on a fixture aged 800 days.**
+
+    NO POLICY MEANS NOTHING IS DESTROYED
+      retain_days=0 examined=0 destroyed=0
+    A HOLD BEATS A PERIOD
+      examined=1 destroyed=0 held=1
+    A DRY RUN CHANGES NOTHING
+      examined=1 expired=1 destroyed=0
+    THE RUN
+      destroyed=1 failed=0
+
+    DATA-RETAIN-001: gone from the vector index, the object store and the answer
+      vector index:  0
+      lexical index: 0
+      manifest:      0
+      object store:  GONE
+      asking about it returned no passage from it
+
+**The object store is the half a job built by reusing the purge would miss.** `DATA-PURGE-001` is a client asking
+us to stop holding a copy, and it **deliberately leaves the file**: the client still has their document.
+Retention is a period running out, and *"keep invoices for seven years"* means that after seven years there is no
+invoice. **A run that cleared the indexes and left the file would report success while the thing the client asked
+to be destroyed sat in their documents directory**, and nothing would surface it because the report would say the
+run succeeded.
+
+**Three behaviours proved beside the destruction**, each a way the mechanism could be wrong in the direction that
+cannot be undone:
+
+- **No policy destroys nothing.** A default period invented here would delete a client's documents on a number
+  they never agreed to.
+- **A hold beats a period.** The period says the client agreed to lose the document by now; the hold says a court
+  has told them not to. Counted separately from a destruction, because a run that skipped forty documents under a
+  hold and a run that destroyed forty are different outcomes.
+- **A dry run changes nothing**, and still checks the hold, because a rehearsal whose output does not match the
+  real thing rehearses a different operation.
+
+**Age is measured from `ingested_at`, not from the file's mtime.** The file's date is a fact about the client's
+filesystem: **copying a folder resets every mtime**, so a document whose date was reset would be retained for
+another period without anybody deciding to. `ingested_at` is when the obligation to keep it started, which is the
+date a retention policy is about. A document with no `ingested_at` is not expired, because an unknown age is not
+the same as an old one.
+
+**The stores are cleared before the file is removed**, and only one of those orders is recoverable. A failure
+between them leaves a file with no index, which re-ingesting fixes. The other order leaves **an index pointing at
+a file that is gone**: a passage the system will cite and nobody can open.
+
+**Conversations are defined but minimal.** The table exists so the requirement's second half has something to
+bind to, and the assistant API that writes it arrives in Phase 4. Inventing its schema now would be inventing
+decisions about a component that does not exist.
+
+**If it breaks.**
+
+- Nothing is destroyed and `retain_days` is 0: no policy is set. That is the intended state and not a fault, and
+  the command says so rather than exiting silently.
+- Documents are held that nobody expected: `retention --holds`. A **deployment-scope** hold covers every document
+  including ones added after it was placed, and it is the one people forget they placed.
+- The file is gone and the index still holds it: the two operations ran in the wrong order, or the purge
+  reported incomplete and the unlink was reached anyway. Check `retention --purges` for a document whose record
+  says `complete: false`.
+- Everything was destroyed on the first run: the period is too short, or the cutoff landed on the wrong column.
+  Age comes from `ingested_at` and a null there is not expired, so a corpus whose manifest predates that column
+  is safe rather than empty.
+
 ## Phase 4 — Assistant API  *(outline)*
 
 The single surface the client app talks to: ask, tasks, approvals, activity, settings.
