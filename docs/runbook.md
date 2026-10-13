@@ -2866,6 +2866,65 @@ decisions about a component that does not exist.
   Age comes from `ingested_at` and a null there is not expired, so a corpus whose manifest predates that column
   is safe rather than empty.
 
+### 3.18 Catching a confidently wrong read
+
+**The last requirement of Phase 3, and the failure it answers is the worst this product has.** OCR misreads a
+character; the wrong number is faithful to the document **as parsed**, so retrieval finds it, the model cites it,
+and the citation layer confirms the number is present in the cited passage **because OCR is what put it there.**
+Every check passes and the client receives a confident wrong figure with a real citation.
+
+**Why confidence is not the instrument.** Step 3.4 carved defects into a cell whose truth was 145.00, forty
+trials: **fifteen wrong readings, and the parser flagged one of them.** Fourteen wrong numbers passed at
+**confidence 61 to 93.**
+
+**Three parts, all verified on the deployed store.**
+
+    PART ONE: a damaged figure is caught
+      CAUGHT 2026-13-45          malformed.date
+      CAUGHT 02/31/2026          malformed.date
+      CAUGHT 1450%               malformed.percent_range
+      CAUGHT 12345678901234.00   malformed.implausible_magnitude
+      CAUGHT 12,34,567.00        malformed.not_a_figure
+      ok     145.00 1,250.00 (1,450.00) 145% 32.50 0.67   - none flagged
+
+      100.00 + 45.00 against 145.00: True
+      100.00 + 45.00 against 155.00: False
+      no relationship to check: None
+
+    PART THREE: is_ocr is set per chunk, true for the scanned publication
+
+    PART TWO: an unverified figure from a scanned passage is disclosed as machine-read
+      "machine-read from a scanned page and not confirmed by any other check in the document"
+
+**The ceiling is stated where it is implemented.** A read that produces something a number cannot be is caught. A
+read that **produces a different plausible number is not**, and step 3.4 measured fourteen of fifteen wrong
+readings as exactly that. **A check described as catching OCR errors would be believed, and this one catches a
+quarter of them.**
+
+**`None` rather than `False` for a document with nothing to add up.** Most documents have no such relationship,
+and returning `False` would mark every figure in every prose document as unconfirmed for a reason that is not
+about the figure.
+
+**The percentage line is drawn where a percentage stops being plausible as ANY percentage**, not where it stops
+being plausible as a rate. **145 percent is a growth rate and a real figure**, so flagging it would be a check
+that fires on correct documents — the failure mode that gets a check turned off.
+
+**The disclosure travels inside the citation**, so it goes wherever the citation goes, and **saying nothing is
+not a guarantee**: most figures carry no caveat because there was nothing to disclose, not because they were
+checked.
+
+**Three faults were found writing it, all of them the parser being wrong about numbers.** 31 February passed a
+`1 <= day <= 31` range, so dates are checked against a real calendar. `(1,250.00)` did not parse at all because
+**the parentheses are the sign** and were left in place, so a statement's negative figure read as not a number.
+And a four-digit percentage fell through the three-digit *shape* to "not a figure" — true and useless, since the
+digits are fine and the value is what is wrong.
+
+**Open, found by the acceptance run.** The per-chunk `is_ocr` label lives in the vector payload and **not in
+`chunk_index`**, so **a passage the lexical arm returns alone carries no scan label** and the disclosure cannot
+fire on it. The lexical arm is a second path to the same content, and a disclosure silently not firing on one arm
+is the shape of failure this step exists to prevent. It needs the label adding to that table and the worker
+writing it.
+
 ## Phase 4 — Assistant API  *(outline)*
 
 The single surface the client app talks to: ask, tasks, approvals, activity, settings.
