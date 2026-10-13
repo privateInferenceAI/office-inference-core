@@ -712,8 +712,12 @@ def cmd_verify(args) -> int:
                             f"this export's window {window_first}..{window_last} and is not in the file, so "
                             f"it has been removed from the middle of this export")
         else:
+            # Name the two numbers for what they are. The anchor's `event_count` is how many rows the
+            # chain held when it was written, which is not the row id, and printing them as "row 61 of 49"
+            # reads as a contradiction rather than as two different facts.
             notes.append(f"matches the anchor written {anchor.get('created_at', 'at an unknown time')} "
-                         f"({anchored_hash[:12]}..., row {anchored_id} of {anchored_count})")
+                         f"({anchored_hash[:12]}..., the anchor's row {anchored_id}; the chain held "
+                         f"{anchored_count} rows then)")
     else:
         notes.append("no external anchor was supplied, so completeness cannot be shown: deleting "
                      "rows from the end and re-exporting would still verify. Pass --anchor with the "
