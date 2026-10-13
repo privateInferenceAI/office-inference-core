@@ -539,3 +539,74 @@ def test_retries_give_up_rather_than_looping_forever(monkeypatch):
     with pytest.raises(urllib.error.HTTPError):
         ingest._with_retries("parsing x", always_down)
     assert attempts["n"] == ingest.RETRY_ATTEMPTS
+
+
+# --------------------------------------------------------------------------- transient failures
+
+def test_a_transient_failure_does_not_dead_letter_the_document(tmp_path, wired):
+    """The second real-corpus bug. A 60-page PDF was dead-lettered after two 504s from the parser, and the
+    document was fine: the stage behind it is slow and something in front of it gave up.
+
+    Counting that against the file leaves a permanently unreadable corpus that no retry fixes and no log
+    explains, because the entry says the document failed rather than that the service did."""
+    import urllib.error
+
+    services = wired()
+    make_corpus(tmp_path, "company/slow.pdf", b"%PDF a long one")
+    manifest = ingest.MemoryManifest()
+
+    # A gateway timeout, twice, which is exactly what happened.
+    def timed_out(services_, path, relpath):
+        raise urllib.error.HTTPError("http://parser", 504, "Gateway Timeout", {}, None)
+    import pytest as _pytest
+    with _pytest.MonkeyPatch.context() as patch:
+        patch.setattr(ingest, "parse_document", timed_out)
+        first = ingest.ingest_cycle(services, tmp_path, manifest)
+        second = ingest.ingest_cycle(services, tmp_path, manifest)
+    assert first.failed == 1 and second.failed == 1
+    record = manifest.get("company/slow.pdf")
+    assert record["failure_kind"] == "transient"
+    assert record["failure_count"] == 0, "a transient failure must not advance the count towards dead-letter"
+
+    # And on the third cycle the service is well again, so the document ingests. It reports `changed`
+    # rather than `new` because the manifest already knows the path from the failed attempts, which is the
+    # right way round: the document was seen, it failed, and now it succeeded.
+    third = ingest.ingest_cycle(services, tmp_path, manifest)
+    assert third.failed == 0, "a transient failure must leave the document retryable"
+    assert third.changed == 1
+    assert third.chunks_written >= 1
+    assert manifest.get("company/slow.pdf")["failure_count"] == 0
+    assert manifest.get("company/slow.pdf")["failure_kind"] is None
+
+
+def test_a_permanent_failure_still_dead_letters(tmp_path, wired):
+    """The limit has to keep working for the failures it was written for: a document that cannot be parsed
+    for its own reasons should stop being retried every cycle."""
+    services = wired(fail_for={"company/broken.pdf"})
+    make_corpus(tmp_path, "company/broken.pdf", b"not really a pdf")
+    manifest = ingest.MemoryManifest()
+
+    ingest.ingest_cycle(services, tmp_path, manifest)
+    ingest.ingest_cycle(services, tmp_path, manifest)
+    record = manifest.get("company/broken.pdf")
+    assert record["failure_kind"] == "permanent"
+    assert record["failure_count"] == 2
+
+    third = ingest.ingest_cycle(services, tmp_path, manifest)
+    assert third.failed == 0 and third.skipped == 1
+    assert any("dead-lettered" in note for note in third.failures)
+
+
+def test_the_kind_of_failure_is_decided_from_the_exception():
+    """The classification itself, which everything above depends on."""
+    import urllib.error
+
+    for code in (429, 500, 502, 503, 504):
+        assert ingest.is_transient(
+            urllib.error.HTTPError("u", code, "m", {}, None)) is True, code
+    for code in (400, 404, 422):
+        assert ingest.is_transient(
+            urllib.error.HTTPError("u", code, "m", {}, None)) is False, code
+    assert ingest.is_transient(TimeoutError("took too long")) is True
+    assert ingest.is_transient(ConnectionError("refused")) is True
+    assert ingest.is_transient(RuntimeError("no retrievable text")) is False
