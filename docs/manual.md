@@ -1667,10 +1667,11 @@ decides whether the client's questions have answers.
 and no way to relabel a file afterwards without re-ingesting. Two questions for the client, and both are
 contract-level rather than technical:
 
-- **Who may see what?** Two roots exist in code today (`company` and `executive`, in the `ROLES` map in
-  `services/retrieval/retriever.py`), and adding a third is a code change and a redeploy, not a setting.
-  So the roots a client needs have to be known before their corpus is laid out, or the corpus gets
-  rearranged later.
+- **Who may see what?** The roots are folders, declared in `access.roots`, and the groups that read them are
+  declared in `access.groups` — **both are manifest settings, so adding a third boundary is a manifest change
+  and a re-render rather than a code change.** The retriever also carries a two-root fallback map for callers
+  that supply no session permit, and it is not the authority. Roots still have to be settled before the
+  corpus is laid out, because a folder that moves later has to be re-ingested rather than relabelled.
 - **Is there anything one group must not see?** Whatever goes in a restricted root, the client should
   understand that a search by a role without that root returns a denial rather than an answer, and that
   `access.denial` decides whether they are told that at all. Section 13d sets out the trade.
@@ -2740,8 +2741,12 @@ ROLES: dict[str, frozenset[str]] = {
 ```
 
 A role's permitted roots are the folders its search may read: `staff` sees `company`, and `executive` sees
-both. **The retrieval roles come from the manifest and the folders they read come from `access.roots`;** this code**,
-which is a real limitation rather than a convention: per-user and per-group permissions are a later phase.
+both. **The roots come from `access.roots` in the manifest, through the session's permit**, so adding a
+boundary is a manifest change and a re-render rather than a code change. The retriever carries a small
+hardcoded role map as well, and it is a fallback for a caller that supplies no permit: **when a session has
+resolved the access, the permit's roots are the permission and the role is not consulted at all**, so there
+is no precedence between two sources and nothing to widen by passing both. A caller with no permit and an
+unknown role is refused rather than defaulted.
 The four model roles are not retrieval roles, and a search asked for `analyst` is refused rather than
 guessed at, because a default would grant the broader of two permissions to a typo.
 
