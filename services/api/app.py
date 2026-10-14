@@ -89,6 +89,20 @@ def resolved_model(role: str) -> str:
     return str(entry.get("frontier") or entry.get("local") or role)
 
 
+def role_lane(role: str) -> str:
+    """Where the model this role points at actually runs, from the manifest.
+
+    **Deployment-wide was wrong, and the panel proved it.** `local_lane_available()` answers whether ANY role
+    declares a local model, and the routing used that as the default lane. On a hybrid manifest where the
+    'analyst' role is frontier-only and other roles are local, it returned 'local' for a request that the
+    gateway answered with a REMOTE model — so the gate was never consulted and the record claimed local
+    residency while the content left the building. No shipped manifest has that shape, which is why it was
+    latent, but the schema allows it and a client would eventually build it.
+    """
+    models = (STATE.get("manifest") or {}).get("models") or {}
+    entry = models.get(role) or {}
+    return "local" if entry.get("local") else "frontier"
+
 def frontier_model_for(role: str) -> str:
     """The separate frontier model this deployment exposes for a role, or empty when there is none.
 
@@ -284,7 +298,7 @@ async def ask(request: Request):
         # The lane the configured model actually runs in, from the manifest. Escalation selects a
         # stronger model; not escalating selects the ordinary one, which is still remote on a cloud
         # deployment. Conflating those made every unescalated request fail where there is no local model.
-        default_lane="local" if local_lane_available() else "frontier",
+        default_lane=role_lane(role),
         frontier_model=frontier_model_for(role),
     )
     # **`none` means no lane may answer, and it must refuse rather than fall through.** The first version
@@ -548,7 +562,7 @@ async def ask_stream(request: Request):
         task=body.get("task") or "",
         user_wants_stronger=bool(body.get("stronger")),
         model_name=model,
-        default_lane="local" if local_lane_available() else "frontier",
+        default_lane=role_lane(role),
         frontier_model=frontier_model_for(role),
     )
 
