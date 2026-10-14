@@ -98,7 +98,13 @@ def run_audit(args: list) -> subprocess.CompletedProcess:
     definition of its hash is the thing this design is arranged to avoid. Reading it back goes through the same
     tool, so RECORDED is asserted against the interface an operator would use.
     """
-    return subprocess.run([sys.executable, audit_tool()] + args, capture_output=True, text=True, timeout=120)
+    # The audit tool reads DATABASE_URL from its environment, and compose builds that for a service while a
+    # bare docker run gets only the parts. Without this the refusal is never written and RECORDED reports the
+    # tool's own error, which is the right outcome for the wrong reason.
+    env = dict(os.environ)
+    env.setdefault("DATABASE_URL", database_url())
+    return subprocess.run([sys.executable, audit_tool()] + args, capture_output=True, text=True,
+                          timeout=120, env=env)
 
 
 def chunk_ids_for_root(services, root: str, limit: int = 200) -> set:
@@ -226,13 +232,17 @@ def main() -> int:
         except (session_module.SessionError, access_module.AccessError) as exc:
             reached, reachable = set(), False
             print(" " * 10 + "the inside session could not be established: " + str(exc))
-        blocked = not ({p.doc_id for p in result.passages} & reached)
-        scoped = reachable and blocked
-        detail = (str(len(executive_ids)) + " chunk(s) are labelled executive, the inside session "
-                  + "reached " + str(sorted(reached) or "(nothing)")
-                  + ", the outside answer overlapped it by "
-                  + ("nothing" if blocked else "something")
-                  + ", and these arms ran: " + (chr(44).join(arms_ran) or "dense only"))
+        # The comparison is on the documents ONLY the inside session reached. Comparing whole results would
+        # flag the company documents both sessions are entitled to, which is the union working rather than a
+        # leak, and the first version of this right did exactly that.
+        outside_docs = {p.doc_id for p in result.passages}
+        inside_only = reached - outside_docs
+        overlap = outside_docs & inside_only
+        scoped = bool(inside_only) and not overlap
+        detail = (str(len(executive_ids)) + " chunk(s) are labelled executive; the inside session reached "
+                  + str(len(reached)) + " document(s), " + str(len(inside_only)) + " of them beyond the "
+                  + "other session's reach, and the outside answer overlapped those by " + str(len(overlap))
+                  + "; arms run: " + (chr(44).join(arms_ran) or "dense only"))
         ledger.record("SCOPED", scoped, detail,
                       "the boundary would be an empty index rather than a filter, or the inside "
                       + "session would be unable to reach content the outside one is kept from")
