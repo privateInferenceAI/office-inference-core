@@ -56,6 +56,7 @@ import citations  # noqa: E402
 import ingest  # noqa: E402
 import retriever  # noqa: E402
 import session as session_module  # noqa: E402
+import budget as budget_module  # noqa: E402
 import streaming  # noqa: E402
 
 GATEWAY_URL = os.environ.get("OI_GATEWAY_URL", "http://litellm:4000")
@@ -215,9 +216,23 @@ async def ask(request: Request):
              "kind": "no_source", "role": session.role, "roots": sorted(permit.roots)},
             status_code=200)
 
-    answer, generation = _generate(session, permit, model, question, result.passages)
+    request_budget = budget_module.Budget()
+    answer, generation = _generate(session, permit, model, question, result.passages, request_budget)
     if answer is None:
-        return JSONResponse({"error": generation, "kind": "generation_failed"}, status_code=502)
+        # **A degraded answer rather than an error.** The research and this step's own design say the
+        # retrieved passages with a typed reason, because retrieval already did the expensive part and the
+        # client is entitled to their own material. A client whose data class forbids the frontier lane meets
+        # this path routinely, so it has to read like a feature rather than an outage.
+        reason, kind, attempts = generation if isinstance(generation, tuple) else ("unclassified", {}, 1)
+        facts = budget_module.audit_facts(
+            reason=reason, matched=(kind or {}).get("matched", ""), retryable=bool((kind or {}).get("retryable")),
+            attempts=attempts, threshold=request_budget.timed_out() or "surrender", budget=request_budget,
+            partial_output=False, errors=[], lane="frontier", data_class="internal")
+        audit("model_call", session.subject, session.role, "denied", facts, model=model)
+        return JSONResponse(
+            budget_module.degraded(reason, _degrade_detail(reason), result.passages, request_budget,
+                                   attempts, request_budget.timed_out() or "surrender", False),
+            status_code=200)
 
     verified = citations.verify(answer, result.passages)
     body_out = {
@@ -243,51 +258,102 @@ async def ask(request: Request):
     return body_out
 
 
-def _generate(session, permit, model: str, question: str, passages: list):
-    """The model call, authenticated with a statement minted for this request."""
+def _generate(session, permit, model: str, question: str, passages: list, budget=None):
+    """The model call, bounded, retried only while it is safe, and classified when it fails.
+
+    Returns `(answer, error)`. Exactly one is None. A failure that is worth waiting for is retried inside the
+    same budget rather than a fresh one, and a failure that can never succeed is not retried at all, because
+    the wait would come out of the budget the degraded answer needs.
+    """
     import urllib.error
     import urllib.request
 
+    budget = budget or budget_module.Budget()
     context = "\n\n".join(f"[{n + 1}] {p.text}" for n, p in enumerate(passages))
     prompt = (
         "Answer the question using only the numbered passages below. Cite the passages you use as [n]. "
         "If they do not answer it, say so plainly. Do not use outside knowledge.\n\n"
         f"Passages:\n{context}\n\nQuestion: {question}"
     )
-    # **The statement carries the MODEL role, and the session's API role is not in it.** The gateway's team,
-    # and therefore the budget, is per model role: that is what the manifest's `budgets.roles` block declares
-    # and what `keys --provision-teams` creates. Minting with the API role would name a team that does not
-    # exist, which the gateway refuses with a 404. Document access is unaffected, because the permit's roots
-    # are already fixed for this request and the gateway never sees them.
     statement = assertion.mint(STATE["key"], model, session_id=session.session_id)
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": int(os.environ.get("OI_MAX_TOKENS", "700")),
     }
-    request = urllib.request.Request(
-        GATEWAY_URL + "/v1/chat/completions", data=json.dumps(payload).encode(), method="POST",
-        headers={"Content-Type": "application/json", assertion.HEADER: statement})
-    try:
-        with urllib.request.urlopen(request, timeout=float(os.environ.get("OI_GATEWAY_TIMEOUT", "120"))) as r:
-            data = json.load(r)
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode(errors="replace")[:300]
-        audit("model_call", session.subject, session.role, "denied",
-              {"stage": "model", "status": exc.code, "model": model, "detail": detail[:160]}, model=model)
-        # A budget refusal is a refusal and not a failure, and saying which it was is the difference between
-        # an operator checking a ceiling and an operator checking a network.
-        if "budget" in detail.lower():
-            return None, f"the role's budget is exhausted at the gateway: {detail}"
-        return None, f"the gateway refused the call: {exc.code} {detail}"
-    except Exception as exc:  # noqa: BLE001 - the message is the response
-        return None, f"the gateway could not be reached: {type(exc).__name__}: {exc}"
 
-    choices = data.get("choices") or []
-    if not choices:
-        return None, "the gateway returned no choices"
-    return (choices[0].get("message") or {}).get("content", ""), "ok"
+    errors: list = []
+    attempt = 0
+    while attempt < budget_module.MAX_ATTEMPTS:
+        attempt += 1
+        if budget.past_reserve():
+            # Not enough left to both wait and deliver. Surrender now so the degraded answer fits.
+            break
+        request = urllib.request.Request(
+            GATEWAY_URL + "/v1/chat/completions", data=json.dumps(payload).encode(), method="POST",
+            headers={"Content-Type": "application/json", assertion.HEADER: statement})
+        try:
+            with urllib.request.urlopen(request, timeout=max(1.0, budget.remaining())) as r:
+                data = json.load(r)
+            choices = data.get("choices") or []
+            if not choices:
+                return None, ("unclassified", "the gateway returned no choices", attempt)
+            return (choices[0].get("message") or {}).get("content", ""), None
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode(errors="replace")[:400]
+            kind = budget_module.classify(detail)
+            errors.append({"attempt": attempt, "status": exc.code, "reason": kind["reason"],
+                           "matched": kind["matched"], "retryable": kind["retryable"]})
+            retry_after = exc.headers.get("Retry-After") if exc.headers else None
+            if not kind["retryable"]:
+                return None, (kind["reason"], kind, attempt)
+            if attempt >= budget_module.MAX_ATTEMPTS:
+                return None, (kind["reason"], kind, attempt)
+            wait = _backoff(attempt, retry_after)
+            if wait >= budget.remaining() - budget.reserve:
+                # The wait itself would eat the delivery reserve, so waiting is the wrong answer.
+                return None, (kind["reason"], kind, attempt)
+            time.sleep(wait)
+        except Exception as exc:  # noqa: BLE001 - a transport failure is a classification too
+            kind = budget_module.classify(type(exc).__name__)
+            errors.append({"attempt": attempt, "status": 0, "reason": kind["reason"],
+                           "matched": kind["matched"], "retryable": kind["retryable"]})
+            if not kind["retryable"] or attempt >= budget_module.MAX_ATTEMPTS:
+                return None, (kind["reason"], kind, attempt)
+            time.sleep(_backoff(attempt, None))
 
+    return None, (errors[-1]["reason"] if errors else "timeout",
+                  errors[-1] if errors else {"reason": "timeout", "retryable": True}, attempt)
+
+
+def _degrade_detail(reason: str) -> str:
+    """One sentence a person reads, from a reason code."""
+    return {
+        "throttled": "the model provider is throttling this deployment, so the answer below comes from your "
+                     "own documents rather than from a generated response",
+        "budget": "this role's budget ceiling has been reached, so no model call was made",
+        "provider_unavailable": "the model provider is unavailable, so the answer below comes from your own "
+                                "documents",
+        "unreachable": "the model provider could not be reached, so the answer below comes from your own "
+                       "documents",
+        "not_authorised": "the model provider refused this deployment's credential, which needs an operator",
+        "refused_by_provider": "the model provider declined to answer this request",
+        "bad_request": "the request was rejected as malformed, which is a defect rather than a condition",
+        "unclassified": "the model call failed in a way this deployment does not recognise, so the answer "
+                        "below comes from your own documents",
+        "timeout": "the model did not answer within the time this deployment allows",
+    }.get(reason, "the model call did not complete, so the answer below comes from your own documents")
+
+def _backoff(attempt: int, retry_after: str | None) -> float:
+    """How long to wait, honoured from the provider when it says, jittered when it does not."""
+    import random
+
+    if retry_after:
+        try:
+            return max(0.0, float(retry_after))
+        except ValueError:
+            pass
+    return min(2.0 ** attempt * 0.25, 2.0) * (0.5 + random.random())
 
 @app.post("/ask/stream")
 async def ask_stream(request: Request):
