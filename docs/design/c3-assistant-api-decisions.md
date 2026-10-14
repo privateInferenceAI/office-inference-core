@@ -538,6 +538,73 @@ dominates. Two writes a request is unaffordable that way and nearly free with a 
 
 **Not built yet.** It is the first thing after C3's remaining step, and the failure mode is decided so whoever
 builds it does not have to choose under pressure.
+## 7i. What the field does, checked on 2026-10-14
+
+**A correction first.** Section 7e says `stream_holdback_chars` "is not a configuration key". It is a real
+LiteLLM parameter: a per-guardrail value for how many trailing characters to withhold so a match cannot be split
+across two chunks. Verified in the pinned image, where it lives in `custom_guardrail`. What is true is the
+narrower claim that a **guardrail supplies it per text per choice** rather than the transport hardcoding it, and
+that withholding only on a rewrite leaks the prefix. The distinction matters: the parameter exists, and our
+holdback is a reimplementation of a supported feature rather than something the vendor lacks.
+
+**Why we keep ours anyway.** It lives in code an auditor can read, on a pin whose version was until recently
+unrecorded and which has reported fail-open branches in exactly this path. A control we own and can test beats a
+configuration knob we do not. LiteLLM's own default for a Bedrock guardrail is
+`streaming_buffer_until_moderated: true`, which buffers every chunk, and its documentation describes turning
+that off as detect-and-log rather than prevention.
+
+### Where the field is, and where we are
+
+| | Their posture | Ours |
+|---|---|---|
+| Cloudflare AI Gateway DLP | buffers the whole response; docs say time to first token rises in proportion to generation time | we stream |
+| AWS Bedrock Guardrails | masking requires sync mode, which buffers; async mode "doesn't support the masking of sensitive information" | we stream |
+| LiteLLM + Bedrock guardrail | buffers until end-of-stream moderation by default | we stream |
+| Portkey | no redaction at all: a boolean verdict, deny or log | we rewrite |
+| Kong AI PII Sanitizer | redacts, enterprise tier, stream behaviour undocumented | we redact, and document it |
+
+**So full buffering is the majority answer and we deliberately differ.** That is a real tradeoff rather than a
+win: buffering is provably correct and kills streaming, and we chose streaming plus a bounded proof. The
+research found **no published measurement of a settlement-point redactor's time to first token**, so our claim
+that the cost is small is unevidenced and everyone else's is too.
+
+### The failures the field keeps shipping, and which of them we have
+
+| Failure | Who shipped it | Ours |
+|---|---|---|
+| withheld only when a rewrite happened, leaking the raw prefix | Mastra | **not present.** Our holdback is unconditional, and a test asserts it |
+| holdback size a magic number with no guard | Mastra used 128 and documented it as insufficient | **not present.** Ours is derived from the longest pattern and a test fails if a longer one is added |
+| buffer mutated in place, deleting ordinary text on overlapping detections | Mastra | **not present.** The raw buffer is redacted, and an emitted marker is never rescanned |
+| audit trail claims success while the stream was not scanned | LiteLLM issue 35257 | **unverified.** Not yet adversarially tested, and it is the failure that would matter most to an auditor |
+| fail-open on a redactor exception | reported in three LiteLLM paths | **unverified.** A catch that falls through to emitting would be the same bug |
+| cache hits skip re-scanning after a policy change | Cloudflare | not applicable, we do not cache responses |
+
+**The count worth recording:** four streaming stacks sharing no code shipped the split-boundary leak between
+February and September 2026, in TypeScript and Python, across proxies, agent frameworks and SDK middleware. The
+directional finding is corroborated by four independent bug reports even though the benchmark that counts them
+is vendor-published.
+
+### What we are behind on, and it is not the mechanism
+
+**Chunk-invariance is a property and we test a proxy for it.** Our unit test asserts that no pattern is longer
+than the holdback, which guards the day somebody edits the pattern list. It does not assert the property itself:
+that redacting a stream gives the same output for every possible way the text could be split. `chunk-invariance`
+(Apache-2.0, standard library only, offline) does exactly that in one assertion and reports the smallest failing
+split. That is a straight upgrade and it is the first thing to adopt from this research.
+
+**Unbounded entities are covered by nobody, on the output side.** Presidio's own maintainers state it: a fixed
+window can always be crossed because some entities have no maximum length. Every credible production answer is
+on the request side, either redact-before-model and rehydrate, or stop streaming. Our posture is to redact the
+request for bounded patterns and accept that a name the model introduces is best-effort.
+
+**The answer that fits us is a client entity list, and nobody sells it.** Enumerate the names and addresses that
+matter for this deployment, redact them deterministically on the way in, and skip open-set NER entirely. It costs
+a maintained list and no ML runtime, and an auditor can read the list and re-run the test against it. A CPU
+Presidio gives recall numbers we could not defend and 600MB to keep patched.
+
+**The office build is the one to check.** It runs a local model with no gateway guardrail, so any control
+implemented at the gateway is absent there. The holdback sits in the API, which both legs pass through, and that
+is the property to keep.
 ## 8. What we are deliberately not building
 
 - **A separate router process.** One Python process with routing behind a pure function. The pure function is
