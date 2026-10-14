@@ -369,7 +369,11 @@ def _generate(session, permit, model: str, question: str, passages: list, budget
         "If they do not answer it, say so plainly. Do not use outside knowledge.\n\n"
         f"Passages:\n{context}\n\nQuestion: {question}"
     )
-    statement = assertion.mint(STATE["key"], model, session_id=session.session_id)
+    # **Minted per attempt, not once.** A statement is spent by its first presentation, and the first
+    # version of this minted one before the retry loop. So attempt one earned the real 429, the retry
+    # replayed a spent assertion, and the 401 that came back classified as `unclassified`: a genuine
+    # throttle was recorded as an unrecognised failure and the documented retry could never succeed.
+    # Found by the C3 panel's executor, who provoked a real Bedrock throttle and read the reason.
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
@@ -383,9 +387,11 @@ def _generate(session, permit, model: str, question: str, passages: list, budget
         if budget.past_reserve():
             # Not enough left to both wait and deliver. Surrender now so the degraded answer fits.
             break
+        # A fresh statement for this attempt. Building it here is what makes a retry possible at all.
+        attempt_statement = assertion.mint(STATE["key"], model, session_id=session.session_id)
         request = urllib.request.Request(
             GATEWAY_URL + "/v1/chat/completions", data=json.dumps(payload).encode(), method="POST",
-            headers={"Content-Type": "application/json", assertion.HEADER: statement})
+            headers={"Content-Type": "application/json", assertion.HEADER: attempt_statement})
         try:
             with urllib.request.urlopen(request, timeout=max(1.0, budget.remaining())) as r:
                 data = json.load(r)
@@ -574,22 +580,28 @@ async def _frames(session, permit, model: str, question: str, result, requested_
         "If they do not answer it, say so plainly. Do not use outside knowledge.\n\n"
         f"Passages:\n{context}\n\nQuestion: {question}"
     )
-    statement = assertion.mint(STATE["key"], model, session_id=session.session_id)
+    # Minted per attempt here too, for the reason above: an assertion is spent once, so a retry that
+    # replays one is a retry that cannot authenticate.
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": int(os.environ.get("OI_MAX_TOKENS", "700")),
         "stream": True,
     }
-    upstream = urllib.request.Request(
-        GATEWAY_URL + "/v1/chat/completions", data=json.dumps(payload).encode(), method="POST",
-        headers={"Content-Type": "application/json", assertion.HEADER: statement})
+    def _request():
+        """A fresh statement for this attempt, built at the moment of the attempt."""
+        attempt_statement = assertion.mint(STATE["key"], model, session_id=session.session_id)
+        return urllib.request.Request(
+            GATEWAY_URL + "/v1/chat/completions", data=json.dumps(payload).encode(), method="POST",
+            headers={"Content-Type": "application/json", assertion.HEADER: attempt_statement})
+
+    upstream = _request()
 
     # **A read cannot be interrupted, so it is bounded instead.** The socket timeout is the time the budget
     # has left, and the watchdog below checks between reads. A generator that never yields cannot be
     # cancelled from outside, which is why the deadline lives in here rather than around the call.
     def _open():
-        return urllib.request.urlopen(upstream, timeout=max(1.0, request_budget.remaining()))
+        return urllib.request.urlopen(_request(), timeout=max(1.0, request_budget.remaining()))
 
     # **Retried here for the same reason the non-streaming path retries, and this path used not to.**
     # Research on 2026-10-14 found the inconsistency: an HTTPError before any answer frame went

@@ -17,6 +17,7 @@ the request before the model call, and streaming is best-effort for whatever the
 """
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -24,6 +25,26 @@ sys.path.insert(0, "/app/services/egress")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "egress"))
 
 import redaction  # noqa: E402
+
+# **A trailing fragment that could still become a pattern.** Used to find a boundary where emitting cannot cut a
+# match, which a fixed holdback cannot do: every pattern here can begin more than a few characters before it is
+# recognisable, and a telephone number begins twelve characters before it is complete.
+_PREFIX = re.compile(
+    r'(?:'
+    r'\d{1,3}(?:[ -]?\d{1,3}){0,2}[ -]?'          # a phone number, a card, an SSN, an EIN, an IPv4
+    r'|\+1?[ .-]?\(?\d{0,3}\)?'                    # an international phone prefix
+    r'|(?:AKIA|ASIA|ABIA|ACCA)[0-9A-Z]{0,15}'       # an AWS key
+    r'|-----BEGIN [A-Z ]*'                          # a private key header
+    r'|Bearer\s+[A-Za-z0-9\-._~+/]{0,19}'           # a bearer token
+    r'|(?:sk|pk|rk|api|key|token)[-_][A-Za-z0-9]{0,15}'  # an api key
+    r'|(?:password|passwd|pwd)\s*[:=]\s*'           # a password assignment
+    r'|[A-Z]{2}\d{0,2}[A-Z0-9]{0,10}'                # an IBAN
+    # An email needs its @ or a distinctive character to count as a prefix. A bare run of letters
+    # must not match: it did, and the boundary then walked all the way back and held text that could
+    # never have become a pattern.
+    r'|[\w.+-]{0,40}(?:@[\w-]{0,30}|[.+-][\w.+-]{0,40})'
+    r')$'
+)
 
 # **Sized from the pattern set, not chosen.** The longest pattern in `redaction.PATTERNS` is a private-key
 # header at 36 characters; an SSN is 11, a card with separators 19, an IBAN up to 34. 64 covers the set with
@@ -55,6 +76,11 @@ class StreamRedactor:
         self.holdback = holdback
         self.raw = ""
         self.emitted = 0
+        # **A position in the REDACTED text, not a count of what was emitted.** Redaction changes
+        # lengths -- a value becomes a marker of a different length -- so a counter of emitted
+        # characters drifts away from the index it is used as, and text already sent is sent again.
+        # Tracking the wrong coordinate is the same mistake as the original slice bug, one layer up.
+        self.sent = 0  # how far into the redacted buffer emission has reached
         self.counts: dict[str, int] = {}
         self.unverified_cards = 0
 
@@ -67,32 +93,77 @@ class StreamRedactor:
         """Everything still held, redacted. Called once, at the end of the stream."""
         return self._drain(final=True)
 
-    def _drain(self, *, final: bool) -> str:
-        if final:
-            safe = self.raw
-        else:
-            # Hold back the last `holdback` characters, then walk back to a codepoint boundary so a
-            # multi-byte character is never split. Nothing is emitted until the buffer is longer than the
-            # holdback, which is the cost of the guarantee.
-            keep = self.holdback
-            if len(self.raw) <= keep:
-                return ""
-            safe = self.raw[:-keep]
-            while safe and len(safe.encode("utf-8", errors="ignore")) != len(safe):
-                safe = safe[:-1]
-            if not safe:
-                return ""
+    def _safe_boundary(self, redacted: str, limit: int) -> int:
+        """The largest position at or below limit where emitting cannot cut a pattern.
 
-        # **The raw buffer is redacted, not the emitted text.** A marker already written is not rescanned,
-        # because a marker breaks the pattern's own character class and the continuation would stop matching.
-        redacted, report = redaction.redact(safe)
+        **Why a fixed holdback is not enough, and this was the bug.** Holding back a constant number of
+        characters assumes no pattern starts more than that many characters before its end. That is untrue for
+        every pattern here: a telephone number is three digits, a separator, three more, a separator, and four
+        more, so a match can begin twelve characters before it is recognisable. A boundary landing inside such a
+        prefix emits the first fragment, and that fragment plus the holdback is twelve characters, which sits
+        inside a sixty-four character window and is therefore never examined again.
+
+        **So walk back rather than hold back.** From the proposed boundary, retreat while the tail of what would
+        be emitted could still be the beginning of a pattern. Where the tail matches no partial pattern, nothing
+        before the boundary can grow into a match across it.
+        """
+        window = redacted[:limit]
+        for back in range(min(len(window), self.holdback), -1, -1):
+            tail = window[len(window) - back:] if back else ''
+            if not tail or not _PREFIX.search(tail):
+                return limit - back
+        return 0
+
+    def _drain(self, *, final: bool) -> str:
+        """The redacted text safe to emit now, or empty when nothing is settled yet.
+
+        **The defect this replaces, because it was severe and it shipped.** The first version sliced a safe
+        prefix out of the raw buffer, redacted that slice on its own, emitted it, and advanced the buffer by the
+        slice's length. Two things were wrong. Redacting the slice alone left a pattern straddling the boundary
+        with no predecessor to match against, so its tail was never recognised. And advancing by the slice
+        length discarded the entire held-back tail, so the next chunk could not complete it either. A value
+        could walk out in the clear with the whole holdback intact, and with random chunking it did so in fifty
+        trials out of fifty.
+
+        **Found by the C3 panel's fidelity checker**, who fed this module a canary through its own tests and
+        watched it leak, then noticed that a single feed never leaks while a chunked one always does. Our probes
+        missed it because the canary question's answer happens not to straddle a boundary, and the unit tests
+        fed whole answers in one call where the final drain flushes everything.
+
+        **The fix holds back REDACTED text and walks the boundary back.** The whole tail is re-redacted on every
+        chunk so a pattern has everything before it to match against, and emission is limited to the part that
+        is both settled and new.
+        """
+        redacted, report = redaction.redact(self.raw)
         for kind, count in (report.counts or {}).items():
             self.counts[kind] = self.counts.get(kind, 0) + count
         self.unverified_cards += report.unverified_cards
-        self.raw = self.raw[len(safe):]
-        self.emitted += len(redacted)
-        return redacted
 
+        if final:
+            # **Resume from where emission reached, not from the start.** The final drain used to emit
+            # the whole redacted buffer, which sent everything that had already gone out a second
+            # time. The client saw the answer repeated, and the duplication was invisible to a test
+            # that only looked for a leaked value.
+            to_emit = redacted[self.sent:]
+        else:
+            keep = self.holdback
+            if len(redacted) <= keep:
+                self.raw = redacted
+                return ""
+            limit = self._safe_boundary(redacted, len(redacted) - keep)
+            # A walked-back boundary can land behind what has already gone out, in which case
+            # there is nothing new that is settled and this drain emits nothing.
+            if limit <= self.sent:
+                self.raw = redacted
+                return ""
+            to_emit = redacted[self.sent:limit]
+            while to_emit and len(to_emit.encode("utf-8", errors="ignore")) != len(to_emit):
+                to_emit = to_emit[:-1]
+
+        self.sent = len(redacted) if final else limit
+        self.raw = redacted
+        self.emitted += len(to_emit)
+        return to_emit
     def report(self) -> dict:
         """What was done, for the audit row. Counts and sizes, never the values."""
         return {
