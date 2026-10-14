@@ -20,8 +20,14 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
+# **The file name is checked before the container starts.** The first version of this mapping said
+# `jobs_probe` where the file is `job_probe`, and the run failed inside the container with "can't open
+# file" — while the pipeline's last command exited 0, so the runner reported success. A probe that cannot
+# be found is not a probe, and a runner that calls that a pass is worse than one that crashes.
 PROBE=gate_check
-[ "${1:-}" = "--jobs" ] && PROBE=jobs
+[ "${1:-}" = "--jobs" ] && PROBE=job
+PROBE_FILE="tests/fixtures/${PROBE}_probe.py"
+[ -f "$PROBE_FILE" ] || { echo "FAILED: $PROBE_FILE does not exist, so nothing would be tested"; exit 1; }
 
 CLASS="${GATE_CHECK_CLASS:-regulated}"
 NAME=gate-check-tmp-api
@@ -62,7 +68,15 @@ for _ in $(seq 1 30); do
 done
 [ "${seen:-}" = "$CLASS" ] || { echo "FAILED: the second container never confirmed it loaded $CLASS"; exit 1; }
 
+# The probe's own exit code is the runner's. **Without capturing it, a probe that failed inside the
+# container still left this script exiting 0**, because the last command in a pipeline decides the status
+# and the probe was not the last command.
+set +e
 docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
   -v "$PWD:/w" -w /w --env-file rendered/env \
   -e "GATE_CHECK_CLASS=$CLASS" -e "JOB_PROBE_CLASS=$CLASS" \
-  --entrypoint python oi-core/session:local "/w/tests/fixtures/${PROBE}_probe.py"
+  --entrypoint python oi-core/session:local "/w/$PROBE_FILE"
+status=$?
+set -e
+echo "$(basename "$PROBE_FILE"): exit $status"
+exit "$status"
