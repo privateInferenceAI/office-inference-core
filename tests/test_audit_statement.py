@@ -30,8 +30,15 @@ def audit_tool():
     The Postgres driver is required at import, so this is skipped where it is absent, which is the same
     treatment the rest of the audit tests give it. The verifier itself needs no database; the module around it
     does.
+
+    **`assertion` is forced into `sys.modules` first, and that is not tidiness.** Loading a file by path
+    re-executes its imports, so without this the tool gets its own copy of `assertion` and therefore its own
+    `AssertionError_`, and a refusal raised by one copy does not match the class the test catches. In the image
+    both sides import one module and the problem does not exist; in a test harness it would have shown up as a
+    failure that moved when the suite was run differently, which is worse than a failure.
     """
     pytest.importorskip("psycopg", reason="the audit tool imports the Postgres driver")
+    sys.modules["assertion"] = assertion
     spec = importlib.util.spec_from_file_location("oi_audit_tool", ROOT / "services" / "audit" / "audit.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
