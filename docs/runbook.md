@@ -3567,6 +3567,109 @@ token, which the stub exists for, and its assertion is about an absence: the ups
   taxonomy is keyed on the error type for exactly this reason.
 - **A retry happens after the first token.** The partial output has already been emitted, so the client holds
   text from an abandoned generation and the second call is billed. This is the failure the ordering exists for.
+### 4.5 Routing, and the one-way boundary it keeps
+
+**Goal.** `INF-ROUTE-001` and `INF-ROLE-001`: routing escalates on the three mechanical triggers only, and the
+model a role uses is read from the manifest rather than assumed.
+
+#### The order is the design
+
+**The data-class gate comes first, and the triggers choose a model only inside the lane it permitted.** That
+reordering is the whole of this step. A trigger is a cost decision; the gate is a data-boundary decision, and
+the boundary has to be settled before anything asks how hard the question is.
+
+The reason it matters is the answer to a question an examiner will ask: *why did this content reach an external
+model?* With the gate first, the answer is one sentence about a declared, reviewable permission. With the
+triggers first, the answer is a story about a heuristic firing, which is not a control anybody can audit.
+
+**The boundary is one-way.** No trigger may move content toward a more exposed lane. A user asking for the
+stronger model cannot reach the frontier lane from a deployment whose data class forbids it, and the same
+applies to the task list and to synthesis. Escalation is only ever *within* what the gate allowed.
+
+#### The three triggers, each a predicate over facts already held
+
+| # | Trigger | How it is decided | What it is not |
+|---|---|---|---|
+| 1 | the task is on the agentic pack's list | a lookup in a configured list | not a judgement about the question |
+| 2 | synthesis across more than one document | an integer: distinct `doc_id` above the floor, with a relevance threshold under it | not an assessment of difficulty |
+| 3 | the user asks for the stronger model | a request field | not a permission to leave the permitted lane |
+
+**Trigger 2 is a proxy and the record says so.** Distinct `doc_id` count has false positives, when a question
+incidentally matches two documents that need no reconciling, and false negatives, when one long contract needs
+synthesis internally. It stays because determinism is worth more here than accuracy, and the audit row labels
+it a proxy rather than a measured property.
+
+#### What the user is told, always
+
+**A user is never left guessing what happened.** Decided 2026-10-14, and the reasoning is in the design note at
+7h:
+
+| Situation | What the answer says |
+|---|---|
+| escalated, and the gate permitted it | which model answered, and which trigger moved it |
+| asked for the stronger model, and the gate forbade it | that it was asked for, that this content may not reach that lane, and which model answered instead |
+| not escalated | nothing, because there is nothing the user needs to know |
+
+**Refusing was the alternative and it is worse.** It is equally honest and less useful: the user asked a
+reasonable question and would get nothing, and they could not tell that apart from a permission problem.
+Announcing does the same work while still delivering an answer.
+
+#### The record carries two facts, not one
+
+**`escalation_requested` and `lane_answered` are separate fields.** A single field conflates what was asked for
+with what ran, which is the distinction the audit row already draws between requested and resolved model. An
+examiner reading the row can see that a user asked for the frontier lane and that the gate refused it, which is
+the fact a residency claim turns on.
+
+#### `INF-ROLE-001` is proved here, and only for the mechanism
+
+Change `models.analyst` in the manifest, validate, render, restart, and ask the API which model it used. **The
+answer must change.** That tests which model was called, not whether the answer improved.
+
+`tests/parity/` holds a README and no questions, and the brief says so. Golden questions are C8's, at sixty per
+deployment. So this step tests the mechanism and **not** answer quality:
+
+- assert the model that was called changed, from the gateway's own view
+- ask the same question before and after the swap and record both answers side by side in `docs/runbook.md`, so the difference is visible rather than asserted
+- state in the manual that answering *is the new model as good* is C8's, and that a swap before then is unmeasured
+
+**Do not close `INF-ROLE-001` by claiming the swap is safe for answers.** It is safe for the mechanism, which is
+what its criteria ask.
+
+#### Run it
+
+    cd /opt/oi-core
+    alias oi='docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env'
+    oi build api && oi up -d api
+    docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
+      -v /opt/oi-core:/w -w /w --env-file rendered/env \
+      --entrypoint python oi-core/session:local /w/tests/fixtures/route_probe.py
+
+#### What proves it
+
+| # | Right | Act | What is asserted |
+|---|---|---|---|
+| 1 | `NO-JUDGEMENT` | ask a question the cheap model answers badly | it does **not** escalate, and no trigger is named |
+| 2 | `TRIGGERS` | one request per trigger | each escalates, each naming its own trigger in the record |
+| 3 | `ONE-WAY` | ask for the stronger model with a data class that forbids the lane | the lane does not change, the answer says so, and the attempt is recorded |
+| 4 | `ROLE` | change `models.analyst`, render, restart | the model the gateway reports having called changes |
+
+**Right 1 is the one the requirement's own words are aimed at**: *a question the cheap tier answers poorly does
+not escalate on its own judgement.* It is asserted as an absence, which is why the record's `trigger` field
+being empty is the evidence rather than the answer being bad.
+
+#### How it breaks
+
+- **Everything escalates.** The agentic list is matching too broadly, or the `doc_id` floor is at zero so an
+  incidental lexical match counts as synthesis.
+- **Nothing ever escalates.** The gate is refusing the frontier lane for a data class the manifest does permit.
+  Check `access.egress.frontier_classes` before the triggers.
+- **A user's escalation request silently does nothing.** The gate refused it and the answer did not say so. That
+  is the case the announcement exists for.
+- **The model did not change after a manifest edit.** The renderer wrote the old map, or the API was not
+  restarted. `OI_MODEL_<ROLE>` is read at startup.
+- **The answer quality changed and nobody measured it.** Expected: golden questions are C8's. The manual says so
+  rather than implying the swap was validated.
 ## Phase 5 — Client app  *(outline)*
 
 Ask, Do, Review, Activity, Settings, with citations as first-class objects and the lane indicator.
