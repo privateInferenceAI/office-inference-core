@@ -357,20 +357,26 @@ async def ask_stream(request: Request):
         "X-Accel-Buffering": "no",
         "Cache-Control": "no-cache",
     }
+    requested_at = time.monotonic()
     return EventSourceResponse(
-        _frames(session, permit, model, question, result),
+        _frames(session, permit, model, question, result, requested_at),
         headers=headers,
         ping=int(os.environ.get("OI_STREAM_PING_SECONDS", "15")),
     )
 
 
-async def _frames(session, permit, model: str, question: str, result):
+async def _frames(session, permit, model: str, question: str, result, requested_at: float):
     """The events, in the order a client should read them."""
     import urllib.error
     import urllib.request
 
     redactor = streaming.StreamRedactor()
+    # Two starts, because they answer two questions. `started` is when the answer began being written;
+    # `requested_at` is when the client asked. The first is what the model did, the second is what the
+    # person waited. Reporting only the first understated the wait by the retrieval time, which on this
+    # deployment is 350 to 600 milliseconds: more than the first token itself.
     started = time.monotonic()
+    retrieval_ms = int((started - requested_at) * 1000)
     first_token_at = None
     deltas = 0
 
@@ -449,5 +455,9 @@ async def _frames(session, permit, model: str, question: str, result):
            "passages": len(result.passages), "redactions": report["redactions"],
            "holdback": report["holdback"], "session_id": session.session_id}, model=model)
     yield frame("done", {"deltas": deltas, "redactions": report["redactions"],
-                         "first_token_ms": int((first_token_at - started) * 1000) if first_token_at else None,
-                         "total_ms": int((time.monotonic() - started) * 1000)})
+                         # Time to first token as the caller experiences it, retrieval included. The
+                         # model's own share sits beside it so a budget can tell the two apart.
+                         "retrieval_ms": retrieval_ms,
+                         "ttft_ms": int((first_token_at - requested_at) * 1000) if first_token_at else None,
+                         "model_first_ms": int((first_token_at - started) * 1000) if first_token_at else None,
+                         "total_ms": int((time.monotonic() - requested_at) * 1000)})
