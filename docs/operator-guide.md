@@ -1844,6 +1844,28 @@ Confirm it from the provider's side rather than from ours:
 **Checkpoint.** The spend log names the new model, and the answer's `resolved_model` agrees with it. **A swap
 before the golden questions exist is unmeasured for quality** — that is C8's work, and this checkpoint proves the
 mechanism rather than the answer.
+## 13b.11. What C3 added, in the order it matters
+
+| What | Why it exists | Where it is proved |
+|---|---|---|
+| **One interface for every capability** | A client application talks to this and nothing else. No published port: the phase that builds an API does not also publish a debug port | 13b.1 |
+| **Sessions instead of credentials** | The caller holds a token that resolves to a subject, a role and a set of roots. The API holds one signing key and mints a short-lived statement per model call | 13b.2 |
+| **A refusal that is recorded** | A role supplied in the request body is refused **and written to the chain before the error returns.** That ordering is what makes it a control rather than a message | 13b.4 |
+| **Streaming, with redaction before the frame** | A value can reach a browser in a token before anything sees the finished answer, so the streamer holds a window back, redacts it, and emits only what is settled | 13b.5 |
+| **A degraded answer instead of an error** | When the model will not answer, the client gets the retrieved passages and a typed reason at HTTP 200. Retrieval already did the expensive part | 13b.6 |
+| **A data boundary that guards every remote request** | The gate runs before any trigger, and a class the manifest does not permit is refused rather than sent | 13b.8 |
+| **Two escalation triggers, both mechanical** | A task list and a request field. Nothing assesses difficulty, because a question the cheap tier answers badly must not escalate on its own judgement | 13b.7 |
+
+**One thing C3 did not finish, and you should know before promising it.** The request-side redaction module exists
+and is proved by its own acceptance probe, and **the API does not call it yet.** The stream-side redaction is in
+the API and runs on every frame. The control on the way out today is the data-class gate. A client asking about
+confidential material is protected by the gate rather than by request redaction, and the manual says so in
+section 13e rather than leaving it to be found.
+
+**And one thing that is proved but not enforced end to end.** The gateway accepts the identity's `tpm_limit` and
+`rpm_limit` now, because a limit nobody passed to the enforcer was a comment rather than a ceiling. Whether the
+gateway applies them when the identity comes from a custom auth hook is **unproven** — lowering a team's limit
+did not produce a refusal. Treat a declared rate limit as documentation until somebody proves it bites.
 # Stage 14: onboarding a second client's corpus
 
 **Goal:** add a corpus to a deployment that is already holding one, without disturbing it.
