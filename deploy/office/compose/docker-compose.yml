@@ -437,6 +437,55 @@ services:
         condition: service_healthy
     networks: [ai-net]
 
+  api:
+    # The assistant API. The only thing a client application talks to, and the only thing that holds the
+    # signing key a model call is authenticated with.
+    #
+    # **One worker, deliberately.** The hooks and the shared state assume one process on this box; more
+    # workers would multiply anything that assumes it is alone, and the gateway's own background jobs are
+    # the documented example. The reference instance has the cores for concurrency inside one process.
+    build:
+      context: ${OI_ROOT}
+      dockerfile: services/api/Dockerfile
+    image: oi-core/api:local
+    container_name: api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DEPLOYMENT_ID: ${DEPLOYMENT_ID}
+      OI_GATEWAY_URL: http://litellm:4000
+      ACCESS_REGISTRY: /app/rendered/access.json
+      OI_ASSERTION_KEY: /app/rendered/assertion.key
+      AUDIT_TOOL: /app/audit.py
+      EMBED_URL: http://embeddings:80
+      VECTOR_URL: http://vector:6333
+      COLLECTION: ${COLLECTION:-documents}
+      OI_DEFAULT_MODEL_ROLE: ${OI_DEFAULT_MODEL_ROLE:-analyst}
+      OI_DEFAULT_API_ROLE: ${OI_DEFAULT_API_ROLE:-viewer}
+      # The audit tool's content mode, passed because the tool refuses to run without it. A model-call row
+      # names a model and counts rather than text, so the policy has nothing to govern here.
+      CONTENT_DEFAULT: ${CONTENT_DEFAULT:-hash}
+      CONTENT_MODE_PUBLIC: ${CONTENT_MODE_PUBLIC:-full}
+      CONTENT_MODE_INTERNAL: ${CONTENT_MODE_INTERNAL:-redacted}
+      CONTENT_MODE_CONFIDENTIAL: ${CONTENT_MODE_CONFIDENTIAL:-hash}
+      CONTENT_MODE_REGULATED: ${CONTENT_MODE_REGULATED:-hash}
+    volumes:
+      # The rendered registry and signing key, read-only. The API mints statements; it does not administer.
+      - ${OI_ROOT}/rendered:/app/rendered:ro
+      # The audit tool, so a refusal goes through the one writer of the chain.
+      - ${OI_ROOT}/services/audit/audit.py:/app/audit.py:ro
+    # **No published port.** The phase's acceptance is an API with no user interface, and a client reaches it
+    # through whatever the deployment puts in front. Publishing one here would be the debug port this project
+    # has already paid for once.
+    depends_on:
+      postgres:
+        condition: service_healthy
+      litellm:
+        condition: service_started
+      vector:
+        condition: service_started
+    networks: [ai-net]
+
   session:
     # The session boundary as a tool: establish a session, inspect one, and rehearse the refusal. It runs when
     # called and exits, like the audit sink and the retention commands.

@@ -369,6 +369,17 @@ def main() -> int:
     env["MODEL_ROLES"] = ",".join(
         f"{role}={entry.get('local','')}" for role, entry in sorted((manifest.get("models") or {}).items())
     )
+    # Which model role answers, per API role. The assistant API reads these to decide the model for a session,
+    # and it is the seam INF-ROLE-001 is proved through: change `models` in the manifest, re-render, and the
+    # model the API calls changes. A deployment that declares access roles the models block does not mention
+    # falls back to the analyst role rather than to a model name, because a model name here would be the second
+    # source of truth this exists to avoid.
+    api_roles = sorted((manifest.get("access") or {}).get("roles") or {}) or ["viewer"]
+    default_role = "analyst" if "analyst" in (manifest.get("models") or {}) else sorted(manifest["models"])[0]
+    for api_role in api_roles:
+        env[f"OI_MODEL_{api_role.upper().replace('-', '_')}"] = default_role
+    env["OI_DEFAULT_MODEL_ROLE"] = default_role
+    env["OI_DEFAULT_API_ROLE"] = api_roles[0]
     env["DEPLOYMENT_ID"] = manifest["client"]["deployment_id"]
     env["PROFILE"] = manifest["profile"]
     # One compose file serves both builds. The local lane's containers sit behind the "office"
