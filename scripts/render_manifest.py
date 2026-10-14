@@ -241,11 +241,15 @@ def custom_auth_setting() -> dict:
     """
     return {
         "custom_auth": "custom_auth.user_api_key_auth",
-        # Off deliberately, and this is the interesting one. With common checks on, the gateway applies its
-        # own key-shaped checks to the identity the hook returns, and the spike showed the identity's
-        # key-level budget is not what enforces: the TEAM budget is. Turning the common checks on would add
-        # a second, weaker ceiling that refuses nothing useful and reports differently.
-        "custom_auth_run_common_checks": False,
+        # **On, and the first version of this had it off for a reason that was wrong.** The reasoning was that
+        # a key-level budget is not what enforces, so the gateway's own checks would add a weaker second
+        # ceiling. What the setting actually governs is whether the gateway applies ITS DB RECORDS at all to
+        # a custom-auth identity, and the gateway says so at startup: with it off, "budgets, model-access
+        # allowlists, and per-model rate limits configured on your DB team/project records will NOT be
+        # enforced for custom-auth requests". The team budget is a DB record, so turning it off disabled the
+        # exact control this credential model exists to keep. Corrected the same day, from the running
+        # gateway's own log rather than from the documentation.
+        "custom_auth_run_common_checks": True,
         # On, because this one is the model allowlist and the expiry: without it a signed assertion could
         # name a model the role is not scoped to.
         "enable_post_custom_auth_checks": True,
