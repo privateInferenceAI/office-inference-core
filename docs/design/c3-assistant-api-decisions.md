@@ -484,6 +484,60 @@ like a budget bug.
 **The lesson is the one this phase keeps teaching.** The admission-arithmetic method was the cheapest-looking
 option, it was recommended on the strength of vendor documentation, and it took one request costing nothing to
 disprove. It had been carried into the runbook as though it were settled.
+## 7h. Two decisions taken on 2026-10-14
+
+### Escalation is announced, always
+
+**Decided: a user is always told what is happening.** When a request asks for the stronger model and the
+deployment's data class permits that lane, it escalates and the answer says which model produced it. When the
+data class forbids it, the answer comes from the strongest model the content **is** permitted to reach, and it
+says that too: that the stronger model was asked for, that this content may not reach it, and which model
+answered instead.
+
+**Why not refuse.** Refusing is equally honest and less useful. The user asked a reasonable question and would
+get nothing, and they could not tell that apart from a permission problem. Announcing does the same work as a
+refusal while still delivering an answer.
+
+**Why not downgrade quietly.** That is the silent subversion the mechanical design exists to prevent: the user
+believes they got the stronger model, when the content never left the building. It also makes the audit record
+the only place the substitution exists, which means the person affected is the last to know.
+
+**The one-way boundary holds either way.** A user cannot move content to an external lane by asking. The
+escalation is bounded by the data-class gate before the trigger is even consulted, and the announcement is what
+makes the bound visible rather than mysterious.
+
+**Recorded as two facts, not one:** the escalation was requested, and the lane that answered. A single field
+would conflate what was asked for with what ran, which is the same distinction the audit row already draws
+between requested and resolved model.
+
+### The audit writer: build it, spool locally, and refuse past a bound
+
+**Decided: build the resident writer, and on failure spool rather than refuse immediately.** Section 7f left
+this open and it is settled here.
+
+**Why not refuse outright.** Fail-closed sounds correct and turns a logging problem into an outage. A client's
+document assistant stopping because the audit writer hiccupped is not defensible, and it is the kind of coupling
+that gets a component ripped out rather than fixed.
+
+**Why not spool without a limit.** The deployment would run indefinitely with no record, precisely during the
+incident somebody will later need the record for.
+
+**So: spool to disk, and refuse only past a bound.** A short outage costs nothing visible; a sustained one stops
+the product, because unbounded unrecorded operation is the thing this system exists not to do. **The bound is
+the policy knob**, and it belongs in the manifest beside the other client declarations rather than in code.
+
+**The serialization is unchanged and is the part that must not be got wrong.** The writer holds a Postgres
+advisory lock while appending and the fallback attempts the same lock, so there is never a second writer
+whichever path runs. A naive fallback that writes the row itself forks the chain, and the verifier then reports a
+break indistinguishable from tampering. The failure that bites is the writer being *slow* rather than dead.
+
+**What it unlocks, and the reason it is worth the component.** The research design is write-ahead: a refusal
+recorded before the error returns, an intent row before the provider call, a completion row after. What exists
+today is one row per model call, written after it finishes, at about 160ms each because the driver import
+dominates. Two writes a request is unaffordable that way and nearly free with a writer.
+
+**Not built yet.** It is the first thing after C3's remaining step, and the failure mode is decided so whoever
+builds it does not have to choose under pressure.
 ## 8. What we are deliberately not building
 
 - **A separate router process.** One Python process with routing behind a pure function. The pure function is
