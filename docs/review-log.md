@@ -279,3 +279,38 @@ problem rather than an impatient one.
 
 
 
+
+---
+
+## C3 panel, verification pass — round 1 of 3, started 2026-10-14
+
+**Why a second pass rather than closing the register.** The first panel closed with two of three reviewers passing
+and the third's findings fixed but not re-read. The choice was to close the five C3 items on that evidence, or to
+buy one more look. **A fresh round 1 is worth more than a fourth round of the old panel**: the later rounds were
+re-tests against my own fixes, and every one of those fixes has been hand-verified. What proves the manual sound
+is a reviewer arriving with no memory of the previous findings and finding nothing structural.
+
+**The stopping rule is unchanged and it is the honest one: stop when a round returns only cosmetics.** Three
+previous rounds each returned something substantive, and a 4,400-line manual reviewed by three agents will always
+yield *something*. So the reviewers were told plainly that a clean round is a real result, that they should not
+manufacture a finding to seem useful, and that **a reviewer who always finds something is a reviewer whose
+findings stop being read.**
+
+**Two changes to how the panel was run, both from what went wrong last time.**
+
+The box is on `main` and in sync, confirmed before launch. The previous executor round tested a tree that was 78
+commits behind and said so in its report, which is a waste of a reviewer.
+
+**Reviewers must clean up after themselves.** A burst container of mine ran for twelve minutes, throttled the
+provider, and made the next reviewer's measurements fail in a way that looked like a product defect. The executor
+is now told to use `docker run --rm`, to stop anything long-lived, and to say in its report what it started and
+that it stopped it.
+
+**State at launch**, so anything a reviewer breaks is distinguishable from what was already there:
+
+    main at f0cbf38, in sync with origin, working tree clean
+    a plain question answers: lane='frontier', escalated=False, kind=None
+    no stray containers
+    provider spend in the preceding minute: 0 rows
+
+**What round 1 found.** Filled in when the reviewers report.
