@@ -298,6 +298,32 @@ the research, and it was about key budgets. The team budget refused at HTTP 422 
 and the ceiling named, and it is enforced through the path a statement takes. The earlier correction still
 stands for keys; it is now wrong to apply it to teams. The manual and the schema get this right when the API
 page is written.
+## 7d. The API, and the two things the first probe found
+
+Six rights held on the first clean run, and two findings behind them, both worth keeping because both were
+invisible to reading.
+
+**Finding 1: every audit write the API made was being refused.** The audit tool refuses a hand-typed actor
+unless `--dev` is passed, and its guard fires before the database is touched. That guard is right in spirit
+and wrong here: the actor the API passes came from a session row this process resolved, so nobody typed it.
+The first probe run passed its FORGED right **on a denial row written by an earlier run rather than by the
+request under test**, which is the failure mode a probe exists to prevent and which only showed up because the
+probe counts rows instead of trusting a 403.
+
+The deployment now sets the development flag for the API, with the reasoning written where the flag is. The
+honest fix is for the API to have its own trusted path to the audit tool rather than reusing the development
+escape, and that is recorded as work rather than as a comment.
+
+**Finding 2: the team budget does not enforce on the assertion path.** Set a team's spend to 99 against a
+ceiling of 10 and the gateway answers. The spike saw `budget_exceeded` at HTTP 422, and the difference between
+the spike and the deployment is the shape of the identity the hook returns rather than the config, which is
+the next thing to chase. Until it is fixed the API cannot claim a per-role ceiling, and the manual must not
+say it does.
+
+**What this pair has in common, and why it is the useful part.** Both are controls that reported success
+while doing nothing: an audit write that failed loudly into a log nobody was reading, and a budget that
+returned an answer. Neither would have been found by reading the code, and the second was found only because
+the probe spent the money rather than checking the config.
 ## 8. What we are deliberately not building
 
 - **A separate router process.** One Python process with routing behind a pure function. The pure function is
