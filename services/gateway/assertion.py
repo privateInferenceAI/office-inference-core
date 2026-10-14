@@ -126,6 +126,21 @@ def mint_audit(key: bytes, actor: str, actor_role: str, *, deployment_id: str = 
     return f"{body}.{signature}"
 
 
+def verify_model_call(key: bytes, token: str, *, now: float | None = None) -> dict:
+    """The payload for a model call, or a refusal.
+
+    A statement minted for anything else is refused here, which is the check that used to live in `verify` and
+    applied to every kind of statement whether it made sense or not.
+    """
+    payload = verify(key, token, now=now)
+    purpose = payload.get("purpose")
+    if purpose not in (None, "model_call"):
+        raise AssertionError_(
+            f"this statement was minted for {purpose!r} rather than for a model call")
+    if not payload.get("role"):
+        raise AssertionError_("the assertion names no role")
+    return payload
+
 def verify_audit(key: bytes, token: str, *, now: float | None = None) -> dict:
     """The audit payload, or a refusal. The statement counterpart of `verify`, and the one the audit tool
     calls, so that the writer and the reader cannot disagree about what a valid statement is.
@@ -141,6 +156,13 @@ def verify_audit(key: bytes, token: str, *, now: float | None = None) -> dict:
 
 def verify(key: bytes, token: str, *, now: float | None = None) -> dict:
     """The payload, or a refusal that says which check failed.
+
+    **This checks that a statement is genuine and unexpired, and says nothing about what it is for.** The
+    first version also required a `role`, which broke the audit statement the day it was added: an audit
+    payload names an `actor` and has no role to name, so a genuine statement was refused for a field it was
+    never supposed to carry. Authenticity and purpose are two questions, so there are two functions: this one
+    answers the first, and `verify`-for-model-calls and `verify_audit` answer the second. A caller that needs
+    a field checks for it.
 
     Every check names itself in the message, because the person reading it is looking at a 401 in a log rather
     than at this file.
@@ -165,8 +187,6 @@ def verify(key: bytes, token: str, *, now: float | None = None) -> dict:
         raise AssertionError_(
             f"the assertion is dated {int(payload.get('iat', 0) - moment)}s in the future, which is a clock "
             f"disagreement rather than a forged statement")
-    if not payload.get("role"):
-        raise AssertionError_("the assertion names no role")
     return payload
 
 

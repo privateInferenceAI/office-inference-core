@@ -90,7 +90,7 @@ async def user_api_key_auth(request: Request, api_key: str) -> UserAPIKeyAuth:
 
     try:
         key = assertion.load_key(KEY_PATH)
-        payload = assertion.verify(key, token)
+        payload = assertion.verify_model_call(key, token)
         assertion.spend_nonce(payload)
     except assertion.AssertionError_ as exc:
         # The message is passed through to the caller on purpose. These refusals are about the shape of the
