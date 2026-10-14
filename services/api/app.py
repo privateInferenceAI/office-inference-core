@@ -165,6 +165,21 @@ def audit(event: str, actor: str, actor_role: str, outcome: str, payload: dict, 
                "--payload", json.dumps(payload, sort_keys=True)]
     if extra.get("model"):
         command += ["--model", extra["model"]]
+    # **The columns the record has and the API was leaving empty.** Section 13e promises that the data
+    # class, the egress verdict and the redaction counts have columns of their own, and the tool has
+    # had the flags all along: the API simply never passed them, so 7,679 of 7,691 model-call rows
+    # said nothing about whether the content was permitted to leave. A control whose evidence is a
+    # blank column is a control an auditor cannot check. Found by the review panel.
+    if extra.get("data_class"):
+        command += ["--data-class", extra["data_class"]]
+    if extra.get("egress_allowed") is not None:
+        command += ["--egress-allowed", "true" if extra["egress_allowed"] else "false"]
+    if extra.get("redactions"):
+        command += ["--redactions", json.dumps(extra["redactions"], sort_keys=True)]
+    if extra.get("unverified_card_shapes"):
+        command += ["--unverified-card-shapes", str(extra["unverified_card_shapes"])]
+    if extra.get("prompt"):
+        command += ["--prompt", extra["prompt"]]
     env = dict(os.environ)
     env["DATABASE_URL"] = session_module.database_url()
     result = subprocess.run(command, capture_output=True, text=True, env=env, timeout=60)
@@ -404,7 +419,13 @@ async def ask(request: Request):
           {"stage": "ask", "model": model, "passages": len(result.passages),
            "supported": len(body_out["supported"]), "unsupported": len(body_out["unsupported"]),
            "session_id": session.session_id, "roots": sorted(permit.roots),
-           **routing.audit_facts(decision, data_class)}, model=model)
+           **routing.audit_facts(decision, data_class)}, model=model,
+          # A frontier answer only happens when the gate permitted it, so the verdict is derivable
+          # here rather than passed in: `lane` is the fact and this is what it means.
+          data_class=data_class, egress_allowed=(decision.lane == "frontier"),
+          redactions=redaction_report.counts,
+          unverified_card_shapes=redaction_report.unverified_cards,
+          prompt=question)
     return body_out
 
 
@@ -784,7 +805,13 @@ async def _frames(session, permit, model: str, question: str, result, requested_
     audit("model_call", session.subject, session.role, "ok",
           {"stage": "ask_stream", "model": model, "deltas": deltas,
            "passages": len(result.passages), "redactions": report["redactions"],
-           "holdback": report["holdback"], "session_id": session.session_id}, model=model)
+           "holdback": report["holdback"], "session_id": session.session_id}, model=model,
+          data_class=((STATE.get("manifest") or {}).get("access") or {}).get("data_class")
+                     or "regulated",
+          egress_allowed=(lane == "frontier"),
+          redactions=report["redactions"],
+          unverified_card_shapes=report.get("unverified_card_shapes", 0),
+          prompt=question)
     yield frame("done", {"deltas": deltas, "redactions": report["redactions"],
                          # Time to first token as the caller experiences it, retrieval included. The
                          # model's own share sits beside it so a budget can tell the two apart.

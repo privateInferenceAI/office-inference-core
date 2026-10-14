@@ -3324,8 +3324,15 @@ request-side one is wired in, the control on the way out is the gate, and `egres
 **Run the boundary probe to check the claim rather than take it:**
 
 ```
-run --entrypoint python oi-core/session:local /w/tests/fixtures/gate_check.py
+docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
+  -v /opt/oi-core:/w -w /w --env-file rendered/env \
+  --entrypoint python oi-core/session:local /w/tests/fixtures/gate_check.py
 ```
+
+**The whole `docker run` invocation is spelled out here on purpose.** An earlier version of this block said
+`run --entrypoint ...`, which relies on a shell alias defined in a different section and fails with `run: command
+not found` if you have not defined it. **A command on the page that exists only because of an alias three
+sections away is not a command.**
 
 It prints what this deployment permits, what a plain request with a class outside that gets (`lane: none` and a
 notice, rather than an answer), and what a permitted class gets. **It exists because the sentence above was
