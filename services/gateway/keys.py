@@ -52,12 +52,16 @@ def read_env(path: Path) -> dict[str, str]:
 
 
 def request(path: str, token: str, payload: dict | None = None, method: str = "POST",
-            timeout: int = 30) -> tuple[int, dict]:
+            timeout: int = 30, extra_headers: dict | None = None) -> tuple[int, dict]:
     """Returns the status and the parsed body. Errors come back rather than raise, because a refused
     call is a result this tool has to report rather than crash on."""
     body = json.dumps(payload).encode() if payload is not None else None
     req = urllib.request.Request(f"{GATEWAY}{path}", data=body, method=method)
     req.add_header("Authorization", f"Bearer {token}")
+    # The signed statement, when the caller has one. The gateway accepts it in place of the key,
+    # and refuses the key for request traffic, which is why the probe mints one.
+    for header_name, header_value in (extra_headers or {}).items():
+        req.add_header(header_name, header_value)
     if body:
         req.add_header("Content-Type", "application/json")
     try:
@@ -229,6 +233,20 @@ def set_budget(env: dict, args: argparse.Namespace, connect=None) -> int:
     return 0
 
 def probe(env: dict, args: argparse.Namespace) -> int:
+    """One small model call, through the path the gateway actually accepts.
+
+    **This used to present a virtual key, and the gateway no longer accepts one for request traffic.** The
+    probe returned a 401 that said so, which made it useless for the thing the manual told readers to use it
+    for: proving that a role's model and budget work. It now mints a signed assertion the way the assistant
+    API does, so a 200 means a model call genuinely succeeded.
+
+    **`--as-model` is where this earns its keep.** The assertion names the model role, the gateway checks it
+    against the team, and asking for a role this session should not reach is refused. That is the model
+    permission proved rather than described.
+
+    If the assertion key or the database is unreachable it falls back to the virtual key and says so, because
+    a diagnostic that silently tests a different path is worse than one that admits which path it tested.
+    """
     keys = load_keys()
     if args.role not in keys:
         die(f"no key for {args.role!r} yet: run this tool with no arguments first")
@@ -236,17 +254,38 @@ def probe(env: dict, args: argparse.Namespace) -> int:
     payload = {"model": model,
                "messages": [{"role": "user", "content": "Reply with the single word: ready"}],
                "max_tokens": 16}
-    status, body = request("/v1/chat/completions", keys[args.role]["key"], payload)
+
+    header, token, how = _assertion_header(env, model)
+    status, body = request("/v1/chat/completions", keys[args.role]["key"], payload, extra_headers=header)
     if status == 200:
         usage = body.get("usage") or {}
-        print(f"{args.role} -> {model}: {status}")
+        print(f"{args.role} -> {model}: {status}   (authenticated by {how})")
         print(f"  answered by {body.get('model')}, {usage.get('total_tokens')} tokens")
         return 0
     message = body.get("error", {}).get("message") if isinstance(body.get("error"), dict) else body
-    print(f"{args.role} -> {model}: {status}")
+    print(f"{args.role} -> {model}: {status}   (authenticated by {how})")
     print(f"  {str(message)[:300]}")
     return 1
 
+
+def _assertion_header(env: dict, model: str):
+    """A signed statement for this call, or nothing with a reason."""
+    key_path = env.get("OI_ASSERTION_KEY", "/app/rendered/assertion.key")
+    if not os.path.exists(key_path):
+        return {}, "", "the virtual key: no assertion key at " + key_path
+    try:
+        # The image copies assertion.py beside this tool rather than into a services tree, and the
+        # checkout is the fallback for running this outside a container.
+        for candidate in ("/app", str(Path(__file__).resolve().parent)):
+            if candidate not in sys.path:
+                sys.path.insert(0, candidate)
+
+        import assertion as assertion_module
+        key = assertion_module.load_key(key_path)
+        token = assertion_module.mint(key, model, session_id="keys-probe")
+        return {assertion_module.HEADER: token}, token, "a signed assertion"
+    except Exception as exc:  # noqa: BLE001 - the fallback is the point
+        return {}, "", "the virtual key: the assertion could not be minted (" + type(exc).__name__ + ")"
 
 def revoke(env: dict, role: str) -> int:
     """Delete a role's key at the gateway and forget it here.
