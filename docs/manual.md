@@ -2532,8 +2532,12 @@ rules and the confidence gate attached, is what section 13c describes and what t
 every request — sections 13g and 13h. **So this page shows the retrieval half on its own**, which is how you
 look at retrieval rather than at an answer; the generation half is one `POST /ask` away and is documented
 there.
+## 13c. Citations and verification
 
-
+**What it is for.** Seven deterministic checks over every sentence of an answer, run against the passages it
+cites. This is the page the contents lists as 13c and the one sections 13b and 13g both point at. **It had no
+heading of its own until a structural check found it missing**, which is why a reader following the contents
+could not find it.
 
 The verifier is the layer that checks an answer against what it cites. Everything below it checks whether the
 answer matches the source, and none of it checks whether the source is the right source or was read correctly.
