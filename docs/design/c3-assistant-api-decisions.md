@@ -605,6 +605,68 @@ Presidio gives recall numbers we could not defend and 600MB to keep patched.
 **The office build is the one to check.** It runs a local model with no gateway guardrail, so any control
 implemented at the gateway is absent there. The holdback sits in the API, which both legs pass through, and that
 is the property to keep.
+## 7j. Routing: what the field does, and why mechanical is the right answer here
+
+Checked 2026-10-14. Full report in `office-inference-research/model-routing-research-2026-10-14.md`.
+
+**Verdict: keep it mechanical.** Not because it is simpler, and not for cost. Because a learned predicate and an
+auditable permission are different kinds of object, and logging does not convert one into the other.
+
+**The decisive evidence is that a learned router is manipulable.** Rerouting LLM Routers (arXiv 2501.01818)
+documents query-independent token sequences that, appended to any question, route it to the strong model with
+high probability, with stated goals of cost inflation and always getting the best model. A user-controllable
+escalation path sitting inside the data boundary is exactly the shape this product exists to prevent. Nobody has
+published a way to make a learned router's decision provable to a third party; the best available is the model's
+own self-reported justification.
+
+**And the hyperscalers agree, architecturally.** The 2026 pattern is the same two layers we built: Azure's model
+router "routes only to eligible models... honoring data zone boundaries", and Bedrock's intelligent prompt
+routing routes only within a model family. The learned part is never the boundary. Cerbos put it plainly in May
+2026: "AI gateways solve the routing problem. They don't solve the authorization problem."
+
+**What the field ships**, for the record: Bedrock predicts response quality per model and switches only if the
+stronger one beats the anchor by a configured percentage; Azure reads the system message, user message, tool
+definitions and history through a trained model with three modes and a 30-minute session affinity; RouteLLM
+calibrates an explicit offline threshold; OpenRouter replaced its router in August 2026 with one driven by
+aggregate trailing spend by task type. Every one of them estimates something. None of them is a boundary.
+
+### The trigger we removed was not naive, it was unexplored
+
+**Nobody uses retrieval signals as an escalation predicate.** The research found no system anywhere using
+document count or a score floor to decide escalation. So our removed synthesis trigger was not a naive version of
+a known technique: it was unbuilt territory, and it did not survive contact with measurement on this corpus.
+That is a better artifact to show than a tuned threshold, and the source comment in `services/api/routing.py`
+records the kill evidence.
+
+**The anti-patterns the field regrets, and which of them we had:**
+
+| Anti-pattern | Reported | Ours |
+|---|---|---|
+| routing that fires on everything | a SaaS team's boundary escalated 60% instead of 30%, raising total inference cost 12% while telemetry said routing was working correctly | **we had this, found it by running it, and removed it** |
+| thresholds never recalibrated | the most-documented regret | we have two triggers, one a list and one a field, and neither has a tuneable number |
+| escalation as a security hole | confounder gadgets, and backdooring a router at training time (arXiv 2503.08704) | structurally impossible here: the gate precedes the triggers and no trigger adds exposure |
+| silent model changes breaking audit trails | Fiddler, August 2026 | our audit row carries requested and resolved model separately |
+
+### Where we are behind, and it is not the routing
+
+**Error-typed fallbacks and per-deployment cooldown.** LiteLLM ships fallbacks typed by error class (content
+policy, context window, general) after a retry count, with per-deployment cooldowns in Redis. We have neither.
+Closer to home, its spend rows record `attempted_fallbacks` and `original_model_group` so a
+fallback-served request stays distinguishable afterwards. **We need that third audit fact**:
+`escalation_requested`, `lane_answered`, and now whether a fallback served the request rather than the primary.
+
+**Graceful degradation for RAG is genuinely ours.** Nobody packages it. The packages fall back to another model
+or fail. Answering from already-retrieved passages is a thing we would be building rather than adopting, and our
+architecture suits it because the passages are in hand before generation starts.
+
+**The decision table should be a contract test.** Our table of request-to-lane cases is the compliance artifact,
+and turning it into a golden file diffed on every commit is what makes "provable to an auditor" a build artifact
+rather than a claim. The researched pattern for this is a declarative policy compiled to decision nodes with
+structured audit traces (arXiv 2603.27299).
+
+**And the agentic task list needs a review cadence.** It is a list that decides cost, and the most-documented
+regret in the field is a threshold nobody revisited. An annual check of the list against audit-row counts per
+trigger is enough to stop it silently becoming a rule that fires on everything.
 ## 8. What we are deliberately not building
 
 - **A separate router process.** One Python process with routing behind a pure function. The pure function is
