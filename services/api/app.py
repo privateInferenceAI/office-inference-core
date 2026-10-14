@@ -57,6 +57,7 @@ import ingest  # noqa: E402
 import retriever  # noqa: E402
 import session as session_module  # noqa: E402
 import budget as budget_module  # noqa: E402
+import routing  # noqa: E402
 import streaming  # noqa: E402
 
 GATEWAY_URL = os.environ.get("OI_GATEWAY_URL", "http://litellm:4000")
@@ -74,6 +75,21 @@ DEFAULT_MODEL_ROLE = os.environ.get("OI_DEFAULT_MODEL_ROLE", "analyst")
 PASSAGES = int(os.environ.get("OI_PASSAGES", "6"))
 
 STATE: dict = {}
+
+
+def local_lane_available() -> bool:
+    """Whether this deployment declares a model it serves itself.
+
+    Read from the manifest rather than guessed. A cloud deployment declares only remote models, so a
+    routing decision to answer locally cannot be honoured there, and saying so is better than announcing
+    a downgrade to a model that does not exist.
+    """
+    models = (STATE.get("manifest") or {}).get("models") or {}
+    for entry in models.values():
+        local = str((entry or {}).get("local") or "")
+        if local:
+            return True
+    return False
 
 
 def model_for(role: str) -> str:
@@ -127,6 +143,11 @@ async def lifespan(app: FastAPI):
     registry_path = os.environ.get("ACCESS_REGISTRY", "/app/rendered/access.json")
     STATE["registry"] = access_module.load(registry_path)
     STATE["key"] = assertion.load_key(KEY_PATH)
+    # What routing reads: the egress declaration decides whether a lane is permitted at all, and the
+    # content default is the data class a request carries.
+    manifest_path = os.environ.get("OI_MANIFEST", "/app/rendered/manifest.json")
+    mp = Path(manifest_path)
+    STATE["manifest"] = json.loads(mp.read_text()) if mp.exists() else {}
     STATE["services"] = ingest.Services()
     STATE["store"] = session_module.open_store()
     print(f"api ready: registry={registry_path} model_role_default={DEFAULT_MODEL_ROLE} "
@@ -216,6 +237,36 @@ async def ask(request: Request):
              "kind": "no_source", "role": session.role, "roots": sorted(permit.roots)},
             status_code=200)
 
+    # **The gate first, then the triggers choosing a model inside what it permitted.** The data class is
+    # the deployment's declared content default: what a request IS, is the client's declaration, and the
+    # record carries the roots retrieval actually reached beside it.
+    data_class = ((STATE.get("manifest") or {}).get("content") or {}).get("default", "internal")
+    decision = routing.route(
+        STATE.get("manifest") or {},
+        data_class=data_class,
+        task=body.get("task") or "",
+        user_wants_stronger=bool(body.get("stronger")),
+        passages=result.passages,
+        model_name=model,
+        local=local_lane_available(),
+    )
+    if decision.lane == "local" and not local_lane_available():
+        # **This deployment has no local lane**, so a decision to answer locally would name a model that
+        # does not exist. The honest outcome is a refusal that says so, recorded, rather than a notice
+        # claiming an answer that cannot be produced. A deployment that declares a local model gets the
+        # announced downgrade instead.
+        facts = {"stage": "routing", "reason": decision.reason,
+                 "lane": decision.lane, "data_class": data_class,
+                 "escalation_requested": decision.escalation_requested,
+                 "session_id": session.session_id}
+        audit("access", session.subject, session.role, "denied", facts)
+        return JSONResponse(
+            {"error": "Permission denied on this resource (or it might not exist). "
+                      "This request needs a lane this deployment does not permit and has no "
+                      "local model to answer with.",
+             "kind": "no_permitted_lane", "reason": decision.reason,
+             "notice": decision.notice},
+            status_code=403)
     request_budget = budget_module.Budget()
     answer, generation = _generate(session, permit, model, question, result.passages, request_budget)
     if answer is None:
@@ -251,13 +302,18 @@ async def ask(request: Request):
         "supported": [c.text for c in verified.claims if c.ok],
         "unsupported": [{"text": c.text, "reason": c.reason, "detail": c.detail}
                         for c in verified.refused],
+        # What the user is told, always, when there is something to tell. Decided 2026-10-14.
+        "notice": decision.notice,
+        "lane": decision.lane,
+        "escalated": decision.escalated,
         "denied": result.denied,
         "disclosure": (result.disclosure.message if result.disclosure else ""),
     }
     audit("model_call", session.subject, session.role, "ok",
           {"stage": "ask", "model": model, "passages": len(result.passages),
            "supported": len(body_out["supported"]), "unsupported": len(body_out["unsupported"]),
-           "session_id": session.session_id, "roots": sorted(permit.roots)}, model=model)
+           "session_id": session.session_id, "roots": sorted(permit.roots),
+           **routing.audit_facts(decision, data_class)}, model=model)
     return body_out
 
 
