@@ -1415,16 +1415,27 @@ python3 scripts/render_manifest.py --manifest manifests/dev-cloud.yaml
 `--root` sets the deployment root the outputs are written for, and it is what lets you render for
 another machine from this one. `--out` overrides the output directory.
 
-The three tools built on `argparse` answer `--help`, which is the fastest way to see their options. The
-other three scripts do not, and will try to treat `--help` as a filename:
+**Some of these tools answer `--help` and some do not, and the ones that do not will treat it as a
+filename.** Which is which is worth knowing before you try it, because the failure looks like a crash:
 
 ```
+# These answer --help, and it is the fastest way to see their options.
 python3 scripts/render_manifest.py --help
 oi run --rm audit --help
 oi run --rm keys --help
+
+# These do not. They read --help as a path and fail.
+python3 scripts/validate_manifests.py --help    # tries to parse a file called --help
+python3 scripts/check_model_lifecycle.py --help # the same
+python3 scripts/check_requirements.py --help    # FAIL: no register at --help
 ```
 
+**A `--help` that fails is not a broken tool.** It is a script without an argument parser, and the three
+that lack one are the three that take a file path as their first argument. Read the script's header
+comment instead.
+
 ```
+$ python3 scripts/render_manifest.py --manifest manifests/dev-cloud.yaml
 rendered dev-cloud.yaml -> /opt/oi-core/rendered
   profile      cloud
   packs        core
