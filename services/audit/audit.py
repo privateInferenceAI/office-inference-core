@@ -30,6 +30,34 @@ import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+# Where the signing key is. A file rather than a variable, and the same file the API reads.
+ASSERTION_KEY = Path(os.environ.get("OI_ASSERTION_KEY", "/app/rendered/assertion.key"))
+
+
+def _verifier():
+    """The statement verifier, imported where it lives.
+
+    **Loaded lazily because the tool is also imported by tests that have no statement to verify.** The first
+    version imported it at module level and broke four test modules at collection, which is a real signal: a
+    tool whose import requires the credential machinery cannot be tested without it.
+
+    It sits beside this file in the image, because the Dockerfile copies it, and one directory over in the
+    checkout.
+    """
+    try:
+        import assertion  # noqa: F401
+        return assertion
+    except ImportError:
+        pass
+    gateway = Path(__file__).resolve().parent.parent / "gateway"
+    if (gateway / "assertion.py").exists():
+        sys.path.insert(0, str(gateway))
+        import assertion  # noqa: F401
+        return assertion
+    die("the statement verifier is not available beside this tool, so a signed record cannot be checked. "
+        "The image copies services/gateway/assertion.py next to audit.py; the checkout has it one "
+        "directory over.")
+
 import psycopg
 from psycopg.types.json import Jsonb
 
@@ -145,16 +173,37 @@ def cmd_migrate(args) -> int:
 # --------------------------------------------------------------------------- record
 
 def cmd_record(args) -> int:
-    # An actor is an identity, not a word someone types. Until the assistant API passes an
-    # authenticated one (C3), recording from the command line is a development act, and it says so.
-    # The guard comes first, before anything touches the database, so a refusal cannot leave a
+    # An actor is an identity, not a word someone types, and there are exactly two ways to have one.
+    #
+    # **A signed statement, which is what a deployment does.** The assistant API resolves a session and
+    # mints a statement naming the actor it found; this verifies the signature against the same key and
+    # takes the actor from inside it. The actor is therefore not something the caller typed, and a caller
+    # cannot name somebody else.
+    #
+    # **--dev, which is the developer with no client data.** It stays because a person at a terminal has no
+    # session to resolve, and it says out loud what it is.
+    #
+    # The guard comes first either way, before anything touches the database, so a refusal cannot leave a
     # half-written event behind.
-    if not getattr(args, "dev", False):
-        die("record refuses a hand-typed actor outside development mode. An actor comes from an "
-            "authenticated session, so a deployment records through the API rather than this CLI. "
-            "Pass --dev when you are the developer and the box holds no client data.")
-    print("warning: --dev is set, so this event's actor is whatever was typed rather than an "
-          "authenticated identity", file=sys.stderr)
+    if getattr(args, "assertion", None):
+        try:
+            verifier = _verifier()
+            key = verifier.load_key(getattr(args, "assertion_key", None) or ASSERTION_KEY)
+            payload = verifier.verify_audit(key, args.assertion)
+        except Exception as exc:  # noqa: BLE001 - a refused statement is a refusal, whatever raised it
+            die(f"the audit statement was refused: {exc}")
+        args.actor = payload["actor"]
+        args.actor_role = payload.get("actor_role") or args.actor_role
+        if payload.get("deployment_id"):
+            args.deployment_id = payload["deployment_id"]
+    elif not getattr(args, "dev", False):
+        die("record refuses a hand-typed actor outside development mode. A deployment records through "
+            "the assistant API, which signs a statement naming the actor it resolved from a session. Pass "
+            "--dev when you are the developer and the box holds no client data, or --assertion with a "
+            "statement the API minted.")
+    if getattr(args, "dev", False):
+        print("warning: --dev is set, so this event's actor is whatever was typed rather than an "
+              "authenticated identity", file=sys.stderr)
 
     payload = None
     if args.payload:
@@ -778,7 +827,15 @@ def main() -> int:
     record.add_argument("--type", required=True,
                         choices=["model_call", "tool_call", "approval", "access",
                                  "config_change", "login"])
-    record.add_argument("--actor", required=True)
+    # Not required at the parser, because a signed statement names the actor and this command line does not.
+    # The guard in cmd_record refuses the case where neither is present, and it refuses before the database is
+    # touched, which is where that check belongs.
+    record.add_argument("--actor", help="the actor, for a development record. A deployment passes --assertion "
+                                       "instead and the actor comes from inside it")
+    record.add_argument("--assertion", help="a statement the assistant API minted, naming the actor. The "
+                                            "deployment path: the actor comes from inside the signature "
+                                            "rather than from this command line")
+    record.add_argument("--assertion-key", help="where the signing key is, for a test or a different layout")
     record.add_argument("--dev", action="store_true",
                         help="accept a hand-typed actor. Development only: a deployment takes the "
                              "actor from an authenticated session, which is the assistant API's job")

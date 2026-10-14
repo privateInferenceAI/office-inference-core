@@ -185,7 +185,7 @@ a request, since that is the thing we refuse.
 **The residency claim becomes provable from the chain alone**, because lane and data class are in the row. That
 is the point of recording them, and it is why this is a compliance feature rather than an observability one.
 
-## 7. Credentials: the open decision
+## 7. Credentials: the decision, and how it was settled
 
 **Where it stands.** Per-role virtual keys exist in the gateway's database and a plaintext copy sits in
 `rendered/keys.json`. The plan was to mount that file into the API. The argument against it: LiteLLM stores
@@ -207,6 +207,158 @@ master key can never be rotated, and setting a salt key later leaves every store
 are four virtual keys and spend history in that database today. It is free to fix while there is no client data
 and impossible to fix afterwards.
 
+## 7a. The credential decision, resolved by spike on 2026-10-14
+
+**Decision: one signing key, short-lived assertions, and `custom_auth`. The spike says it works, including the
+part that would have made it unusable.**
+
+Five questions were put to the pinned version by loading a real hook into a throwaway gateway on the box,
+sharing the deployment's database. All five have answers, and two of them are the kind that only appear when
+something is actually run.
+
+| Question | Answer |
+|---|---|
+| Does `custom_auth` load? | Yes. A missing header and a bad signature both return a 401 `auth_error` with the message the hook raised. |
+| Does a valid assertion reach the model? | Yes, a real Bedrock answer, and the manifest's declared model was the one called. |
+| Does a team budget enforce? | **Yes, and it refuses hard**: `budget_exceeded`, HTTP 422, naming the spend and the ceiling. |
+| Does the team have to be a real row? | Yes. A `team_id` the database does not know returns a 404 telling you to create it. |
+| Is administration locked out? | **Only if the hook does not handle it**, and this is the finding. |
+
+**The lockout, and the one line that fixes it.** With `custom_auth` enabled the master key goes through the
+same hook, so a hook that only understands role assertions refuses the master key too: `/team/list` returned
+401 and the whole management surface became unreachable. That would have bricked budget administration, the
+`keys` tool and any future `/team/new` call, and it is not mentioned in the documentation the research found.
+The hook is handed `api_key`, so it can compare that against `LITELLM_MASTER_KEY` and return a
+`proxy_admin` identity. Confirmed: the log shows `matches_master=True` and `/team/list` answering normally
+afterwards.
+
+**Two consequences that change the design.**
+
+- **Budgets move from keys to teams.** A key-level `max_budget` is documented as unsupported with
+  `custom_auth`, and the spike confirms the identity's key budget is not what enforces. Team budgets do
+  enforce, so one team per role carrying that role's ceiling is the shape. The `keys` tool grows from minting
+  keys to provisioning teams, and the manifest's `budgets.roles` block is what it reads.
+- **This is a stronger budget story than the one we had, and it corrects something we already published.**
+  Section 5 of this note records that LiteLLM's key budgets admit against recorded spend, so concurrent
+  requests can pass before any is counted. That is true of key budgets. A team budget refused at 422 in the
+  spike with the spend and the ceiling named. It is a better ceiling, and it belongs on the team record
+  rather than claimed for the key.
+
+**What the spike does not settle.** Whether the token-per-minute ceiling counts concurrent admissions the way
+the team budget does, and whether a team's model allowlist is enforced on the assertion path. Both are for the
+step, with a test each.
+
+**The spike itself does not ship.** `services/spike/` holds three files that exist to record what was run,
+and step 4.2 deletes it once the real hook has its own tests.
+
+## 7c. The credential path, end to end, and the hole it left
+
+Run against the live gateway on 2026-10-14, with the hook in the real gateway image and teams provisioned
+from the manifest. Nine checks, and the results split cleanly.
+
+**What works.**
+
+| Check | Result |
+|---|---|
+| A valid signed statement | 200, a real Bedrock answer from the declared model |
+| No statement at all | 401, with the message naming what this deployment expects instead |
+| A tampered signature | 401, "the assertion signature does not match the key this gateway holds" |
+| A replayed statement | 401, "assertion ... was already presented: a statement is spent once" |
+| The admin exemption | 200 from `/team/list` with the master key, which is the lockout avoided |
+| A virtual key presented instead | 401. **The gateway no longer accepts long-lived model keys at all.** |
+| Team budgets | Provisioned per role from `budgets.roles`, one team each, ceilings reported |
+
+**What the same run found, and it is the important part.** A signed statement for one role reached a model
+that role is not scoped to. A `viewer` statement asked for `coder` and got an answer; a `front_desk` statement
+asked for `analyst` and got an answer. **The team's model allowlist is not enforced on the custom-auth path**,
+even with `enable_post_custom_auth_checks` on and `custom_auth_run_common_checks` on, which is the pair the
+documentation names for exactly this. The startup warning speaks only about budgets, model-access allowlists
+and rate limits being unenforced when common checks are *off*; turning them on enforced budgets, as the spike
+had already shown, and did not enforce the allowlist.
+
+**Why that is a smaller hole than it looks, and still one to close in code rather than in hope.** The API is
+the only thing that holds the signing key, and it chooses the model from the manifest for the session's role;
+a client never names one. So the allowlist is not load-bearing for the product's behaviour today. What is
+wrong is that the manifest's declaration of which model a role reaches is a promise the gateway does not keep,
+and a control that exists on paper and not in the path is the shape this project keeps paying for.
+
+**The decision that follows: the API enforces the model, not the gateway.** It resolves the role to a model
+from the manifest and requests that, which puts the choice in the one process that already knows the session,
+the role and the permit. The gateway's allowlist stays configured, because it costs nothing and might start
+working, and step 4.5 proves the mapping by changing it and watching the called model change.
+
+**A second consequence worth writing down.** With `custom_auth` in place the gateway accepts exactly two
+credentials: a signed statement, and the master key. Every virtual key minted by the `keys` tool is now inert
+for request traffic. They still exist, they are still scoped and budgeted, and nothing presents them, so the
+next step should either find them a use or stop minting them rather than leave a security control that has
+quietly become decoration.
+
+**And one correction to section 8 below.** "Do not describe gateway budgets as hard caps" was recorded from
+the research, and it was about key budgets. The team budget refused at HTTP 422 in the spike with the spend
+and the ceiling named, and it is enforced through the path a statement takes. The earlier correction still
+stands for keys; it is now wrong to apply it to teams. The manual and the schema get this right when the API
+page is written.
+## 7d. The API, and the two things the first probe found
+
+Six rights held on the first clean run, and two findings behind them, both worth keeping because both were
+invisible to reading.
+
+**Finding 1, fixed: every audit write the API made was being refused.** The audit tool refuses a hand-typed
+actor unless `--dev` is passed, and its guard fires before the database is touched. That guard is right in
+spirit and was wrong for this caller: the actor the API passes came from a session row the process resolved,
+so nobody typed it. The first probe run passed its FORGED right **on a denial row written by an earlier run
+rather than by the request under test**, which surfaced only because the probe counts rows instead of trusting
+a 403.
+
+**The fix is the shape the guard was asking for.** The API signs a statement naming the actor it resolved,
+with the signing key it already holds, and the audit tool verifies the signature and takes the actor from
+inside it. The development flag is gone from the deployment. A statement minted for a model call cannot write
+an audit row and the reverse is also refused, because the purpose is inside the signed payload and checked on
+the far side.
+
+**Three defects found while building that fix**, each a small thing that would have been a quiet failure:
+
+1. `verify()` required a `role`, so a genuine audit statement was refused for a field it was never supposed to
+   carry. Authenticity and purpose are two questions, so there are two functions now: one proves a statement is
+   genuine, and each caller checks the payload it needs.
+2. `--actor` was still required by the argument parser, so every signed record died in argparse before the
+   guard was reached. The parser does not require it and the guard refuses the case where neither is present.
+3. The API mounts the audit tool into `/app` but not the verifier beside it, so the tool could not check a
+   statement at all. It refuses loudly rather than writing an unverified row, which is the right direction and
+   was invisible until the log was read.
+
+**Verified on the live deployment**: a question over HTTP returns a cited answer, the API log holds zero
+audit-write failures, and the chain holds a `model_call` row whose actor came from the session and whose model
+is the one the manifest declares.
+**Finding 2, fixed the same day: the team budget did not enforce, and the reason was the spike.**
+
+**The spike proved something other than what it looked like.** Its hook returned `max_budget=0.000001` on the
+identity itself, and what refused at 422 was that number being spent, not the team's ceiling. The team row was
+decorative in the spike, and I read it as load-bearing and wrote it into this document as a stronger budget
+story than the key budgets it replaced.
+
+**The gateway does not read the team row for an identity that came from a custom-auth hook.** So the hook
+computes the remainder itself: it reads the team's ceiling and spend, returns `ceiling - spend` as the
+identity's `max_budget`, and lets the gateway accumulate spend against the same row. A ceiling that cannot be
+read is a refusal rather than an allowance, because a database that is unreachable must not turn a budget into
+an unmetered lane.
+
+**Verified on the live deployment**: spend 99 against a ceiling of 10 returns a 502 whose body names the team,
+the current cost and the maximum; spend 0 against the same ceiling returns a cited answer.
+
+**A second finding, and it is operational.** LiteLLM caches the team row. Editing the spend directly in the
+database and asking again still reports the old figure until the gateway restarts. That is harmless in normal
+operation, because the gateway is the thing that writes the spend, and it matters for anybody testing a
+ceiling by hand: **the number in the database is not the number the gateway is enforcing.** The probe says so
+where it measures it.
+
+**This is the third control in this phase found reporting success while doing nothing**, after the audit writes
+and the model allowlist, and the first one fixed. The pattern is worth naming: none was visible to reading the
+code, and each was obvious within a minute of running it.
+**What this pair has in common, and why it is the useful part.** Both are controls that reported success
+while doing nothing: an audit write that failed loudly into a log nobody was reading, and a budget that
+returned an answer. Neither would have been found by reading the code, and the second was found only because
+the probe spent the money rather than checking the config.
 ## 8. What we are deliberately not building
 
 - **A separate router process.** One Python process with routing behind a pure function. The pure function is

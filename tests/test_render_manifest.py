@@ -109,13 +109,35 @@ def test_rerendering_preserves_the_existing_secrets(tmp_path):
 
 
 def test_no_key_material_reaches_the_gateway_config(tmp_path):
-    """The gateway reads the master key from the environment. A literal key in litellm.yaml would
-    end up wherever that file is copied."""
+    """The gateway gets its credentials from the environment. A literal key in litellm.yaml would end up
+    wherever that file is copied.
+
+    **Two assertions in this test were passing on absences and one was wrong, all found the same day.** The
+    original checked that the substring `sk-` was absent, which passed only because nothing in the file
+    contained it; the gateway then gained an identity hook whose module path is `custom_auth.user_api_key_auth`,
+    which contains `sk-` inside `api_key_auth`, and the test failed on a legitimate change. It also asserted
+    that the string `os.environ/LITELLM_MASTER_KEY` appeared, which nothing here ever wrote: the config is
+    static YAML and the gateway reads the master key from its own environment, so that assertion was checking
+    for text that only a different design would produce.
+
+    What it checks now is what the name says: the secret the renderer minted is not in this file, and nothing
+    key-shaped is either.
+    """
     assert render(OFFICE, tmp_path).returncode == 0
     text = (tmp_path / "litellm.yaml").read_text()
-    assert "os.environ/LITELLM_MASTER_KEY" in text
-    assert "sk-" not in text
 
+    # The real secret, which belongs in the env file beside it and nowhere else.
+    env = (tmp_path / "env").read_text()
+    master = next(line.split("=", 1)[1] for line in env.splitlines()
+                  if line.startswith("LITELLM_MASTER_KEY="))
+    assert master not in text
+
+    # And the shape of a provider key, which is what the original assertion was reaching for.
+    import re
+    assert not re.search(r"sk-[A-Za-z0-9_-]{20,}", text), "a key-shaped string reached the gateway config"
+
+    # The identity hook is configured, which is the reason this file mentions a key at all.
+    assert "custom_auth:" in text
 
 def test_an_office_build_turns_the_local_lane_on(tmp_path):
     """The local lane's container sits behind a compose profile, so the rendered env has to ask
@@ -204,16 +226,18 @@ def test_a_sellable_pack_pulls_in_core(tmp_path):
 
 
 def test_the_render_names_the_files_it_writes(tmp_path):
-    """Five of them, and the manual says so.
+    """Six of them, and the manual says so.
 
-    `access.json` is the permission model the session tool and the retriever both read (SEC-ACL-002). It is
-    listed here rather than added quietly, because this test exists so that a file appearing in a deployment's
-    rendered directory is a decision somebody wrote down.
+    `access.json` is the permission model the session tool and the retriever both read (SEC-ACL-002), and
+    `assertion.key` is the signing key the API mints model-call assertions with and the gateway verifies them
+    against. Both are listed here rather than added quietly, because this test exists so that a file appearing
+    in a deployment's rendered directory is a decision somebody wrote down.
     """
     out = tmp_path / "rendered"
     assert render(DEV_CLOUD, out).returncode == 0
     written = sorted(p.name for p in out.iterdir())
-    assert written == ["access.json", "env", "litellm.yaml", "manifest.json", "services.txt"], written
+    assert written == ["access.json", "assertion.key", "env", "litellm.yaml", "manifest.json",
+                       "services.txt"], written
 
 
 def test_the_denial_policy_reaches_the_env_file(tmp_path):

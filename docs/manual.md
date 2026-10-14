@@ -3462,6 +3462,139 @@ events from the record and leaves a tombstone. `retention` destroys documents an
 
 # Part 5: when something breaks
 
+## 13g. The assistant API
+
+**What it is for.** Every capability over one API with no interface of its own. A client application talks to
+this and nothing else: it asks a question, it gets an answer with its citations, and the permission check and
+the record happen inside the call rather than beside it.
+
+**Where it runs.** A container on the internal network, port 8088, **with no published port on purpose.** The
+phase this belongs to is an API with no user interface, and a client reaches it through whatever a deployment
+puts in front. Publishing one here would be the debug port this project has already paid for once.
+
+### What a request does
+
+1. **The session resolves.** The token is a random identifier that resolves to a row holding the subject, the
+   role and the document roots. No token, no answer.
+2. **A request that supplies its own role is refused**, and the refusal is written to the chain before the
+   error returns. The response is a 403 whose wording says the permission was denied **or the resource might
+   not exist**, which is Google's AIP-211 position: a 404 instead of a 403 is worse for the operator and no
+   better for secrecy.
+3. **Retrieval runs with the filter inside the query**, so a passage outside the session's roots never leaves
+   the store.
+4. **The model is chosen from the manifest**, not from the request. A caller cannot name a model any more
+   than it can name a role. This matters because the gateway's own model allowlist turned out not to be
+   enforced on this path.
+5. **The model call is authenticated with a short-lived signed statement** minted for this request. The API
+   holds a signing key; it never holds a model credential.
+6. **The answer is checked against what was retrieved.** A sentence no passage supports is marked rather than
+   dropped, and counted in the response.
+
+### Establish a session and ask
+
+```
+$ alias oi='docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env'
+$ oi --profile tools run --rm session mint --dev --subject probe-staff@officeinference.com --role viewer
+token      6D6LoGQsK-qL0E9anQN2kULjH9tPjaguzbx-M5G075k
+subject    probe-staff@officeinference.com
+role       viewer
+roots      ['company']
+groups     ['staff']
+expires_at 2026-10-14T09:57:56.895572+00:00
+```
+
+```
+$ docker run --rm --network ai-net --entrypoint python oi-core/session:local -c "
+import json, urllib.request
+body = {'session': 'THE_TOKEN', 'question': 'What is the mileage rate for reimbursement?'}
+req = urllib.request.Request('http://api:8088/ask', data=json.dumps(body).encode(),
+                             method='POST', headers={'Content-Type': 'application/json'})
+print(json.dumps(json.load(urllib.request.urlopen(req, timeout=180)), indent=2)[:900])"
+{
+  "answer": "The mileage rate for reimbursement is 0.67 per mile for travel in an employee's own vehicle.",
+  "model": "analyst",
+  "role": "viewer",
+  "roots": ["company"],
+  "citations": [{"index": 1, "doc_id": "company/og-fee-schedule-2026.md", "acl": "company", "page_start": 0, "page_end": 0}],
+  "supported": ["The mileage rate for reimbursement is 0.67 per mile."],
+  "unsupported": [],
+  "denied": false,
+  "disclosure": ""
+}
+```
+
+### The two endpoints
+
+| Method | Path | What it does |
+|---|---|---|
+| GET | `/health` | Liveness, and what the process loaded: the registry, the deployment, the default model role |
+| POST | `/ask` | `{"session": "<token>", "question": "..."}` in, a cited answer out |
+
+Two, and that is deliberate. Streaming arrives in `4.3` and the routing triggers in `4.5`; there is no third
+endpoint until a capability needs one.
+
+### What the answer carries, and why each field is there
+
+| Field | Why |
+|---|---|
+| `answer` | The model's text, with `[n]` markers referring to `citations` |
+| `model` | **Which model actually answered.** Read from the manifest, so changing the manifest changes this |
+| `role`, `roots` | What the session held, so a caller can see the permission it was answered under |
+| `citations` | Document, access label and page for each passage the answer could cite |
+| `supported` / `unsupported` | The sentences the retrieved passages do and do not back, with a reason |
+| `denied`, `disclosure` | Whether passages outside the role matched, and what the client's policy says to tell the user |
+
+**The refusal that matters is the one in the chain, not the status code.** A 403 on its own is a control
+nobody can audit. Read it back the way the manual's access-control section describes:
+
+```
+$ oi --profile tools run --rm audit list --type access --limit 3
+$ oi --profile tools run --rm session refusals --session <token>
+```
+
+### The credential, in one paragraph
+
+The API signs a statement naming a role and a session, valid for five minutes and usable once, and the gateway
+verifies it with the same key. The gateway accepts exactly two credentials now: a signed statement, and the
+master key, which the hook recognises so that administration is not locked out. **Every virtual key the `keys`
+tool mints is refused for request traffic**, which is recorded rather than tidied away.
+
+### The rehearsal
+
+```
+$ oi --profile tools run --rm keys --provision-teams
+$ oi build api && oi up -d api
+$ docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
+    -v /opt/oi-core:/w -w /w --env-file rendered/env \
+    --entrypoint python oi-core/session:local /w/tests/fixtures/api_probe.py
+```
+
+Seven rights, each printed with the wrong path it rules out: `ANSWER`, `CITED`, `SCOPED`, `FORGED`, `NO-SESS`,
+`BUDGET` and `ADMIN`. The **session** image rather than the eval one, because the probe reads and writes the
+gateway's own tables and that image carries the driver which reaches them.
+
+**If it breaks.**
+
+- `[401] kind=no_session`: the token is absent, expired or revoked. The three are one answer on purpose.
+- `[403] kind=refused_authority_claim`: the request supplied its own authority. That is the control, not a bug.
+- `[502] ... budget is exhausted`: the role's ceiling is spent. The message names the team, the current cost
+  and the maximum. A ceiling can also be raised with `keys --set-budget`.
+- `[502] ... could not be reached`: the gateway is down or the API cannot see it. Check `oi ps`.
+- **Every request returns an answer with no citations**: retrieval found nothing and the model answered from
+  its own knowledge, which is the failure this product exists to avoid. Check that the corpus is ingested and
+  that the session's roots match a document label.
+- **A budget set by hand does not take effect.** LiteLLM caches the team row, so the number in the database is
+  not the number the gateway is enforcing until it restarts. Found by setting a ceiling and watching a request
+  answer anyway.
+
+### Extending it
+
+- **Another capability** becomes another endpoint, and the phase's later steps each add one thing to this one
+  rather than a service of their own.
+- **A different model per role** is a manifest change: edit `models`, re-render, restart the API. The
+  `OI_MODEL_<ROLE>` variables are what the API reads, and the probe's `CITED` line prints which model answered.
+- **A different identity provider** replaces the verifier behind the same seam. The session record, the role
+  resolution, the retriever call and the refusal path stay.
 ## 21. Troubleshooting
 
 Every item below is something that actually happened, with what it looked like and what fixed it.

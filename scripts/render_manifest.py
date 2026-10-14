@@ -228,6 +228,33 @@ def declared_roles(block: dict, groups: dict, roots: list) -> dict:
     return {"viewer": []}
 
 
+def custom_auth_setting() -> dict:
+    """The gateway's general_settings, including the identity hook.
+
+    **The hook is configured here rather than in a file somebody edits on the box.** Where a deployment gets
+    its identities from is a decision with a review trail, and the manifest render is where this repository
+    keeps those.
+
+    It is written for every deployment, and it is inert until the gateway image carries the module, which is
+    the same image that ships the tool. A deployment that never receives an assertion is unaffected: the hook
+    only runs when a request arrives without a key the gateway already knows.
+    """
+    return {
+        "custom_auth": "custom_auth.user_api_key_auth",
+        # **On, and the first version of this had it off for a reason that was wrong.** The reasoning was that
+        # a key-level budget is not what enforces, so the gateway's own checks would add a weaker second
+        # ceiling. What the setting actually governs is whether the gateway applies ITS DB RECORDS at all to
+        # a custom-auth identity, and the gateway says so at startup: with it off, "budgets, model-access
+        # allowlists, and per-model rate limits configured on your DB team/project records will NOT be
+        # enforced for custom-auth requests". The team budget is a DB record, so turning it off disabled the
+        # exact control this credential model exists to keep. Corrected the same day, from the running
+        # gateway's own log rather than from the documentation.
+        "custom_auth_run_common_checks": True,
+        # On, because this one is the model allowlist and the expiry: without it a signed assertion could
+        # name a model the role is not scoped to.
+        "enable_post_custom_auth_checks": True,
+    }
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", required=True)
@@ -262,6 +289,10 @@ def main() -> int:
     env.setdefault("POSTGRES_DB", "oicore")
     env.setdefault("POSTGRES_PASSWORD", secrets.token_urlsafe(24))
     env.setdefault("LITELLM_MASTER_KEY", "sk-" + secrets.token_urlsafe(32))
+    # The assertion signing key. One secret shared by the API, which mints statements, and the gateway, which
+    # verifies them. It is deliberately not a model credential: whoever holds it can speak as a role for five
+    # minutes and cannot call a model with it.
+    env.setdefault("OI_ASSERTION_SECRET", secrets.token_urlsafe(48))
     env.setdefault("GATEWAY_PORT", "4000")
     # The audit tool runs as this user so exported evidence belongs to the operator rather than
     # to root. Files a client is meant to keep should not need sudo to read or copy.
@@ -338,6 +369,17 @@ def main() -> int:
     env["MODEL_ROLES"] = ",".join(
         f"{role}={entry.get('local','')}" for role, entry in sorted((manifest.get("models") or {}).items())
     )
+    # Which model role answers, per API role. The assistant API reads these to decide the model for a session,
+    # and it is the seam INF-ROLE-001 is proved through: change `models` in the manifest, re-render, and the
+    # model the API calls changes. A deployment that declares access roles the models block does not mention
+    # falls back to the analyst role rather than to a model name, because a model name here would be the second
+    # source of truth this exists to avoid.
+    api_roles = sorted((manifest.get("access") or {}).get("roles") or {}) or ["viewer"]
+    default_role = "analyst" if "analyst" in (manifest.get("models") or {}) else sorted(manifest["models"])[0]
+    for api_role in api_roles:
+        env[f"OI_MODEL_{api_role.upper().replace('-', '_')}"] = default_role
+    env["OI_DEFAULT_MODEL_ROLE"] = default_role
+    env["OI_DEFAULT_API_ROLE"] = api_roles[0]
     env["DEPLOYMENT_ID"] = manifest["client"]["deployment_id"]
     env["PROFILE"] = manifest["profile"]
     # One compose file serves both builds. The local lane's containers sit behind the "office"
@@ -353,6 +395,7 @@ def main() -> int:
     env_path.chmod(0o600)
 
     gateway = build_litellm_config(manifest, env)
+    gateway["general_settings"] = custom_auth_setting()
     (out_dir / "litellm.yaml").write_text(
         "# Generated from the manifest by scripts/render_manifest.py. Do not edit by hand.\n"
         + yaml.safe_dump(gateway, sort_keys=False)
@@ -362,6 +405,13 @@ def main() -> int:
         + "".join(f"{s}\n" for s in services)
     )
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+
+    # The signing key as a file, mode 600, because the gateway hook reads a file rather than an environment
+    # variable: an environment variable is visible to `docker inspect` and to any process that can read /proc.
+    key_path = out_dir / "assertion.key"
+    if not key_path.exists():
+        key_path.write_text(env["OI_ASSERTION_SECRET"] + "\n")
+    key_path.chmod(0o600)
 
     registry = build_access_registry(manifest)
     (out_dir / "access.json").write_text(json.dumps(registry, indent=2, sort_keys=True) + "\n")
