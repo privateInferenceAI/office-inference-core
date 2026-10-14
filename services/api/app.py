@@ -615,8 +615,21 @@ async def _frames(session, permit, model: str, question: str, result, requested_
             request_budget.note_chunk()
             if first_token_at is None:
                 first_token_at = time.monotonic()
-            # The redactor decides what is safe to emit. Everything else is held.
-            safe = redactor.feed(delta)
+            # **The redactor decides what is safe to emit, and its failure is closed on purpose.**
+            # Research on 2026-10-14 found fail-open branches in three separate LiteLLM streaming
+            # paths, where an exception or an unrecognised event emitted the buffer unmasked, and found a
+            # guardrail that logged success while scanning nothing. So the failure here is deliberate
+            # rather than incidental: nothing raw is emitted, the client is told, and the record says so.
+            try:
+                safe = redactor.feed(delta)
+            except Exception as exc:  # noqa: BLE001 - a redactor that cannot run must not pass text
+                audit("model_call", session.subject, session.role, "error",
+                      {"stage": "redaction", "error": type(exc).__name__,
+                       "emitted_so_far": emitted, "session_id": session.session_id}, model=model)
+                yield frame("error", {"kind": "redaction_failed", "partial_output": emitted,
+                                      "detail": "the response could not be filtered, so it was stopped "
+                                                "rather than sent unfiltered"})
+                return
             if safe:
                 emitted = True
                 yield frame("delta", {"text": safe})
