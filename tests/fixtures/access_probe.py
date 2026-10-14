@@ -141,7 +141,7 @@ def ask(services, question: str, session):
     """
     permit = session.permit()
     result = retriever.search(services, question, permit.role, limit=5, permit=permit)
-    return {p.acl for p in result.passages}, result
+    return result
 
 
 def main() -> int:
