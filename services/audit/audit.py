@@ -827,7 +827,11 @@ def main() -> int:
     record.add_argument("--type", required=True,
                         choices=["model_call", "tool_call", "approval", "access",
                                  "config_change", "login"])
-    record.add_argument("--actor", required=True)
+    # Not required at the parser, because a signed statement names the actor and this command line does not.
+    # The guard in cmd_record refuses the case where neither is present, and it refuses before the database is
+    # touched, which is where that check belongs.
+    record.add_argument("--actor", help="the actor, for a development record. A deployment passes --assertion "
+                                       "instead and the actor comes from inside it")
     record.add_argument("--assertion", help="a statement the assistant API minted, naming the actor. The "
                                             "deployment path: the actor comes from inside the signature "
                                             "rather than from this command line")
