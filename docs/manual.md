@@ -343,7 +343,10 @@ cd /opt/oi-core
 docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env ps
 ```
 
-You should see six services running, four of them healthy. Compose prints seven columns; the sample below
+You should see seven services running, five of them healthy. Seven is the current number, and the
+**assistant API is one of them**: a `ps` without it means the API is not deployed, which is a deployment that
+cannot answer a question. The count has grown with each phase — six before C3 added the API — so an older copy of
+this page showing a different number is a stale page rather than a broken box. Compose prints seven columns; the sample below
 keeps them all, because two of them carry information the others do not. `IMAGE` is where a digest-pinned
 image shows whether the box is running what the repository says it should, and `PORTS` shows the exposed
 ports with no host binding, which is how you confirm from the outside that nothing is reachable:
@@ -358,7 +361,7 @@ postgres     postgres:16-alpine                           "docker-entrypoint.s�
 vector       qdrant/qdrant@sha256:b7b0444c4c351c970b98…    "./entrypoint.sh"        vector       20 hours ago     Up 20 hours               
 ```
 
-**Six, and the number matters.** Three of them arrived with C2 and none of the three is optional:
+**The number matters, and so does which service is missing.** Four of them arrived with C2 and none is optional:
 `vector` holds the chunk embeddings, `embeddings` turns text into them, `parser` turns a document into
 text with page numbers, and `ingestion` is the worker that drives both. A `ps` showing two services is a
 deployment that cannot read a client's documents at all, and it is what an older copy of this manual
@@ -2315,9 +2318,10 @@ believing it reranked is not a state this code can reach.
 
 ### Asking one question
 
-**There is no ask endpoint yet, and this is the part of the manual worth being honest about.** The
-retrieval path is a function, `search()` in `services/retrieval/retriever.py`, and the assistant API that
-would expose it — sessions, caller identity, streaming — is C3. What exists is a probe that runs one
+**The assistant API is the supported way to ask a question now, and this page predates it.** What
+follows is the retrieval path as a function, `search()` in `services/retrieval/retriever.py`, which is how this
+stage is exercised and diagnosed. **To ask a question as a client would, use `POST /ask` — section 13g.** This
+page is for the case where retrieval itself is what you are looking at. The probe below runs one
 question through the whole path, and it is the way to answer "what does the system return for this?"
 today. Section 25 records the gap.
 
@@ -3223,8 +3227,9 @@ class in force is `redacted` rather than `hash`. It is corrected here because th
 narrower claim than the system can support, and a reader who checked it would have found the record holding
 more than the page promised.
 
-The gate and the redaction run where a frontier request is assembled. The component that assembles one, the
-assistant API, arrives in Phase 4, so today they are exercised by this probe and by the test suite.
+The gate and the redaction run where a frontier request is assembled. **The component that assembles one is the
+assistant API, built in C3 and documented at 13g**, which calls this gate on every request. The probe and the test
+suite exercise it directly when you want to look at the gate on its own rather than through a question.
 
 **If it breaks.**
 
@@ -4214,8 +4219,9 @@ completion hashes are recorded whatever the mode.
 it, so it moves every time the record grows.
 
 **Component.** Anything we build that asks the gateway for an answer: the assistant API, a workflow, a
-connector, a document pipeline. Components are the callers in every description of a request, and none of
-them exist yet; C3 through C6 build them. Until then the callers are the `keys` probe and a curl.
+connector, a document pipeline. Components are the callers in every description of a request. **The first one
+exists: the assistant API, built in C3 and documented at 13g.** The rest arrive in C4 through C6, and until they
+do the other callers are the `keys` probe and a curl.
 
 **Spend log.** The gateway's own table of calls, inside its database, written as each call happens and
 including the ones it refused. It is not the audit record: it is the source the audit tool copies from,
@@ -4258,7 +4264,7 @@ is explained.
 |---|---|---|
 | C1 | The record: gateway, keys and budgets, the hash-chained audit record, export and anchoring | **Built.** Sections 11 to 14 |
 | C2 | Reading documents: Docling ingestion with OCR and tables, Qdrant, embeddings and reranking, hybrid search, and the verifier that checks every citation | **Built.** Sections 13a to 13f |
-| C3 | The assistant API: sessions, roles from tokens, streaming, retries, a degraded mode when the provider throttles | Not built |
+| C3 | The assistant API: sessions, roles from tokens, streaming, retries, a degraded mode when the provider throttles, and routing that keeps a one-way data boundary | **Built.** Sections 13g and 13h |
 | C4 | The client application: Ask, Do, Review, Activity | Not built |
 | C5 | Workflows and the first connector, with an approval gate | Not built |
 | C6 | The agent runtime and the MCP gateway | Not built |
