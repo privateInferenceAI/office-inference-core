@@ -161,7 +161,20 @@ items:
     tier: [cloud, hosted]
     phase: C3
     verify: a user outside a document's group cannot retrieve it by any query
-    status: open
+    status: verified
+    note: >-
+      Closed 2026-10-14 on the C3 verification pass: three panel rounds, three reviewers, all three verdicts yes, and every finding fixed and re-tested. Evidence is in docs/review-log.md.
+          The verify line is met against the deployed store, not argued from the source. Two roles over two
+          document roots, declared in access.groups and access.users rather than in code: access_probe passes 4
+          of 4 against the live stack, and acl_probe shows a staff session refused on the salary and bonus
+          documents while an executive session reads them. One right is skipped with an explanation rather than
+          silently: no role on this deployment exists that can claim beyond its grant, so the FORGED subject has
+          nothing to forge. The panel's cold reader ran the refusal, the recording and the refusal list by hand
+          and matched all three to the page.
+          A limitation is recorded rather than fixed, carried from C2: on a severance question the restricted
+          chunk scores below a permitted one, so no denial fires even though the memorandum answers the question.
+          The cause is chunking, not permission, and it is in the manual where a reader will meet it.
+
   - id: SEC-REDACT-001
     title: PII is redacted before any frontier-bound request leaves, and the redaction is recorded
     tier: [cloud, hosted]
@@ -785,25 +798,73 @@ items:
     tier: [cloud, office, hosted]
     phase: C3
     verify: changing the analyst role in the manifest changes the model the API calls
-    status: open
+    status: verified
+    note: >-
+      Closed 2026-10-14 on the C3 verification pass: three panel rounds, three reviewers, all three verdicts yes, and every finding fixed and re-tested. Evidence is in docs/review-log.md.
+          The verify line is met in both halves. Changing a role's model in the manifest, re-rendering and
+          restarting changes the model the API calls: the renderer emits OI_MODEL_<API ROLE> and the panel's
+          executor swapped analyst from nova-lite to nova-pro on the live deployment, saw
+          bedrock/amazon.nova-pro-v1:0 in the spend log, saw the API report model='analyst' with
+          resolved_model='bedrock/amazon.nova-pro-v1:0', then put it back and re-verified.
+          The second half is the one that was wrong for most of the phase and is now recorded in the audit chain:
+          the lane is a property of the role, not of the deployment, so a hybrid manifest can send a
+          frontier-only model out with the gate consulted. That defect was found by the panel and fixed.
+
   - id: INF-STREAM-001
     title: Responses stream
     tier: [cloud, hosted]
     phase: C3
     verify: the first token arrives before the last is generated
-    status: open
+    status: verified
+    note: >-
+      Closed 2026-10-14 on the C3 verification pass: three panel rounds, three reviewers, all three verdicts yes, and every finding fixed and re-tested. Evidence is in docs/review-log.md.
+          The verify line is met: stream_probe passes 4 of 4 against the live service, and its TTFT right asserts
+          that the first token arrives before the last is generated rather than inferring it from a total.
+          The panel re-ran it after the holdback change, alone, on a quiet box, and it passes.
+          **The redaction half of this item is where the phase's worst defect lived, and it is worth recording
+          here because the register claimed it before it was true.** The streaming endpoint redacted from the
+          start and the JSON endpoint did not, so the same question returned the PII canary in clear over
+          POST /ask. Found by the panel, fixed, and verified by re-running the question: the canary does not
+          appear in either response, and both carry a redactions field.
+
   - id: INF-TIMEOUT-001
     title: Timeouts, retries, and queueing are bounded, and throttling degrades rather than hanging
     tier: [cloud, office, hosted]
     phase: C3
     verify: with the provider throttling, requests return a clear degraded answer within the timeout, and it is recorded
-    status: open
+    status: verified
+    note: >-
+      Closed 2026-10-14 on the C3 verification pass: three panel rounds, three reviewers, all three verdicts yes, and every finding fixed and re-tested. Evidence is in docs/review-log.md.
+          The verify line is met with a real provider throttle rather than a simulated one. throttle_probe drives
+          the request ceiling that Bedrock actually enforces on these models and produced a genuine
+          ThrottlingException, and the answer came back HTTP 200 with kind='degraded', reason='throttled',
+          attempts=3, threshold='first_token', and the budget block recorded.
+          Three sub-claims are each tested rather than assumed: classification is by error TYPE and not by status
+          code; a retry happens only before the first token, because a second attempt after a partial answer
+          would duplicate text a client has already seen; and every threshold is measured against one wall-clock
+          deadline anchored where the client asked, not where routing finished. The panel's executor confirmed
+          all three from the source and reproduced the degraded path on the live deployment.
+
   - id: INF-ROUTE-001
-    title: Routing escalates on the three mechanical triggers only
+    title: Routing escalates on the two mechanical triggers only, and never on the model's own judgement
     tier: [cloud, office, hosted]
     phase: C3
-    verify: a question that the cheap tier answers poorly does not escalate on its own judgement
-    status: open
+    verify: a question the cheap tier answers poorly does not escalate on its own judgement, and a trigger cannot widen the data boundary the gate enforces
+    status: verified
+    note: >-
+      Closed 2026-10-14 on the C3 verification pass: three panel rounds, three reviewers, all three verdicts yes, and every finding fixed and re-tested. Evidence is in docs/review-log.md.
+          **The title and the verify line are corrected here rather than the status.** The item read 'the three
+          mechanical triggers only', and the phase removed one: the synthesis trigger was dropped on measurement
+          because it fired on answers that were already correct, so the system has two. A register that describes
+          three is describing something that does not exist, which is the same class of error the C2 closure found
+          in its own counts.
+          The verify line is met for the two that remain. The gate is one-way: a trigger asks for a lane and
+          cannot widen what the deployment permits, which the panel proved by running a forbidden class against
+          both endpoints after the streaming bypass was found and fixed. No trigger fires on the model's own
+          judgement, and nothing escalates without one. interface_probe passes 7 of 7 including its TRIGGERS
+          right, and tests/test_routing_contract.py diffs a twenty-decision table on every commit, so a change to
+          the predicates fails a test rather than silently changing behaviour.
+
   - id: INF-DEPRECATE-001
     title: Model deprecation is owned, detected, and priced
     tier: [cloud, office, hosted]
