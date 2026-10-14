@@ -234,7 +234,12 @@ def _generate(session, permit, model: str, question: str, passages: list):
         "If they do not answer it, say so plainly. Do not use outside knowledge.\n\n"
         f"Passages:\n{context}\n\nQuestion: {question}"
     )
-    statement = assertion.mint(STATE["key"], permit.role, session_id=session.session_id)
+    # **The statement carries the MODEL role, and the session's API role is not in it.** The gateway's team,
+    # and therefore the budget, is per model role: that is what the manifest's `budgets.roles` block declares
+    # and what `keys --provision-teams` creates. Minting with the API role would name a team that does not
+    # exist, which the gateway refuses with a 404. Document access is unaffected, because the permit's roots
+    # are already fixed for this request and the gateway never sees them.
+    statement = assertion.mint(STATE["key"], model, session_id=session.session_id)
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],

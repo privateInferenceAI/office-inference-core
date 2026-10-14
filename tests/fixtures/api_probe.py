@@ -221,13 +221,18 @@ def main() -> int:
                   "an unauthenticated caller would get an answer")
 
     # ------------------------------------------------------------------ BUDGET
-    team = sql("select team_id, spend, max_budget from \"LiteLLM_TeamTable\" where team_id = %s", (role,))
+    # The team is the role whose ceiling applies to the model call, which is the model role rather than the
+    # API role: budgets are declared per model role in the manifest and provisioned per model role here.
+    model_role = os.environ.get("OI_DEFAULT_MODEL_ROLE", "analyst")
+    team = sql("select team_id, spend, max_budget from \"LiteLLM_TeamTable\" where team_id = %s",
+               (model_role,))
     if not team:
-        ledger.skipped("BUDGET", "no team named " + repr(role) + " exists, so there is no ceiling to hit.")
+        ledger.skipped("BUDGET", "no team named " + repr(model_role) + " exists, so there is no ceiling.")
         print(" " * 9 + "Run: oi --profile tools run --rm keys --provision-teams")
     else:
         print(" " * 9 + "team before: " + repr(team[0]))
-        sql("update \"LiteLLM_TeamTable\" set spend = coalesce(max_budget, 1) + 1 where team_id = %s", (role,))
+        sql("update \"LiteLLM_TeamTable\" set spend = coalesce(max_budget, 1) + 1 where team_id = %s",
+            (model_role,))
         status, over = post("/ask", {"session": session.session_id,
                                      "question": "What is the mileage rate for reimbursement?"})
         refused_by_budget = status == 502 and "budget" in json.dumps(over).lower()
@@ -235,7 +240,7 @@ def main() -> int:
                       "[%s] the API reported %r rather than an answer"
                       % (status, (over.get("error") or "")[:70]),
                       "a request over the ceiling would return an answer and be billed to nobody")
-        sql("update \"LiteLLM_TeamTable\" set spend = 0 where team_id = %s", (role,))
+        sql("update \"LiteLLM_TeamTable\" set spend = 0 where team_id = %s", (model_role,))
 
     # ------------------------------------------------------------------ ADMIN
     status, listing = gateway("/team/list")
