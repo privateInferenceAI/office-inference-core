@@ -105,7 +105,10 @@ def run_audit(args: list) -> subprocess.CompletedProcess:
     # bare docker run gets only the parts. Without this the refusal is never written and RECORDED reports the
     # tool's own error, which is the right outcome for the wrong reason.
     env = dict(os.environ)
-    env.setdefault("DATABASE_URL", database_url())
+    # Assigned, not defaulted. The env file carries POSTGRES_* and no DATABASE_URL, and `docker run --env-file`
+    # still defines the variable as an empty string, so setdefault saw the key present and passed the empty
+    # value on. The tool then refused to run and the refusal was never written.
+    env["DATABASE_URL"] = database_url()
     return subprocess.run([sys.executable, audit_tool()] + args, capture_output=True, text=True,
                           timeout=120, env=env)
 
@@ -320,17 +323,15 @@ def main() -> int:
         refused = False
         refusal_note = "the request was accepted, so the boundary is not enforced"
     except session_module.SessionError as exc:
-        refused = "refused" in str(exc).lower() and "recorded" in str(exc).lower()
+        # Two conditions, because the first version checked only the words in the message and passed on a
+        # refusal whose write had failed: the failure text contains both. A refusal only counts when the
+        # call raised AND the row is in the chain, which is what the message is not allowed to stand in for.
+        refused = "refused:" in str(exc).lower() and "could not be recorded" not in str(exc).lower()
         refusal_note = str(exc)
-    ledger.record("REFUSED", refused,
-                  ("a request supplying role=" + repr(claimed) + " while holding " + repr(role)
-                   + " was refused") if refused else refusal_note,
-                  "a role would be honoured because a caller typed it, which is the whole of SEC-ACL-002")
-
-    # ------------------------------------------------------------------ RECORDED
-    # Read back out of the chain rather than out of the refusal's own message. A refusal nobody can find
-    # afterwards is not a control, and a message claiming to have recorded one is exactly what a broken
-    # writer would print.
+    # The refusal is asserted together with its record, because either alone is satisfiable with the boundary
+    # off: a write that silently fails with every request refused, or a refusal path that accepts a typed
+    # role while the chain stays empty. Both conditions in one right is the only version that cannot pass
+    # with the control absent.
     rows, why = refusal_rows(staff.session_id)
     found = bool(rows)
     if found:
@@ -341,6 +342,16 @@ def main() -> int:
                   + repr((row[5] or {}).get("session_role")))
     else:
         detail = "no audit row names this session: " + (why or "the query returned nothing")
+
+    ledger.record("REFUSED", bool(refused and rows),
+                  ("a request supplying role=" + repr(claimed) + " while holding " + repr(role)
+                   + " was refused") if refused else refusal_note,
+                  "a role would be honoured because a caller typed it, which is the whole of SEC-ACL-002")
+
+    # ------------------------------------------------------------------ RECORDED
+    # Read back out of the chain rather than out of the refusal's own message. A refusal nobody can find
+    # afterwards is not a control, and a message claiming to have recorded one is exactly what a broken
+    # writer would print.
     ledger.record("RECORDED", bool(refused and found), detail,
                   "the 403 would go out and the record would be missing, leaving an access decision "
                   "with no evidence of what was attempted")
