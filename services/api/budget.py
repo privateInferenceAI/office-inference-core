@@ -159,7 +159,10 @@ def _label(matched: str, *, terminal: bool) -> str:
     """A reason a person reads, from a type a gateway sends."""
     if matched.startswith(('throttl', 'too_many', 'rate_limit')):
         return 'throttled'
-    if matched in ('budget_exceeded', 'envelope_spend_limit', 'enforced_spend_limit', 'insufficient_quota'):
+    # The phrase forms as well as the tokens, for the reason the terminal list carries both: what arrives is
+    # the provider's message, and a label that only knows the type token falls through to a generic word.
+    if matched.startswith('budget') or matched in ('envelope_spend_limit', 'enforced_spend_limit',
+                                                   'insufficient_quota'):
         return 'budget'
     if matched in ('invalid_api_key', 'authentication_error', 'permission_denied', 'access_denied'):
         return 'not_authorised'
