@@ -74,7 +74,8 @@ done
 set +e
 docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
   -v "$PWD:/w" -w /w --env-file rendered/env \
-  -e "GATE_CHECK_CLASS=$CLASS" -e "JOB_PROBE_CLASS=$CLASS" \
+  -e "GATE_CHECK_CLASS=$CLASS" -e "GATE_CHECK_URL=http://$NAME:8088" \
+  -e "JOB_PROBE_CLASS=$CLASS" -e "JOB_PROBE_URL=http://$NAME:8088" \
   --entrypoint python oi-core/session:local "/w/$PROBE_FILE"
 status=$?
 set -e

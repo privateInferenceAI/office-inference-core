@@ -278,23 +278,54 @@ def main() -> int:
     # **This is the right C3's second defect would have missed.** The streaming path had no boundary check
     # while the JSON path did, and every probe passed because each tested the path its author had in mind.
     # A job is a third path, so it is tested here rather than assumed to inherit the other two.
+    #
+    # **The request must go to the deployment that carries the forbidden class, not to this one.** The first
+    # version of this right posted to `API` — the permitted deployment — and read a 200, which said nothing
+    # about any boundary. The request-path probe has a separate target for the same reason, and this uses it.
     if not os.environ.get("JOB_PROBE_CLASS"):
         ledger.skip("BOUNDARY", "no forbidden-class deployment was started; run gate_check_run.sh --jobs")
     else:
-        status, answer = call("/ask", {"session": session.session_id,
-                                       "question": "What is the mileage rate for reimbursement?"},
-                              session_id=session.session_id)
-        status_job, job_answer = call("/jobs", {"session": session.session_id, "task": task,
-                                                "input": "What is the mileage rate for reimbursement?"},
-                                      session_id=session.session_id)
-        detail = job_answer.get("result") or {}
-        refused_job = status_job == 403 or detail.get("kind") in ("no_permitted_lane", "refusal")
-        # The refusal has to be the boundary's, not a side effect of an empty corpus.
-        named_boundary = "no_permitted_lane" in json.dumps(job_answer)
-        ledger.record("BOUNDARY", refused_job and named_boundary and status == 403,
-                      f"/ask -> {status} kind={answer.get('kind')}, /jobs -> {status_job} "
-                      f"kind={(job_answer.get('result') or {}).get('kind') or job_answer.get('kind')}",
-                      "a forbidden class is refused on both paths, and the refusal says which control")
+        forbidden = os.environ.get("JOB_PROBE_URL", "http://gate-check-tmp-api:8088")
+        expected = os.environ["JOB_PROBE_CLASS"]
+
+        def call_forbidden(path: str, body: dict):
+            request = urllib.request.Request(forbidden + path, data=json.dumps(body).encode(),
+                                             method="POST",
+                                             headers={"Content-Type": "application/json"})
+            try:
+                with urllib.request.urlopen(request, timeout=180) as response:
+                    return response.status, json.loads(response.read())
+            except urllib.error.HTTPError as exc:
+                raw = exc.read().decode(errors="replace")
+                try:
+                    return exc.code, json.loads(raw)
+                except json.JSONDecodeError:
+                    return exc.code, {"error": raw[:200]}
+
+        question = "What is the mileage rate for reimbursement?"
+        ask_status, ask_body = call_forbidden("/ask", {"session": session.session_id,
+                                                       "question": question})
+        job_status, job_body = call_forbidden("/jobs", {"session": session.session_id, "task": task,
+                                                        "input": question})
+
+        # **The refusal has to name the class, or this deployment is not the one we think it is.** An API
+        # that quietly fell back to the permitted manifest would refuse for some other reason, or not at
+        # all, and the right would pass while testing nothing. That mistake has been made in this repository
+        # once already, while reproducing the streaming bypass by hand.
+        def names_class(payload) -> bool:
+            return expected in json.dumps(payload)
+
+        refused = (ask_status == 403 and job_status == 403)
+        named = names_class(ask_body) and names_class(job_body)
+        if not named:
+            ledger.record("BOUNDARY", False,
+                          f"a refusal does not name {expected!r}, so this deployment did not load the class "
+                          f"it was given: /ask {ask_status}, /jobs {job_status}",
+                          "the forbidden-class deployment refuses and says which control")
+        else:
+            ledger.record("BOUNDARY", refused,
+                          f"/ask -> {ask_status}, /jobs -> {job_status}, both naming {expected!r}",
+                          "a forbidden class is refused on every path to the model, including the new one")
 
     held = len(ledger.rows) - ledger.failures()
     if ledger.failures():
