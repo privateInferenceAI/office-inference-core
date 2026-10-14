@@ -319,12 +319,35 @@ running container is not a change Compose can see. Use `oi restart <service>` fo
 
 He runs these himself, in his terminal, on the box. Paste the output back when something is wrong.
 
+**First, once per shell, and once per machine.**
+
+```
+cd /opt/oi-core
+alias oi='docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env'
+```
+
+**`oi` is a shell alias, not a program.** It works in an interactive shell and **does not exist** in
+`ssh host 'command'`, in a script, or in `docker run`. Write the whole compose line out in those places. This
+hand-off and `docs/manual.md` both use the shorthand, and the manual says the same thing at section 10.
+
+**And the box needs a Python environment before any test can run.** It ships without `pip`, `pytest` or
+`venv`, and Ubuntu 24.04 refuses a bare `pip install` under PEP 668. Three commands, once:
+
+```
+sudo apt-get install -y python3-venv python3-pip
+python3 -m venv ~/venv
+~/venv/bin/pip install -r requirements-dev.txt
+```
+
+Then use `~/venv/bin/python -m pytest` rather than a bare `python3`. **Test imports skip cleanly when a
+dependency is absent**, so the suite passes without them and a missing package does not announce itself.
+
 **After pulling a change, the short loop:**
 
 ```
 cd /opt/oi-core
 git pull
-python3 -m pytest tests/ -q                      # unit tests
+~/venv/bin/python -m pytest tests/ -q            # unit tests
 python3 scripts/validate_manifests.py            # every manifest still valid
 python3 scripts/check_model_lifecycle.py         # no model is deprecated or unknown
 ```
@@ -339,7 +362,10 @@ oi build api && oi up -d api && oi ps
 ```
 
 **Then the probes**, on the live stack. Each prints `PASSED` or `FAILED with N problem(s)` and nothing in
-between is worth ignoring:
+between is worth ignoring.
+
+The `run()` helper below defines the compose line explicitly, which is why it works where the `oi` shorthand
+would not:
 
 ```
 run() { docker run --rm --network ai-net --user "$(id -u):$(id -g)" \

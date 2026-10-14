@@ -3431,8 +3431,8 @@ the manual also asks you to type.
 | `python3 scripts/render_manifest.py --manifest <file>` | Writes `rendered/env`, `rendered/litellm.yaml`, `rendered/services.txt`, `rendered/manifest.json` |
 | `python3 scripts/check_requirements.py` | Reports the register: verified, open, waived, by phase |
 | `python3 scripts/check_model_lifecycle.py [manifest…]` | Fails if a manifest names a deprecated, past-EOL, or unknown model |
-| `pip install -r requirements-dev.txt` | Once, on a machine that will run the tests. The box has no pytest otherwise |
-| `python3 -m pytest tests/ -q` | The test suite. Runs from a checkout, not from a container |
+| `python3 -m venv ~/venv && ~/venv/bin/pip install -r requirements-dev.txt` | Once, on a machine that will run the tests. The box has no pytest otherwise, and Ubuntu 24.04 refuses a bare `pip install` under PEP 668 |
+| `~/venv/bin/python -m pytest tests/ -q` | The test suite. Runs from a checkout, not from a container |
 | `oi ps` | Container status |
 | `oi logs <service>` | Container logs |
 | `oi up -d` | Start everything, or reconcile a service whose *definition* changed |
