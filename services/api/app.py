@@ -318,6 +318,12 @@ async def ask(request: Request):
         "notice": decision.notice,
         "lane": decision.lane,
         "escalated": decision.escalated,
+        # **Which trigger moved it, and why.** The manual promises a client can tell the user what escalated
+        # the request. The first version of this answer did not carry it: the trigger existed only in the audit
+        # row, so a client could say the stronger model answered but not what made it. Found by a probe that
+        # asserts every claim the manual makes, on its first run.
+        "trigger": decision.trigger,
+        "reason": decision.reason,
         "denied": result.denied,
         "disclosure": (result.disclosure.message if result.disclosure else ""),
     }
