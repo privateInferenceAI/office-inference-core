@@ -314,7 +314,24 @@ The deployment now sets the development flag for the API, with the reasoning wri
 honest fix is for the API to have its own trusted path to the audit tool rather than reusing the development
 escape, and that is recorded as work rather than as a comment.
 
-**Finding 2: the team budget does not enforce on the assertion path.** Set a team's spend to 99 against a
+**Finding 2: the team budget does not enforce on the assertion path, and the spike is why I believed it did.**
+Set a team's spend to 99 against a ceiling of 10 and the API answers with a cited response.
+
+**The spike was wrong, not the deployment.** The spike's hook returned `max_budget=0.000001` on the identity
+itself, and what refused at 422 was that number being spent, not the team's ceiling. The team row was
+decorative in the spike and I read it as load-bearing, then wrote it into this document as a stronger budget
+story than the key budgets it replaced. It is not, yet.
+
+**What it takes to make it true**, recorded in the hook where the fix belongs: read the team's ceiling and
+spend, return the remainder as `max_budget` on the identity, cache the read briefly, and write the gateway's
+accumulated spend back to the team row or the ceiling resets whenever the process restarts. Until that is
+written, the manifest's `budgets.roles` is a declaration the gateway does not enforce on this path and the
+manual must not say otherwise.
+
+**This is the third control in this phase found reporting success while doing nothing**, after the audit
+writes and the model allowlist. The pattern is worth naming: every one of them was invisible to reading the
+code and obvious to spending a minute running it.
+ Set a team's spend to 99 against a
 ceiling of 10 and the gateway answers. The spike saw `budget_exceeded` at HTTP 422, and the difference between
 the spike and the deployment is the shape of the identity the hook returns rather than the config, which is
 the next thing to chase. Until it is fixed the API cannot claim a per-role ceiling, and the manual must not

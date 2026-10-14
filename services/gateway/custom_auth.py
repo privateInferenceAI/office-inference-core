@@ -61,6 +61,21 @@ async def user_api_key_auth(request: Request, api_key: str) -> UserAPIKeyAuth:
         raise Exception(f"the assertion was refused: {exc}") from exc
 
     role = payload["role"]
+
+    # ------------------------------------------------------------------ the budget, and what does not enforce it
+    #
+    # **Returning `team_id` is not enough, and this cost a day to learn.** A team row holds the ceiling and the
+    # spend, and the gateway does not read them for an identity that came from this hook: set a team's spend to
+    # 99 against a ceiling of 10 and a request still answers. What the spike enforced was the `max_budget` ON
+    # THE IDENTITY IT RETURNED, which is why the spike looked like proof that team budgets work and was not.
+    #
+    # The fix, and it is small: read the team's ceiling and spend here and return the remainder as
+    # `max_budget`. The gateway then refuses once the remainder is spent, which is the behaviour the manifest
+    # promises and the manual must not claim until this is written. The read belongs in one place, with a
+    # short cache so a request does not pay for it twice, and the spend the gateway accumulates has to be
+    # written back to the team row or the ceiling resets on every process restart.
+    #
+    # Recorded here rather than in a note because this is the line somebody will be looking at.
     return UserAPIKeyAuth(
         api_key="oi-assertion",
         # The team is what carries the ceiling. One team per role, provisioned from the manifest.
