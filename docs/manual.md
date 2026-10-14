@@ -2044,7 +2044,7 @@ gives for the executive fixture would place them.
 | company/onboarding-notes.md | 1 | |
 | company/rate-card-2026.xlsx | 7 | spreadsheet |
 | executive/executive-compensation.md | 1 | the restricted root |
-| **total** | **1261** | the collection's own count, **which includes twenty-eight documents this table does not name** |'s own count |
+| **total** | **1261** | the collection's own count, **which includes twenty-eight documents this table does not name** |
 
 At the start of a cycle the worker also reports the collection it is writing to: its dimension, its distance
 and how many points it holds. A collection whose dimension does not match what the embedding model produces
@@ -3691,7 +3691,9 @@ print(json.dumps(json.load(urllib.request.urlopen(req, timeout=180)), indent=2)[
 |---|---|---|
 | GET | `/health` | Liveness, and what the process loaded: the registry, the deployment, the default model role |
 | POST | `/ask` | `{"session": "<token>", "question": "..."}` in, a cited answer out |
-| POST | `/ask/stream` | the same request, answered as Server-Sent Events. See the streaming page below |
+| POST | `/ask/stream` | the same request, answered as Server-Sent Events. See the streaming page below.
+**A refusal is a JSON 403 before the first event, not an SSE error event** — a client that only handles
+`error` and `message` will not see it |
 
 Three, and that is deliberate. There is no fourth endpoint until a capability needs one.
 
@@ -3706,6 +3708,7 @@ Three, and that is deliberate. There is no fourth endpoint until a capability ne
 | `citations` | Document, access label and page for each passage the answer could cite |
 | `supported` / `unsupported` | The sentences the retrieved passages do and do not back, with a reason |
 | `denied`, `disclosure` | Whether passages outside the role matched, and what the client's policy says to tell the user |
+| `redactions` | **What was removed from this answer, by kind and count** — absent until the C3 panel found the JSON path returning a PII canary in clear while the streaming path redacted. A client that cannot see this cannot tell whether a value was replaced |
 
 **The refusal that matters is the one in the chain, not the status code.** A 403 on its own is a control
 nobody can audit. Read it back the way the manual's access-control section describes:
@@ -3894,10 +3897,9 @@ lane the request would otherwise use, because an ordinary answer on a remote mod
 **Why the order matters, and it is the sentence an auditor will ask for.** A trigger is a cost decision. The
 gate is a data-boundary decision. **The order that matters is not which is evaluated first but which one decides:**
 a trigger is evaluated first, and it cannot move content anywhere the gate has not allowed, so the answer to
-*why did this content reach an external
-model* is a sentence about a declared permission somebody approved. With the triggers first, the answer is a
-story about a heuristic firing, which is not a control anybody can review.
-
+*why did this content reach an external model* is a sentence about a declared permission somebody approved. **If the decision were a heuristic's
+to make, the answer would be a story about a trigger firing, and a trigger is not a control anybody can
+review.** A declared permission is.
 **The boundary is one-way.** No trigger moves content toward a more exposed lane, ever. A user asking for the
 stronger model cannot reach the frontier lane from a deployment whose data class forbids it. Escalation only
 happens inside what the gate already permitted.
