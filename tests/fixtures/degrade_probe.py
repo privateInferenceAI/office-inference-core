@@ -93,9 +93,19 @@ def ask(session_id: str, question: str, timeout: int = 180):
 
 
 def compose(*args: str, timeout: int = 120):
+    """The documented compose command, when this is running where docker exists.
+
+    **It does not exist inside a container**, and this probe runs in one. The first version called it
+    unconditionally and died with FileNotFoundError, which is the third time this project has made that
+    mistake in a probe. So it returns None instead of raising, and the caller turns that into the
+    operator instruction it actually is.
+    """
     command = ["docker", "compose", "-f", "deploy/office/compose/docker-compose.yml",
                "--env-file", "rendered/env", *args]
-    return subprocess.run(command, capture_output=True, text=True, cwd=str(W), timeout=timeout)
+    try:
+        return subprocess.run(command, capture_output=True, text=True, cwd=str(W), timeout=timeout)
+    except FileNotFoundError:
+        return None
 
 
 class Ledger:
@@ -148,6 +158,14 @@ def main() -> int:
         sql('update "LiteLLM_TeamTable" set spend = %s where team_id = %s', (ceiling + 1, args.model_role))
         try:
             restart = compose("restart", "litellm")
+            if restart is None:
+                ledger.record("DEGRADE", False,
+                              "this probe cannot restart the gateway from inside a container, so the ceiling "
+                              "it wrote is not what the gateway is enforcing",
+                              "the gateway caches the team row, so a spend written here is inert until it "
+                              "restarts. Run this from the host, or restart litellm and run it again")
+                store.close()
+                return 1
             if restart.returncode != 0:
                 print(" " * 10 + "the gateway would not restart: " + restart.stderr.strip()[:120])
             time.sleep(int(os.environ.get("OI_GATEWAY_RESTART_WAIT", "16")))
