@@ -2987,8 +2987,13 @@ access:
 
 The four registry fields are **all or nothing**. A manifest that declares `groups` and forgets `roots` is
 refused rather than defaulted, because a renderer filling in the gap would be enforcing a model the manifest
-does not state. A manifest that declares none of them keeps the two built-in roles, which is what every
-manifest in this repository does.
+does not state. A manifest that declares none of them keeps the two built-in roles.
+
+**Five of the six manifests in this repository are in that state; `dev-cloud.yaml` declares a registry.** That
+is why `session show` on a cloud deployment reports `declared yes` with two groups and two users, while the
+office manifest falls back to the role map in the code. Neither is wrong, and a reader who assumes the map is
+always in force will misread which permission is actually being applied — so check `session show` rather than
+assuming from the manifest's size.
 
 A role may carry no roots of its own, which is the usual shape when access is written with groups: the
 renderer emits one role named `viewer` for that case, and every subject's permission comes from its groups.
