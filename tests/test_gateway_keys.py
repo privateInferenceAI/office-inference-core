@@ -30,6 +30,9 @@ class StubGateway(BaseHTTPRequestHandler):
 
     calls: list = []
     capped: set = set()
+    # Set to a (reason, status) pair to refuse every model call, which is how a test models a
+    # refusal now that capping a virtual key no longer reaches the enforcement path.
+    refuse: tuple | None = None
 
     def log_message(self, *args):  # keep the test output readable
         return
@@ -58,7 +61,10 @@ class StubGateway(BaseHTTPRequestHandler):
                 StubGateway.capped.add(body["key"])
             self._send(200, {"key": body.get("key")})
         elif self.path == "/v1/chat/completions":
-            if token in StubGateway.capped:
+            if StubGateway.refuse is not None:
+                reason, status = StubGateway.refuse
+                self._send(status, {"error": {"message": reason}})
+            elif token in StubGateway.capped:
                 self._send(400, {"error": {"message": "budget exceeded for this key"}})
             else:
                 self._send(200, {"model": body.get("model"), "usage": {"total_tokens": 12}})
@@ -70,6 +76,7 @@ class StubGateway(BaseHTTPRequestHandler):
 def gateway():
     StubGateway.calls = []
     StubGateway.capped = set()
+    StubGateway.refuse = None
     server = HTTPServer(("127.0.0.1", 0), StubGateway)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -138,22 +145,129 @@ def test_every_role_carries_its_budget_and_its_acl(rendered):
         assert body["metadata"]["deployment_id"] == "test-deploy"
 
 
-def test_capping_one_role_touches_only_that_key(rendered):
+def test_capping_a_role_writes_the_team_row_the_gateway_enforces(rendered):
+    """**The brake used to write the virtual key, and nothing consulted it.**
+
+    Request traffic is authenticated by a signed statement that resolves to a team, so capping a key reported
+    success while the team row stayed put and the next call answered normally. This asserts where the number now
+    goes, which is the row the auth hook reads.
+    """
     assert rendered.main([]) == 0
-    keys_before = json.loads(rendered.KEYS_FILE.read_text())
     StubGateway.calls = []
+    written = []
 
-    args = type("Args", (), {"role": "analyst", "amount": "0.000001"})()
-    assert rendered.set_budget(rendered.read_env(rendered.ENV_FILE), args) == 0
+    class Cursor:
+        def __init__(self):
+            self._row = None
 
-    updates = [c for c in StubGateway.calls if c["path"] == "/key/update"]
-    assert len(updates) == 1
-    assert updates[0]["body"]["key"] == keys_before["analyst"]["key"]
-    assert updates[0]["body"]["max_budget"] == pytest.approx(0.000001)
+        def execute(self, statement, params=()):
+            if statement.strip().lower().startswith('select'):
+                self._row = ('analyst',)
+            else:
+                written.append((statement, params))
 
-    keys_after = json.loads(rendered.KEYS_FILE.read_text())
-    assert keys_after["reader"] == keys_before["reader"], "another role's key was disturbed"
+        def fetchone(self):
+            return self._row
 
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    class Conn:
+        def cursor(self):
+            return Cursor()
+
+        def commit(self):
+            pass
+
+        def close(self):
+            pass
+
+    args = type('Args', (), {'role': 'analyst', 'amount': '0.000001'})()
+    env = rendered.read_env(rendered.ENV_FILE)
+    env['DATABASE_URL'] = 'postgresql://stub'
+    assert rendered.set_budget(env, args, connect=lambda url: Conn()) == 0
+
+    assert written, 'no ceiling was written anywhere'
+    statement, params = written[0]
+    assert 'LiteLLM_TeamTable' in statement, 'the ceiling must go on the team row the auth hook reads'
+    assert 'max_budget' in statement
+    assert params == (0.000001, 'analyst')
+
+
+def test_capping_a_role_that_has_no_team_refuses(rendered):
+    """A brake on a role that does not exist must fail rather than report success."""
+    assert rendered.main([]) == 0
+
+    class Cursor:
+        def execute(self, statement, params=()):
+            pass
+
+        def fetchone(self):
+            return None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    class Conn:
+        def cursor(self):
+            return Cursor()
+
+        def commit(self):
+            pass
+
+        def close(self):
+            pass
+
+    args = type('Args', (), {'role': 'nobody', 'amount': '1'})()
+    env = rendered.read_env(rendered.ENV_FILE)
+    env['DATABASE_URL'] = 'postgresql://stub'
+    with pytest.raises(SystemExit):
+        rendered.set_budget(env, args, connect=lambda url: Conn())
+
+
+def test_the_brake_says_the_gateway_must_restart(rendered, capsys):
+    """**A control that reports success and does nothing is worse than no brake.**
+
+    The gateway caches the team row, so the number written here is inert until it restarts. Saying so turns it
+    from a belief into an instruction.
+    """
+    assert rendered.main([]) == 0
+
+    class Cursor:
+        def execute(self, statement, params=()):
+            pass
+
+        def fetchone(self):
+            return ('analyst',)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    class Conn:
+        def cursor(self):
+            return Cursor()
+
+        def commit(self):
+            pass
+
+        def close(self):
+            pass
+
+    args = type('Args', (), {'role': 'analyst', 'amount': '1'})()
+    env = rendered.read_env(rendered.ENV_FILE)
+    env['DATABASE_URL'] = 'postgresql://stub'
+    assert rendered.set_budget(env, args, connect=lambda url: Conn()) == 0
+    out = capsys.readouterr().out
+    assert 'restart' in out.lower(), 'the reader is not told the number is inert until a restart'
 
 def test_a_probe_reports_the_answer_and_the_tokens(rendered):
     assert rendered.main([]) == 0
@@ -177,11 +291,38 @@ def test_an_over_budget_call_is_reported_as_a_failure(rendered):
     not a traceback."""
     assert rendered.main([]) == 0
     env = rendered.read_env(rendered.ENV_FILE)
-    rendered.set_budget(env, type("Args", (), {"role": "analyst", "amount": "0.000001"})())
+    env['DATABASE_URL'] = 'postgresql://stub'
 
-    args = type("Args", (), {"role": "analyst", "as_model": None})()
+    class Cursor:
+        def execute(self, statement, params=()):
+            pass
+
+        def fetchone(self):
+            return ('analyst',)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    class Conn:
+        def cursor(self):
+            return Cursor()
+
+        def commit(self):
+            pass
+
+        def close(self):
+            pass
+
+    # The stub gateway answers the probe with a budget refusal, so what is asserted here is the reporting of a
+    # refused call rather than the capping, which has its own tests above.
+    rendered.set_budget(env, type('Args', (), {'role': 'analyst', 'amount': '0.000001'})(),
+                        connect=lambda url: Conn())
+    StubGateway.refuse = ('budget exceeded for this key', 400)
+    args = type('Args', (), {'role': 'analyst', 'as_model': None})()
     assert rendered.probe(env, args) == 1
-
 
 # --- revoking a key ----------------------------------------------------------------------------
 

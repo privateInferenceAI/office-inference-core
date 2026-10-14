@@ -185,23 +185,48 @@ def provision_teams(env: dict, manifest: dict) -> int:
     print("  budgets are enforced per team, which is the path a signed assertion takes")
     return 0
 
-def set_budget(env: dict, args: argparse.Namespace) -> int:
-    master = env.get("LITELLM_MASTER_KEY")
-    if not master:
-        die(f"no LITELLM_MASTER_KEY in {ENV_FILE}")
-    keys = load_keys()
-    if args.role not in keys:
-        die(f"no key for {args.role!r} yet: run this tool with no arguments first")
-    status, body = request("/key/update", master,
-                           {"key": keys[args.role]["key"], "max_budget": float(args.amount)})
-    if status != 200:
-        die(f"could not cap {args.role}: {status} {str(body)[:200]}")
-    keys[args.role]["max_budget"] = float(args.amount)
-    save_keys(keys)
-    print(f"{args.role} capped at {args.amount} USD. A plain run of this tool restores the "
-          f"manifest's value.")
-    return 0
+def set_budget(env: dict, args: argparse.Namespace, connect=None) -> int:
+    """Cap a role now, through the row the gateway actually enforces.
 
+    **This used to update the virtual key, and that stopped working when the gateway changed.** Request traffic
+    is authenticated by a signed statement that resolves to a TEAM; the virtual keys this tool mints are refused
+    on that path. So capping a key set a number on something nothing consulted: the command reported success, the
+    team row was unchanged, and the next call answered normally. An emergency brake that reports success and does
+    nothing is worse than no brake, because the operator stops looking.
+
+    **The ceiling lives on the team**, so that is what this writes. Found by the C3 panel's cold reader, who
+    noticed the manual contradicted itself about when a cap takes effect, and a test then showed neither page was
+    right: it did not take effect at all.
+
+    **The gateway caches the team row**, so this writes the number and says plainly that the gateway must be
+    restarted before it enforces. Saying so is what makes it a control rather than a belief.
+    """
+    # The connection is injectable so the logic can be tested without a Postgres driver in the test
+    # environment, which is how the rest of this tool is tested.
+    url = (env.get('DATABASE_URL') or os.environ.get('DATABASE_URL') or '').strip()
+    if connect is None:
+        import psycopg
+        connect = psycopg.connect
+    if not url:
+        die('no DATABASE_URL, so no ceiling can be written. Run this where rendered/env is available.')
+    amount = float(args.amount)
+    conn = connect(url)
+    try:
+        with conn.cursor() as cur:
+            cur.execute('select team_id from "LiteLLM_TeamTable" where team_id = %s', (args.role,))
+            if cur.fetchone() is None:
+                die('no team named ' + repr(args.role) + '. Run this tool with --provision-teams first.')
+            cur.execute('update "LiteLLM_TeamTable" set max_budget = %s where team_id = %s',
+                        (amount, args.role))
+        conn.commit()
+    finally:
+        conn.close()
+
+    print(args.role + ' capped at ' + str(amount) + ' USD in the team row.')
+    print('The gateway caches this row, so it is NOT in force until litellm restarts:')
+    print('    oi restart litellm')
+    print("A plain run of this tool restores the manifest's value.")
+    return 0
 
 def probe(env: dict, args: argparse.Namespace) -> int:
     keys = load_keys()
