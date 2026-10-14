@@ -444,3 +444,78 @@ not** — worth recording, because a panel whose findings are never wrong is a p
 Its NO rested entirely on the canary leak, which is fixed and verified — `POST /ask` now returns
 `[REDACTED-SSN]`, and the record carries the verdict. **Round 2 asks it to re-run that exact question and see
 what happens now**, and to re-walk the pages it found the other defects on.
+
+---
+
+## C3 panel, verification pass — round 3, 2026-10-14, the final round
+
+**All three verdicts: YES.**
+
+| Reviewer | Verdict |
+|---|---|
+| cold reader | **YES** — *"the stream path now refuses a forbidden class with the same 403 and the same wording as the JSON path, and the refusal is recorded"* |
+| executor | **YES** — *"about forty documented commands ran verbatim; the only things I found this round are cosmetic"* |
+| fidelity checker | **YES** — *"with that one table row added, I would have nothing left to report"* |
+
+### The finding that mattered, and it was about my own probe
+
+The cold reader found that **`gate_check.py` never touched `/ask/stream`.** It called `routing.route()` in
+process, posted once to `/ask`, and printed the same three lines whatever the service did. **It would have
+printed them with the streaming guard removed.** So the command the manual tells readers to run *"to check the
+claim rather than take it"* could not have caught the bypass it was written for, and neither could it have caught
+the redaction leak.
+
+**That is the phase's real lesson, said precisely: the probes were written per feature and the defects were per
+path.** Redaction existed on the stream and not the JSON path. The gate existed on the JSON path and not the
+stream. Each probe passed because each tested the endpoint its author had in mind.
+
+### The probe is rebuilt, and it has been proved able to fail
+
+`tests/fixtures/gate_check_run.sh` builds a manifest copy with a class that may not leave, starts a second API
+container on it, **waits until that container confirms it loaded the copy**, and runs a probe that asks both
+endpoints. It fails if one refuses and the other answers, and it fails if the refusal does not name the class, so
+a container that quietly fell back to the real manifest fails rather than passing for the wrong reason.
+
+**The proof it works, run on the box:**
+
+    guard present  -> /ask 403 · /ask/stream 403 · permitted path 200   PASSED, exit 0
+    guard removed  -> /ask 403 · /ask/stream 200 "event: start"        FAILED, exit 1
+                     "the boundary holds on one endpoint and not on /ask/stream"
+    guard restored -> PASSED, exit 0
+
+**A probe that fails when the control is removed and passes when it is there.** That is what this one should
+have been from the start, and the reviewer who noticed it was the one who had already been caught by the same
+blindness.
+
+### Also fixed in round 3
+
+| Finding | Fix |
+|---|---|
+| The endpoint table promised a stream is "answered as Server-Sent Events" and nothing said a refusal is a JSON 403 before the first event | the table says so, and why a client handling only `error` and `message` will not see it |
+| The answer-field table omitted `redactions` | listed, with why it exists |
+| A stray `|'s own count |` fragment in the corpus total row, from my own edit | removed |
+| 13h's rationale closed by arguing from the order the new heading abandoned | it argues from the verdict now |
+| Two stale paragraphs in 13e describing the old bare-probe invocation and its output | the section says only what is true of the runner |
+
+### What round 3 cost, and one thing that went wrong
+
+**The regression test timed out mid-run and left the streaming guard disabled on the box**, with the API rebuilt
+from the disabled source. The next reviewer would have measured a deployment whose boundary was open. It was
+caught because the executor reported that the tree had uncommitted changes it had not made, which prompted a
+check. **A test that disables a control must restore it even when the test is killed**, and this one did not.
+
+Two other things went wrong while rebuilding the probe, both recorded because they are the kind that waste an
+afternoon: the second container was given the repo at `/w` when the API mounts only `rendered/` at `/app/rendered`,
+and it was started without `DATABASE_URL`, which lives in the compose service rather than `rendered/env`, so every
+request came back `401 no_session` and looked like a session bug.
+
+### State at the close of the verification pass
+
+    611 passed
+    6/6 manifests valid; 8 packs known
+    api_probe 7/7   stream_probe 4/4   interface_probe 7/7   access_probe 4/4
+    the boundary probe passes with the guard present and fails with it removed
+    the canary redacted on /ask and /ask/stream
+    7 services, no probe containers left behind
+
+**The five C3 register items have their evidence.** Whether to close them is a decision above this log.
