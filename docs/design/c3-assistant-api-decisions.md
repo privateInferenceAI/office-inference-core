@@ -303,17 +303,33 @@ page is written.
 Six rights held on the first clean run, and two findings behind them, both worth keeping because both were
 invisible to reading.
 
-**Finding 1: every audit write the API made was being refused.** The audit tool refuses a hand-typed actor
-unless `--dev` is passed, and its guard fires before the database is touched. That guard is right in spirit
-and wrong here: the actor the API passes came from a session row this process resolved, so nobody typed it.
-The first probe run passed its FORGED right **on a denial row written by an earlier run rather than by the
-request under test**, which is the failure mode a probe exists to prevent and which only showed up because the
-probe counts rows instead of trusting a 403.
+**Finding 1, fixed: every audit write the API made was being refused.** The audit tool refuses a hand-typed
+actor unless `--dev` is passed, and its guard fires before the database is touched. That guard is right in
+spirit and was wrong for this caller: the actor the API passes came from a session row the process resolved,
+so nobody typed it. The first probe run passed its FORGED right **on a denial row written by an earlier run
+rather than by the request under test**, which surfaced only because the probe counts rows instead of trusting
+a 403.
 
-The deployment now sets the development flag for the API, with the reasoning written where the flag is. The
-honest fix is for the API to have its own trusted path to the audit tool rather than reusing the development
-escape, and that is recorded as work rather than as a comment.
+**The fix is the shape the guard was asking for.** The API signs a statement naming the actor it resolved,
+with the signing key it already holds, and the audit tool verifies the signature and takes the actor from
+inside it. The development flag is gone from the deployment. A statement minted for a model call cannot write
+an audit row and the reverse is also refused, because the purpose is inside the signed payload and checked on
+the far side.
 
+**Three defects found while building that fix**, each a small thing that would have been a quiet failure:
+
+1. `verify()` required a `role`, so a genuine audit statement was refused for a field it was never supposed to
+   carry. Authenticity and purpose are two questions, so there are two functions now: one proves a statement is
+   genuine, and each caller checks the payload it needs.
+2. `--actor` was still required by the argument parser, so every signed record died in argparse before the
+   guard was reached. The parser does not require it and the guard refuses the case where neither is present.
+3. The API mounts the audit tool into `/app` but not the verifier beside it, so the tool could not check a
+   statement at all. It refuses loudly rather than writing an unverified row, which is the right direction and
+   was invisible until the log was read.
+
+**Verified on the live deployment**: a question over HTTP returns a cited answer, the API log holds zero
+audit-write failures, and the chain holds a `model_call` row whose actor came from the session and whose model
+is the one the manifest declares.
 **Finding 2, fixed the same day: the team budget did not enforce, and the reason was the spike.**
 
 **The spike proved something other than what it looked like.** Its hook returned `max_budget=0.000001` on the

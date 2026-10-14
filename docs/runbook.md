@@ -3201,11 +3201,14 @@ And the budget refusal, captured by hand because a probe inside the network cann
 **Four defects this step found by running it, and three were controls reporting success while doing nothing.**
 None was visible to reading the code, and that is the pattern worth keeping:
 
-1. **Every audit write the API made was refused.** The audit tool refuses a hand-typed actor without `--dev`,
-   and its guard fires before the database is touched. The first probe run passed its FORGED right **on a
-   denial row written by an earlier run rather than by the request under test**, which surfaced only because
-   the probe counts rows instead of trusting a 403. The API passes the flag now, with the reasoning written
-   where the flag is, and a proper trusted path is recorded as work rather than as a comment.
+1. **Every audit write the API made was refused, and it is fixed properly rather than exempted.** The audit
+   tool refuses a hand-typed actor, and its guard fires before the database is touched. The first probe run
+   passed its FORGED right **on a denial row written by an earlier run rather than by the request under test**,
+   which surfaced only because the probe counts rows instead of trusting a 403. The API now signs a statement
+   naming the actor it resolved from the session, the tool verifies it and takes the actor from inside, and the
+   development flag is gone from the deployment. Three smaller defects came out of that work: `verify()`
+   demanded a role an audit payload has no reason to carry, `--actor` stayed required at the parser, and the
+   API mounted the tool without the verifier beside it.
 2. **The model allowlist is not enforced on the signed-statement path.** A `viewer` statement reached `coder`,
    with both common-check flags on. The API therefore chooses the model from the manifest and a caller cannot
    name one, which is where that enforcement lives now.
