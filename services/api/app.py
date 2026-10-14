@@ -332,7 +332,10 @@ async def ask(request: Request):
                  "lane": decision.lane, "data_class": data_class,
                  "escalation_requested": decision.escalation_requested,
                  "session_id": session.session_id}
-        audit("access", session.subject, session.role, "denied", facts)
+        # The column as well as the payload: a refusal that records its class only inside JSON is a
+        # refusal an auditor cannot count by class. Found by the C3 panel, who read the row.
+        audit("access", session.subject, session.role, "denied", facts,
+              data_class=data_class, egress_allowed=False)
         return JSONResponse(
             {"error": "Permission denied on this resource (or it might not exist). "
                       "This request needs a lane this deployment does not permit and has no "
@@ -380,6 +383,20 @@ async def ask(request: Request):
     # produced, so a citation is verified in the text the client will actually hold.
     answer, redaction_report = redaction.redact(answer)
 
+    # **The record's prompt hash is of the REDACTED question, which is what the page promises.** The audit
+    # tool hashes the text it is handed, and the API was handing it the raw question, so `prompt_sha256` was a
+    # hash of the original: a comparable value, which is exactly what 13e says it must not be. A hash cannot be
+    # read back, but it can be compared against a guess, and confirming 'is this the number I think it is' needs
+    # only a comparison. Passed redacted now.
+    #
+    # Found by the C3 panel, who hashed both forms and showed the stored value matched the raw one.
+    _, question_report = redaction.redact(question)
+    redaction_report = redaction.Redaction(
+        counts={**redaction_report.counts,
+                **{k: redaction_report.counts.get(k, 0) + v for k, v in question_report.counts.items()}},
+        unverified_cards=redaction_report.unverified_cards + question_report.unverified_cards)
+    safe_question, _ = redaction.redact(question)
+
     verified = citations.verify(answer, result.passages)
     body_out = {
         "answer": answer,
@@ -425,7 +442,7 @@ async def ask(request: Request):
           data_class=data_class, egress_allowed=(decision.lane == "frontier"),
           redactions=redaction_report.counts,
           unverified_card_shapes=redaction_report.unverified_cards,
-          prompt=question)
+          prompt=safe_question)
     return body_out
 
 
@@ -841,7 +858,7 @@ async def _frames(session, permit, model: str, question: str, result, requested_
           egress_allowed=(lane == "frontier"),
           redactions=report["redactions"],
           unverified_card_shapes=report.get("unverified_card_shapes", 0),
-          prompt=question)
+          prompt=redaction.redact(question)[0])
     yield frame("done", {"deltas": deltas, "redactions": report["redactions"],
                          # Time to first token as the caller experiences it, retrieval included. The
                          # model's own share sits beside it so a budget can tell the two apart.
