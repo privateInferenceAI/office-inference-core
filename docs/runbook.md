@@ -3250,6 +3250,105 @@ administration out and nothing in the deployment would say so until somebody nee
   citations are the product, so this is a failure and not a degradation.
 - **`/team/list` returns 401 with the master key.** The exemption is missing or the environment does not
   carry `LITELLM_MASTER_KEY` into the hook. This is the lockout from finding 3 and it stops everything.
+### 4.3 Streaming, and the redaction that has to come with it
+
+**Goal.** `INF-STREAM-001`: the first token arrives before the last is generated. And, because streaming opens it,
+the response path gets the redaction it does not have today.
+
+**Why redaction is in this step rather than a later one.** Research into the streaming design found two things.
+The first is that `post_call` guardrails on a streaming path are audit-only in every gateway that has them,
+with live bypasses in the one this deployment uses: one where raw SSE bytes stream through while the guardrail
+logs `success`, and one where a PII guardrail **fails open** on an analyzer error. The second is that this
+deployment's model *responses* are not redacted at all, today, streaming or not. `redact_request` runs on the
+way out to a frontier model and nothing redacts what comes back. So the exposure is not created by streaming;
+streaming makes it arrive sooner.
+
+**A correction to an argument that was made while deciding this.** Input redaction was said to cover the
+response, on the grounds that a model cannot echo what it never saw. That is wrong: a model can emit a
+valid-shaped SSN that appears in no document, because it learned the shape. Input redaction is necessary and
+not sufficient, and output redaction needs its own justification.
+
+#### The mechanism, and why this one
+
+**A holdback buffer.** Redact the raw accumulated buffer on every chunk, emit only the prefix older than the
+holdback, back off to a UTF-8 boundary, and flush at the end. The invariant that matters comes from a
+published implementation's design record: **re-redact the raw buffer, never re-redact an earlier marker**,
+because a marker like `sk-***` breaks the pattern's own character class and the continuation of a
+boundary-split secret stops matching.
+
+| Mechanism | Guarantees no raw pattern reaches the browser? |
+|---|---|
+| Redact the request before the model call | **yes**, and it is already built for the frontier lane |
+| Holdback buffer on the response | **yes**, if the holdback is at least the longest pattern |
+| Redact each delta as it arrives | no. A published measurement found 40 of 86 two-way splits leaking |
+| Redact the assembled response after delivery | no. That is logging, not a control |
+| Block on a stream after tokens have gone | impossible. Bytes written cannot be recalled |
+
+**The holdback is sized from the pattern set, not chosen.** The longest pattern in `services/egress/redaction.py`
+is a private-key header at 36 characters; an SSN is 11, a card with separators 19, an IBAN up to 34. **64
+characters** covers the set with headroom, which is about 16 tokens and roughly 0.3 to 0.5 seconds of added
+time to first token on the local model. Full buffering, which is what one large provider does, costs the entire
+generation instead.
+
+**The honest limit, said in the manual rather than discovered later.** This covers patterns with a shape. A
+personal name or an address has no bounded form, so no finite holdback can prove it cannot appear. For those
+the control is the request-side redaction, and streaming is best-effort for anything the model introduces.
+
+#### The transport
+
+**Server-Sent Events through `sse-starlette`**, not FastAPI's own SSE: the native support is months old while
+`sse-starlette` already carries `ping`, `send_timeout` and slow-client handling. Uvicorn implements write flow
+control, so a slow client really does pause the send rather than buffering without limit.
+
+Four things go in from the start because each is invisible to a load test and obvious in production:
+
+- **`Incremental: ?1`** (RFC 10036) and **`X-Accel-Buffering: no`**. A proxy that buffers turns a fast origin
+  into a slow client. One published measurement: 0.41s at the origin, 3.4s at the browser, and no synthetic
+  test caught it because synthetic traffic keeps the stream busy.
+- **A heartbeat comment every 15 seconds, including while the model is processing the prompt.** This is not
+  decoration. An idle connection is what intermediaries kill, and CPU prompt processing is exactly an idle
+  connection. Without it a slow local first token surfaces as a connection failure rather than a slow answer.
+- **A terminal error event**, because the status code is spent once the first byte goes out. A mid-stream
+  failure cannot become a 502.
+- **Token counts from our own deltas**, never the gateway's usage numbers: a provider sends usage in the final
+  chunk, so a client that disconnects early loses it.
+
+#### Run it
+
+    cd /opt/oi-core
+    alias oi='docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env'
+    oi build api && oi up -d api
+    docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
+      -v /opt/oi-core:/w -w /w --env-file rendered/env \
+      --entrypoint python oi-core/session:local /w/tests/fixtures/stream_probe.py
+
+#### What proves it
+
+| # | Right | Act | What is asserted |
+|---|---|---|---|
+| 1 | `TTFT` | stream a long answer, timestamp every frame | the first token is materially before the last, and a non-streaming implementation fails this |
+| 2 | `INCREMENTAL` | read the frames as they arrive | the bytes arrive in more than one frame, with the first well before the last |
+| 3 | `REDACTED` | ask a question whose answer contains a canary pattern | the pattern appears in **no frame the client received** |
+| 4 | `BOUNDARY` | feed the transformer a pattern split across chunks | the split pattern is caught, which per-delta redaction does not |
+| 5 | `END-TO-END` | ask a normal question | the answer still arrives, cited, with the same content as the non-streaming path |
+
+**Right 3 is the one that matters and it is the one that can be faked.** The canary is a real value the corpus
+contains, the probe reads the raw frames rather than a parsed answer, and the assertion is over every byte the
+client received. A test that checked the assembled reply would pass on exactly the design being replaced.
+
+#### How it breaks
+
+- **The whole answer arrives in one frame.** A proxy is buffering. Check the response headers for
+  `X-Accel-Buffering: no` and `Incremental: ?1`, then check what sits in front of the API.
+- **The first token arrives, then a long silence, then everything.** The heartbeat is not running during prompt
+  processing, so something upstream is holding the connection.
+- **A pattern reaches the client.** Check the holdback first: a pattern longer than the holdback is a pattern
+  that can straddle it. Then check that the transformer is re-redacting the raw buffer rather than an earlier
+  marker.
+- **The response is cut short with no error.** A mid-stream failure emitted a terminal error event that
+  nothing logged. The event is there; look for it.
+- **Time to first token is much worse than the non-streaming path.** The holdback is too large for the pattern
+  set, or the heartbeat interval is shorter than the model's first-token time.
 ## Phase 5 — Client app  *(outline)*
 
 Ask, Do, Review, Activity, Settings, with citations as first-class objects and the lane indicator.
