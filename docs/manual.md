@@ -3987,9 +3987,12 @@ it prints both the burst outcomes and the answers. Exit 0 means a real throttle 
 signed statement the gateway has already spent, and the 401 that comes back is what gets classified. It was a
 real bug and this probe is how it was found.
 
-**The second way is to lower a team's `tpm_limit`** and restart the gateway, which produces a refusal through
-our own layer rather than the provider's. It exercises the same classification path and the same degraded
-payload, and it is **not** evidence of a provider throttle. Useful for a quick check; say which one you ran.
+**Lowering a team's `tpm_limit` is not a working way to provoke anything, and this page used to say it was.**
+Setting a team's limit to 1 and restarting the gateway leaves the calls answering: the identity our auth hook
+returns carries the limit, and **whether the gateway enforces it on that path is unproven.** Someone will
+eventually prove it either way; until then, treat a declared rate limit as documentation rather than a ceiling.
+That is recorded here because a drill that silently does nothing is worse than no drill, and this one was
+written into the page as though it worked.
 ### How it breaks
 
 - **Everything escalates.** The task list is matching too broadly. Check the audit rows counted per trigger,
@@ -4406,12 +4409,7 @@ is explained.
 | C8 | Alarms, backups, a restore drill, the sixty golden questions, vulnerability scanning, drift reporting | Not built |
 | C9 | The demonstration | Not built |
 
-**What exists today, said plainly.** The system stores a client's documents, finds the passages that
-answer a question, checks every citation it makes, refuses to answer from a superseded version, filters
-by role, redacts before anything leaves for a frontier model, and destroys material when a retention
-period runs out. It records all of it in a tamper-evident chain and ships that record off the machine.
-
-**What does not exist, and this is the honest gap.** There is no user interface. **The assistant API does
+**What exists today, said plainly.**the data-class gate refuses a request whose content may not reach a remote model**What does not exist, and this is the honest gap.** There is no user interface. **The assistant API does
 exist** — one endpoint in front of every capability, with sessions, streaming, a data-class gate and a
 degraded answer when the model will not answer — and sections 13g and 13h document it. **Section 13b
 documents the retrieval function underneath it**, which is the developer's path for looking at retrieval on
