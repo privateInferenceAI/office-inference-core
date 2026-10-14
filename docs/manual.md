@@ -1600,6 +1600,11 @@ oi restart api
 oi run --rm keys --probe analyst
 ```
 
+**After a restart, give the gateway a few seconds before the next command.** The very next documented step can
+fail with `cannot reach the gateway at http://litellm:4000: [Errno 111] Connection refused` for tens of seconds
+while the container comes up, and that error reads like a configuration problem rather than an impatient one.
+`docker compose ps` showing `Up` is the signal; a probe that fails before that is early, not broken.
+
 **Both restarts, and the second one is the one people miss.** The renderer writes the config, and neither
 process re-reads it. Restart only the gateway and the model genuinely changes at the provider while the API goes
 on reporting the old one from the manifest it loaded at startup. That is the worst shape of failure: the record
