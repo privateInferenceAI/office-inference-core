@@ -36,6 +36,14 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
+# This service's own directory, because the code is imported as modules rather than run as a package. Without
+# it `import streaming` finds nothing, which is how the first deploy of the streaming step failed: the container
+# restarted in a loop while the path was correct in the checkout and wrong in the image.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+# The shared services: retrieval for the search and the citation checks, ingestion for the endpoints Qdrant and
+# TEI are reached through, session for who is asking, gateway for how a model call is authenticated, and egress
+# for the redaction the stream applies.
 sys.path.insert(0, "/app/services/retrieval")
 sys.path.insert(0, "/app/services/ingestion")
 sys.path.insert(0, "/app/services/session")
