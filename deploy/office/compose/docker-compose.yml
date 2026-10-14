@@ -420,6 +420,53 @@ services:
         condition: service_healthy
     networks: [ai-net]
 
+  session:
+    # The session boundary as a tool: establish a session, inspect one, and rehearse the refusal. It runs when
+    # called and exits, like the audit sink and the retention commands.
+    #
+    # Its own image rather than a command inside the audit service, because it owns a table and a boundary the
+    # audit service does not know about. It is NOT a second writer of the chain: the refusal is recorded by
+    # invoking the audit tool, so the chain keeps exactly one definition of its own hash.
+    #
+    # The build context is the repository root because the image carries the access model from
+    # services/retrieval as well as this service's own module: the retriever and the session tool have to agree
+    # about what a root is, and one definition is the only way that stays true.
+    build:
+      context: ${OI_ROOT}
+      dockerfile: services/session/Dockerfile
+    container_name: session
+    profiles: ["tools"]
+    user: "${HOST_UID}:${HOST_GID}"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DEPLOYMENT_ID: ${DEPLOYMENT_ID}
+      MIGRATIONS_DIR: /app/migrations
+      OI_ROOT: /opt/oi-core
+      # Where the rendered permission model is. Mounted rather than baked in, so a render takes effect without
+      # a rebuild, and read on every run rather than cached, so a drift between the file and the running
+      # deployment is not something this tool can be wrong about.
+      ACCESS_REGISTRY: /app/rendered/access.json
+      # The audit tool records the refusal. This service never inserts into the chain itself.
+      AUDIT_TOOL: /app/audit.py
+      # The content mode the audit tool applies to anything it stores. A refusal payload names fields and a
+      # role rather than content, so the deployment's policy has nothing to govern here, but the tool refuses
+      # to run without the variables and a second source of truth for them would be worse than passing them.
+      CONTENT_DEFAULT: ${CONTENT_DEFAULT:-hash}
+      CONTENT_MODE_PUBLIC: ${CONTENT_MODE_PUBLIC:-full}
+      CONTENT_MODE_INTERNAL: ${CONTENT_MODE_INTERNAL:-redacted}
+      CONTENT_MODE_CONFIDENTIAL: ${CONTENT_MODE_CONFIDENTIAL:-hash}
+      CONTENT_MODE_REGULATED: ${CONTENT_MODE_REGULATED:-hash}
+    volumes:
+      - ${OI_ROOT}/rendered:/app/rendered:ro
+      - ${OI_ROOT}/db/migrations:/app/migrations:ro
+      # The audit tool's own code, so the refusal goes through the same writer as every other event rather
+      # than through a copy of its hashing.
+      - ${OI_ROOT}/services/audit/audit.py:/app/audit.py:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [ai-net]
+
   audit:
     # The audit sink, as a tool rather than a service: it runs when called and exits. It is
     # where every other component will record model calls, tool calls, and approvals, so the

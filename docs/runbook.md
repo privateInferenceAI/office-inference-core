@@ -2896,9 +2896,167 @@ fire on it. The lexical arm is a second path to the same content, and a disclosu
 is the shape of failure this step exists to prevent. It needs the label adding to that table and the worker
 writing it.
 
-## Phase 4 — Assistant API  *(outline)*
+## Phase C3 — Assistant API
 
-The single surface the client app talks to: ask, tasks, approvals, activity, settings.
+The single surface the client app talks to: ask, tasks, approvals, activity, settings. This is the phase the
+hand-off at `docs/handoff-c3.md` describes. Its two decisions are recorded in that document at §5.4 and §5.5.
+
+**The step order matters, and this is why.** The route from a question to an answer already exists and is
+proven, ending in a function call that takes a role as an argument. What does not exist is anything that can
+say who is asking. Every later step in this phase — streaming, the timeout budget, the routing triggers — puts
+a decision on top of that answer, so the session boundary is built first and the API is built around it.
+
+### 4.1 The access model, the session, and the forged-role refusal
+
+**Goal.** `SEC-ACL-002`: *a user outside a document's group cannot retrieve it by any query.*
+
+The requirement's title says "per-user and per-group permissions". The verify line says something narrower and
+harder: not that the mechanism exists, but that it holds against every query. So the step is two things at
+once. **The permission model gets a third level**, so a document boundary can be narrower than the folder
+tree. **And the role stops being an argument**, because today it is one:
+
+    def search(services, question, role: str, limit=10, denial=None, rerank_passages=True) -> Result:
+
+That signature is safe while the only caller is a probe on the same box. The moment an API sits in front of it,
+whoever can reach the API can claim `executive` by typing it, and read everything. So the role has to arrive
+from a session, and a request that tries to set its own has to be **refused and recorded**, which is the
+phase's own acceptance sentence.
+
+**The vocabulary, three levels, and each one earns its place.**
+
+| Level | What it is | Why it exists |
+|---|---|---|
+| **root** | An access boundary, and the value stored in a chunk's `acl` label | It is the label `SEC-ACL-001` already filters on, so this level renames what is there rather than adding a mechanism |
+| **group** | A named union of roots | It is how a person's access actually changes over time: a job changes, a group changes, and no code moves |
+| **user** | A subject, with the groups it belongs to | It is the thing the identity provider will authenticate, and in C3 it is the thing a session is minted for |
+
+**The shape, in the manifest's `access` block:**
+
+    access:
+      roots: [company, executive, finance]
+      groups:
+        staff:      {roots: [company]}
+        finance:    {roots: [company, finance]}
+        executive:  {roots: [company, executive]}
+      users:
+        - subject: dana@client.example
+          name: Dana Reyes
+          groups: [staff]
+        - subject: anthony@client.example
+          groups: [executive]
+
+**Access is a union and there are no deny rules.** A user in `staff` and `finance` sees `company` and
+`finance`, with no precedence table and no exceptions. That is a decision rather than an omission: a
+permission model with no precedence is one that can be tested to exhaustion, and the union is a single line of
+code that a reader can check by eye. Per-document grants are **not** built here. When a client needs one, the
+extension that keeps the filter inside the query is to write group membership onto the chunk at ingest, so the
+payload carries real labels and the filter stays a label match.
+
+**The two folder roles stay as the built-in default.** A deployment that declares nothing keeps `staff` and
+`executive` reading `company` and `executive`, which is what every manifest on the box does today, so no
+existing deployment changes behaviour when this lands. Declaring `roots`, `groups` or `users` replaces that
+default wholesale rather than merging with it, and the validator refuses a manifest that declares some of the
+three and not the rest.
+
+**The session record is the authority, not the token.** The token carries a session id and nothing else, so
+there is no claim inside it to tamper with. What it resolves to is a row:
+
+    sessions(session_id, subject, role, roots jsonb, issued_at, expires_at, revoked_at)
+
+`roots` is **snapshotted when the session starts**, not looked up per request. The reason is the audit record:
+a later change to a group must not change what an event recorded last week meant.
+
+**A refusal is evidence, and the evidence is written before the client is told no.** Three properties, each of
+which has been wrong in a system somewhere:
+
+- **The guard runs before anything touches the database.** A refusal that half-wrote a session would be worse
+  than the request it refused. The same order as `audit.py record`, which refuses a hand-typed actor before it
+  opens a connection.
+- **The record is committed before the 403 goes out.** If the response is written first and the commit
+  second, a crash in between leaves an access decision with no trace.
+- **The refused role is recorded as a role, not as a string in a message.** The event is
+  `event_type='access'`, `outcome='denied'`, and `actor_role` carries the role that was **claimed**,
+  because that is the claim the row has to be findable by. The session's real role goes in the payload beside
+  the name of the field it was supplied in:
+
+      actor_role: executive          -- the role the request claimed
+      payload: {supplied_field: "role", attempted_role: "executive",
+                session_role: "staff", session_id: "..."}
+
+**Why that shape and not a new event type.** `event_type` is a check constraint with six allowed values and
+`access` is one of them, so a refused access decision is already representable and needs no migration. It is
+also the same type a legitimate denial uses, which is why the structural difference matters: a refused
+authority claim sets `actor_role` to something the session does not hold, and a legitimate denial sets it to
+the role the session does hold. A reviewer can tell them apart in one query without reading payload prose.
+
+**The development mint command follows the guard already in the tree.**
+
+    ... session mint --subject dana@client.example --role staff --ttl 8h
+
+It refuses unless `--dev` is passed, it says in its refusal what will replace it, and it mints a session for a
+subject the manifest's `access.users` declares. A subject the manifest does not know is refused, because
+otherwise the command is a way to invent an identity.
+
+**The probe, and what makes it falsifiable.** Four rights, run through the same interface a request takes:
+
+| Right | Act | What is asserted |
+|---|---|---|
+| `ACCESS` | mint a session for `staff`, ask the question the `finance` document answers | the answer carries no passage from `finance` |
+| `REFUSED` | send the same request with `role: executive` in the body | refused, and the refusal is in the chain |
+| `RECORDED` | read the audit row the refusal wrote | `outcome='denied'`, `actor_role='executive'`, payload names the field |
+| `FORGED` | mint a session claiming a role the manifest does not grant that subject | refused at mint time, and refused again at the API |
+
+**A right with no wrong path beside it is not a test.** Each of the four is paired with the failing case it
+exists to catch, and the ledger prints both. The forged session is what makes `REFUSED` mean anything: with
+only production auth there is no forgery to refuse, which is why this phase builds the stand-in, and why its
+verification cannot wait for C7.
+
+**The seams, named here so C7 inherits them rather than rediscovering them.** C7 changes three things:
+the verifier module in `services/session/session.py`, the mint command, which it deletes, and the manifest
+field that names the verifier. It keeps four: the session record and its schema, the role and roots
+resolution, the retriever call, and the refusal path with its audit event.
+
+**The refusal path is deliberately not on that list.** Production auth does not stop a client from trying to
+assert its own role — an ALB that rejects a bad token never sees the body, and the API is what sees a valid
+session asking for something it does not hold. That path is what this phase is for, and it stays.
+
+**Run it.**
+
+    cd /opt/oi-core
+    alias oi='docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env'
+
+    # Render the registry, then bring the session tool up.
+    python3 scripts/render_manifest.py --manifest manifests/dev-cloud.yaml
+    oi --profile tools build session
+
+    # A session for a subject the manifest declares, and one it does not.
+    oi --profile tools run --rm session mint --dev --subject dana@client.example --role staff
+    oi --profile tools run --rm session mint --dev --subject nobody@client.example --role staff
+
+    # The four rights, and the wrong path beside each.
+    docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
+      -v /opt/oi-core:/w -w /w --env-file rendered/env \
+      --entrypoint python oi-core/ingestion:local /w/tests/fixtures/access_probe.py
+
+    # The refusal, read back out of the chain rather than out of the probe's own report.
+    oi --profile tools run --rm audit list --type access | head
+
+**What proves it.** The probe prints one line per right and its wrong path beside it, and ends with a count.
+`access_probe.py` exits non-zero on any failure, so the operator does not have to read the ledger to know.
+
+**How it breaks.** The three ways this fails on a real box, because each one has a shape that looks like
+something else:
+
+- **The registry is not rendered.** The session tool reads `rendered/access.json` and refuses to start
+  without it. The message names the render command, because the alternative is a traceback that reads like a
+  code fault.
+- **The session expired between minting and asking.** The refusal is the same shape as a forged one. The
+  probe prints the session's `expires_at` on every line so an expired session is visible as an expired
+  session rather than as a permission failure.
+- **The audit row is missing while the refusal worked.** The response is written before the commit. The probe
+  fails the `RECORDED` right in that case rather than passing on the 403 alone, because a refusal nobody can
+  find afterwards is not a control.
+
 
 ## Phase 5 — Client app  *(outline)*
 

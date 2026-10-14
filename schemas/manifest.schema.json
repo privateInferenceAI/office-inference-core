@@ -55,6 +55,73 @@
               "description": "Whether identifiers are replaced before a request leaves. On by default: the cost of redacting something harmless is a question the model cannot answer, and the cost of not redacting a card number is a payment incident in a provider's logs. Turning it off is a client's decision to make and one they should have to make explicitly."
             }
           }
+        },
+        "roles": {
+          "type": "object",
+          "description": "Optional. What each role may read, by role name. A role is what a session claims; a group is what a person belongs to, and a subject's permission is the union of the two. Declaring none gives the deployment one role named viewer that carries no roots of its own, which is the usual case when access is written with groups.",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          }
+        },
+        "roots": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "description": "Every access boundary this deployment uses, and the value written into a chunk's acl label. Declaring the full set here means a document labelled with a root no role and no group carries is reported rather than silently unreachable."
+        },
+        "groups": {
+          "type": "object",
+          "description": "Named unions of roots. A group is how a person's access changes over time: a job changes, a group changes, and no code moves. Access is a union with no deny rules and no precedence, which is what makes the model testable to exhaustion.",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true,
+            "minItems": 1
+          }
+        },
+        "users": {
+          "type": "array",
+          "description": "The subjects this deployment knows, and the groups each belongs to. A subject not declared here cannot hold a session once the deployment declares any users at all.",
+          "items": {
+            "type": "object",
+            "required": [
+              "subject",
+              "groups"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "subject": {
+                "type": "string",
+                "minLength": 3,
+                "description": "The identifier the identity provider will assert at C7. An email address in every deployment so far."
+              },
+              "name": {
+                "type": "string",
+                "description": "For the manual's worked examples and the operator's read of the registry. Never used for a decision."
+              },
+              "groups": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true,
+                "minItems": 1,
+                "description": "At least one, because in a declared registry access comes from groups and a user without one resolves to nothing."
+              }
+            }
+          }
         }
       }
     },

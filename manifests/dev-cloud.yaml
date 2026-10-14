@@ -48,6 +48,33 @@ content:
     public: full
     internal: redacted
 access:
+  # The declared permission model, SEC-ACL-002. This is a development deployment, so it declares the model
+  # that exercises the feature rather than one belonging to a client.
+  #
+  # **It is declared here rather than left to the built-in default, and the reason is the FORGED right.** A
+  # deployment with the built-in two roles has no user list, so any subject may hold either role and there is
+  # nothing for a forged session to be refused against. Declaring users is what makes that refusal real, and
+  # the probe says so if it finds the built-in model instead of failing for a reason nobody can see.
+  roots: [company, executive, finance]
+  groups:
+    # Two groups rather than three, because two is enough to prove a union and the third would be a fixture
+    # that never fails. `staff` is the built-in role's set and `finance` is the one staff must not reach.
+    staff:   {roots: [company]}
+    finance: {roots: [company, finance]}
+    executive: {roots: [company, executive]}
+  users:
+    # No subject here is a real person. The names say what each one is for, because a fixture whose purpose
+    # is not in its name becomes a mystery the first time it fails.
+    - subject: probe-staff@officeinference.com
+      name: Staff probe
+      groups: [staff]
+    - subject: probe-finance@officeinference.com
+      name: Finance probe
+      groups: [staff, finance]
+    - subject: probe-exec@officeinference.com
+      name: Executive probe
+      groups: [executive]
+
   # What a user is told when their role excludes content that would answer the
   # question. silent tells them nothing; denied says documents exist that they
   # cannot see; counted also says how many passages were withheld. The trade is
