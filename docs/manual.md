@@ -581,7 +581,7 @@ skip    005_content_modes.sql (already applied)
 skip    006_feed_tells_the_truth.sql (already applied)
 …
 skip    016_retention_policy.sql (already applied)
-0 migration(s) applied, 15 already present
+0 migration(s) applied, 16 already present
 ```
 
 On a fresh machine the same command prints `applied` for each in order and `15 migration(s) applied, 0
@@ -593,11 +593,16 @@ error: 005_content_modes.sql was applied but has changed since. Applied 6ed11a69
 Write a new migration instead of editing an applied one.
 ```
 
-**The count is `15 files, 15 recorded`, one row per file.** The numbering starts at `002` because `001` was
-folded into the service before it shipped, and `schema_migrations` itself is created by `audit migrate` rather
-than by a migration file. So the highest number is `016` while the file count is fifteen, which is the
-off-by-one worth knowing about: **sixteen was never the file count.** On a fresh machine the summary line reads
-`15 migration(s) applied, 0 already present`.
+**The count is one row per file, and the file count and the highest number agree.** The numbering starts at
+`002` because `001` was folded into the service before it shipped, and `schema_migrations` itself is created by
+`audit migrate` rather than by a migration file. **Sixteen files through `017_sessions.sql`, sixteen rows.** On
+a fresh machine the summary line reads `16 migration(s) applied, 0 already present`.
+
+**This section used to warn about an off-by-one and the warning is now wrong, which is why it is worth a
+sentence.** There were fifteen files and a note explaining that sixteen was never the count. C3 added
+`017_sessions.sql` — sessions live in the database the audit record is in — so sixteen is the count, and a page
+that kept insisting otherwise would be wrong in the direction a reader cannot check. **A count in a manual goes
+stale the moment somebody adds a file**, so treat any number here as a claim to verify against `ls`.
 
 ### Adding a migration
 
@@ -639,7 +644,7 @@ oi run --rm audit migrate
 
 ```
 applied 017_your_change.sql
-1 migration(s) applied, 15 already present
+1 migration(s) applied, 16 already present
 ```
 
 `applied` is the word to look for. `skip` means the file was already recorded, and `error` means it was
