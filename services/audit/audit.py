@@ -58,8 +58,17 @@ def _verifier():
         "The image copies services/gateway/assertion.py next to audit.py; the checkout has it one "
         "directory over.")
 
-import psycopg
-from psycopg.types.json import Jsonb
+try:
+    import psycopg
+    from psycopg.types.json import Jsonb
+except ModuleNotFoundError as exc:  # pragma: no cover - the message is the point
+    # **A missing driver used to surface as a bare ModuleNotFoundError three frames deep**, which reads as a
+    # broken tool rather than as the wrong image. It bit a C2 acceptance probe run under the ingestion image,
+    # whose entrypoint has no Postgres driver, and the failure looked like the audit sink refusing a write.
+    # The audit tool needs the session or eval image, and saying so costs one message.
+    die("no Postgres driver in this image, so an audit record cannot be written. The audit tool needs an "
+        "image that carries psycopg: oi-core/session:local or oi-core/eval:local. The ingestion image's "
+        f"entrypoint does not. Original error: {exc}")
 
 DSN = os.environ.get("DATABASE_URL")
 MIGRATIONS_DIR = Path(os.environ.get("MIGRATIONS_DIR", "/app/migrations"))
