@@ -125,7 +125,22 @@ def build_litellm_config(manifest: dict, env: dict[str, str]) -> dict:
             })
     return {
         "model_list": models,
-        "litellm_settings": {"drop_params": True, "set_verbose": False},
+        "litellm_settings": {
+            "drop_params": True,
+            "set_verbose": False,
+            # **Retries are the API's job and the gateway must not add its own.** LiteLLM defaults
+            # `num_retries` to 2 when it is unset, so our three budgeted attempts could have become
+            # NINE upstream calls, none of them visible to the deadline and none counted in the record.
+            # The research on 2026-10-14 calls this retry amplification: two layers multiply into
+            # (1+N)**2 calls per request, and AWS states that retries "can make the overload worse
+            # instead of better". Setting it to zero explicitly makes the number in our audit row true.
+            "num_retries": 0,
+            # The API owns the timeouts too, for the same reason: a retry that ignores the caller's
+            # deadline is not a retry, it is an unaccounted one. These sit far above our 30s total so
+            # they act only as a backstop against a socket that never returns.
+            "request_timeout": 120,
+            "stream_timeout": 120,
+        },
         "general_settings": {"master_key": "os.environ/LITELLM_MASTER_KEY"},
     }
 

@@ -57,6 +57,7 @@ import ingest  # noqa: E402
 import retriever  # noqa: E402
 import session as session_module  # noqa: E402
 import budget as budget_module  # noqa: E402
+import routing  # noqa: E402
 import streaming  # noqa: E402
 
 GATEWAY_URL = os.environ.get("OI_GATEWAY_URL", "http://litellm:4000")
@@ -74,6 +75,21 @@ DEFAULT_MODEL_ROLE = os.environ.get("OI_DEFAULT_MODEL_ROLE", "analyst")
 PASSAGES = int(os.environ.get("OI_PASSAGES", "6"))
 
 STATE: dict = {}
+
+
+def local_lane_available() -> bool:
+    """Whether this deployment declares a model it serves itself.
+
+    Read from the manifest rather than guessed. A cloud deployment declares only remote models, so a
+    routing decision to answer locally cannot be honoured there, and saying so is better than announcing
+    a downgrade to a model that does not exist.
+    """
+    models = (STATE.get("manifest") or {}).get("models") or {}
+    for entry in models.values():
+        local = str((entry or {}).get("local") or "")
+        if local:
+            return True
+    return False
 
 
 def model_for(role: str) -> str:
@@ -127,6 +143,11 @@ async def lifespan(app: FastAPI):
     registry_path = os.environ.get("ACCESS_REGISTRY", "/app/rendered/access.json")
     STATE["registry"] = access_module.load(registry_path)
     STATE["key"] = assertion.load_key(KEY_PATH)
+    # What routing reads: the egress declaration decides whether a lane is permitted at all, and the
+    # content default is the data class a request carries.
+    manifest_path = os.environ.get("OI_MANIFEST", "/app/rendered/manifest.json")
+    mp = Path(manifest_path)
+    STATE["manifest"] = json.loads(mp.read_text()) if mp.exists() else {}
     STATE["services"] = ingest.Services()
     STATE["store"] = session_module.open_store()
     print(f"api ready: registry={registry_path} model_role_default={DEFAULT_MODEL_ROLE} "
@@ -216,7 +237,49 @@ async def ask(request: Request):
              "kind": "no_source", "role": session.role, "roots": sorted(permit.roots)},
             status_code=200)
 
-    request_budget = budget_module.Budget()
+    # **The gate first, then the triggers choosing a model inside what it permitted.** The data class is
+    # the deployment's declared content default: what a request IS, is the client's declaration, and the
+    # record carries the roots retrieval actually reached beside it.
+    # **Read from the access block, and the first version read `content.default` instead.** That field is a
+    # CONTENT MODE (`hash`, `redacted`, `full`), not a data class, so the gate compared `hash` against the
+    # permitted classes and refused every request on the deployment: three 403s and a routing decision to a
+    # lane that did not exist. A manifest with no data-class declaration now falls back to the most
+    # restrictive class rather than to a middle one, so an undeclared deployment does not send content off
+    # the box by omission.
+    data_class = ((STATE.get("manifest") or {}).get("access") or {}).get("data_class") or "regulated"
+    decision = routing.route(
+        STATE.get("manifest") or {},
+        data_class=data_class,
+        task=body.get("task") or "",
+        user_wants_stronger=bool(body.get("stronger")),
+        model_name=model,
+        # The lane the configured model actually runs in, from the manifest. Escalation selects a
+        # stronger model; not escalating selects the ordinary one, which is still remote on a cloud
+        # deployment. Conflating those made every unescalated request fail where there is no local model.
+        default_lane="local" if local_lane_available() else "frontier",
+        local=local_lane_available(),
+    )
+    if decision.lane == "local" and not local_lane_available():
+        # **This deployment has no local lane**, so a decision to answer locally would name a model that
+        # does not exist. The honest outcome is a refusal that says so, recorded, rather than a notice
+        # claiming an answer that cannot be produced. A deployment that declares a local model gets the
+        # announced downgrade instead.
+        facts = {"stage": "routing", "reason": decision.reason,
+                 "lane": decision.lane, "data_class": data_class,
+                 "escalation_requested": decision.escalation_requested,
+                 "session_id": session.session_id}
+        audit("access", session.subject, session.role, "denied", facts)
+        return JSONResponse(
+            {"error": "Permission denied on this resource (or it might not exist). "
+                      "This request needs a lane this deployment does not permit and has no "
+                      "local model to answer with.",
+             "kind": "no_permitted_lane", "reason": decision.reason,
+             "notice": decision.notice},
+            status_code=403)
+    # **The lane decides the thresholds.** A local model is a different shape from a remote one, and
+    # borrowing the frontier numbers would mark healthy local answers as failures. The arrival clock is
+    # passed through so the deadline stays anchored where the client asked, not where routing finished.
+    request_budget = budget_module.Budget.for_lane(decision.lane)
     answer, generation = _generate(session, permit, model, question, result.passages, request_budget)
     if answer is None:
         # **A degraded answer rather than an error.** The research and this step's own design say the
@@ -251,13 +314,18 @@ async def ask(request: Request):
         "supported": [c.text for c in verified.claims if c.ok],
         "unsupported": [{"text": c.text, "reason": c.reason, "detail": c.detail}
                         for c in verified.refused],
+        # What the user is told, always, when there is something to tell. Decided 2026-10-14.
+        "notice": decision.notice,
+        "lane": decision.lane,
+        "escalated": decision.escalated,
         "denied": result.denied,
         "disclosure": (result.disclosure.message if result.disclosure else ""),
     }
     audit("model_call", session.subject, session.role, "ok",
           {"stage": "ask", "model": model, "passages": len(result.passages),
            "supported": len(body_out["supported"]), "unsupported": len(body_out["unsupported"]),
-           "session_id": session.session_id, "roots": sorted(permit.roots)}, model=model)
+           "session_id": session.session_id, "roots": sorted(permit.roots),
+           **routing.audit_facts(decision, data_class)}, model=model)
     return body_out
 
 
@@ -406,6 +474,18 @@ async def ask_stream(request: Request):
     permit = session.permit()
     role = body.get("model_role") or os.environ.get("OI_DEFAULT_API_ROLE", "viewer")
     model = model_for(role)
+    # The same decision the non-streaming path makes, so the two cannot drift. The gate decides the
+    # lane and the triggers choose inside it; the stream then uses the lane thresholds rather than the
+    # frontier ones.
+    stream_decision = routing.route(
+        STATE.get("manifest") or {},
+        data_class=((STATE.get("manifest") or {}).get("access") or {}).get("data_class") or "regulated",
+        task=body.get("task") or "",
+        user_wants_stronger=bool(body.get("stronger")),
+        model_name=model,
+        default_lane="local" if local_lane_available() else "frontier",
+        local=local_lane_available(),
+    )
 
     try:
         result = retriever.search(STATE["services"], question, permit.role, limit=PASSAGES, permit=permit)
@@ -428,13 +508,14 @@ async def ask_stream(request: Request):
     }
     requested_at = time.monotonic()
     return EventSourceResponse(
-        _frames(session, permit, model, question, result, requested_at),
+        _frames(session, permit, model, question, result, requested_at, stream_decision.lane),
         headers=headers,
         ping=int(os.environ.get("OI_STREAM_PING_SECONDS", "15")),
     )
 
 
-async def _frames(session, permit, model: str, question: str, result, requested_at: float):
+async def _frames(session, permit, model: str, question: str, result, requested_at: float,
+                   lane: str = "frontier"):
     """The events, in the order a client should read them."""
     import urllib.error
     import urllib.request
@@ -452,7 +533,7 @@ async def _frames(session, permit, model: str, question: str, result, requested_
     # **The same budget the non-streaming path has, on the clock the client experiences.** The deadline is
     # anchored at `requested_at` rather than here, so retrieval counts against it: a budget that starts
     # after the work has begun is not a bound on the request.
-    request_budget = budget_module.Budget(started=requested_at)
+    request_budget = budget_module.Budget.for_lane(lane, started=requested_at)
     errors: list = []
     emitted = False
 
@@ -487,27 +568,51 @@ async def _frames(session, permit, model: str, question: str, result, requested_
     def _open():
         return urllib.request.urlopen(upstream, timeout=max(1.0, request_budget.remaining()))
 
-    try:
-        response = _open()
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode(errors="replace")[:400]
-        kind = budget_module.classify(detail)
-        errors.append({"attempt": 1, "status": exc.code, "reason": kind["reason"],
-                       "matched": kind["matched"], "retryable": kind["retryable"]})
+    # **Retried here for the same reason the non-streaming path retries, and this path used not to.**
+    # Research on 2026-10-14 found the inconsistency: an HTTPError before any answer frame went
+    # straight to a degraded answer on the streaming path while the non-streaming path retried the
+    # identical 429 three times, and the streaming path is the one real clients use. Retrying is safe
+    # here because no answer byte has been emitted; the start frame carries citations, not text, and is
+    # idempotent. After the first delta the rule is unchanged: an error event, never a retry.
+    attempt = 0
+    response = None
+    while attempt < budget_module.MAX_ATTEMPTS:
+        attempt += 1
+        if request_budget.past_reserve():
+            break
+        try:
+            response = _open()
+            break
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode(errors="replace")[:400]
+            kind = budget_module.classify(detail)
+            errors.append({"attempt": attempt, "status": exc.code, "reason": kind["reason"],
+                           "matched": kind["matched"], "retryable": kind["retryable"]})
+            last_kind = kind
+            if not kind["retryable"] or attempt >= budget_module.MAX_ATTEMPTS:
+                break
+            wait = _backoff(attempt, exc.headers.get("Retry-After") if exc.headers else None)
+            if wait >= request_budget.remaining() - request_budget.reserve:
+                break
+            time.sleep(wait)
+        except Exception as exc:  # noqa: BLE001
+            last_kind = budget_module.classify(type(exc).__name__)
+            errors.append({"attempt": attempt, "status": 0, "reason": last_kind["reason"],
+                           "matched": last_kind["matched"], "retryable": last_kind["retryable"]})
+            if not last_kind["retryable"] or attempt >= budget_module.MAX_ATTEMPTS:
+                break
+            time.sleep(_backoff(attempt, None))
+
+    if response is None:
+        kind = errors[-1] if errors else {"reason": "unclassified", "matched": "", "retryable": False}
         audit("model_call", session.subject, session.role, "denied",
               budget_module.audit_facts(reason=kind["reason"], matched=kind["matched"],
-                                        retryable=kind["retryable"], attempts=1,
+                                        retryable=kind["retryable"], attempts=attempt,
                                         threshold=request_budget.timed_out(), budget=request_budget,
                                         partial_output=False, errors=errors), model=model)
         # No frame has gone out yet, so a degraded answer is still possible and is the better outcome.
         yield frame("degraded", budget_module.degraded(kind["reason"], _degrade_detail(kind["reason"]),
-                                                      result.passages, request_budget, 1,
-                                                      request_budget.timed_out(), False))
-        return
-    except Exception as exc:  # noqa: BLE001
-        kind = budget_module.classify(type(exc).__name__)
-        yield frame("degraded", budget_module.degraded(kind["reason"], _degrade_detail(kind["reason"]),
-                                                      result.passages, request_budget, 1,
+                                                      result.passages, request_budget, attempt,
                                                       request_budget.timed_out(), False))
         return
 
@@ -549,8 +654,21 @@ async def _frames(session, permit, model: str, question: str, result, requested_
             request_budget.note_chunk()
             if first_token_at is None:
                 first_token_at = time.monotonic()
-            # The redactor decides what is safe to emit. Everything else is held.
-            safe = redactor.feed(delta)
+            # **The redactor decides what is safe to emit, and its failure is closed on purpose.**
+            # Research on 2026-10-14 found fail-open branches in three separate LiteLLM streaming
+            # paths, where an exception or an unrecognised event emitted the buffer unmasked, and found a
+            # guardrail that logged success while scanning nothing. So the failure here is deliberate
+            # rather than incidental: nothing raw is emitted, the client is told, and the record says so.
+            try:
+                safe = redactor.feed(delta)
+            except Exception as exc:  # noqa: BLE001 - a redactor that cannot run must not pass text
+                audit("model_call", session.subject, session.role, "error",
+                      {"stage": "redaction", "error": type(exc).__name__,
+                       "emitted_so_far": emitted, "session_id": session.session_id}, model=model)
+                yield frame("error", {"kind": "redaction_failed", "partial_output": emitted,
+                                      "detail": "the response could not be filtered, so it was stopped "
+                                                "rather than sent unfiltered"})
+                return
             if safe:
                 emitted = True
                 yield frame("delta", {"text": safe})
