@@ -558,6 +558,8 @@ pages that C1 wrote. The heading sequence in the file is not the reading order; 
 13d. Access control
 13e. Redaction and the egress gate
 13f. Retention and deletion
+13g. The assistant API
+13h. Routing, and what happens when the model will not answer
 
 The `audit` tool writes and checks one append-only record. Every command below is run the same way:
 
@@ -3568,7 +3570,7 @@ print(json.dumps(json.load(urllib.request.urlopen(req, timeout=180)), indent=2)[
 }
 ```
 
-### The two endpoints
+### The endpoints
 
 | Method | Path | What it does |
 |---|---|---|
@@ -3583,7 +3585,8 @@ Three, and that is deliberate. There is no fourth endpoint until a capability ne
 | Field | Why |
 |---|---|
 | `answer` | The model's text, with `[n]` markers referring to `citations` |
-| `model` | **Which model actually answered.** Read from the manifest, so changing the manifest changes this |
+| `model` | **The role**, as the manifest names it. Not the model that ran — see the next row, and section 18 |
+| `resolved_model` | **Which model actually answered.** A client that reads only `model` cannot tell that a manifest swap took effect |
 | `role`, `roots` | What the session held, so a caller can see the permission it was answered under |
 | `citations` | Document, access label and page for each passage the answer could cite |
 | `supported` / `unsupported` | The sentences the retrieved passages do and do not back, with a reason |
@@ -3874,6 +3877,11 @@ them visible to the deadline and none counted in the record.
 
 Seven rights, and each one is a sentence this page told you to expect. If the page and the service disagree,
 that probe fails, which is the point of it.
+
+**Run it on a quiet deployment, and re-run it before believing a failure.** Under a real throttle the answer
+degrades, and a degraded payload carries no `notice` — so `TOLD` reads a correct degradation as a silent
+downgrade and `STREAM` sees frames that never included a delta. A second run after the throttle window passes
+prints `PASSED`. A failure that repeats is real; one that does not is the provider, not the service.
 
     ok   ANSWER     [200] 6 citation(s), lane='frontier'
     ok   NO-JUDGE   escalated=False trigger='' notice=False
