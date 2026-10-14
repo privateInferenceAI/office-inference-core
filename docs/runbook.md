@@ -3465,12 +3465,28 @@ role supplied in a request. Counts and identifiers only.
 **There is no supported way to force a provider error through the gateway.** The three `mock_testing_*`
 flags were stripped from proxy requests in LiteLLM 1.85.0, and the one documented mock facility mocks success.
 
-**The honest method uses the provider's own admission arithmetic.** AWS deducts `input tokens + max_tokens`
-from the per-model tokens-per-minute quota when a request is admitted, and throttles when that exceeds it. So a
-request whose input plus `max_tokens` is larger than our quota produces a genuine `ThrottlingException`, on
-demand, deterministically, with no new component and no blast radius beyond that request. A retry with the same
-oversized `max_tokens` throttles again, which exercises sustained-throttle-to-degrade rather than
-retry-then-succeed.
+**The admission-arithmetic method does not work, and this was measured after being recommended.** The idea was
+that AWS deducts `input + max_tokens` from the per-model quota at admission, so an oversized `max_tokens` would
+produce a genuine throttle. **Bedrock validates `max_tokens` against the model's own limit first and returns a
+400:**
+
+    max_tokens=4200000 -> 400 BadRequestError: The maximum tokens you requested exceeds the model limit of
+                              10000. Try again with a maximum tokens value that is lower than 10000.
+
+So the oversized value never reaches the quota check, and Nova Lite's limit is 10,000 rather than the 4,000,000
+tokens per minute its quota allows. The finding is worth keeping because it was the cheapest-looking method and
+looked correct on paper.
+
+**What a real throttle needs: load, against a quota small enough to reach.** The quotas were read from Service
+Quotas and they vary by two orders of magnitude. Nova Lite's on-demand quota is 4,000,000 tokens per minute,
+which would take about four hundred maximum-size requests. But the **latency-optimized** on-demand quota for
+Nova Pro V1 is **40,000 tokens per minute**, and a single request may ask for up to 10,000, so roughly four
+concurrent requests exhaust it. That is the route to a genuine throttle: the same model, a different service
+tier, and a ceiling four requests away rather than four hundred.
+
+**Not yet run, and recorded as owed rather than assumed.** Which field LiteLLM 1.104.2 passes to Bedrock to
+select the latency-optimized tier is unverified, and a wrong field would silently use the standard quota and
+produce no throttle at all.
 
     # The real throttle, once per release, with the provider's own request id in the record.
     OI_MAX_TOKENS=100000 oi restart api       # far above the per-model TPM quota

@@ -451,6 +451,39 @@ request at 160ms each is not affordable with a subprocess and is nearly free wit
 fail-closed and right for a compliance product, and it turns one broken component into an outage; spooling
 locally keeps the product up and makes the record eventual. That choice belongs with whoever builds the writer,
 and it is recorded rather than guessed.
+## 7g. Provoking a throttle, and a recommendation that did not survive being tested
+
+**The recommendation was wrong and the fix is recorded here.** Section 5 of the defect list above proposed
+provoking a genuine provider throttle through Bedrock's admission arithmetic: an oversized `max_tokens` would
+deduct more than the per-model quota at admission and earn a real `ThrottlingException`, deterministically, with
+no new component.
+
+**Bedrock validates `max_tokens` against the model's limit before any quota arithmetic.** Measured:
+
+    max_tokens=4200000 -> 400 BadRequestError: The maximum tokens you requested exceeds the model limit of
+                              10000. Try again with a maximum tokens value that is lower than 10000.
+
+**The quotas themselves were then read**, and they vary by two orders of magnitude:
+
+| Model tier | Tokens per minute |
+|---|---|
+| Nova Lite, on-demand | 4,000,000 |
+| Nova Pro, on-demand | 1,000,000 |
+| **Nova Pro V1, latency-optimized on-demand** | **40,000** |
+| AI21 Jamba 1.5 Large | 30,000 |
+
+**So a real throttle needs load, and the cheapest honest route is the smallest quota rather than the biggest
+request.** Nova Lite at four million tokens per minute would take roughly four hundred maximum-size requests;
+the latency-optimized Nova Pro tier at forty thousand takes about four, because a single request may ask for up
+to ten thousand. Same provider, same classification path, a ceiling that is reachable.
+
+**What is still unverified, and it is the part that could waste a day:** which field LiteLLM 1.104.2 passes to
+Bedrock to select that tier. A wrong field would silently use the standard quota, produce no throttle, and look
+like a budget bug.
+
+**The lesson is the one this phase keeps teaching.** The admission-arithmetic method was the cheapest-looking
+option, it was recommended on the strength of vendor documentation, and it took one request costing nothing to
+disprove. It had been carried into the runbook as though it were settled.
 ## 8. What we are deliberately not building
 
 - **A separate router process.** One Python process with routing behind a pure function. The pure function is
