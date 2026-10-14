@@ -252,7 +252,6 @@ async def ask(request: Request):
         data_class=data_class,
         task=body.get("task") or "",
         user_wants_stronger=bool(body.get("stronger")),
-        passages=result.passages,
         model_name=model,
         # The lane the configured model actually runs in, from the manifest. Escalation selects a
         # stronger model; not escalating selects the ordinary one, which is still remote on a cloud
