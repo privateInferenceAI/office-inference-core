@@ -174,4 +174,39 @@ the thresholds 1.5/5/30 and 20/30/180, `num_retries: 0`, and the holdback with i
 
 **Round 3 re-tests from the manual**, including everything above.
 
+### Fixed after round 2 reported, from the same round's evidence
+
+**A regression in the degraded record, caught by the round-2 executor's last measurement.** Rows written after
+the retry work read `reason: 'unclassified'` with an empty `errors` list: the provider error was being swallowed
+again. Two causes, both mine and both in the same function.
+
+The loop's fall-through returned a **two-tuple where the caller unpacked three**, and it fell back to a bare
+`unclassified` when the loop broke before recording anything — so a real throttle could still be recorded as an
+unrecognised failure, which is precisely the defect the retry fix had removed one layer down. It now returns the
+three values the caller expects, and never discards a classification it already made. When no attempt was made
+at all, it says `timeout`, which is true, rather than `unclassified`, which reads as a failure nobody understands.
+
+The handler then built the audit row with **`errors=[]` and `lane="frontier"` hardcoded**, so the attempts the
+loop had carefully collected were thrown away at the last step and a local-lane deployment would have written a
+false residency claim. `_generate` hands its attempts back now, and the row carries them and the lane that
+answered.
+
+Verified by provoking a real throttle afterwards:
+
+    reason    | attempts |   lane   | errors
+    ---------- | -------- | -------- | ------
+     throttled | 3        | frontier | [{"reason": "throttled", "status": 429, "attempt": 1, "matched": "throttling"...
+
+**The lesson is the one this phase keeps repeating.** The retry fix was correct and I verified it by reading it.
+The record still lost the data, one function away, and only a measurement of what the record actually contained
+found it.
+
+### Documentation corrected from the same round
+
+Section 9 counted six services and two healthy; the box has seven and three without a healthcheck. The corpus
+point count was a recorded output from a smaller corpus. Section 18 gained the note that the next documented
+command fails with `Connection refused` for tens of seconds after a restart, which reads like a configuration
+problem rather than an impatient one.
+
+
 
