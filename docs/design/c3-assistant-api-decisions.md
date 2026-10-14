@@ -398,6 +398,59 @@ it sees the assembled response after delivery, which is what a row wants. It is 
 to verify. It is verified, and the answer is narrower than the wording: **the API's own writer must block
 in-stream.** A gateway may or may not, depending on which hook it uses and which mode it is in, and a control
 whose behaviour depends on two settings nobody reads is not one to promise a client.
+## 7f. The audit write, measured, and what the measurement rules out
+
+**The measurement.** Nine streamed requests against the live deployment gave a time to first token of 231ms at
+the minimum, 260ms at the median and 359ms at p95, with retrieval between them costing 0 to 9ms. Total time ran
+498ms to 2904ms. Those are the numbers `4.4`'s budget is built from, and they are for the **frontier lane**:
+this deployment answers from Bedrock, and the office build's local llama.cpp server will need its own figures,
+where prompt processing is compute-bound on CPU and the first-token time is a different shape entirely.
+
+**Then the anomaly.** Wall-clock time exceeded what the server reported by 350 to 650ms. Chasing it produced
+the finding: the API writes its audit rows by starting a Python interpreter, and the breakdown is
+
+| Piece | Cost |
+|---|---|
+| interpreter start | 9 ms |
+| `import psycopg` | 124 ms |
+| importing the audit tool | 10 ms |
+| the write itself | 17 ms |
+
+**The driver import is the cost, and it cannot be optimised away.** The modules are already precompiled in the
+image, and a warm import still costs about 130ms, so this is psycopg's own import graph rather than compilation.
+Any subprocess that writes a row with that driver pays it. This is what rules out the cheapest-looking fix:
+there is no "make the subprocess cheap" option, only "do not spawn one".
+
+**Where it sits, which is worse than assumed at first.** Both paths block. In the non-streaming handler the
+write is before the response is returned. In the streaming handler it is before the `done` frame. So every
+request waits roughly 160ms for a record to be written after the model has already finished.
+
+**The decision: keep the subprocess, and defer a success row's write off the response path.** State the cost
+and accept it. The alternative considered was a resident writer service appending over a Unix socket, which
+makes a write microseconds and is what would make the two-write design below affordable.
+
+**A fallback to a subprocess alongside a resident writer was considered and rejected for now**, and the reason
+is worth recording because it is not obvious. A fallback that writes the row itself creates a **second writer**,
+and two rows computed from the same predecessor hash fork the chain: the verifier then reports a break that is
+indistinguishable from tampering. The failure that bites is not the writer being dead but the writer being
+*slow*, because the API times out, writes directly, and then the writer finishes its append.
+
+**If it is built, the serialization belongs in the database rather than in the process topology.** The writer
+holds a Postgres advisory lock while appending; the fallback tries the same lock and waits if the writer holds
+it. Then there is never a second writer whichever path runs, and the invariant is enforced by the component that
+can enforce it atomically. That also turns "unavailable" into "cannot acquire the lock", which is a fact rather
+than a timeout guess.
+
+**The gap this leaves, and it is the real reason to build the writer.** The research design for `4.4` is
+write-ahead: a refusal recorded before the error returns, an intent row before the provider call, a completion
+row after. What exists is **one row per model call, written after it finishes**. The intent row is the one that
+has to be synchronous, because it is evidence that a call was permitted before it happened. Two writes per
+request at 160ms each is not affordable with a subprocess and is nearly free with a resident writer.
+
+**One decision left open deliberately.** If both paths to the audit are unavailable, refusing the request is
+fail-closed and right for a compliance product, and it turns one broken component into an outage; spooling
+locally keeps the product up and makes the record eventual. That choice belongs with whoever builds the writer,
+and it is recorded rather than guessed.
 ## 8. What we are deliberately not building
 
 - **A separate router process.** One Python process with routing behind a pure function. The pure function is
