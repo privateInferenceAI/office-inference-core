@@ -34,7 +34,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -63,23 +62,32 @@ REQUIRED_IN_HEALTH = ("status", "deployment_id")
 
 
 def fetch(url: str, timeout: int = 30) -> dict:
-    """The schema the service serves, over the wire."""
+    """The schema the service serves, over the wire.
+
+    **`urllib`, not `curl`, and the first version shelled out to curl.** It ran on a workstation and
+    failed inside the service's own image with "curl is not installed", which is where this has to run:
+    the API is on an internal network with no published port, so the check is executed from a container
+    beside it. Reaching a URL is something Python already does, and the project's probes use the same
+    library, so there is one way this codebase makes an HTTP call rather than two.
+    """
+    import urllib.error
+    import urllib.request
+
     base = url.rstrip("/")
+    target = f"{base}/openapi.json"
     try:
-        out = subprocess.run(
-            ["curl", "-sS", "--max-time", str(timeout), f"{base}/openapi.json"],
-            capture_output=True, text=True, check=True,
-        ).stdout
-    except FileNotFoundError:
-        raise SystemExit("curl is not installed. Use --offline, or run this where curl exists.")
-    except subprocess.CalledProcessError as exc:
-        raise SystemExit(f"could not reach {base}/openapi.json: {exc.stderr.strip()}")
-    if not out.strip():
-        raise SystemExit(f"{base}/openapi.json returned nothing. Is the service up?")
+        with urllib.request.urlopen(target, timeout=timeout) as response:
+            body = response.read().decode()
+    except urllib.error.HTTPError as exc:
+        raise SystemExit(f"{target} answered HTTP {exc.code}. The service is up and refusing this path.")
+    except urllib.error.URLError as exc:
+        raise SystemExit(f"could not reach {target}: {exc.reason}")
+    if not body.strip():
+        raise SystemExit(f"{target} returned nothing. Is the service up?")
     try:
-        return json.loads(out)
+        return json.loads(body)
     except json.JSONDecodeError as exc:
-        raise SystemExit(f"{base}/openapi.json did not return JSON: {exc}")
+        raise SystemExit(f"{target} did not return JSON: {exc}")
 
 
 def generate_offline() -> dict:
