@@ -1325,10 +1325,21 @@ to whoever last ran the validator:
 
 ```
 python3 scripts/validate_manifests.py
-ok   dev-cloud.yaml  (profile=cloud, packs=['core'])
-  ! dev-cloud.yaml: lanes.frontier.redaction and access.egress.redaction disagree, and access.egress is
-    the one the egress gate reads: declared False, enforced 'on'. …
+ok   dev-cloud.yaml      (profile=cloud, packs=['core'])
+ok   dev-office.yaml     (profile=office, packs=['core'])
+  ...
+6/6 manifests valid; 8 packs known
 ```
+
+**On a manifest where the two disagree, the same run prints a `!` line instead:**
+
+```
+  ! some-manifest.yaml: lanes.frontier.redaction and access.egress.redaction disagree, and access.egress is
+    the one the egress gate reads: declared False, enforced 'on'.
+```
+
+**This deployment prints no such line, because its two declarations agree.** The example above is the clean
+run; the warning is what a divergent manifest produces.
 
 **A warning, never a failure, and the direction is stated.** A manifest that is working today must not stop
 working on upgrade, so a divergence does not make a manifest invalid. What it does do is say which way the
@@ -4368,6 +4379,17 @@ wins.
 
 | Variable | Default | What it decides | Read by |
 |---|---|---|---|
+| `OI_FIRST_TOKEN_SECONDS` | `1.5` | Time to first token before the first-token threshold trips, frontier lane | the API's budget |
+| `OI_STALL_SECONDS` | `5` | Gap between chunks before the stall threshold trips | the API's budget |
+| `OI_TOTAL_SECONDS` | `30` | The whole deadline, anchored at the client's ask | the API's budget |
+| `OI_LOCAL_FIRST_TOKEN_SECONDS` | `20` | The same three for the local lane, where a CPU model is a different shape | the API's budget |
+| `OI_LOCAL_STALL_SECONDS` | `30` | | the API's budget |
+| `OI_LOCAL_TOTAL_SECONDS` | `180` | | the API's budget |
+| `OI_DELIVERY_RESERVE_SECONDS` | `1.2` | Held back so a degraded answer still fits inside the deadline | the API's budget |
+| `OI_MAX_ATTEMPTS` | `3` | Attempts before giving up, all inside the one deadline | the API's budget |
+| `OI_MAX_TOKENS` | `700` | The output ceiling sent to the model | the API |
+| `OI_PASSAGES` | `6` | How many passages retrieval asks for | the API |
+| `OI_STREAM_PING_SECONDS` | `15` | The SSE heartbeat interval | the API's streaming path |
 | `RERANK_ENABLED` | `true` | Whether the reranker runs at all. Only the exact string `false` disables it | retrieval, so `eval` and the probes |
 | `RERANK_DEPTH` | `50` | The **ceiling** on how many fused candidates the reranker scores. The real number is whatever the arms returned, up to this | retrieval |
 | `RERANK_BUDGET_MS` | `5000` | The budget a rerank is measured against, and the HTTP timeout is derived from it (`budget/1000 + 5` seconds) | retrieval |
