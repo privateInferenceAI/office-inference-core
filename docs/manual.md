@@ -3255,9 +3255,22 @@ class in force is `redacted` rather than `hash`. It is corrected here because th
 narrower claim than the system can support, and a reader who checked it would have found the record holding
 more than the page promised.
 
-The gate and the redaction run where a frontier request is assembled. **The component that assembles one is the
-assistant API, built in C3 and documented at 13g**, which calls this gate on every request. The probe and the test
-suite exercise it directly when you want to look at the gate on its own rather than through a question.
+The gate and the redaction run where a frontier request is assembled. **The component that assembles one is
+the assistant API, built in C3 and documented at 13g**, which consults this gate before any request reaches
+a remote lane.
+
+**Two things worth being precise about, because a boundary that covers less than a reader assumes is worse
+than one whose shape they know.**
+
+The gate is consulted on **every** request that would reach a remote model, including the ordinary one, and
+a class the manifest does not permit is refused with `lane: none` rather than answered anyway. That was false
+until the C3 panel found it: the first implementation consulted the gate only when a trigger escalated, so a
+plain request with a forbidden class went to the provider with `escalated: false` and no notice.
+
+**The request-side redaction in this section is a module the probes exercise directly, and the API does not
+call it yet.** The stream-side redaction in 13g is in the API and runs on every frame. Until the
+request-side one is wired in, the control on the way out is the gate, and `egress_acceptance.py` proves the
+module rather than a path the service takes. Recorded rather than left to be discovered.
 
 **If it breaks.**
 

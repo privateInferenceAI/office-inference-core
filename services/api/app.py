@@ -331,7 +331,11 @@ async def ask(request: Request):
         audit("model_call", session.subject, session.role, "denied", facts, model=model)
         return JSONResponse(
             budget_module.degraded(reason, _degrade_detail(reason), result.passages, request_budget,
-                                   attempts, request_budget.timed_out(), False),
+                                   attempts, request_budget.timed_out(), False,
+                                   # The lane that answered, not a default. A degraded row on a local-lane
+                                   # deployment that said `frontier` would put a false residency claim in
+                                   # the record. Found by the C3 panel.
+                                   decision.lane),
             status_code=200)
 
     verified = citations.verify(answer, result.passages)
@@ -670,7 +674,7 @@ async def _frames(session, permit, model: str, question: str, result, requested_
         # No frame has gone out yet, so a degraded answer is still possible and is the better outcome.
         yield frame("degraded", budget_module.degraded(kind["reason"], _degrade_detail(kind["reason"]),
                                                       result.passages, request_budget, attempt,
-                                                      request_budget.timed_out(), False))
+                                                      request_budget.timed_out(), False, lane))
         return
 
     try:
