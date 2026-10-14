@@ -616,7 +616,7 @@ skip    016_retention_policy.sql (already applied)
 0 migration(s) applied, 16 already present
 ```
 
-On a fresh machine the same command prints `applied` for each in order and `15 migration(s) applied, 0
+On a fresh machine the same command prints `applied` for each in order and `16 migration(s) applied, 0
 already present`. Migrations are ordered and checksummed, and editing one that has already been applied
 is refused rather than silently accepted, so a schema change means a new file:
 
