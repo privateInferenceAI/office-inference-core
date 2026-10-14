@@ -240,7 +240,13 @@ async def ask(request: Request):
     # **The gate first, then the triggers choosing a model inside what it permitted.** The data class is
     # the deployment's declared content default: what a request IS, is the client's declaration, and the
     # record carries the roots retrieval actually reached beside it.
-    data_class = ((STATE.get("manifest") or {}).get("content") or {}).get("default", "internal")
+    # **Read from the access block, and the first version read `content.default` instead.** That field is a
+    # CONTENT MODE (`hash`, `redacted`, `full`), not a data class, so the gate compared `hash` against the
+    # permitted classes and refused every request on the deployment: three 403s and a routing decision to a
+    # lane that did not exist. A manifest with no data-class declaration now falls back to the most
+    # restrictive class rather than to a middle one, so an undeclared deployment does not send content off
+    # the box by omission.
+    data_class = ((STATE.get("manifest") or {}).get("access") or {}).get("data_class") or "regulated"
     decision = routing.route(
         STATE.get("manifest") or {},
         data_class=data_class,

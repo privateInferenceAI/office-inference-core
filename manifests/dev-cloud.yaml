@@ -48,6 +48,11 @@ content:
     public: full
     internal: redacted
 access:
+  # What a request on this deployment IS, which decides whether a remote lane may see it. The
+  # egress block below says which classes may leave; this says which class a request carries.
+  # **Absent means the most restrictive class**, so a deployment that forgets this does not send
+  # content off the box by omission.
+  data_class: internal
   # The declared permission model, SEC-ACL-002. A development deployment, so it declares the model the
   # probe needs rather than one belonging to a client.
   #
