@@ -61,3 +61,32 @@ interface:
   show_lane_indicator: true
 support:
   response_window: business hours, 4 hours
+
+# What this deployment lets a person start. The app's Do screen is built from this block, and the routing
+# trigger reads it too, so the thing a client sees offered and the thing that escalates a model cannot
+# drift apart.
+#
+# **`tier` is where the email-versus-codebase decision is made.** A task that needs the cheap model names
+# one role; a task that synthesises across documents names another. The interface sends a task and never a
+# model, which is what keeps "why did this content reach a provider" answerable with a declared permission
+# rather than with a heuristic.
+agentic:
+  tasks:
+    - id: draft
+      label: Draft a reply
+      description: Write a reply to a message, using your own documents as the source.
+      tier: front_desk
+      touches: [documents, mail.draft]
+      needs_approval: true
+    - id: reconcile
+      label: Reconcile two documents
+      description: Compare the figures in two documents and list where they disagree.
+      tier: analyst
+      touches: [documents]
+      needs_approval: false
+    - id: summarise_across_documents
+      label: Summarise across several documents
+      description: Read a set of documents and write one summary that cites each source.
+      tier: reader
+      touches: [documents]
+      needs_approval: false

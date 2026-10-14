@@ -7,6 +7,12 @@ audit row that said `egress_allowed: false` while the content left the building.
 Found by the C3 panel, who ran a second API container against a manifest copy with a forbidden class and read
 both answers. **The same shape as the redaction defect found the same way: a control implemented on the path
 somebody was looking at.** So this asserts the guard on BOTH paths rather than the one it was written for.
+
+**One assertion moved to `answer.py`, and the move is the fix rather than a concession.** The guard existed
+twice, in two handlers, and one copy was missing. The pipeline now lives in one module that every path calls,
+so the guard exists once and cannot be present on one endpoint and absent on another. The assertions below
+check that the extraction actually happened, because a shared pipeline that one handler does not use is a
+shared pipeline that has not fixed anything.
 """
 from __future__ import annotations
 
@@ -15,11 +21,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 API = ROOT / "services" / "api" / "app.py"
+PIPELINE = ROOT / "services" / "api" / "answer.py"
 
 
-def test_the_json_handler_refuses_a_lane_that_may_not_answer():
-    source = API.read_text()
-    assert 'if decision.lane == "none" or (' in source, "the JSON handler has no lane guard"
+def test_the_shared_pipeline_refuses_a_lane_that_may_not_answer():
+    """The JSON path's guard, after the extraction. One implementation, reached by every path."""
+    source = PIPELINE.read_text()
+    assert 'if decision.lane == "none" or (decision.lane == "local"' in source, (
+        "the shared pipeline has no lane guard, so every path that answers a question lost it at once")
 
 
 def test_the_streaming_handler_refuses_one_too():
@@ -27,6 +36,27 @@ def test_the_streaming_handler_refuses_one_too():
     source = API.read_text()
     assert 'if stream_decision.lane == "none" or (' in source, (
         "the streaming handler computes a routing decision and never checks it")
+
+
+def test_the_json_handler_goes_through_the_shared_pipeline():
+    """**The structural fix for the class of defect this file was written for.**
+
+    Two handlers with two copies of a guard is how the guard goes missing from one of them. `/ask` calls the
+    same pipeline a job does, so there is one implementation and no second copy to keep in step.
+    """
+    source = API.read_text()
+    assert "answer_module.prepare(" in source, (
+        "the JSON handler does not go through the shared pipeline, so the guards are duplicated again")
+
+
+def test_the_job_path_goes_through_it_as_well():
+    """A job is another way to ask a model a question, so it carries the same guards or it is the hole."""
+    source = API.read_text()
+    start = source.index("def _step_once(")
+    body = source[start:source.index("\n@app.", start)]
+    assert "answer_module.prepare(" in body, (
+        "the job step builds its own retrieval and routing path, which is where the next boundary defect "
+        "would live")
 
 
 def test_the_stream_refusal_happens_before_the_response_starts():
@@ -40,10 +70,14 @@ def test_the_stream_refusal_happens_before_the_response_starts():
 
 
 def test_every_routing_decision_is_read_at_least_once():
-    """The general shape of the defect: a decision computed and then dropped."""
-    source = API.read_text()
-    for name in ("decision", "stream_decision"):
-        assert source.count(name) > 1, f"{name} is assigned and never used again"
+    """The general shape of the defect: a decision computed and then dropped.
+
+    **Two files, because there are two places a decision is made now.** The streaming path still computes
+    its own, because a stream has to decide before it opens; everything else goes through the shared
+    pipeline. A count of one in either file means a decision was taken and nothing acted on it.
+    """
+    assert API.read_text().count("stream_decision") > 1, "stream_decision is assigned and never used again"
+    assert PIPELINE.read_text().count("decision") > 1, "the pipeline's decision is assigned and never read"
 
 
 def test_the_stream_refusal_reaches_the_record():
@@ -53,4 +87,14 @@ def test_the_stream_refusal_reaches_the_record():
     block = source[guard:guard + 1400]
     assert 'audit("access"' in block, "the stream refusal is not recorded"
     assert 'egress_allowed=False' in block, "and the record does not say egress was refused"
+
+
+def test_the_shared_pipeline_records_its_refusal_too():
+    """The same right, on the path every other endpoint takes. Asserted separately, because the streaming
+    assertion above would pass while this one was broken."""
+    source = PIPELINE.read_text()
+    guard = source.index('if decision.lane == "none" or (')
+    block = source[guard:guard + 900]
+    assert 'audit("access"' in block, "the shared refusal is not recorded"
+    assert "egress_allowed=False" in block, "and the record does not say egress was refused"
 

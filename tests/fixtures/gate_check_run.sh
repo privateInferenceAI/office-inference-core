@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the data-boundary probe against a deployment whose class may NOT leave.
+# Run a data-boundary probe against a deployment whose class may NOT leave.
 #
 # **The setup is the probe.** A boundary is only testable against a request that must be refused, and the deployed
 # manifest permits the classes this box uses. So this starts a second API container on a copy of the manifest with
@@ -9,8 +9,19 @@
 # **The confirmation step is not optional.** Without it an API that fell back to the real manifest refuses for a
 # different reason and the probe passes without testing anything. That happened once while reproducing the
 # streaming bypass by hand.
+#
+# Usage:
+#     bash tests/fixtures/gate_check_run.sh           the request path: /ask and /ask/stream
+#     bash tests/fixtures/gate_check_run.sh --jobs     the job path as well, against the same second deployment
+#
+# **One second deployment serves both probes**, because they are testing the same boundary and starting a
+# third container for the second one would only add something else to go wrong. They run in sequence rather
+# than together: the earlier version of this file started containers that outlived the run.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+
+PROBE=gate_check
+[ "${1:-}" = "--jobs" ] && PROBE=jobs
 
 CLASS="${GATE_CHECK_CLASS:-regulated}"
 NAME=gate-check-tmp-api
@@ -53,4 +64,5 @@ done
 
 docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
   -v "$PWD:/w" -w /w --env-file rendered/env \
-  -e "GATE_CHECK_CLASS=$CLASS" --entrypoint python oi-core/session:local /w/tests/fixtures/gate_check.py
+  -e "GATE_CHECK_CLASS=$CLASS" -e "JOB_PROBE_CLASS=$CLASS" \
+  --entrypoint python oi-core/session:local "/w/tests/fixtures/${PROBE}_probe.py"

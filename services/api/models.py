@@ -103,6 +103,11 @@ class Answer(BaseModel):
 
     kind: Optional[Literal["answer"]] = Field(
         default=None, description="absent on a real answer; `degraded` on a degradation")
+    request_id: Optional[str] = Field(
+        default=None,
+        description="**the id this answer is recorded under.** A client that reports a lane — 'left the "
+                    "building' — needs to name the row that proves it, and without this the indicator's "
+                    "claim and the record's entry are two statements nothing can compare")
     answer: str
     model: str = Field(description="the ROLE, as the manifest names it, not the model that ran")
     resolved_model: str = Field(
@@ -252,3 +257,69 @@ class Health(BaseModel):
     deployment_id: str
     registry_declared: Optional[bool] = None
     default_model_role: str
+
+
+# --------------------------------------------------------------------------- jobs
+
+
+class JobStep(BaseModel):
+    """One attempt. **`failure` is typed rather than prose**, because an operator counts it and a client
+    branches on it. 'It failed' is neither."""
+
+    step_id: str
+    attempt: int
+    name: str
+    state: Literal["running", "succeeded", "failed"]
+    failure: Optional[dict] = Field(
+        default=None,
+        description="kind, detail, and whether retrying could help. Absent on an attempt that worked")
+    lane: Optional[str] = None
+    model: Optional[str] = None
+    duration_ms: Optional[int] = None
+
+
+class Job(BaseModel):
+    """Work with an identity and a history.
+
+    **`terminal` is told to the client rather than left to be inferred.** A screen that guesses whether a
+    job has finished gets it wrong exactly once, and then nobody trusts the spinner.
+    """
+
+    job_id: str
+    state: Literal["queued", "running", "paused", "awaiting_approval", "succeeded", "failed",
+                   "cancelled"]
+    task: str
+    input: str
+    attempts: int
+    steps: list[JobStep]
+    terminal: bool
+    time_budget_s: int
+    attempt_budget: int
+    submitted_by: str
+    role: str
+    data_class: str
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    duration_ms: Optional[int] = None
+    outcome_reason: Optional[str] = Field(
+        default=None,
+        description="why it ended, when it did not succeed. A typed reason such as attempts_exhausted")
+    result: Optional[dict] = Field(
+        default=None,
+        description="the answer, when a step produced one. A client that comes back gets the result rather "
+                    "than only the history of producing it")
+
+
+class Task(BaseModel):
+    """A thing this deployment can be asked to do.
+
+    **Read from the manifest.** A deployment with no agentic pack declares none, and the interface then
+    offers none, which is the honest outcome rather than a menu of things that cannot run.
+    """
+
+    id: str
+    label: str
+    description: str = ""
+    tier: str = Field(default="", description="the model role that handles it, from the manifest")
+    touches: list[str] = Field(default_factory=list)
+    needs_approval: bool = False

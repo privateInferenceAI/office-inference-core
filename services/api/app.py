@@ -29,6 +29,7 @@ import os
 import time
 import subprocess
 import sys
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -68,6 +69,15 @@ import streaming  # noqa: E402
 # been tested against a live deployment. `tests/test_api_contract.py` fails when a declaration and the
 # code that produces the payload stop agreeing.
 import models as contract  # noqa: E402
+
+# **The pipeline every path that answers a question goes through.** `/ask`, `/ask/stream` and a job all
+# answer questions, and the guards, their order, and the recording live in `answer.py` rather than in each
+# handler. C3 shipped two defects whose shape was two implementations of one thing.
+import answer as answer_module  # noqa: E402
+
+# **Work with an identity and a history.** A job is not a longer answer: it is a record that can be
+# watched, stopped, and read afterwards, and the state machine that keeps that honest is in this module.
+import jobs as jobs_module  # noqa: E402
 
 GATEWAY_URL = os.environ.get("OI_GATEWAY_URL", "http://litellm:4000")
 DEPLOYMENT_ID = os.environ.get("DEPLOYMENT_ID", "unknown")
@@ -212,9 +222,19 @@ async def lifespan(app: FastAPI):
     STATE["manifest"] = json.loads(mp.read_text()) if mp.exists() else {}
     STATE["services"] = ingest.Services()
     STATE["store"] = session_module.open_store()
+    # What the shared answer pipeline needs, gathered once. `answer.py` takes this rather than reading the
+    # app's globals, which is what lets the pipeline be tested without a running service.
+    STATE["ctx"] = answer_module.Context(services=STATE["services"], manifest=STATE["manifest"],
+                                         passages=PASSAGES)
+    # **The job store, and the migration runs at startup rather than on a first request.** A table that
+    # appears halfway through the first job is a table that did not exist when the job was created.
+    migrations = os.environ.get("OI_MIGRATIONS", "/app/db/migrations")
+    STATE["jobs"] = jobs_module.open_store(migrations_dir=migrations)
     print(f"api ready: registry={registry_path} model_role_default={DEFAULT_MODEL_ROLE} "
-          f"answers_with={model_for(os.environ.get('OI_DEFAULT_API_ROLE', 'viewer'))}", flush=True)
+          f"answers_with={model_for(os.environ.get('OI_DEFAULT_API_ROLE', 'viewer'))} "
+          f"jobs={'durable' if getattr(STATE['jobs'], 'durable', False) else 'in-memory'}", flush=True)
     yield
+    STATE["jobs"].close()
     STATE["store"].close()
 
 
@@ -257,10 +277,15 @@ def _resolve(request_token: str):
           "description": "retrieval failed, or the model could not be reached after the budget was spent"},
 })
 async def ask(request: Request):
-    """A question in, a cited answer out."""
-    # **The arrival clock, taken before anything else happens.** The budget is anchored here so
-    # retrieval counts against the documented deadline. Taking it after retrieval made the time the
-    # client actually waited invisible to the thing that is supposed to bound it.
+    """A question in, a cited answer out.
+
+    **The pipeline is in `answer.py` and this is a caller of it.** That is deliberate rather than tidy:
+    this endpoint, the streaming one, and a job all answer questions, and C3 shipped two defects whose
+    shape was two implementations of one thing. One implementation is how that stops.
+    """
+    # **The arrival clock, taken before anything else happens.** The budget is anchored here so retrieval
+    # counts against the documented deadline. Taking it after retrieval made the time the client actually
+    # waited invisible to the thing that is supposed to bound it.
     asked_at = time.monotonic()
     try:
         body = await request.json()
@@ -268,207 +293,326 @@ async def ask(request: Request):
         return JSONResponse({"error": "the request body is not JSON"}, status_code=400)
 
     token = body.get("session") or request.headers.get("X-OI-Session", "")
-    question = (body.get("question") or "").strip()
-    if not question:
-        return JSONResponse({"error": "no question was asked"}, status_code=400)
-
-    # The session, before anything else. No session is no identity, and no identity is no answer.
+    # A request id, so the lane the interface reports can be tied to the row in the chain that recorded
+    # it. Minted here rather than at the model call because the refusal paths need one too.
+    request_id = uuid.uuid4().hex
     try:
-        session = _resolve(token)
-    except session_module.SessionError as exc:
-        return JSONResponse({"error": str(exc), "kind": "no_session"}, status_code=401)
+        session, permit, model, result, decision, data_class = answer_module.prepare(
+            token=token, question=(body.get("question") or "").strip(), body=body,
+            ctx=STATE["ctx"], resolve=_resolve, model_for=model_for, role_lane=role_lane,
+            frontier_model_for=frontier_model_for, local_lane_available=local_lane_available,
+            audit=audit, endpoint="/ask")
+    except answer_module.Refused as refused:
+        return JSONResponse({**refused.payload, "request_id": request_id}, status_code=refused.status)
 
-    # A request that supplies its own role is refused, and the refusal is in the chain before this returns.
-    supplied = next((field for field in ("role", "roles", "actor_role", "groups", "roots", "acl")
-                     if body.get(field) is not None), None)
-    if supplied:
-        try:
-            session_module.check_role_claim(session, supplied, body.get(supplied), dev=True)
-        except session_module.SessionError as exc:
-            audit("access", session.subject, str(body.get(supplied)), "denied",
-                  {"supplied_field": supplied, "session_role": session.role,
-                   "session_id": session.session_id, "refusal": "a request may not supply its own authority",
-                   "endpoint": "/ask"})
-            # AIP-211: a permission refusal says the permission was denied OR the resource might not exist.
-            # A 404 instead of a 403 is worse for the operator and no better for secrecy, which is Google's
-            # stated position and the reason the wording is theirs.
-            return JSONResponse(
-                {"error": "Permission denied on this resource (or it might not exist). A role comes from an "
-                          "authenticated session and never from a request field.",
-                 "kind": "refused_authority_claim"},
-                status_code=403)
-
-    permit = session.permit()
-    role = body.get("model_role") or os.environ.get("OI_DEFAULT_API_ROLE", "viewer")
-    model = model_for(role)
-
-    # Retrieval, with the filter inside the query. A failure here is a refusal rather than an empty answer,
-    # because an empty answer reads as a corpus that does not contain the thing.
-    try:
-        result = retriever.search(STATE["services"], question, permit.role, limit=PASSAGES, permit=permit)
-    except Exception as exc:  # noqa: BLE001 - the message is the response
-        audit("access", session.subject, session.role, "error",
-              {"stage": "retrieval", "error": type(exc).__name__, "session_id": session.session_id})
-        return JSONResponse({"error": f"retrieval failed: {exc}", "kind": "retrieval_failed"}, status_code=502)
-
-    if not result.passages:
-        audit("access", session.subject, session.role, "denied",
-              {"stage": "retrieval", "reason": "no passage the session may read matched",
-               "session_id": session.session_id, "roots": sorted(permit.roots)})
-        return JSONResponse(
-            {"answer": "No document you may read answers this question.", "citations": [],
-             "kind": "no_source", "role": session.role, "roots": sorted(permit.roots)},
-            status_code=200)
-
-    # **The gate first, then the triggers choosing a model inside what it permitted.** The data class is
-    # the deployment's declared content default: what a request IS, is the client's declaration, and the
-    # record carries the roots retrieval actually reached beside it.
-    # **Read from the access block, and the first version read `content.default` instead.** That field is a
-    # CONTENT MODE (`hash`, `redacted`, `full`), not a data class, so the gate compared `hash` against the
-    # permitted classes and refused every request on the deployment: three 403s and a routing decision to a
-    # lane that did not exist. A manifest with no data-class declaration now falls back to the most
-    # restrictive class rather than to a middle one, so an undeclared deployment does not send content off
-    # the box by omission.
-    data_class = ((STATE.get("manifest") or {}).get("access") or {}).get("data_class") or "regulated"
-    decision = routing.route(
-        STATE.get("manifest") or {},
-        data_class=data_class,
-        task=body.get("task") or "",
-        user_wants_stronger=bool(body.get("stronger")),
-        model_name=model,
-        # The lane the configured model actually runs in, from the manifest. Escalation selects a
-        # stronger model; not escalating selects the ordinary one, which is still remote on a cloud
-        # deployment. Conflating those made every unescalated request fail where there is no local model.
-        default_lane=role_lane(role),
-        frontier_model=frontier_model_for(role),
-    )
-    # **`none` means no lane may answer, and it must refuse rather than fall through.** The first version
-    # guarded only the `local` case, so a decision of `none` skipped the model guard and the ordinary
-    # remote model answered anyway, while the notice claimed no answer could be produced. That is the
-    # worst combination: a refusal that is not one, with a message saying it was.
-    #
-    # Found by the C3 panel's fidelity checker, who read the guard and asked what `none` did.
-    if decision.lane == "none" or (decision.lane == "local" and not local_lane_available()):
-        # **This deployment has no local lane**, so a decision to answer locally would name a model that
-        # does not exist. The honest outcome is a refusal that says so, recorded, rather than a notice
-        # claiming an answer that cannot be produced. A deployment that declares a local model gets the
-        # announced downgrade instead.
-        facts = {"stage": "routing", "reason": decision.reason,
-                 "lane": decision.lane, "data_class": data_class,
-                 "escalation_requested": decision.escalation_requested,
-                 "session_id": session.session_id}
-        # The column as well as the payload: a refusal that records its class only inside JSON is a
-        # refusal an auditor cannot count by class. Found by the C3 panel, who read the row.
-        audit("access", session.subject, session.role, "denied", facts,
-              data_class=data_class, egress_allowed=False)
-        return JSONResponse(
-            {"error": "Permission denied on this resource (or it might not exist). "
-                      "This request needs a lane this deployment does not permit and has no "
-                      "local model to answer with.",
-             "kind": "no_permitted_lane", "reason": decision.reason,
-             "notice": decision.notice},
-            status_code=403)
-    # **The lane decides the thresholds.** A local model is a different shape from a remote one, and
-    # borrowing the frontier numbers would mark healthy local answers as failures. The arrival clock is
-    # passed through so the deadline stays anchored where the client asked, not where routing finished.
     request_budget = budget_module.Budget.for_lane(decision.lane, started=asked_at)
-    answer, generation = _generate(session, permit, model, question, result.passages, request_budget)
-    if answer is None:
-        # **A degraded answer rather than an error.** The research and this step's own design say the
-        # retrieved passages with a typed reason, because retrieval already did the expensive part and the
-        # client is entitled to their own material. A client whose data class forbids the frontier lane meets
-        # this path routinely, so it has to read like a feature rather than an outage.
+    generated, generation = _generate(session, permit, model, (body.get("question") or "").strip(),
+                                      result.passages, request_budget)
+    if generated is None:
         reason, kind, attempts, attempt_errors = generation if isinstance(generation, tuple) else (
             "unclassified", {}, 1, [])
-        facts = budget_module.audit_facts(
-            reason=reason, matched=(kind or {}).get("matched", ""), retryable=bool((kind or {}).get("retryable")),
-            # `threshold` is carrying None when no deadline tripped, and that is the honest value: a budget
-            # refusal is not a timeout, and recording one as a threshold would blur the three the spec
-            # exists to distinguish. The reason field already says what happened.
-            attempts=attempts, threshold=request_budget.timed_out(), budget=request_budget,
-            partial_output=False, errors=attempt_errors, lane=decision.lane,
-            data_class=data_class)
-        audit("model_call", session.subject, session.role, "denied", facts, model=model)
-        return JSONResponse(
-            budget_module.degraded(reason, _degrade_detail(reason), result.passages, request_budget,
-                                   attempts, request_budget.timed_out(), False,
-                                   # The lane that answered, not a default. A degraded row on a local-lane
-                                   # deployment that said `frontier` would put a false residency claim in
-                                   # the record. Found by the C3 panel.
-                                   decision.lane),
+        return JSONResponse(answer_module.degraded(
+            reason=reason, detail=_degrade_detail(reason), passages=result.passages,
+            request_budget=request_budget, attempts=attempts,
+            threshold=request_budget.timed_out(), partial_output=False, lane=decision.lane,
+            session=session, model=model, data_class=data_class, audit=audit,
+            audit_facts=budget_module.audit_facts(
+                reason=reason, matched=(kind or {}).get("matched", ""),
+                retryable=bool((kind or {}).get("retryable")), attempts=attempts,
+                threshold=request_budget.timed_out(), budget=request_budget, partial_output=False,
+                errors=attempt_errors, lane=decision.lane, data_class=data_class)).payload,
             status_code=200)
 
-    # **The answer is redacted before the client sees it, on this path too.** The streaming endpoint
-    # redacted from the start and this one did not, so the same question returned the PII canary in
-    # clear over `POST /ask` and redacted over `POST /ask/stream`. The canary fixture says in its own
-    # first line that if it ever appears in a response the deployment is not safe to show a client,
-    # and it appeared. Found by the review panel, who asked the question and read the answer.
-    #
-    # The order matters: the checks below run against what is SENT, not against what the model
-    # produced, so a citation is verified in the text the client will actually hold.
-    answer, redaction_report = redaction.redact(answer)
+    decided = answer_module.finish(
+        question=(body.get("question") or "").strip(), answer=generated, session=session, permit=permit,
+        model=model, result=result, decision=decision, data_class=data_class,
+        request_budget=request_budget, redaction_report=None, audit=audit,
+        resolved_model=resolved_model, request_id=request_id)
+    return JSONResponse(decided.payload, status_code=decided.status)
 
-    # **The record's prompt hash is of the REDACTED question, which is what the page promises.** The audit
-    # tool hashes the text it is handed, and the API was handing it the raw question, so `prompt_sha256` was a
-    # hash of the original: a comparable value, which is exactly what 13e says it must not be. A hash cannot be
-    # read back, but it can be compared against a guess, and confirming 'is this the number I think it is' needs
-    # only a comparison. Passed redacted now.
-    #
-    # Found by the C3 panel, who hashed both forms and showed the stored value matched the raw one.
-    _, question_report = redaction.redact(question)
-    redaction_report = redaction.Redaction(
-        counts={**redaction_report.counts,
-                **{k: redaction_report.counts.get(k, 0) + v for k, v in question_report.counts.items()}},
-        unverified_cards=redaction_report.unverified_cards + question_report.unverified_cards)
-    safe_question, _ = redaction.redact(question)
 
-    verified = citations.verify(answer, result.passages)
-    body_out = {
-        "answer": answer,
-        # **The role and the model are different facts.** `model` is the role the routing chose, which is
-        # what a manifest names; `resolved_model` is the provider model that role points at. Reporting
-        # only the role made the manifest swap that proves INF-ROLE-001 invisible from the answer: the
-        # client saw `analyst` before and after and could not tell the model had changed.
-        "model": model,
-        "resolved_model": resolved_model(model),
-        "role": session.role,
-        "roots": sorted(permit.roots),
-        "citations": [
-            {"index": n + 1, "doc_id": p.doc_id, "acl": p.acl, "page_start": p.page_start,
-             "page_end": p.page_end}
-            for n, p in enumerate(result.passages)
-        ],
-        "supported": [c.text for c in verified.claims if c.ok],
-        "unsupported": [{"text": c.text, "reason": c.reason, "detail": c.detail}
-                        for c in verified.refused],
-        # What the user is told, always, when there is something to tell. Decided 2026-10-14.
-        # What was redacted from this answer. Absent from the response until the panel found the leak;
-        # a client that wants to know whether a value was replaced has to be told.
-        "redactions": redaction_report.counts,
-        "notice": decision.notice,
-        "lane": decision.lane,
-        "escalated": decision.escalated,
-        # **Which trigger moved it, and why.** The manual promises a client can tell the user what escalated
-        # the request. The first version of this answer did not carry it: the trigger existed only in the audit
-        # row, so a client could say the stronger model answered but not what made it. Found by a probe that
-        # asserts every claim the manual makes, on its first run.
-        "trigger": decision.trigger,
-        "reason": decision.reason,
-        "denied": result.denied,
-        "disclosure": (result.disclosure.message if result.disclosure else ""),
-    }
-    audit("model_call", session.subject, session.role, "ok",
-          {"stage": "ask", "model": model, "passages": len(result.passages),
-           "supported": len(body_out["supported"]), "unsupported": len(body_out["unsupported"]),
-           "session_id": session.session_id, "roots": sorted(permit.roots),
-           **routing.audit_facts(decision, data_class)}, model=model,
-          # A frontier answer only happens when the gate permitted it, so the verdict is derivable
-          # here rather than passed in: `lane` is the fact and this is what it means.
-          data_class=data_class, egress_allowed=(decision.lane == "frontier"),
-          redactions=redaction_report.counts,
-          unverified_card_shapes=redaction_report.unverified_cards,
-          prompt=safe_question)
-    return body_out
+# --------------------------------------------------------------------------- jobs
+#
+# A job is work with an identity and a history. Ask is one round trip that ends when the answer does; a job
+# can be watched, stopped, and read afterwards, which is what a task that fails four times and changes
+# approach on the fifth needs.
+#
+# **Every guard on `/ask` applies here, and it is applied by calling the same code rather than by repeating
+# it.** C3 shipped a redaction on one path and a boundary on the other, and each passed every probe because
+# each probe tested the endpoint its author had in mind. The step executor below goes through
+# `answer_module.prepare`, so there is no second copy of the guards to keep in step.
+
+
+def _find_job(job_id: str, session):
+    """A job this session may read, or None.
+
+    **A job belonging to somebody else answers the same way a job that does not exist does.** The
+    alternative is an endpoint that tells a caller which job ids are real, which is the same reasoning the
+    403 wording already follows.
+    """
+    job = STATE["jobs"].get(job_id)
+    if job is None or job.deployment_id != DEPLOYMENT_ID or job.subject != session.subject:
+        return None
+    return job
+
+
+def _session_for(request: Request, body: dict | None = None):
+    """The session behind a request, or the refusal to return."""
+    token = (body or {}).get("session") or request.headers.get("X-OI-Session", "") \
+        or (request.query_params.get("session") or "")
+    try:
+        return _resolve(token), None
+    except session_module.SessionError as exc:
+        return None, JSONResponse({"error": str(exc), "kind": "no_session"}, status_code=401)
+
+
+def _tasks_this_deployment_declares() -> list[dict]:
+    """The tasks the manifest declares, which is what the interface offers.
+
+    **Read from the manifest and not from a constant**, because the app is a function of the deployment. A
+    client with no agentic pack gets an empty list and therefore no Do screen, which is the honest outcome
+    rather than a menu of things that cannot run.
+    """
+    declared = (((STATE.get("manifest") or {}).get("agentic") or {}).get("tasks")) or []
+    out = []
+    for entry in declared:
+        if isinstance(entry, str):
+            # A bare list of ids is accepted, because that is what the routing trigger used to hold. It
+            # carries no label, and a client falls back to the id rather than inventing one.
+            out.append({"id": entry, "label": entry, "description": "", "tier": "",
+                        "touches": [], "needs_approval": False})
+        elif isinstance(entry, dict) and entry.get("id"):
+            out.append({"id": entry["id"], "label": entry.get("label") or entry["id"],
+                        "description": entry.get("description", ""), "tier": entry.get("tier", ""),
+                        "touches": entry.get("touches") or [],
+                        "needs_approval": bool(entry.get("needs_approval"))})
+    return out
+
+
+def _step_once(job, attempt):
+    """One attempt: a question through the same pipeline `/ask` uses.
+
+    **This is the seam C6 replaces.** Everything below is the C4 one-step executor: it resolves the
+    session, retrieves, routes, calls the model, redacts, checks the citations and records the row, by
+    calling the shared pipeline rather than by reimplementing it. C6 puts a tool loop here, and the state
+    machine, the event log, the budgets and the interface do not change.
+    """
+    try:
+        session = _resolve(job.session_id)
+    except session_module.SessionError as exc:
+        # The session the job was created under has expired or been revoked. Terminal rather than
+        # retryable: waiting does not bring a credential back.
+        return jobs_module.StepOutcome(ok=False, failure_kind="no_session", failure_detail=str(exc),
+                                       retryable=False)
+
+    body = {"session": job.session_id, "question": job.input, "task": job.task}
+    try:
+        _sess, permit, model, result, decision, data_class = answer_module.prepare(
+            token=job.session_id, question=job.input, body=body, ctx=STATE["ctx"], resolve=_resolve,
+            model_for=model_for, role_lane=role_lane, frontier_model_for=frontier_model_for,
+            local_lane_available=local_lane_available, audit=audit, endpoint=f"/jobs/{job.job_id}")
+    except answer_module.Refused as refused:
+        retryable = refused.status in (502, 503, 504)
+        return jobs_module.StepOutcome(ok=False, failure_kind=refused.kind or "refused",
+                                       failure_detail=str(refused.payload.get("error", ""))[:300],
+                                       retryable=retryable,
+                                       result={"refusal": refused.payload, "status": refused.status})
+
+    asked_at = time.monotonic()
+    request_budget = budget_module.Budget.for_lane(decision.lane, started=asked_at)
+    generated, generation = _generate(session, permit, model, job.input, result.passages, request_budget)
+    if generated is None:
+        reason, kind, attempts, attempt_errors = generation if isinstance(generation, tuple) else (
+            "unclassified", {}, 1, [])
+        decided = answer_module.degraded(
+            reason=reason, detail=_degrade_detail(reason), passages=result.passages,
+            request_budget=request_budget, attempts=attempts, threshold=request_budget.timed_out(),
+            partial_output=False, lane=decision.lane, session=session, model=model,
+            data_class=data_class, audit=audit,
+            audit_facts=budget_module.audit_facts(
+                reason=reason, matched=(kind or {}).get("matched", ""),
+                retryable=bool((kind or {}).get("retryable")), attempts=attempts,
+                threshold=request_budget.timed_out(), budget=request_budget, partial_output=False,
+                errors=attempt_errors, lane=decision.lane, data_class=data_class))
+        # **A degraded answer completes the step rather than failing it.** Retrieval did the expensive part
+        # and the client is entitled to their own material, so the job succeeds carrying the passages and a
+        # typed reason. The alternative is a job that reports failure while holding the answer.
+        return jobs_module.StepOutcome(ok=True, name="answer", lane=decided.lane, model=model,
+                                       result=decided.payload, notice=decided.notice or "")
+
+    decided = answer_module.finish(
+        question=job.input, answer=generated, session=session, permit=permit, model=model, result=result,
+        decision=decision, data_class=data_class, request_budget=request_budget, redaction_report=None,
+        audit=audit, resolved_model=resolved_model, request_id=job.job_id)
+    return jobs_module.StepOutcome(ok=True, name="answer", lane=decided.lane, model=model,
+                                   result=decided.payload, notice=decided.notice or "")
+
+
+@app.get("/tasks", responses={
+    200: {"description": "The tasks this deployment declares, for an interface to offer. **Empty when the "
+                         "deployment has no agentic pack**, which is the honest answer rather than a menu "
+                         "of things that cannot run."},
+    401: {"model": contract.Refusal, "description": "no session"},
+})
+async def tasks(request: Request):
+    """What this deployment can be asked to do. Read from the manifest, never from a constant here."""
+    session, refusal = _session_for(request)
+    if refusal:
+        return refusal
+    declared = _tasks_this_deployment_declares()
+    return {"tasks": declared, "agentic": bool(declared)}
+
+
+@app.post("/jobs", responses={
+    200: {"model": contract.Job, "description": "the job, already run to a terminal state by the one-step "
+                                               "executor this phase ships"},
+    400: {"model": contract.Refusal, "description": "no input, or no task"},
+    401: {"model": contract.Refusal, "description": "no session"},
+    403: {"model": contract.Refusal,
+          "description": "the request supplied its own authority, or the task is not one this deployment "
+                         "declares"},
+    502: {"model": contract.Refusal, "description": "retrieval failed"},
+})
+async def create_job(request: Request):
+    """Start a job, and run it. Returns the job rather than a promise of one."""
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001 - the message is the response
+        return JSONResponse({"error": "the request body is not JSON"}, status_code=400)
+
+    session, refusal = _session_for(request, body)
+    if refusal:
+        return refusal
+
+    # **A request that supplies its own authority is refused here too**, and this is the check that has to
+    # be on both paths rather than on the one somebody was looking at.
+    supplied = next((f for f in answer_module.AUTHORITY_FIELDS if body.get(f) is not None), None)
+    if supplied:
+        audit("access", session.subject, str(body.get(supplied)), "denied",
+              {"supplied_field": supplied, "session_role": session.role,
+               "session_id": session.session_id,
+               "refusal": "a request may not supply its own authority", "endpoint": "/jobs"})
+        return JSONResponse(
+            {"error": "Permission denied on this resource (or it might not exist). A role comes from an "
+                      "authenticated session and never from a request field.",
+             "kind": "refused_authority_claim"}, status_code=403)
+
+    task = (body.get("task") or "").strip()
+    text = (body.get("input") or "").strip()
+    if not task or not text:
+        return JSONResponse({"error": "a job needs both a task and an input", "kind": "bad_request"},
+                            status_code=400)
+
+    declared = {t["id"] for t in _tasks_this_deployment_declares()}
+    if task not in declared:
+        # **The refusal names the task and lists what is declared.** A caller is not left guessing, and the
+        # row exists so an operator can see what was asked for.
+        audit("access", session.subject, session.role, "denied",
+              {"stage": "job", "reason": "task_not_declared", "task": task,
+               "declared": sorted(declared), "session_id": session.session_id}, tool=task)
+        return JSONResponse(
+            {"error": f"This deployment does not declare a task called '{task}'.",
+             "kind": "no_such_task", "declared": sorted(declared)}, status_code=403)
+
+    data_class = answer_module._data_class(STATE.get("manifest") or {})
+    job = jobs_module.new_job(
+        deployment_id=DEPLOYMENT_ID, subject=session.subject, actor_role=session.role,
+        roots=session.permit().roots, session_id=session.session_id, task=task, input=text,
+        data_class=data_class)
+    store = STATE["jobs"]
+    store.put(job)
+    jobs_module.run(job, store, _step_once, audit=audit)
+    return JSONResponse(job.to_dict(include_result=True), status_code=200)
+
+
+@app.get("/jobs/{job_id}", responses={
+    200: {"model": contract.Job, "description": "the job, its attempts, and its result"},
+    401: {"model": contract.Refusal, "description": "no session"},
+    404: {"model": contract.Refusal, "description": "no such job, or one belonging to somebody else. "
+                                                   "The two are one answer on purpose."},
+})
+async def get_job(job_id: str, request: Request):
+    """One job, with every attempt it made. This is what a client that comes back reads."""
+    session, refusal = _session_for(request)
+    if refusal:
+        return refusal
+    job = _find_job(job_id, session)
+    if job is None:
+        return JSONResponse({"error": "no such job", "kind": "not_found"}, status_code=404)
+    return JSONResponse(job.to_dict(include_result=True), status_code=200)
+
+
+@app.get("/jobs/{job_id}/events", responses={
+    200: {"description": "the job's progress as Server-Sent Events. **Replayable**: `?since=<seq>` returns "
+                         "everything after that number, so a client that closed the tab catches up rather "
+                         "than losing what happened."},
+    401: {"model": contract.Refusal, "description": "no session"},
+    404: {"model": contract.Refusal, "description": "no such job"},
+})
+async def job_events(job_id: str, request: Request):
+    """The numbered log, replayed from where the caller stopped."""
+    session, refusal = _session_for(request)
+    if refusal:
+        return refusal
+    job = _find_job(job_id, session)
+    if job is None:
+        return JSONResponse({"error": "no such job", "kind": "not_found"}, status_code=404)
+
+    try:
+        since = max(0, int(request.query_params.get("since") or 0))
+    except ValueError:
+        return JSONResponse({"error": "since must be a number", "kind": "bad_request"}, status_code=400)
+
+    events = STATE["jobs"].events_since(job_id, since=since)
+
+    async def replay():
+        for event in events:
+            yield {"event": event["event"],
+                   "data": json.dumps({"seq": event["seq"], **event["data"]}, sort_keys=True)}
+
+    return EventSourceResponse(replay(), headers={"X-Accel-Buffering": "no", "Cache-Control": "no-store"})
+
+
+@app.post("/jobs/{job_id}/{action}", responses={
+    200: {"model": contract.Job, "description": "the job after the action"},
+    400: {"model": contract.Refusal, "description": "an action that is not pause, resume or cancel"},
+    401: {"model": contract.Refusal, "description": "no session"},
+    404: {"model": contract.Refusal, "description": "no such job"},
+    409: {"model": contract.Refusal, "description": "**a transition the machine refuses**, named. Resuming "
+                                                   "a cancelled job is the one this exists for."},
+})
+async def control_job(job_id: str, action: str, request: Request):
+    """Pause, resume, or cancel.
+
+    **The refusal is the feature.** A handler that assigned the state directly would happily resume a
+    cancelled job, and the record would then describe work that happened after somebody stopped it.
+    """
+    session, refusal = _session_for(request)
+    if refusal:
+        return refusal
+    job = _find_job(job_id, session)
+    if job is None:
+        return JSONResponse({"error": "no such job", "kind": "not_found"}, status_code=404)
+
+    store = STATE["jobs"]
+    try:
+        if action == "pause":
+            jobs_module.pause(job, store)
+        elif action == "resume":
+            jobs_module.resume(job, store)
+        elif action == "cancel":
+            jobs_module.cancel(job, store)
+        else:
+            return JSONResponse({"error": f"'{action}' is not an action on a job. The three are pause, "
+                                          "resume and cancel.", "kind": "bad_action"}, status_code=400)
+    except jobs_module.TransitionRefused as refused:
+        return JSONResponse({"error": str(refused), "kind": "transition_refused",
+                             "was": refused.was, "wanted": refused.wanted}, status_code=409)
+
+    audit("tool_call", session.subject, session.role, "ok",
+          {"stage": "job", "job_id": job.job_id, "task": job.task, "state": job.state, "action": action,
+           "session_id": session.session_id}, tool=job.task)
+    return JSONResponse(job.to_dict(include_result=True), status_code=200)
 
 
 def _generate(session, permit, model: str, question: str, passages: list, budget=None):

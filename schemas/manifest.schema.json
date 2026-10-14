@@ -13,6 +13,55 @@
   ],
   "additionalProperties": false,
   "properties": {
+    "agentic": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The tasks this deployment can be asked to do. **This is what the client app's Do screen is built from**, and it lives in the manifest rather than in the API's source because the app is a function of the deployment: a client with no agentic pack has no tasks, and therefore no Do screen, which is the honest outcome rather than a menu of things that cannot run. A deployment that declares none behaves exactly as it did before this block existed.",
+      "properties": {
+        "tasks": {
+          "type": "array",
+          "default": [],
+          "description": "Each entry is a thing a person can start. The API matches on `id` and routes on `tier`, so the label a client reads and the model that answers come from one declaration and cannot drift apart.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "label"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]*$",
+                "description": "The identifier a request carries in its `task` field. Lowercase with underscores, because it is matched exactly and a space in it would be a task nobody can start."
+              },
+              "label": {
+                "type": "string",
+                "description": "The task in the client's words, shown as-is. 'Draft the recall texts' rather than 'draft'. This is the field that makes the Do screen readable to a person who has never seen the system."
+              },
+              "description": {
+                "type": "string",
+                "default": "",
+                "description": "One sentence about what it does, shown under the label."
+              },
+              "tier": {
+                "type": "string",
+                "default": "",
+                "description": "The model role that handles this task, as named in `models`. **This is what lets one task go to the cheap model and another to the frontier one without the interface choosing a model**: the app sends a task and the manifest decides which tier answers it."
+              },
+              "touches": {
+                "type": "array",
+                "items": {"type": "string"},
+                "default": [],
+                "description": "What the task reads or changes, in plain words, so the interface can say what it will touch before somebody starts it."
+              },
+              "needs_approval": {
+                "type": "boolean",
+                "default": false,
+                "description": "Whether a human has to approve before work happens. The approval gate itself arrives with the agentic pack; this is the declaration the interface renders."
+              }
+            }
+          }
+        }
+      }
+    },
     "access": {
       "type": "object",
       "additionalProperties": false,

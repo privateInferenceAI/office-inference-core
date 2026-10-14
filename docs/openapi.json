@@ -68,6 +68,18 @@
           "redactions": {
             "$ref": "#/components/schemas/Redactions"
           },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "**the id this answer is recorded under.** A client that reports a lane \u2014 'left the building' \u2014 needs to name the row that proves it, and without this the indicator's claim and the record's entry are two statements nothing can compare",
+            "title": "Request Id"
+          },
           "resolved_model": {
             "description": "the provider model behind that role. A client reading only `model` cannot see a manifest swap take effect",
             "title": "Resolved Model",
@@ -288,6 +300,19 @@
         "title": "Degraded",
         "type": "object"
       },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
       "Health": {
         "description": "Liveness, and what the process actually loaded.\n\n`deployment_id` is how the app knows which deployment answered, which is not decoration on a build\nthat ships more than once. `status` is `loading` until the registry is read, and a client should say\nso rather than treat it as an error.",
         "properties": {
@@ -325,6 +350,225 @@
           "default_model_role"
         ],
         "title": "Health",
+        "type": "object"
+      },
+      "Job": {
+        "description": "Work with an identity and a history.\n\n**`terminal` is told to the client rather than left to be inferred.** A screen that guesses whether a\njob has finished gets it wrong exactly once, and then nobody trusts the spinner.",
+        "properties": {
+          "attempt_budget": {
+            "title": "Attempt Budget",
+            "type": "integer"
+          },
+          "attempts": {
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "data_class": {
+            "title": "Data Class",
+            "type": "string"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "input": {
+            "title": "Input",
+            "type": "string"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "outcome_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "why it ended, when it did not succeed. A typed reason such as attempts_exhausted",
+            "title": "Outcome Reason"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "the answer, when a step produced one. A client that comes back gets the result rather than only the history of producing it",
+            "title": "Result"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "state": {
+            "enum": [
+              "queued",
+              "running",
+              "paused",
+              "awaiting_approval",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/JobStep"
+            },
+            "title": "Steps",
+            "type": "array"
+          },
+          "submitted_by": {
+            "title": "Submitted By",
+            "type": "string"
+          },
+          "task": {
+            "title": "Task",
+            "type": "string"
+          },
+          "terminal": {
+            "title": "Terminal",
+            "type": "boolean"
+          },
+          "time_budget_s": {
+            "title": "Time Budget S",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "job_id",
+          "state",
+          "task",
+          "input",
+          "attempts",
+          "steps",
+          "terminal",
+          "time_budget_s",
+          "attempt_budget",
+          "submitted_by",
+          "role",
+          "data_class"
+        ],
+        "title": "Job",
+        "type": "object"
+      },
+      "JobStep": {
+        "description": "One attempt. **`failure` is typed rather than prose**, because an operator counts it and a client\nbranches on it. 'It failed' is neither.",
+        "properties": {
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "failure": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "kind, detail, and whether retrying could help. Absent on an attempt that worked",
+            "title": "Failure"
+          },
+          "lane": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lane"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "running",
+              "succeeded",
+              "failed"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "step_id": {
+            "title": "Step Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "step_id",
+          "attempt",
+          "name",
+          "state"
+        ],
+        "title": "JobStep",
         "type": "object"
       },
       "Passage": {
@@ -629,6 +873,46 @@
         ],
         "title": "UnsupportedClaim",
         "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
       }
     }
   },
@@ -640,7 +924,7 @@
   "paths": {
     "/ask": {
       "post": {
-        "description": "A question in, a cited answer out.",
+        "description": "A question in, a cited answer out.\n\n**The pipeline is in `answer.py` and this is a caller of it.** That is deliberate rather than tidy:\nthis endpoint, the streaming one, and a job all answer questions, and C3 shipped two defects whose\nshape was two implementations of one thing. One implementation is how that stops.",
         "operationId": "ask_ask_post",
         "responses": {
           "200": {
@@ -799,6 +1083,299 @@
           }
         },
         "summary": "Health"
+      }
+    },
+    "/jobs": {
+      "post": {
+        "description": "Start a job, and run it. Returns the job rather than a promise of one.",
+        "operationId": "create_job_jobs_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            },
+            "description": "the job, already run to a terminal state by the one-step executor this phase ships"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "no input, or no task"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "no session"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "the request supplied its own authority, or the task is not one this deployment declares"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "retrieval failed"
+          }
+        },
+        "summary": "Create Job"
+      }
+    },
+    "/jobs/{job_id}": {
+      "get": {
+        "description": "One job, with every attempt it made. This is what a client that comes back reads.",
+        "operationId": "get_job_jobs__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            },
+            "description": "the job, its attempts, and its result"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "no session"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "no such job, or one belonging to somebody else. The two are one answer on purpose."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Job"
+      }
+    },
+    "/jobs/{job_id}/events": {
+      "get": {
+        "description": "The numbered log, replayed from where the caller stopped.",
+        "operationId": "job_events_jobs__job_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "the job's progress as Server-Sent Events. **Replayable**: `?since=<seq>` returns everything after that number, so a client that closed the tab catches up rather than losing what happened."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "no session"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "no such job"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Job Events"
+      }
+    },
+    "/jobs/{job_id}/{action}": {
+      "post": {
+        "description": "Pause, resume, or cancel.\n\n**The refusal is the feature.** A handler that assigned the state directly would happily resume a\ncancelled job, and the record would then describe work that happened after somebody stopped it.",
+        "operationId": "control_job_jobs__job_id___action__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "action",
+            "required": true,
+            "schema": {
+              "title": "Action",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            },
+            "description": "the job after the action"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "an action that is not pause, resume or cancel"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "no session"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "no such job"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "**a transition the machine refuses**, named. Resuming a cancelled job is the one this exists for."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Control Job"
+      }
+    },
+    "/tasks": {
+      "get": {
+        "description": "What this deployment can be asked to do. Read from the manifest, never from a constant here.",
+        "operationId": "tasks_tasks_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The tasks this deployment declares, for an interface to offer. **Empty when the deployment has no agentic pack**, which is the honest answer rather than a menu of things that cannot run."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "no session"
+          }
+        },
+        "summary": "Tasks"
       }
     }
   }

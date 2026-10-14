@@ -41,6 +41,33 @@ AGENTIC_TASKS = frozenset({
 })
 
 
+def declared_tasks(manifest: dict) -> frozenset[str]:
+    """The tasks this deployment declares, read from its manifest.
+
+    **Why the list moved out of this file.** The six names above were hardcoded here and used for one thing:
+    to decide whether a request escalates. Everything else about them was missing. A client could not
+    discover them, nothing labelled them in the client's words, nothing said what they touch, and the
+    manifest, which is what defines the deployment, knew nothing about them. So the client app's Do screen
+    would have had to be written into the app, which breaks the rule that the app is a function of the
+    manifest.
+
+    **What happens when a manifest declares none.** An absent block falls back to the set above, because a
+    deployment that predates this must keep behaving exactly as it did. **An empty list is not an absent
+    block**: a deployment that declares `tasks: []` has said it has no tasks and gets no escalation. That
+    distinction is the whole reason this reads the key rather than the value.
+    """
+    agentic = manifest.get('agentic')
+    if not isinstance(agentic, dict) or 'tasks' not in agentic:
+        return AGENTIC_TASKS
+    out = set()
+    for entry in agentic.get('tasks') or []:
+        if isinstance(entry, str) and entry:
+            out.add(entry)
+        elif isinstance(entry, dict) and entry.get('id'):
+            out.add(entry['id'])
+    return frozenset(out)
+
+
 @dataclass(frozen=True)
 class Decision:
     """Where one request goes, why, and what the caller should tell the user."""
@@ -87,7 +114,7 @@ def route(manifest: dict, *, data_class: str, task: str = '', user_wants_stronge
     # Which trigger, if any, wants the frontier lane. None of them is consulted about anything else.
     wanted = ''
     why = ''
-    if task and task in AGENTIC_TASKS:
+    if task and task in declared_tasks(manifest):
         wanted = TRIGGER_AGENTIC
         why = 'the task ' + task + ' is on the agentic pack list'
     elif user_wants_stronger:

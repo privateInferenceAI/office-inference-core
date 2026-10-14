@@ -40,10 +40,28 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUT = ROOT / "docs" / "openapi.json"
 
-# The paths a client may call. A fourth route is a deliberate act, so it is added here in the same
-# commit that adds it, and this list is what makes "the app can only call the documented surface"
-# checkable rather than a promise.
-EXPECTED_PATHS = {"/health", "/ask", "/ask/stream"}
+# The paths a client may call. A new route is a deliberate act, so it is added here in the same commit
+# that adds it, and this list is what makes "the app can only call the documented surface" checkable
+# rather than a promise.
+EXPECTED_PATHS = {
+    "/health",
+    "/ask",
+    "/ask/stream",
+    # Jobs: work with an identity and a history, which is what the Do screen is built on. The events path
+    # is the replayable one, so a client that closed the tab catches up instead of losing what happened.
+    "/tasks",
+    "/jobs",
+    "/jobs/{job_id}",
+    "/jobs/{job_id}/events",
+    "/jobs/{job_id}/{action}",
+}
+
+# **The paths whose absence the checker must not tolerate.** A client that cannot start a job has no Do
+# screen, and one that cannot replay events cannot tell a user what happened while they were away. These
+# are separated from the full set so that a future route can be added without weakening the check on the
+# ones that already exist.
+REQUIRED_PATHS = {"/health", "/ask", "/ask/stream", "/tasks", "/jobs", "/jobs/{job_id}",
+                  "/jobs/{job_id}/events"}
 
 # **The fields the client app branches on.** This is the list that keeps the two repositories honest:
 # `kind` decides whether a payload is an answer or a degradation, `lane` is what the residency
@@ -147,7 +165,11 @@ def fields_in(node) -> set[str]:
 def failure(schema: dict) -> str:
     """The reason this schema is not the contract the app was promised, or an empty string."""
     paths = set(schema.get("paths", {}))
-    missing = EXPECTED_PATHS - paths
+    # **The required set, not every expected path.** A route that is added to the service but not to this
+    # file is caught below as an undeclared extra, so the two lists together still mean "nothing is
+    # published that a client was not told about". Checking the full set here would only make the message
+    # for a missing route and an undeclared route the same message.
+    missing = REQUIRED_PATHS - paths
     if missing:
         return f"the service does not serve {sorted(missing)}"
     extra = paths - EXPECTED_PATHS

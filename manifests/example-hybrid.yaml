@@ -66,3 +66,25 @@ interface:
 support:
   remote_access: true
   response_window: business hours, 4 hours
+
+# The task registry. See example-compliant-cloud.yaml for what each field is for; the short version is that
+# this block is what the client app offers, and the routing trigger reads the same list.
+#
+# **This manifest sends one task to the local lane and the others to the frontier lane**, which is the
+# demonstration worth having: `tier` is the model role, the role's lane comes from `models`, and the data
+# boundary still has the last word. A task naming a frontier role on content the gate forbids is refused
+# with its notice, and never quietly answered by the cheaper model instead.
+agentic:
+  tasks:
+    - id: draft
+      label: Draft a reply
+      description: Write a reply to a message, using your own documents as the source.
+      tier: front_desk
+      touches: [documents, mail.draft]
+      needs_approval: true
+    - id: compare
+      label: Compare two documents
+      description: Compare two versions of a document and list what changed.
+      tier: analyst
+      touches: [documents]
+      needs_approval: false

@@ -124,3 +124,53 @@ offsite:
   ship: [anchors, exports]
 support:
   response_window: business hours, 4 hours
+# The tasks this deployment can be asked to do, which is what the client app's Do screen is built from.
+#
+# **These names used to live in the API's source**, in a frozenset called AGENTIC_TASKS, and the manifest
+# knew nothing about them. That made the app impossible to build correctly: it could not discover which
+# tasks existed, could not label them in a client's words, and could not say what they touch. So the list
+# is here, where the deployment is defined, and the API reads it from the same place the app does.
+#
+# **Every task below is honest about what it does today.** Each one retrieves from the client's documents
+# and asks the model named by `tier` to answer, in one step. None of them loops, calls a tool, or changes
+# anything, because the agentic pack is C6 and this deployment does not carry it.
+#
+# The first draft of this block declared nothing, on the reasoning that a task which cannot do the work
+# teaches a client the feature is broken. That was wrong for a reason worth recording: it made the job path
+# untestable on the only deployment that exists, and a path nothing exercises is a path nobody knows works.
+# The labels say what happens rather than what will happen, and when C6 gives the same ids a real loop the
+# interface does not change.
+#
+#   id                  matched exactly by a request's `task` field, and read by the routing trigger
+#   label               shown as-is. A person reads this, so it says what the thing does
+#   tier                which model role answers. This is what lets one task go to the cheap model and
+#                       another to the frontier one WITHOUT the interface choosing a model: the app sends
+#                       a task, and the manifest decides the tier
+#   touches             shown before somebody starts it
+#   needs_approval      whether a human approves first. Nothing here writes yet, so nothing needs one
+agentic:
+  tasks:
+    - id: draft
+      label: Draft a reply
+      description: Write a reply to a message, using your own documents as the source.
+      tier: front_desk
+      touches: [documents]
+      needs_approval: false
+    - id: compare
+      label: Compare two documents
+      description: Look for disagreements between documents and list them with their sources.
+      tier: analyst
+      touches: [documents]
+      needs_approval: false
+    - id: summarise_across_documents
+      label: Summarise across documents
+      description: Read several documents and write one summary that cites each source it used.
+      tier: reader
+      touches: [documents]
+      needs_approval: false
+    - id: extract_table
+      label: Pull the figures out
+      description: Find the numbers in a document and list them, with the page each came from.
+      tier: analyst
+      touches: [documents]
+      needs_approval: false
