@@ -31,6 +31,7 @@ LIMITS = [4, 6, 10]
 
 def search(registry, question, want):
     # The widest permitted session, so the count is about the question rather than about a role's roots.
+    subject = sorted(registry.users)[0]
     store = sm.PostgresStore(sm.database_url())
     try:
         session = sm.mint(registry, store, subject, next(iter(sorted(registry.roles))), dev=True,
