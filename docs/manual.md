@@ -489,11 +489,20 @@ never prints them.
 
 ```
 oi run --rm keys --set-budget coder 0.000001
+oi restart litellm
 ```
 
 ```
-coder capped at 0.000001 USD. A plain run of this tool restores the manifest's value.
+coder capped at 1e-06 USD in the team row.
+The gateway caches this row, so it is NOT in force until litellm restarts:
+    oi restart litellm
+A plain run of this tool restores the manifest's value.
 ```
+
+**The restart is part of the drill, and the tool prints it because it is easy to miss.** The ceiling lives in
+the team row and the gateway caches that row, so a cap written and not restarted is a number in a database while
+the looping component keeps spending. This is the one control where believing it worked when it did not costs
+money, so the tool says so rather than reporting success.
 
 **See the ceiling hold:**
 
@@ -502,16 +511,28 @@ oi run --rm keys --probe coder
 ```
 
 ```
-coder -> coder: 422
-  Budget has been exceeded! Key=oi-core-dev-cloud:coder (sk-...VcRQ) Current cost: 3.156e-05, Max budget: 1e-06
+coder -> coder: 422   (authenticated by a signed assertion)
+  Budget has been exceeded! Team=coder Current cost: 5.692e-05, Max budget: 1e-06
 ```
 
-**Put it back:**
+**Put it back, and this takes the right command.** A plain run of `keys` restores the *virtual keys* from the
+manifest, which is **not** the row the assertion path enforces, so it prints a success message and leaves the cap
+in force:
 
 ```
-oi run --rm keys
+oi run --rm keys --provision-teams     # this is what rewrites the team rows
+oi restart litellm
 oi run --rm keys --probe coder
 ```
+
+```
+coder -> coder: 200   (authenticated by a signed assertion)
+```
+
+**This caught a defect and it is worth knowing the shape of it.** The brake wrote the team row and the release
+wrote the key rows, so an operator who followed the page could cap a role and then be unable to release it with
+the command the page gave them. Both directions touch the team row now: `--set-budget` for the cap,
+`--provision-teams` for the release.
 
 **Prove the model permission**, by asking for a model the key is not scoped to:
 
