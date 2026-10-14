@@ -3774,6 +3774,36 @@ being empty is the evidence rather than the answer being bad.
   restarted. `OI_MODEL_<ROLE>` is read at startup.
 - **The answer quality changed and nobody measured it.** Expected: golden questions are C8's. The manual says so
   rather than implying the swap was validated.
+## Running the probes: which image, and why it matters
+
+**Every probe needs an entrypoint that carries its dependencies, and getting it wrong looks like a product
+failure rather than a harness one.** A C2 acceptance probe run under the ingestion image reported *the audit
+event could not be recorded*, which reads as the sink refusing a write; the actual cause was that the image has
+no Postgres driver and the audit tool could not import one. The tool names the wrong image now, but the table is
+cheaper than the error.
+
+| Probe | Entrypoint | Why that one |
+|---|---|---|
+| `api_probe`, `stream_probe`, `interface_probe`, `throttle_probe` | `oi-core/session:local` | they mint a session against Postgres |
+| `access_probe` | `oi-core/eval:local` | carries the eval extras and the registry |
+| `acl_probe`, `hybrid_acceptance`, `citations_acceptance`, `injection_acceptance` | `oi-core/ingestion:local` | they read the vector store through the ingestion services |
+| `egress_acceptance` | **`oi-core/session:local` or `oi-core/eval:local`** | it writes through the audit CLI, which needs a Postgres driver |
+
+    cd /opt/oi-core
+    alias oi='docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env'
+
+    # A probe that mints a session:
+    docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
+      -v /opt/oi-core:/w -w /w --env-file rendered/env \
+      --entrypoint python oi-core/session:local /w/tests/fixtures/interface_probe.py
+
+    # A probe that reads the vector store:
+    docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
+      -v /opt/oi-core:/w -w /w --env-file rendered/env \
+      --entrypoint python oi-core/ingestion:local /w/tests/fixtures/acl_probe.py
+
+**A probe that passes under one image and fails under another is a harness problem until proven otherwise.**
+Check the import before believing the failure.
 ## Phase 5 — Client app  *(outline)*
 
 Ask, Do, Review, Activity, Settings, with citations as first-class objects and the lane indicator.
