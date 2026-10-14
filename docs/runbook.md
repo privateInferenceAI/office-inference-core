@@ -3175,6 +3175,50 @@ better for secrecy.
       -v /opt/oi-core:/w -w /w --env-file rendered/env \
       --entrypoint python oi-core/eval:local /w/tests/fixtures/api_probe.py
 
+**The result, 2026-10-14, on the live deployment.** Six rights held and one measured, from the probe as written:
+
+    THE SERVICE
+      http://api:8088  status=200  {"status":"ok","deployment_id":"oi-core-dev-cloud"}
+      role held: 'viewer'
+
+    ok   ANSWER   [200] The mileage rate for reimbursement is 0.67 per mile for travel in an employee's own
+    ok   CITED    6 citation(s) from the retrieved set, model='analyst', unsupported=0
+    ok   SCOPED   [200] roots=['company'] answer='The base salary of the Chief Executive Officer is not'
+    ok   FORGED   [403] kind=refused_authority_claim and 2 denial row(s) in the chain
+    ok   NO-SESS  [401] kind=no_session
+    ok   BUDGET   the ceiling the hook reads is 10.0 with 0 spent, so the remainder it returns is 10.0
+    ok   ADMIN    [200] [{"team_alias":"oi-core-dev-cloud:analyst","team_id":"analyst"...
+
+    PASSED: 7 right(s) held against the running service
+
+And the budget refusal, captured by hand because a probe inside the network cannot restart the gateway:
+
+    $ set the analyst team's spend to 25 against its ceiling of 10, then restart the gateway
+    $ ask the mileage question
+    502 {"error": "the role's budget is exhausted at the gateway: Budget has been exceeded! Team=analyst
+         Current cost: 25.0, Max budget: 10.0", "kind": "generation_failed"}
+
+**Four defects this step found by running it, and three were controls reporting success while doing nothing.**
+None was visible to reading the code, and that is the pattern worth keeping:
+
+1. **Every audit write the API made was refused.** The audit tool refuses a hand-typed actor without `--dev`,
+   and its guard fires before the database is touched. The first probe run passed its FORGED right **on a
+   denial row written by an earlier run rather than by the request under test**, which surfaced only because
+   the probe counts rows instead of trusting a 403. The API passes the flag now, with the reasoning written
+   where the flag is, and a proper trusted path is recorded as work rather than as a comment.
+2. **The model allowlist is not enforced on the signed-statement path.** A `viewer` statement reached `coder`,
+   with both common-check flags on. The API therefore chooses the model from the manifest and a caller cannot
+   name one, which is where that enforcement lives now.
+3. **The budget did not enforce at all.** Spend 99 against a ceiling of 10, and the gateway answered. The
+   spike had looked like proof that team budgets work; what it enforced was a `max_budget` on the identity it
+   returned, and the team row was decorative. The hook now reads the ceiling and the spend and returns the
+   remainder, and the refusal above is the result.
+4. **The gateway caches the team row**, so a spend written straight into the database is not what it enforces
+   until a restart. Harmless in operation, because the gateway writes the spend itself, and a trap for
+   anybody testing a ceiling by hand.
+
+**`--provision-teams` is new in this step.** The gateway refuses an assertion naming a team that does not
+exist, so teams are created from `budgets.roles` as part of a render rather than as a repair.
 #### What proves it
 
 The probe prints one line per right with the wrong path beside it, as `access_probe.py` does:
