@@ -138,8 +138,8 @@ def main() -> int:
     typed = [row for row in degraded if row[2] and row[2] != 'unclassified']
     print()
     if typed:
-        print('A REAL THROTTLE, CORRECTLY CLASSIFIED. The provider refused, the deployment degraded, and the'
-              'reason is a real classification rather than an unrecognised failure.')
+        print('A REAL THROTTLE, CORRECTLY CLASSIFIED. The provider refused, the deployment degraded,'
+              'and the reason is a real classification rather than an unrecognised failure.')
         return 0
     if degraded:
         print('IT DEGRADED, BUT THE REASON IS unclassified. That is a defect rather than a throttle: it is what'
