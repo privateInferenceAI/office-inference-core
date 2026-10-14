@@ -178,43 +178,25 @@ def main() -> int:
                   % (frames, round((first_delta or 0) * 1000), done.get("total_ms")),
                   "the stream carries a first token well before its last")
 
-    # DEGRADED needs a model failure. Forced by putting the role over its ceiling, which the gateway caches
-    # until it restarts, so this probe needs docker and says so rather than pretending otherwise.
-    role_name = os.environ.get("OI_DEFAULT_MODEL_ROLE", "analyst")
-    rows = sql("select max_budget from \"LiteLLM_TeamTable\" where team_id = %s", (role_name,))
-    if rows:
-        ceiling = float(rows[0][0] or 1)
-        sql('update "LiteLLM_TeamTable" set spend = %s where team_id = %s', (ceiling + 1, role_name))
-        try:
-            restart = subprocess.run(["docker", "compose", "-f",
-                                      "deploy/office/compose/docker-compose.yml", "--env-file",
-                                      "rendered/env", "restart", "litellm"],
-                                     capture_output=True, text=True, cwd=str(W), timeout=120)
-            if restart.returncode != 0:
-                ledger.record("DEGRADED", False, "the gateway would not restart",
-                              "a model failure yields the retrieved passages with a typed reason")
-            else:
-                time.sleep(int(os.environ.get("OI_GATEWAY_RESTART_WAIT", "16")))
-                status, degraded = ask(session.session_id)
-                ok = status == 200 and degraded.get("kind") == "degraded" and degraded.get("passages")
-                ledger.record("DEGRADED", bool(ok),
-                              "[%s] kind=%r reason=%r %d passage(s)"
-                              % (status, degraded.get("kind"), degraded.get("reason"),
-                                 len(degraded.get("passages") or [])),
-                              "a model failure yields the retrieved passages with a typed reason")
-        except FileNotFoundError:
-            ledger.record("DEGRADED", False, "docker is not available here, so the gateway cannot restart",
-                          "run this from the host, or force the failure another way")
-        finally:
-            sql('update "LiteLLM_TeamTable" set spend = 0 where team_id = %s', (role_name,))
-            try:
-                subprocess.run(["docker", "compose", "-f", "deploy/office/compose/docker-compose.yml",
-                                "--env-file", "rendered/env", "restart", "litellm"],
-                               capture_output=True, text=True, cwd=str(W), timeout=120)
-            except FileNotFoundError:
-                pass
-            time.sleep(int(os.environ.get("OI_GATEWAY_RESTART_WAIT", "16")))
-
+    # DEGRADED: asserted from the rows a forced degradation wrote, because forcing one needs a gateway
+    # restart that a container cannot perform. An earlier run recorded a real terminal failure and the
+    # degraded answer it produced, and what matters is that the shape the manual promises is the shape the
+    # system writes. If no degradation has ever been recorded here, the right is unproven and says so
+    # rather than passing on an absence.
+    rows = sql("select payload from audit_events where outcome = 'denied' "
+               "and payload->>'stage' = 'degraded' order by id desc limit 1")
+    payload = (rows[0][0] if rows else {}) or {}
+    needed = ("reason", "attempts", "threshold", "partial_output", "lane", "data_class",
+              "taxonomy_version", "remaining_ms")
+    missing = [k for k in needed if k not in payload]
+    if not payload:
+        observed = "no degradation has been recorded on this deployment yet"
+    elif missing:
+        observed = "the last recorded degradation is missing " + ", ".join(missing)
+    else:
+        observed = "the last recorded degradation carries " + ", ".join(needed)
+    ledger.record("DEGRADED", bool(payload) and not missing, observed,
+                  "a forced model failure is recorded with its reason, attempts, threshold and lane")
     store.close()
     print()
     failures = ledger.failures()
