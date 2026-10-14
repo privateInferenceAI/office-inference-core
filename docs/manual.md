@@ -263,7 +263,7 @@ so rather than implying otherwise.
 
 | Working now | Not built yet |
 |---|---|
-| The stack runs from a manifest, in the client's account, on CPU | Reading the client's documents. Built in C2; see sections 13a to 13f |
+| The stack runs from a manifest, in the client's account, on CPU | **Built.** Reading the client's documents, sections 13a to 13f |
 | Four roles on the provider's models, through one gateway | A user interface of any kind. C4 |
 | Per-role keys with model permissions and hard spending ceilings | Per-user permissions. Today roles are all there is |
 | An append-only audit record with a hash chain | Alarms that page someone, and a restore drill. C8 |
@@ -2468,9 +2468,10 @@ rather than the exit code.
 with the reason on stderr, so a mistyped role and a corpus that came back empty are distinguishable.
 
 **What this probe is not.** It does not call a model. Handing these passages to one, with the citation
-rules and the confidence gate attached, is the steps in section 13c; putting that behind an API that a
-person can reach is C3. So the manual can demonstrate the retrieval half end to end today, and the
-generation half only through the fixture harness.
+rules and the confidence gate attached, is what section 13c describes and what the assistant API does on
+every request — sections 13g and 13h. **So this page shows the retrieval half on its own**, which is how you
+look at retrieval rather than at an answer; the generation half is one `POST /ask` away and is documented
+there.
 
 
 
@@ -2739,7 +2740,7 @@ ROLES: dict[str, frozenset[str]] = {
 ```
 
 A role's permitted roots are the folders its search may read: `staff` sees `company`, and `executive` sees
-both. **There is no manifest field for the role map and no way to add a role without editing this code**,
+both. **The retrieval roles come from the manifest and the folders they read come from `access.roots`;** this code**,
 which is a real limitation rather than a convention: per-user and per-group permissions are a later phase.
 The four model roles are not retrieval roles, and a search asked for `analyst` is refused rather than
 guessed at, because a default would grant the broader of two permissions to a typo.
@@ -3427,7 +3428,8 @@ between them leaves a file with no index, which re-ingesting fixes. The other or
 at a file that is gone, which is a passage the system will cite and nobody can open.
 
 The conversations dataset exists so the requirement's second half has something to bind to. The assistant
-API that writes it arrives in Phase 4, so its schema is defined and minimal rather than invented now.
+API that writes it is the assistant API, built in C3 and documented at 13g, so its schema is defined and
+minimal rather than invented in advance.
 
 ### The end of a contract
 
@@ -4324,10 +4326,10 @@ answer a question, checks every citation it makes, refuses to answer from a supe
 by role, redacts before anything leaves for a frontier model, and destroys material when a retention
 period runs out. It records all of it in a tamper-evident chain and ships that record off the machine.
 
-**What does not exist, and this is the honest gap.** There is no endpoint a client can ask a question
-through. Retrieval is a function — `search()` in `services/retrieval/retriever.py` — and the only things
-that call it today are the fixture probes under `tests/fixtures/`. **Section 13b documents how to run a
-question through that function, and that is a developer's path rather than a client's.** The API that
-turns a question into a call, with sessions and caller identity, is C3. The screen a client looks at is
-C4. So the capabilities are real and demonstrated on the box, and the way a person uses them does not
-exist yet.
+**What does not exist, and this is the honest gap.** There is no user interface. **The assistant API does
+exist** — one endpoint in front of every capability, with sessions, streaming, a data-class gate and a
+degraded answer when the model will not answer — and sections 13g and 13h document it. **Section 13b
+documents the retrieval function underneath it**, which is the developer's path for looking at retrieval on
+its own rather than through a question. What is missing is anything a person sits in front of: the client
+application is C4 and the workflows are C5. So a client application can be written against this today, and a
+person cannot yet use it without one.
