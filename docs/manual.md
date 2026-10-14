@@ -1953,6 +1953,13 @@ docker logs ingestion --tail 30
 rather than that the process is alive. There is no listening socket here, so a check that only proved the
 process existed would stay green while every document failed.
 
+**`healthy` is not evidence that a corpus loaded, and this deployment demonstrates it.** The healthcheck
+runs `--status`, which reads the last cycle record, and a dead-lettered document is not in that record: the
+container reports healthy while a client file is out of the index. On this box the malformed-fixture RTF
+sits dead-lettered with `healthy` beside it. **After loading a corpus, count: `--status` for what the
+worker saw and `--failures` for what it gave up on.** Section 13a is where the second command is
+documented, and this paragraph is why it matters more than the first.
+
 **What a cycle prints, and how the two forms differ.** The worker parses every document it has not seen, so a
 first run over a client's corpus takes minutes or hours.
 
@@ -1981,18 +1988,18 @@ is the one the manual can show you because only a hand run produces it:
 $ docker exec ingestion python3 /app/ingest.py --documents /documents
 collection documents: 1024 dimensions, Cosine, 1261 points
 
-seen 12, new 0, changed 0, skipped 12, failed 0
+seen 40, new 0, changed 0, skipped 40, failed 0
 chunks written 0, chunks removed 0, documents removed 0
 ```
 
 The counts depend on the corpus and on the chunker version. On this deployment, forty documents and 1261
 points, measured from the index:
 
-**Twelve documents, and only four of them were fetched.** `fixtures/corpus/manifest.yaml` declares both
-lists and is the authority: four real filings from SEC EDGAR and the IRS under `documents`, with the licence
-read at the source, and eight fixtures this project wrote under `authored_fixtures`, each naming the
-`tests/fixtures/*.py` script that builds it, the control it exists to prove, and **how it arrives in a
-deployed corpus — which is not the same for all eight:**
+**The declared corpus is twelve documents, and only four of them were fetched.** `fixtures/corpus/manifest.yaml`
+declares both lists and is the authority for those twelve: four real filings from SEC EDGAR and the IRS under
+`documents`, with the licence read at the source, and eight fixtures this project wrote under
+`authored_fixtures`, each naming the `tests/fixtures/*.py` script that builds it, the control it exists to
+prove, and **how it arrives in a deployed corpus — which is not the same for all eight:**
 
 | How it arrives | How many | Which |
 |---|---|---|
@@ -2000,7 +2007,7 @@ deployed corpus — which is not the same for all eight:**
 | `copied-by-hand` — the builder writes into the repository and an operator copies it in | 1 | `executive-compensation.md`, by runbook step 3.8, "Access labels" |
 | `no-install-step` — nothing in the repository places it | 3 | `callout-rate-approval.eml`, `rate-card-2026.xlsx`, `dispatch-review-q1.pptx` |
 
-So an index holding twelve is correct rather than a sign that something was ingested twice, and **a reader
+So an index holding more than this table lists is correct rather than a sign that something was ingested twice, and **a reader
 rebuilding this corpus from the repository alone will find three files missing.** That is recorded as a gap
 rather than tidied: the three are the format fixtures from `RET-FORMAT-001`, and the honest statement is that
 they were installed by hand during the build and the step was never written down. The same `cp` the runbook
@@ -2022,7 +2029,7 @@ gives for the executive fixture would place them.
 | company/onboarding-notes.md | 1 | |
 | company/rate-card-2026.xlsx | 7 | spreadsheet |
 | executive/executive-compensation.md | 1 | the restricted root |
-| **total** | **1261** | matching the collection's own count |
+| **total** | **1261** | the collection's own count, **which includes twenty-eight documents this table does not name** |'s own count |
 
 At the start of a cycle the worker also reports the collection it is writing to: its dimension, its distance
 and how many points it holds. A collection whose dimension does not match what the embedding model produces
@@ -3060,6 +3067,12 @@ With a registry declared, that line reads `access       declared: 3 group(s), 2 
 `rendered/access.json`, and both the session tool and the retriever read it from there. It is mounted rather
 than baked into an image, so re-rendering takes effect on the next command without a rebuild.
 
+**The manifest above is an illustration and the outputs below are this deployment**, which is why the
+group counts differ: that example declares three groups and two invented users, while the box runs two
+groups and the two probe users. **A subject is refused rather than defaulted**, so a command copied with a
+subject from the example fails with the list of subjects this deployment actually declares — which is the
+error doing its job rather than a broken page.
+
 #### The commands
 
 ```
@@ -3072,15 +3085,15 @@ declared   yes
 deployment oi-core-dev-cloud
 
 roles   1: viewer=[]
-groups  3: executive=['company', 'executive'], finance=['company', 'finance'], staff=['company']
-users   2: dana@client.example[staff], sam@client.example[staff,finance]
+groups  2: exec=['company', 'executive'], staff=['company']
+users   2: probe-exec@officeinference.com[exec], probe-staff@officeinference.com[staff]
 ```
 
 ```
 # Establish a session. Development only: without --dev it refuses and says what replaces it
-$ oi --profile tools run --rm session mint --dev --subject dana@client.example --role viewer
+$ oi --profile tools run --rm session mint --dev --subject probe-staff@officeinference.com --role viewer
 token      <the session id, which is the whole token>
-subject    dana@client.example
+subject    probe-staff@officeinference.com
 role       viewer
 roots      ['company']
 groups     ['staff']
@@ -3090,11 +3103,11 @@ expires_at 2026-10-14T05:00:00+00:00
 ```
 # Ask what a token holds, which is what a request does
 $ oi --profile tools run --rm session verify --token <token>
-subject    dana@client.example
+subject    probe-staff@officeinference.com
 role       viewer
 groups     ['staff']
 roots      ['company']
-permit     {"groups": ["staff"], "role": "viewer", "roots": ["company"], "subject": "dana@client.example"}
+permit     {"groups": ["staff"], "role": "viewer", "roots": ["company"], "subject": "probe-staff@officeinference.com"}
 ```
 
 ```
@@ -3321,7 +3334,7 @@ plain request with a forbidden class went to the provider with `escalated: false
 
 **The request-side redaction in this section is a module the probes exercise directly, and the API does not
 call it yet.** The stream-side redaction in 13g is in the API and runs on every frame. Until the
-request-side one is wired in, the control on the way out is the gate, and `egress_acceptance.py` proves the
+request-side one is wired in, the control on the way out is the gate, and `egress_acceptance.py` proves the module rather than a path the service takes.
 
 **Run the boundary probe to check the claim rather than take it:**
 
@@ -3340,7 +3353,6 @@ It prints what this deployment permits, what a plain request with a class outsid
 notice, rather than an answer), and what a permitted class gets. **It exists because the sentence above was
 false when it was written**, and a claim about a boundary that a reader cannot check from the page is the kind
 of claim this project has already been caught making once.
-module rather than a path the service takes. Recorded rather than left to be discovered.
 
 **If it breaks.**
 
@@ -3727,8 +3739,12 @@ gateway's own tables and that image carries the driver which reaches them.
 
 - **Another capability** becomes another endpoint, and the phase's later steps each add one thing to this one
   rather than a service of their own.
-- **A different model per role** is a manifest change: edit `models`, re-render, restart the API. The
-  `OI_MODEL_<ROLE>` variables are what the API reads, and the probe's `CITED` line prints which model answered.
+- **A different model per role** is a manifest change: edit `models`, re-render, restart the API. **The API
+  reads `OI_MODEL_<API ROLE>`, and the name is the API role rather than the model role.** This deployment
+  declares one API role, so `rendered/env` carries exactly one such variable, `OI_MODEL_VIEWER=analyst`, plus
+  `OI_DEFAULT_MODEL_ROLE` and the `MODEL_ROLES` list. Looking for `OI_MODEL_SUMMARIZER` before adding
+  `summarizer` to `access.roles` finds nothing, and that is a correct render rather than a failed one. The
+  probe's `CITED` line prints which model answered, and the answer carries `model` and `resolved_model`.
 - **A different identity provider** replaces the verifier behind the same seam. The session record, the role
   resolution, the retriever call and the refusal path stay.
 ### Streaming, and the redaction that comes with it
@@ -3848,9 +3864,11 @@ audit-only control redacts.
 ## 13h. Routing, and what happens when the model will not answer
 
 **What it is for.** Two questions with one answer each: *which model may see this*, and *which model should*.
-They are decided in that order, and the order is the design.
+A trigger says which model *should* answer; the gate decides which model *may*. **The gate has the last word, and
+that is the design** — a trigger can ask for the frontier lane and be refused, and it can never widen what the
+deployment permits.
 
-### The gate runs first, and the triggers choose inside it
+### The gate decides, and the triggers choose inside what it allows
 
 A request carries a data class, which the deployment declares in `access.data_class`. The gate compares that
 against `access.egress.frontier_classes`. **A trigger is evaluated first and the gate then decides whether the
@@ -3859,7 +3877,9 @@ announced in the notice rather than applied silently. When no trigger fires, the
 lane the request would otherwise use, because an ordinary answer on a remote model is egress too.
 
 **Why the order matters, and it is the sentence an auditor will ask for.** A trigger is a cost decision. The
-gate is a data-boundary decision. With the gate first, the answer to *why did this content reach an external
+gate is a data-boundary decision. **The order that matters is not which is evaluated first but which one decides:**
+a trigger is evaluated first, and it cannot move content anywhere the gate has not allowed, so the answer to
+*why did this content reach an external
 model* is a sentence about a declared permission somebody approved. With the triggers first, the answer is a
 story about a heuristic firing, which is not a control anybody can review.
 
@@ -4276,9 +4296,9 @@ the manual also asks you to type.
 | `docker inspect <service> --format '…'` | Where a container mounts from, and how often it has restarted |
 | `systemctl list-timers 'oi-core-*'`, `journalctl -u <unit>`, `systemctl status <unit>` | The shipping schedule and its history |
 
-**Three commands in this table run from your workstation rather than the box**, because they need an AWS CLI
+**Four commands in this table run from your workstation rather than the box**, because they need an AWS CLI
 and a profile the box deliberately does not carry: the two `aws` commands above (`s3api list-object-versions`
-and `iam get-policy-version`), and nothing else. On the box they fail with `aws: command not found`, which
+and `iam get-policy-version`), and two `ec2` commands labelled below. On the box they fail with `aws: command not found`, which
 reads like a broken deployment rather than a command in the wrong place.
 
 ## 23. What lives where on the machine
