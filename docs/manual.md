@@ -245,7 +245,7 @@ A client's deployment is described by one YAML file called a manifest. It names 
 profile (cloud, office, or hybrid), the roles and their models, the spending ceilings, what content
 the record may keep, where evidence ships, and any compliance profile.
 
-Nothing is hand-configured on a server. The renderer reads the manifest and writes four files: an
+Nothing is hand-configured on a server. The renderer reads the manifest and writes six files: an
 environment file holding secrets and settings, the gateway's model list, the list of services the packs
 add up to, and a normalized copy of the manifest. Everything downstream reads those, so changing a deployment means changing the manifest and
 re-rendering, not editing files in place.
@@ -3758,9 +3758,15 @@ slow first token looks like a connection failure rather than a slow answer.
 
 ### The redaction, which is the part worth understanding
 
-**A holdback buffer.** Each chunk is appended to a buffer, the buffer is redacted, and only the part older than
-64 characters is emitted. A pattern split across two chunks is two fragments that match nothing, so it is held
-until it is complete. On the last chunk the remainder is flushed, redacted.
+**A holdback buffer, with the boundary walked back rather than fixed.** The whole tail is re-redacted on every
+chunk and only the settled part is emitted. A pattern split across two chunks is two fragments that match
+nothing, so it is held until it is complete. On the last chunk the remainder is flushed, redacted.
+
+**The 64 is where the emit point starts, not where it stops.** A fixed window is not enough on its own, and this
+was a real leak: a telephone number begins twelve characters before it is recognisable, so a boundary landing
+inside that prefix emits the first fragment, and the fragment plus the window is too short to ever match again.
+So the emit point retreats from `length - 64` while the tail could still be the beginning of a pattern.
+**The constant is insurance; the walk-back is the guarantee.**
 
     # what a client sees when the answer contains a reserved test number
     data: {"text": "The"}
@@ -3769,10 +3775,14 @@ until it is complete. On the last chunk the remainder is flushed, redacted.
     data: {"text": "ry contact reference for the Acme engagement is [REDACTED-SSN] [1]."}
     data: {"deltas": 7, "ttft_ms": 301, "model_first_ms": 290, "retrieval_ms": 11, "redactions": {"ssn": 1}, "total_ms": 558}
 
-**Sized from the pattern set, not chosen.** The longest pattern in `services/egress/redaction.py` is a
-private-key header at 36 characters; an SSN is 11, a card with separators 19. 64 covers the set with headroom,
-and a test fails if a longer pattern is added, because a pattern longer than the holdback is a pattern that can
-straddle it.
+**Sized from the pattern set, not chosen.** The longest pattern in `services/egress/redaction.py` is the
+**telephone** pattern at **59** characters. Next are `api_key` 50, `password` 43, `aws_key` 39, `bearer` 36 and
+`private_key` 34; an SSN is 21 and a card 24. **64 covers the set with five characters of headroom**, and a test
+fails if a longer pattern is added, because a pattern longer than the window can straddle it.
+
+**`longest_pattern()` computes it rather than stating it**, and that is deliberate: the page carried a wrong
+number and a wrong pattern name for two rounds because somebody wrote a figure down once. A number derived from
+the pattern list cannot drift from it.
 
 **The holdback is unconditional, and that is a tested property rather than an implementation detail.** A design
 that withholds only when it has found something leaks the prefix of a pattern that completes later, and emitted

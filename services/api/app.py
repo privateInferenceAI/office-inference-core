@@ -53,6 +53,7 @@ sys.path.insert(0, "/app/services/egress")
 import access as access_module  # noqa: E402
 import assertion  # noqa: E402
 import citations  # noqa: E402
+import redaction  # noqa: E402
 import ingest  # noqa: E402
 import retriever  # noqa: E402
 import session as session_module  # noqa: E402
@@ -354,6 +355,16 @@ async def ask(request: Request):
                                    decision.lane),
             status_code=200)
 
+    # **The answer is redacted before the client sees it, on this path too.** The streaming endpoint
+    # redacted from the start and this one did not, so the same question returned the PII canary in
+    # clear over `POST /ask` and redacted over `POST /ask/stream`. The canary fixture says in its own
+    # first line that if it ever appears in a response the deployment is not safe to show a client,
+    # and it appeared. Found by the review panel, who asked the question and read the answer.
+    #
+    # The order matters: the checks below run against what is SENT, not against what the model
+    # produced, so a citation is verified in the text the client will actually hold.
+    answer, redaction_report = redaction.redact(answer)
+
     verified = citations.verify(answer, result.passages)
     body_out = {
         "answer": answer,
@@ -374,6 +385,9 @@ async def ask(request: Request):
         "unsupported": [{"text": c.text, "reason": c.reason, "detail": c.detail}
                         for c in verified.refused],
         # What the user is told, always, when there is something to tell. Decided 2026-10-14.
+        # What was redacted from this answer. Absent from the response until the panel found the leak;
+        # a client that wants to know whether a value was replaced has to be told.
+        "redactions": redaction_report.counts,
         "notice": decision.notice,
         "lane": decision.lane,
         "escalated": decision.escalated,
