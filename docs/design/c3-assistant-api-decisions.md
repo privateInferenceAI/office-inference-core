@@ -314,29 +314,31 @@ The deployment now sets the development flag for the API, with the reasoning wri
 honest fix is for the API to have its own trusted path to the audit tool rather than reusing the development
 escape, and that is recorded as work rather than as a comment.
 
-**Finding 2: the team budget does not enforce on the assertion path, and the spike is why I believed it did.**
-Set a team's spend to 99 against a ceiling of 10 and the API answers with a cited response.
+**Finding 2, fixed the same day: the team budget did not enforce, and the reason was the spike.**
 
-**The spike was wrong, not the deployment.** The spike's hook returned `max_budget=0.000001` on the identity
-itself, and what refused at 422 was that number being spent, not the team's ceiling. The team row was
-decorative in the spike and I read it as load-bearing, then wrote it into this document as a stronger budget
-story than the key budgets it replaced. It is not, yet.
+**The spike proved something other than what it looked like.** Its hook returned `max_budget=0.000001` on the
+identity itself, and what refused at 422 was that number being spent, not the team's ceiling. The team row was
+decorative in the spike, and I read it as load-bearing and wrote it into this document as a stronger budget
+story than the key budgets it replaced.
 
-**What it takes to make it true**, recorded in the hook where the fix belongs: read the team's ceiling and
-spend, return the remainder as `max_budget` on the identity, cache the read briefly, and write the gateway's
-accumulated spend back to the team row or the ceiling resets whenever the process restarts. Until that is
-written, the manifest's `budgets.roles` is a declaration the gateway does not enforce on this path and the
-manual must not say otherwise.
+**The gateway does not read the team row for an identity that came from a custom-auth hook.** So the hook
+computes the remainder itself: it reads the team's ceiling and spend, returns `ceiling - spend` as the
+identity's `max_budget`, and lets the gateway accumulate spend against the same row. A ceiling that cannot be
+read is a refusal rather than an allowance, because a database that is unreachable must not turn a budget into
+an unmetered lane.
 
-**This is the third control in this phase found reporting success while doing nothing**, after the audit
-writes and the model allowlist. The pattern is worth naming: every one of them was invisible to reading the
-code and obvious to spending a minute running it.
- Set a team's spend to 99 against a
-ceiling of 10 and the gateway answers. The spike saw `budget_exceeded` at HTTP 422, and the difference between
-the spike and the deployment is the shape of the identity the hook returns rather than the config, which is
-the next thing to chase. Until it is fixed the API cannot claim a per-role ceiling, and the manual must not
-say it does.
+**Verified on the live deployment**: spend 99 against a ceiling of 10 returns a 502 whose body names the team,
+the current cost and the maximum; spend 0 against the same ceiling returns a cited answer.
 
+**A second finding, and it is operational.** LiteLLM caches the team row. Editing the spend directly in the
+database and asking again still reports the old figure until the gateway restarts. That is harmless in normal
+operation, because the gateway is the thing that writes the spend, and it matters for anybody testing a
+ceiling by hand: **the number in the database is not the number the gateway is enforcing.** The probe says so
+where it measures it.
+
+**This is the third control in this phase found reporting success while doing nothing**, after the audit writes
+and the model allowlist, and the first one fixed. The pattern is worth naming: none was visible to reading the
+code, and each was obvious within a minute of running it.
 **What this pair has in common, and why it is the useful part.** Both are controls that reported success
 while doing nothing: an audit write that failed loudly into a log nobody was reading, and a budget that
 returned an answer. Neither would have been found by reading the code, and the second was found only because

@@ -34,6 +34,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -231,17 +232,37 @@ def main() -> int:
         print(" " * 9 + "Run: oi --profile tools run --rm keys --provision-teams")
     else:
         print(" " * 9 + "team before: " + repr(team[0]))
+
+        # **The gateway caches the team row**, so a spend written directly into the database is not what it
+        # enforces until it restarts. Found by setting a ceiling, watching a request answer anyway, and
+        # finding the database said one thing and the gateway another.
         sql("update \"LiteLLM_TeamTable\" set spend = coalesce(max_budget, 1) + 1 where team_id = %s",
             (model_role,))
-        status, over = post("/ask", {"session": session.session_id,
-                                     "question": "What is the mileage rate for reimbursement?"})
+        restart = subprocess.run(
+            ["docker", "compose", "-f", "deploy/office/compose/docker-compose.yml",
+             "--env-file", "rendered/env", "restart", "litellm"],
+            capture_output=True, text=True, cwd=str(W))
+        if restart.returncode != 0:
+            print(" " * 9 + "could not restart the gateway, so the ceiling is not read fresh: "
+                  + restart.stderr.strip()[:120])
+        time.sleep(int(os.environ.get("OI_GATEWAY_RESTART_WAIT", "16")))
+
+        try:
+            status, over = post("/ask", {"session": session.session_id,
+                                         "question": "What is the mileage rate for reimbursement?"})
+        finally:
+            sql("update \"LiteLLM_TeamTable\" set spend = 0 where team_id = %s", (model_role,))
+            subprocess.run(
+                ["docker", "compose", "-f", "deploy/office/compose/docker-compose.yml",
+                 "--env-file", "rendered/env", "restart", "litellm"],
+                capture_output=True, text=True, cwd=str(W))
+            time.sleep(int(os.environ.get("OI_GATEWAY_RESTART_WAIT", "16")))
+
         refused_by_budget = status == 502 and "budget" in json.dumps(over).lower()
         ledger.record("BUDGET", refused_by_budget,
-                      "[%s] the API reported %r rather than an answer"
+                      "[%s] over the ceiling the API reported %r rather than an answer"
                       % (status, (over.get("error") or "")[:70]),
                       "a request over the ceiling would return an answer and be billed to nobody")
-        sql("update \"LiteLLM_TeamTable\" set spend = 0 where team_id = %s", (model_role,))
-
     # ------------------------------------------------------------------ ADMIN
     status, listing = gateway("/team/list")
     ledger.record("ADMIN", status == 200, "[%s] %s" % (status, listing[:80]),

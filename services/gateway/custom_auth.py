@@ -36,6 +36,44 @@ def _master_key() -> str:
     return os.environ.get("LITELLM_MASTER_KEY", "")
 
 
+def _team_budget(role: str) -> float:
+    """How much of this role's ceiling is left, which is what the gateway enforces.
+
+    Read per request rather than cached, because the number changes as the gateway records spend and a stale
+    ceiling is a ceiling that lets a runaway through. One indexed row read on a local socket is cheaper than
+    the model call it guards.
+    """
+    import psycopg
+
+    url = (os.environ.get("DATABASE_URL") or "").strip()
+    if not url:
+        raise Exception("no DATABASE_URL, so no ceiling could be read and no call may be allowed")
+    conn = psycopg.connect(url)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select max_budget, spend from \"LiteLLM_TeamTable\" where team_id = %s", (role,))
+            row = cur.fetchone()
+    finally:
+        conn.close()
+
+    if row is None:
+        raise Exception(
+            f"no team named {role!r} exists, so this role has no ceiling and no call may be allowed. "
+            f"Run: oi --profile tools run --rm keys --provision-teams"
+        )
+    ceiling, spend = row
+    if ceiling is None:
+        # A deployment that declared no ceiling for this role. The manifest allows it, and the honest answer
+        # is a number the gateway can enforce a spend against rather than an unlimited lane.
+        return float(os.environ.get("OI_UNBUDGETED_ROLE_CEILING", "1.0"))
+    remaining = float(ceiling) - float(spend or 0)
+    if remaining <= 0:
+        # Zero rather than a refusal here, so the gateway produces its own budget error and the API reports
+        # a refusal with the numbers in it, which is a better message than anything this hook would invent.
+        return 0.0
+    return remaining
+
 async def user_api_key_auth(request: Request, api_key: str) -> UserAPIKeyAuth:
     """Resolve the caller, or refuse with the reason."""
     # The exemption. Without it, enabling this hook locks the deployment out of its own administration.
@@ -62,21 +100,24 @@ async def user_api_key_auth(request: Request, api_key: str) -> UserAPIKeyAuth:
 
     role = payload["role"]
 
-    # ------------------------------------------------------------------ the budget, and what does not enforce it
+    # ------------------------------------------------------------------ the budget
     #
-    # **Returning `team_id` is not enough, and this cost a day to learn.** A team row holds the ceiling and the
-    # spend, and the gateway does not read them for an identity that came from this hook: set a team's spend to
-    # 99 against a ceiling of 10 and a request still answers. What the spike enforced was the `max_budget` ON
-    # THE IDENTITY IT RETURNED, which is why the spike looked like proof that team budgets work and was not.
+    # **Returning `team_id` is not enough, and this cost a day to learn.** The gateway does not read the team
+    # row's ceiling for an identity that came from this hook: set a team's spend to 99 against a ceiling of 10
+    # and a request still answers. What the spike enforced was the `max_budget` ON THE IDENTITY IT RETURNED,
+    # which made the spike look like proof that team budgets work when it was proof of something else.
     #
-    # The fix, and it is small: read the team's ceiling and spend here and return the remainder as
-    # `max_budget`. The gateway then refuses once the remainder is spent, which is the behaviour the manifest
-    # promises and the manual must not claim until this is written. The read belongs in one place, with a
-    # short cache so a request does not pay for it twice, and the spend the gateway accumulates has to be
-    # written back to the team row or the ceiling resets on every process restart.
+    # So the remainder is computed here and returned as the identity's budget. The gateway then refuses once
+    # that remainder is spent, and it accumulates the spend against the team row as usual, which is what keeps
+    # the figure current across restarts: this reads the same row the gateway writes.
     #
-    # Recorded here rather than in a note because this is the line somebody will be looking at.
+    # **A ceiling that cannot be read is a refusal, not an allowance.** A database that is unreachable must
+    # not turn a budget into an unmetered lane, which is the direction this fails in and the reason it is a
+    # raise rather than a default.
+    budget = _team_budget(role)
+
     return UserAPIKeyAuth(
+        max_budget=budget,
         api_key="oi-assertion",
         # The team is what carries the ceiling. One team per role, provisioned from the manifest.
         team_id=role,
