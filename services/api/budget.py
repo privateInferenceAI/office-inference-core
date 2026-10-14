@@ -35,6 +35,18 @@ TOTAL_SECONDS = float(os.environ.get('OI_TOTAL_SECONDS', '30'))
 DELIVERY_RESERVE_SECONDS = float(os.environ.get('OI_DELIVERY_RESERVE_SECONDS', '1.2'))
 MAX_ATTEMPTS = int(os.environ.get('OI_MAX_ATTEMPTS', '3'))
 
+# **The local lane is a different shape, so it gets different numbers.** Everything above was measured
+# against a remote frontier model: first token at p50 260ms, p95 359ms. A llama.cpp server on CPU is
+# compute-bound on prompt processing, so its first token is dominated by the prompt rather than by the
+# network, and inheriting the frontier figure would degrade every local answer as if it were a failure.
+# These are placeholders until the office build is measured, and the runbook says so rather than implying
+# they are derived. llama.cpp publishes `prompt_tokens_seconds` and `predicted_tokens_seconds`, which is
+# what the derivation should use.
+LOCAL_FIRST_TOKEN_SECONDS = float(os.environ.get("OI_LOCAL_FIRST_TOKEN_SECONDS", "20"))
+LOCAL_STALL_SECONDS = float(os.environ.get("OI_LOCAL_STALL_SECONDS", "30"))
+LOCAL_TOTAL_SECONDS = float(os.environ.get("OI_LOCAL_TOTAL_SECONDS", "180"))
+
+
 # Waiting will not help for these. Matched case-insensitively against whatever the provider said, because the
 # string arrives through a gateway and its exact form is not ours to promise.
 # **Both the type token and the message a person would recognise.** The first version matched only the token,
@@ -77,7 +89,22 @@ RETRYABLE_TYPES = (
 
 @dataclass
 class Budget:
-    """One request''s deadline, and where inside it the request currently is."""
+    """One request's deadline, and where inside it the request currently is."""
+
+    @classmethod
+    def for_lane(cls, lane: str, started: float | None = None) -> "Budget":
+        """The thresholds that match where the model actually runs.
+
+        **Why this exists rather than one set of numbers.** The frontier figures were measured against
+        Bedrock. A llama.cpp server on CPU is a different shape, and borrowing the frontier thresholds
+        would mark every healthy local answer as a failure. Research on 2026-10-14 found the deployed
+        code doing exactly that: module-level defaults, and a degraded payload that said frontier while
+        a local model served.
+        """
+        if lane == "local":
+            return cls(total=LOCAL_TOTAL_SECONDS, first_token=LOCAL_FIRST_TOKEN_SECONDS,
+                       stall=LOCAL_STALL_SECONDS, started=started if started is not None else time.monotonic())
+        return cls(started=started if started is not None else time.monotonic())
 
     total: float = TOTAL_SECONDS
     first_token: float = FIRST_TOKEN_SECONDS
@@ -178,7 +205,7 @@ def _label(matched: str, *, terminal: bool) -> str:
 
 
 def degraded(reason: str, detail: str, passages: list, budget: Budget, attempts: int,
-             threshold: str | None, partial_output: bool) -> dict:
+             threshold: str | None, partial_output: bool, lane: str = 'frontier') -> dict:
     """The answer when the provider will not give one, and the facts that go with it.
 
     **The retrieved passages rather than an apology.** Retrieval and generation are already separate halves,
@@ -189,6 +216,7 @@ def degraded(reason: str, detail: str, passages: list, budget: Budget, attempts:
     return {
         'kind': 'degraded',
         'reason': reason,
+        'lane': lane,
         'detail': detail,
         'passages': [
             {

@@ -277,7 +277,10 @@ async def ask(request: Request):
              "kind": "no_permitted_lane", "reason": decision.reason,
              "notice": decision.notice},
             status_code=403)
-    request_budget = budget_module.Budget()
+    # **The lane decides the thresholds.** A local model is a different shape from a remote one, and
+    # borrowing the frontier numbers would mark healthy local answers as failures. The arrival clock is
+    # passed through so the deadline stays anchored where the client asked, not where routing finished.
+    request_budget = budget_module.Budget.for_lane(decision.lane)
     answer, generation = _generate(session, permit, model, question, result.passages, request_budget)
     if answer is None:
         # **A degraded answer rather than an error.** The research and this step's own design say the
@@ -472,6 +475,18 @@ async def ask_stream(request: Request):
     permit = session.permit()
     role = body.get("model_role") or os.environ.get("OI_DEFAULT_API_ROLE", "viewer")
     model = model_for(role)
+    # The same decision the non-streaming path makes, so the two cannot drift. The gate decides the
+    # lane and the triggers choose inside it; the stream then uses the lane thresholds rather than the
+    # frontier ones.
+    stream_decision = routing.route(
+        STATE.get("manifest") or {},
+        data_class=((STATE.get("manifest") or {}).get("access") or {}).get("data_class") or "regulated",
+        task=body.get("task") or "",
+        user_wants_stronger=bool(body.get("stronger")),
+        model_name=model,
+        default_lane="local" if local_lane_available() else "frontier",
+        local=local_lane_available(),
+    )
 
     try:
         result = retriever.search(STATE["services"], question, permit.role, limit=PASSAGES, permit=permit)
@@ -494,13 +509,14 @@ async def ask_stream(request: Request):
     }
     requested_at = time.monotonic()
     return EventSourceResponse(
-        _frames(session, permit, model, question, result, requested_at),
+        _frames(session, permit, model, question, result, requested_at, stream_decision.lane),
         headers=headers,
         ping=int(os.environ.get("OI_STREAM_PING_SECONDS", "15")),
     )
 
 
-async def _frames(session, permit, model: str, question: str, result, requested_at: float):
+async def _frames(session, permit, model: str, question: str, result, requested_at: float,
+                   lane: str = "frontier"):
     """The events, in the order a client should read them."""
     import urllib.error
     import urllib.request
@@ -518,7 +534,7 @@ async def _frames(session, permit, model: str, question: str, result, requested_
     # **The same budget the non-streaming path has, on the clock the client experiences.** The deadline is
     # anchored at `requested_at` rather than here, so retrieval counts against it: a budget that starts
     # after the work has begun is not a bound on the request.
-    request_budget = budget_module.Budget(started=requested_at)
+    request_budget = budget_module.Budget.for_lane(lane, started=requested_at)
     errors: list = []
     emitted = False
 
@@ -553,27 +569,51 @@ async def _frames(session, permit, model: str, question: str, result, requested_
     def _open():
         return urllib.request.urlopen(upstream, timeout=max(1.0, request_budget.remaining()))
 
-    try:
-        response = _open()
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode(errors="replace")[:400]
-        kind = budget_module.classify(detail)
-        errors.append({"attempt": 1, "status": exc.code, "reason": kind["reason"],
-                       "matched": kind["matched"], "retryable": kind["retryable"]})
+    # **Retried here for the same reason the non-streaming path retries, and this path used not to.**
+    # Research on 2026-10-14 found the inconsistency: an HTTPError before any answer frame went
+    # straight to a degraded answer on the streaming path while the non-streaming path retried the
+    # identical 429 three times, and the streaming path is the one real clients use. Retrying is safe
+    # here because no answer byte has been emitted; the start frame carries citations, not text, and is
+    # idempotent. After the first delta the rule is unchanged: an error event, never a retry.
+    attempt = 0
+    response = None
+    while attempt < budget_module.MAX_ATTEMPTS:
+        attempt += 1
+        if request_budget.past_reserve():
+            break
+        try:
+            response = _open()
+            break
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode(errors="replace")[:400]
+            kind = budget_module.classify(detail)
+            errors.append({"attempt": attempt, "status": exc.code, "reason": kind["reason"],
+                           "matched": kind["matched"], "retryable": kind["retryable"]})
+            last_kind = kind
+            if not kind["retryable"] or attempt >= budget_module.MAX_ATTEMPTS:
+                break
+            wait = _backoff(attempt, exc.headers.get("Retry-After") if exc.headers else None)
+            if wait >= request_budget.remaining() - request_budget.reserve:
+                break
+            time.sleep(wait)
+        except Exception as exc:  # noqa: BLE001
+            last_kind = budget_module.classify(type(exc).__name__)
+            errors.append({"attempt": attempt, "status": 0, "reason": last_kind["reason"],
+                           "matched": last_kind["matched"], "retryable": last_kind["retryable"]})
+            if not last_kind["retryable"] or attempt >= budget_module.MAX_ATTEMPTS:
+                break
+            time.sleep(_backoff(attempt, None))
+
+    if response is None:
+        kind = errors[-1] if errors else {"reason": "unclassified", "matched": "", "retryable": False}
         audit("model_call", session.subject, session.role, "denied",
               budget_module.audit_facts(reason=kind["reason"], matched=kind["matched"],
-                                        retryable=kind["retryable"], attempts=1,
+                                        retryable=kind["retryable"], attempts=attempt,
                                         threshold=request_budget.timed_out(), budget=request_budget,
                                         partial_output=False, errors=errors), model=model)
         # No frame has gone out yet, so a degraded answer is still possible and is the better outcome.
         yield frame("degraded", budget_module.degraded(kind["reason"], _degrade_detail(kind["reason"]),
-                                                      result.passages, request_budget, 1,
-                                                      request_budget.timed_out(), False))
-        return
-    except Exception as exc:  # noqa: BLE001
-        kind = budget_module.classify(type(exc).__name__)
-        yield frame("degraded", budget_module.degraded(kind["reason"], _degrade_detail(kind["reason"]),
-                                                      result.passages, request_budget, 1,
+                                                      result.passages, request_budget, attempt,
                                                       request_budget.timed_out(), False))
         return
 
