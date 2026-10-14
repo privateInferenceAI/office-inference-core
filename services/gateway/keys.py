@@ -140,6 +140,51 @@ def mint(env: dict, manifest: dict, keys: dict) -> int:
     return 0
 
 
+def provision_teams(env: dict, manifest: dict) -> int:
+    """Create or update one team per role, carrying that role's ceiling.
+
+    **Budgets live on teams now, and the reason is the credential change.** The gateway's custom_auth hook
+    resolves a signed assertion into an identity whose `team_id` is the role, and a key-level budget is not
+    enforced on that path. A team budget is, and it refuses harder than the key budgets did: the spike saw
+    `budget_exceeded` at HTTP 422 with the spend and the ceiling named, where a key budget is only checked
+    against recorded spend and can be passed by concurrent requests.
+
+    **The team must exist before an assertion naming it works.** A team the database does not know returns a
+    404 telling you to create it, so this runs as part of rendering a deployment rather than as a repair.
+    """
+    master = env.get("LITELLM_MASTER_KEY")
+    if not master:
+        die(f"no LITELLM_MASTER_KEY in {ENV_FILE}: run the renderer first")
+    deployment = env.get("DEPLOYMENT_ID", "unknown")
+    models = manifest.get("models") or {}
+    budgets = manifest.get("budgets") or {}
+    by_role = budgets.get("roles") or {}
+    period = int(budgets.get("period_days", 30))
+    duration = f"{period}d"
+
+    rows = []
+    for role in sorted(models):
+        ceiling = by_role.get(role)
+        policy = {"team_id": role, "team_alias": f"{deployment}:{role}", "models": [role],
+                  "metadata": {"deployment_id": deployment, "role": role}}
+        if ceiling is not None:
+            policy["max_budget"] = float(ceiling)
+            policy["budget_duration"] = duration
+        status, body = request("/team/new", master, policy)
+        if status != 200:
+            # A team that already exists refuses a second create, so the update path is the normal one.
+            status, body = request("/team/update", master, policy)
+        if status != 200:
+            die(f"could not provision the team for {role}: {status} {str(body)[:200]}")
+        rows.append((role, ceiling))
+
+    print(f"teams for {deployment}:")
+    for role, ceiling in rows:
+        limit = f"{ceiling} USD per {period}d" if ceiling is not None else "no ceiling declared"
+        print(f"  {role:10} members=[] models=[{role}]  {limit}")
+    print("  budgets are enforced per team, which is the path a signed assertion takes")
+    return 0
+
 def set_budget(env: dict, args: argparse.Namespace) -> int:
     master = env.get("LITELLM_MASTER_KEY")
     if not master:
@@ -211,6 +256,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--set-budget", nargs=2, metavar=("ROLE", "AMOUNT"))
     parser.add_argument("--probe", metavar="ROLE")
+    parser.add_argument("--provision-teams", action="store_true",
+                        help="create or update one team per role, carrying that role's budget. A signed "
+                             "assertion is checked against a team, so this runs with every render")
     parser.add_argument("--revoke", metavar="ROLE",
                         help="delete a role's key at the gateway and forget it here")
     parser.add_argument("--as-model", metavar="MODEL",
@@ -229,6 +277,10 @@ def main(argv: list[str] | None = None) -> int:
         return probe(env, args)
     if args.revoke:
         return revoke(env, args.revoke)
+    if args.provision_teams:
+        if not MANIFEST_FILE.exists():
+            die(f"no rendered manifest at {MANIFEST_FILE}: run the renderer first")
+        return provision_teams(env, json.loads(MANIFEST_FILE.read_text()))
 
     if not MANIFEST_FILE.exists():
         die(f"no rendered manifest at {MANIFEST_FILE}: run the renderer first")

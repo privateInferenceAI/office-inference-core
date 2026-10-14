@@ -3097,6 +3097,112 @@ something else:
   find afterwards is not a control.
 
 
+### 4.2 The assistant API, and the credential it calls with
+
+**Goal.** There is no API today. This step builds one: an authenticated session asks a question, the answer
+comes back with its citations, and the model call is made with a credential the gateway issued rather than one
+the API typed. All five of the phase's requirements land on top of this, so this step is deliberately the
+plainest version of it: no streaming, no timeout budget, no routing beyond reading the manifest.
+
+**Why the credential is part of this step and not a later one.** The API cannot answer anything without
+calling a model, and how it authenticates that call decides what the authorization story looks like for the
+rest of the phase. It was settled by a spike before this step was written; the finding and the evidence are in
+`docs/design/c3-assistant-api-decisions.md` section 7a.
+
+#### The shape
+
+| Piece | What it does |
+|---|---|
+| the API service | **FastAPI on uvicorn**, one process, no published port, on `ai-net`. A service rather than a tool because it listens. |
+| session resolution | the token resolves to a session record through `services/session`, which refuses a request that supplies its own role and records the refusal |
+| the permit | the session's roots go to the retriever, which filters inside the query, as `4.1` built |
+| the credential | the API signs a short-lived assertion per request; the gateway validates it through `custom_auth` and enforces the role's budget as a **team** |
+| the answer | retrieval, then generation, then citation assembly, returned as one JSON document |
+
+#### The credential path, which the spike decided
+
+The API holds **one** secret: a signing key. It does not hold a model credential, and it cannot read one.
+
+    rendered/assertion.key    mode 600, one line, minted by the renderer like every other secret
+
+Per request the API signs `role` and a nonce with that key and sends two headers. The gateway's
+`custom_auth` hook verifies the signature, resolves the identity, and returns a `UserAPIKeyAuth` whose
+`team_id` is the role. Budget enforcement then happens against that team.
+
+**Three findings from the spike that this step depends on, each proved by running it:**
+
+1. **A team must exist before an assertion naming it works.** A `team_id` the database does not know returns a
+   404 telling you to create it. So provisioning moves into the `keys` tool, which reads
+   `budgets.roles` from the manifest and creates one team per role with that ceiling.
+2. **A team budget refuses hard.** Over the ceiling the gateway returned `budget_exceeded` at HTTP 422,
+   naming the spend and the maximum. This is **stronger than the key budgets we had**, which admission-check
+   against recorded spend and can be passed by concurrent requests. The manual and the schema say so.
+3. **The master key must be exempted or the deployment locks itself out.** With `custom_auth` enabled the
+   master key goes through the same hook. A hook that only understands role assertions refuses it, and every
+   management endpoint, including `/team/new`, becomes unreachable. The hook receives `api_key`, so it
+   compares it against `LITELLM_MASTER_KEY` and returns `proxy_admin`. Without that line this step would
+   brick budget administration.
+
+#### The endpoints
+
+| Method | Path | What it does |
+|---|---|---|
+| GET | `/health` | liveness, and what it has loaded |
+| POST | `/ask` | a question in, a cited answer out |
+
+Two, and that is the point of the step. The phase's later steps add streaming to the second one and a routing
+decision behind it; there is no third endpoint until a capability needs one.
+
+**A request that supplies its own role is refused with the refusal already in the chain**, which `4.1` built
+and this step wires in. The response is a 403 whose wording says the permission was denied **or the resource
+might not exist**, which is Google's AIP-211 position: a 404 instead of a 403 is worse for the operator and no
+better for secrecy.
+
+#### Run it
+
+    cd /opt/oi-core
+    alias oi='docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env'
+
+    # The registry and the signing key, then the teams the assertions name.
+    python3 scripts/render_manifest.py --manifest manifests/dev-cloud.yaml
+    oi --profile tools run --rm keys --provision-teams
+    oi --profile tools build api
+    oi up -d api
+
+    # A session, then a question through the API.
+    oi --profile tools run --rm session mint --dev --subject probe-staff@officeinference.com --role viewer
+    docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
+      -v /opt/oi-core:/w -w /w --env-file rendered/env \
+      --entrypoint python oi-core/eval:local /w/tests/fixtures/api_probe.py
+
+#### What proves it
+
+The probe prints one line per right with the wrong path beside it, as `access_probe.py` does:
+
+| # | Right | Act | What is asserted |
+|---|---|---|---|
+| 1 | `ANSWER` | ask a question the corpus answers, with a valid session | the answer carries a citation whose page and document exist in the retrieved set |
+| 2 | `SCOPED` | ask the executive question as a staff session | no passage outside the session's roots, and the content is reachable by a session that holds them |
+| 3 | `FORGED` | send the request with a `role` field | refused, and the refusal is in the chain |
+| 4 | `NO-KEY` | call the API with no session token | refused before any model is called |
+| 5 | `BUDGET` | set a role's team ceiling below its spend, then ask | refused by the gateway with `budget_exceeded`, and the API reports it as a refusal rather than an answer |
+| 6 | `ADMIN` | call `/team/list` with the master key | answers, proving the exemption in finding 3 is in place |
+
+**Right 6 exists because of how the spike failed first.** Without it, a later change to the hook could lock
+administration out and nothing in the deployment would say so until somebody needed to change a budget.
+
+#### How it breaks
+
+- **Every request returns 401 with a message from the hook.** The signing key the API loaded is not the one the
+  gateway is verifying. Both come from `rendered/`, so a half-finished render is the cause.
+- **A request returns 404 mentioning a team.** The teams were never provisioned, or the manifest's role list
+  changed and nobody re-ran `--provision-teams`.
+- **Every request returns 422 `budget_exceeded` on a fresh deployment.** The team was created with the
+  manifest's ceiling and the period has not rolled over. Check `budgets.period_days` before assuming a bug.
+- **The API answers but the answer has no citations.** Generation ran and citation assembly did not. The
+  citations are the product, so this is a failure and not a degradation.
+- **`/team/list` returns 401 with the master key.** The exemption is missing or the environment does not
+  carry `LITELLM_MASTER_KEY` into the hook. This is the lockout from finding 3 and it stops everything.
 ## Phase 5 — Client app  *(outline)*
 
 Ask, Do, Review, Activity, Settings, with citations as first-class objects and the lane indicator.

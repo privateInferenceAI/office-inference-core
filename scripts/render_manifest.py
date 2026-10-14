@@ -262,6 +262,10 @@ def main() -> int:
     env.setdefault("POSTGRES_DB", "oicore")
     env.setdefault("POSTGRES_PASSWORD", secrets.token_urlsafe(24))
     env.setdefault("LITELLM_MASTER_KEY", "sk-" + secrets.token_urlsafe(32))
+    # The assertion signing key. One secret shared by the API, which mints statements, and the gateway, which
+    # verifies them. It is deliberately not a model credential: whoever holds it can speak as a role for five
+    # minutes and cannot call a model with it.
+    env.setdefault("OI_ASSERTION_SECRET", secrets.token_urlsafe(48))
     env.setdefault("GATEWAY_PORT", "4000")
     # The audit tool runs as this user so exported evidence belongs to the operator rather than
     # to root. Files a client is meant to keep should not need sudo to read or copy.
@@ -362,6 +366,13 @@ def main() -> int:
         + "".join(f"{s}\n" for s in services)
     )
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+
+    # The signing key as a file, mode 600, because the gateway hook reads a file rather than an environment
+    # variable: an environment variable is visible to `docker inspect` and to any process that can read /proc.
+    key_path = out_dir / "assertion.key"
+    if not key_path.exists():
+        key_path.write_text(env["OI_ASSERTION_SECRET"] + "\n")
+    key_path.chmod(0o600)
 
     registry = build_access_registry(manifest)
     (out_dir / "access.json").write_text(json.dumps(registry, indent=2, sort_keys=True) + "\n")
