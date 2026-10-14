@@ -251,7 +251,6 @@ services the packs add up to, a normalized copy of the manifest, **the signing k
 statements with**, and **the permission registry the session tool and the retriever read**. Everything
 downstream reads those, so changing a deployment means changing the manifest and re-rendering, not
 editing files in place.
-re-rendering, not editing files in place.
 
 A validator refuses a manifest that would break a promise. It knows, for example, that an office build
 cannot use remote models, that a regulated deployment may not route a prompt globally, and that a

@@ -313,4 +313,68 @@ that it stopped it.
     no stray containers
     provider spend in the preceding minute: 0 rows
 
-**What round 1 found.** Filled in when the reviewers report.
+**What round 1 found.** Two of three passed and one found the worst defect of the whole phase.
+
+| Reviewer | Verdict |
+|---|---|
+| **cold reader** | **NO** — *"the second of the two documented API endpoints returns a Social Security number to the caller in plaintext"* |
+| **fidelity checker** | **YES** — *"every operational path I followed from the page ran and produced the documented shape"*, with description and stale-number defects |
+| **executor** | interim, everything it reached passing |
+
+### The defect that decided the round, and it was mine
+
+**`POST /ask` returned the PII canary unredacted.** The streaming endpoint redacted from the start; the JSON endpoint
+never did. So the same question returned this:
+
+    POST /ask         -> "...the Acme engagement is 219-09-9999, as indicated in the first passage [1]."
+    POST /ask/stream  -> REDACTED-SSN
+
+**The canary fixture says in its own first line** that if the value ever appears in a response, the deployment is
+not safe to show a client. It appeared in a response from the documented API, and 13g tells the reader that
+streaming exists *because* it redacts, listing both endpoints as equals. A reader would believe redaction was a
+property of the API.
+
+**How it happened is worth recording.** The streaming path was built with a redactor because a value can reach a
+browser mid-token and cannot be recalled. The JSON path was built earlier, returns one finished document, and
+nobody asked where its redaction was — **including me, for four rounds, while writing probes that tested the
+streaming path's redaction and never the other one's.** The panel found it by asking the question over the
+endpoint nobody had tested and reading the answer.
+
+Fixed: the answer is redacted before anything downstream sees it, the citation checks run against the text the
+client actually receives, and the response carries a `redactions` field so a client can tell. Four structural
+tests assert it against the source, so it cannot come back quietly.
+
+### The other half of that finding: the record could not say whether egress was permitted
+
+13e promises that the data class, the egress verdict and the redaction counts "have columns of their own". They
+have had the columns all along and **the audit tool has had the flags all along**: the API never passed them.
+Twelve of 7,691 model-call rows carried `egress_allowed`; the twelve were the acceptance probe's own writes.
+
+    id    | stage      | data_class | egress_allowed | redaction_count | has_hash
+    ------+------------+------------+----------------+-----------------+---------
+    7814  | ask        | internal   | t              | 1               | t        <- after
+    7812  | ask        | internal   |                | 0               | f        <- before
+
+**A control whose evidence is a blank column is a control an auditor cannot check**, and this is the second time
+in this phase that a declared control turned out to have no enforcer on the path that mattered.
+
+### What else round 1 found, all fixed
+
+| Finding | Fix |
+|---|---|
+| 13e's boundary-probe command said `run ...`, a shell function defined 600 lines later. `run: command not found` | the whole `docker run` invocation is spelled out, with a note on why an alias from another section is not a command |
+| The holdback was described as a fixed 64-character window | it is a walk-back from that window, and the description now says which part is the guarantee |
+| "The longest pattern is a private-key header at 36 characters" | it is the phone pattern at 59; the page now gives the measured list and says `longest_pattern()` computes it |
+| "if the class is not permitted then no trigger is even consulted" | the trigger is evaluated first and the gate decides; a refused trigger is announced, not silent |
+| The migration count said 15 eleven lines before it said 16 | 16 |
+| The renderer "writes four files" and section 22 listed five | six, named, in both places |
+| 13a's corpus counts said 1131 while the same section's own output said 1261 | 1261, keeping the dated historical run at its recorded figure |
+
+**Two findings were recorded rather than fixed**, because both are disclosures that are already accurate: the
+request-side redaction module is not wired into the API, and the rate-limit drill does not produce a refusal.
+
+### Round 2 goes back to the cold reader
+
+Its NO rested entirely on the canary leak, which is fixed and verified — `POST /ask` now returns
+`[REDACTED-SSN]`, and the record carries the verdict. **Round 2 asks it to re-run that exact question and see
+what happens now**, and to re-walk the pages it found the other defects on.
