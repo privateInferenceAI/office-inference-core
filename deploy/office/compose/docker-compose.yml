@@ -474,6 +474,10 @@ services:
       - ${OI_ROOT}/rendered:/app/rendered:ro
       # The audit tool, so a refusal goes through the one writer of the chain.
       - ${OI_ROOT}/services/audit/audit.py:/app/audit.py:ro
+      # The statement verifier, beside the tool for the same reason the audit image copies it there: the tool
+      # checks the signature on a record the API writes, and both sides have to be reading one implementation.
+      # Without this the tool refuses every signed row, which it did, loudly, into a log nobody was reading.
+      - ${OI_ROOT}/services/gateway/assertion.py:/app/assertion.py:ro
     # **No published port.** The phase's acceptance is an API with no user interface, and a client reaches it
     # through whatever the deployment puts in front. Publishing one here would be the debug port this project
     # has already paid for once.
