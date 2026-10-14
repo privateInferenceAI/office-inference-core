@@ -1240,6 +1240,10 @@ validator refuses, because an appliance that can reach a provider is not an offi
 | `lanes.frontier.redaction` | Whether prompts are redacted before leaving. One validator rule refuses `false` with `regulated` on a cloud build. **As of C2 this is superseded in practice by `access.egress.redaction`**, which is the field the egress gate reads; this one is still validated and still read by nothing at call time. The overlap is recorded rather than resolved — see the note under this table |
 | `lanes.frontier.requires_approval` | A human approval step before a remote call. In the schema, read by no rule and no service; C3 owns the gate |
 | `access.denial` | **What a denied user is told** when their retrieval role excludes content that would answer the question: `silent`, `denied`, or `counted`. Read by the retriever at call time, rendered to `ACCESS_DENIAL_MODE`. The trade each mode makes is the client's, and section 13d sets it out. Default `denied`; an unrecognised value is refused rather than defaulted |
+| `access.data_class` | **What a request on this deployment IS**, which is what the gate compares against
+ `access.egress.frontier_classes`. One of `public`, `internal`, `confidential`, `regulated`. **Absent
+ means the most restrictive class**, so a deployment that forgets it does not send content off-box by
+ omission. Added in C3; the field existed in the schema before this page mentioned it |
 | `access.egress.frontier_classes` | **Which data classes may leave for a frontier model.** Rendered to `FRONTIER_CLASSES`. The gate refuses rather than defaulting, so a deployment that declares nothing sends nothing off-box. Confidential and regulated are absent rather than listed as false, which is what makes a refusal name what *is* permitted |
 | `access.egress.redaction` | Whether the egress gate redacts before the call leaves: `"on"` or `"off"`, rendered to `EGRESS_REDACTION`. Default `on`. This is the field section 13e documents, and the one that turned the `lanes.frontier.redaction` story around |
 | `lanes.frontier.provider` | `bedrock` (the schema also allows `api`). Required when the lane is on, and omitted entirely by a build with no remote lane |
@@ -3633,14 +3637,20 @@ is its own endpoint rather than a flag on the first one.
     event: start    data: {"citations": [...], "model": "analyst", "role": "viewer", "roots": ["company"]}
     event: delta    data: {"text": "The mileage rate is "}
     event: delta    data: {"text": "0.67 per mile"}
-    event: done     data: {"deltas": 36, "first_token_ms": 544, "redactions": {}, "total_ms": 1011}
+    event: done     data: {"deltas": 36, "ttft_ms": 544, "model_first_ms": 512, "retrieval_ms": 32,
+                          "redactions": {}, "total_ms": 1011}
 
 | Event | When | What it carries |
 |---|---|---|
 | `start` | before the model is called | the model, the role, the roots, and the citations retrieval found |
 | `delta` | as tokens arrive | a piece of the answer, **already redacted** |
 | `error` | if something fails mid-stream | `kind` and a short detail. A terminal event, because the status code is spent |
-| `done` | at the end | frame count, time to first token, total time, and the redaction counts |
+| `degraded` | when the model cannot answer at all, before any delta | the retrieved passages, a typed
+ reason, and the attempts made. **A client that branches only on the events above will render this as
+ nothing**, which reads to a user as an empty answer |
+| `done` | at the end | `deltas`, `ttft_ms`, `model_first_ms`, `retrieval_ms`, `total_ms`, and the
+ redaction counts. **`ttft_ms` is the caller's wait, retrieval included**; `model_first_ms` is the
+ model's own share, and the two were once conflated |
 
 **A comment line every 15 seconds** keeps the connection alive while the model is processing the prompt. This
 is not decoration: an idle connection is what intermediaries kill, and prompt processing is idle. Without it a
@@ -3657,7 +3667,7 @@ until it is complete. On the last chunk the remainder is flushed, redacted.
     data: {"text": " p"}
     data: {"text": "rima"}
     data: {"text": "ry contact reference for the Acme engagement is [REDACTED-SSN] [1]."}
-    data: {"deltas": 7, "first_token_ms": 301, "redactions": {"ssn": 1}, "total_ms": 558}
+    data: {"deltas": 7, "ttft_ms": 301, "model_first_ms": 290, "retrieval_ms": 11, "redactions": {"ssn": 1}, "total_ms": 558}
 
 **Sized from the pattern set, not chosen.** The longest pattern in `services/egress/redaction.py` is a
 private-key header at 36 characters; an SSN is 11, a card with separators 19. 64 covers the set with headroom,

@@ -84,7 +84,7 @@
     "escalation_requested": false,
     "lane": "local",
     "reason": "the deployment permits ['public'] on a remote lane, and this request is regulated",
-    "told_user": false,
+    "told_user": true,
     "trigger": ""
   },
   "public_only | agentic_and_wants_stronger": {
@@ -124,7 +124,7 @@
     "escalation_requested": false,
     "lane": "local",
     "reason": "the deployment permits nothing on a remote lane, and this request is regulated",
-    "told_user": false,
+    "told_user": true,
     "trigger": ""
   },
   "undeclared | agentic_and_wants_stronger": {

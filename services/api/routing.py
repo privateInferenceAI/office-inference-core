@@ -103,13 +103,19 @@ def route(manifest: dict, *, data_class: str, task: str = '', user_wants_stronge
     # A trigger wants the frontier lane, so the boundary decides whether it may have it.
     permitted, why_not = gate(data_class, egress.get('frontier_classes'))
     if not permitted:
-        note = ''
+        # **Every refused escalation is announced, not only the one the user asked for.** A trigger that fired
+        # and was refused is a decision the user would otherwise not know about: they asked a question the
+        # deployment decided needed the stronger model, and it was answered on the default lane instead. Silence
+        # there is the same defect as a silent downgrade, one step removed.
         if user_wants_stronger:
-            note = ('You asked for the stronger model, and this content may not be sent to it.')
-            if default_lane == 'local':
-                note += ' The answer below comes from the model this deployment serves locally.'
-            else:
-                note += ' This deployment has no local model, so no answer could be produced.'
+            note = 'You asked for the stronger model, and this content may not be sent to it.'
+        else:
+            note = ('This question would normally be answered by the stronger model, and this content may not '
+                    'be sent to it.')
+        if default_lane == 'local':
+            note += ' The answer below comes from the model this deployment serves locally.'
+        else:
+            note += ' This deployment has no local model, so no answer could be produced.'
         return Decision(lane=default_lane if default_lane == 'local' else 'none', model=model_name,
                         escalated=False, reason=why_not, notice=note,
                         escalation_requested=user_wants_stronger,
