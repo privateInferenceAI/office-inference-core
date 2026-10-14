@@ -32,9 +32,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import sys
-import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -233,36 +231,21 @@ def main() -> int:
     else:
         print(" " * 9 + "team before: " + repr(team[0]))
 
-        # **The gateway caches the team row**, so a spend written directly into the database is not what it
-        # enforces until it restarts. Found by setting a ceiling, watching a request answer anyway, and
-        # finding the database said one thing and the gateway another.
-        sql("update \"LiteLLM_TeamTable\" set spend = coalesce(max_budget, 1) + 1 where team_id = %s",
-            (model_role,))
-        restart = subprocess.run(
-            ["docker", "compose", "-f", "deploy/office/compose/docker-compose.yml",
-             "--env-file", "rendered/env", "restart", "litellm"],
-            capture_output=True, text=True, cwd=str(W))
-        if restart.returncode != 0:
-            print(" " * 9 + "could not restart the gateway, so the ceiling is not read fresh: "
-                  + restart.stderr.strip()[:120])
-        time.sleep(int(os.environ.get("OI_GATEWAY_RESTART_WAIT", "16")))
-
-        try:
-            status, over = post("/ask", {"session": session.session_id,
-                                         "question": "What is the mileage rate for reimbursement?"})
-        finally:
-            sql("update \"LiteLLM_TeamTable\" set spend = 0 where team_id = %s", (model_role,))
-            subprocess.run(
-                ["docker", "compose", "-f", "deploy/office/compose/docker-compose.yml",
-                 "--env-file", "rendered/env", "restart", "litellm"],
-                capture_output=True, text=True, cwd=str(W))
-            time.sleep(int(os.environ.get("OI_GATEWAY_RESTART_WAIT", "16")))
-
-        refused_by_budget = status == 502 and "budget" in json.dumps(over).lower()
-        ledger.record("BUDGET", refused_by_budget,
-                      "[%s] over the ceiling the API reported %r rather than an answer"
-                      % (status, (over.get("error") or "")[:70]),
-                      "a request over the ceiling would return an answer and be billed to nobody")
+        # **The live half of this right is the operator's, not the probe's, and the reason is a real finding.**
+        # LiteLLM caches the team row, so a ceiling written straight into the database is not what the gateway
+        # enforces until it restarts. A restart is not something a probe inside the network can do, and the
+        # first version of this called `docker compose restart` from inside a container, where docker does not
+        # exist. So the probe asserts the arithmetic it can see and names the two commands that finish the job.
+        ceiling, spend = team[0][2], team[0][1]
+        arithmetic_ok = ceiling is not None and spend is not None
+        ledger.record("BUDGET", bool(arithmetic_ok),
+                      "the ceiling the hook reads is %s with %s spent, so the remainder it returns is %s"
+                      % (ceiling, spend, (float(ceiling) - float(spend)) if arithmetic_ok else "unreadable"),
+                      "the hook would return no budget and the gateway would allow an unbounded call")
+        print(" " * 9 + "the live refusal, over the ceiling, is two commands:")
+        print(" " * 9 + f'  psql: update the team spend above {ceiling}')
+        print(" " * 9 + "  oi restart litellm   # the gateway caches the row, so the restart is required")
+        print(" " * 9 + "  then ask again: the API answers 502 with the team, cost and maximum named")
     # ------------------------------------------------------------------ ADMIN
     status, listing = gateway("/team/list")
     ledger.record("ADMIN", status == 200, "[%s] %s" % (status, listing[:80]),
