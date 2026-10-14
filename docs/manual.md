@@ -1130,7 +1130,8 @@ with no new events, the same name comes back.
 the chain, so an hourly run over an unchanged chain writes the same key twice, with the object's
 version history holding both. That is deliberate. The
 filename is a fingerprint of the chain's state, so two identical names mean the chain did not change,
-and `aws s3 ls` showing one object is not a lost upload. To see the versions:
+and `aws s3 ls` showing one object is not a lost upload. To see the versions, **from a workstation**
+(the box has no AWS CLI and no credentials for one, which is deliberate — section 21 says why):
 
 ```
 aws s3api list-object-versions --bucket oi-core-audit-dev --prefix anchors/ \
@@ -1661,7 +1662,8 @@ questions before a client sees the new answers, which is C8's work rather than s
 If the model is unknown to `data/model-lifecycle.json`, the lifecycle check fails and names it. Add it
 with its status and a replacement, following `docs/model-lifecycle.md`.
 
-Then confirm the instance may actually invoke it:
+Then confirm the instance may actually invoke it — **from a workstation**, because the box has no AWS CLI
+and no credentials for one:
 
 ```
 aws iam get-policy-version --profile oi-credits \
@@ -3313,6 +3315,17 @@ plain request with a forbidden class went to the provider with `escalated: false
 **The request-side redaction in this section is a module the probes exercise directly, and the API does not
 call it yet.** The stream-side redaction in 13g is in the API and runs on every frame. Until the
 request-side one is wired in, the control on the way out is the gate, and `egress_acceptance.py` proves the
+
+**Run the boundary probe to check the claim rather than take it:**
+
+```
+run --entrypoint python oi-core/session:local /w/tests/fixtures/gate_check.py
+```
+
+It prints what this deployment permits, what a plain request with a class outside that gets (`lane: none` and a
+notice, rather than an answer), and what a permitted class gets. **It exists because the sentence above was
+false when it was written**, and a claim about a boundary that a reader cannot check from the page is the kind
+of claim this project has already been caught making once.
 module rather than a path the service takes. Recorded rather than left to be discovered.
 
 **If it breaks.**
@@ -4227,7 +4240,7 @@ the manual also asks you to type.
 | `aws ssm start-session --profile oi-credits --region us-east-1 --target i-096bebd46308d1673` | A shell with no key and no open port. Needs the Session Manager plugin locally |
 | `aws ec2 stop-instances` / `start-instances --instance-ids i-096bebd46308d1673` | Stop paying for the machine, or bring it back. The address survives |
 | `aws s3api list-object-versions --bucket oi-core-audit-dev --profile oi-credits` | Every version of every piece of evidence, which is where a repeated anchor filename shows its history |
-| `aws iam get-policy-version --profile oi-credits --policy-arn arn:aws:iam::878451098165:policy/oi-core-dev-bedrock-invoke --version-id v1` | Which models this machine may invoke |
+| `aws iam get-policy-version --profile oi-credits --policy-arn arn:aws:iam::878451098165:policy/oi-core-dev-bedrock-invoke --version-id v1` | Which models this machine may invoke. **Run from a workstation**, see below |
 | `aws ec2 describe-instances … --query '…MetadataOptions…'` | The metadata hop limit, when the gateway cannot find credentials |
 | `git log --oneline -1`, `git pull`, `git status --short` | What the box is running, and getting it current |
 | `git stash push -u`, `git stash show -p`, `git stash drop` | Setting aside local changes so a pull can proceed |
@@ -4235,6 +4248,11 @@ the manual also asks you to type.
 | `docker exec postgres psql -U oicore -d oicore -c '<sql>'` | Read the record directly, including the `audit_feed` view |
 | `docker inspect <service> --format '…'` | Where a container mounts from, and how often it has restarted |
 | `systemctl list-timers 'oi-core-*'`, `journalctl -u <unit>`, `systemctl status <unit>` | The shipping schedule and its history |
+
+**Three commands in this table run from your workstation rather than the box**, because they need an AWS CLI
+and a profile the box deliberately does not carry: the two `aws` commands above (`s3api list-object-versions`
+and `iam get-policy-version`), and nothing else. On the box they fail with `aws: command not found`, which
+reads like a broken deployment rather than a command in the wrong place.
 
 ## 23. What lives where on the machine
 
