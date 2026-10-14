@@ -3712,6 +3712,43 @@ and it does so by replaying the prefix as an assistant prefill, which re-bills i
 argument the signature no longer took, and a `decision` referenced outside its scope. Both would have been
 instant failures for a client and neither was visible to 587 passing tests, because the tests do not run the
 handlers.
+**The role swap, 2026-10-14, on the live deployment.** `INF-ROLE-001` asks that the model a role uses comes
+from the manifest. The proof changes the manifest and watches the called model change, and the evidence is the
+gateway's own record rather than our report of it.
+
+    BEFORE  role='analyst' resolved_model='bedrock/amazon.nova-lite-v1:0'
+    SWAP    manifest: analyst frontier -> bedrock/amazon.nova-micro-v1:0
+    AFTER   role='analyst' resolved_model='bedrock/amazon.nova-micro-v1:0'
+
+**And from LiteLLM's spend log**, which is the gateway saying what it asked Bedrock for rather than the API
+saying what it believes:
+
+    bedrock/amazon.nova-micro-v1:0
+    bedrock/amazon.nova-micro-v1:0
+
+The two answers, side by side, because the difference should be visible rather than asserted:
+
+    nova-lite:  "The mileage rate for reimbursement is 0.67 per mile for travel in an employee's own vehicle [1][2][3][4]."
+    nova-micro: "The mileage rate for reimbursement is **0.67 per mile** for travel in an employee's own vehicle [1][2][3][4]. Travel in a client-owned vehicle is bill..."
+
+**What this proves and what it does not.** It proves the mechanism: which model runs is read from the manifest,
+and changing the manifest changes it. It does **not** say the new model is as good. Golden questions are `C8`'s,
+at sixty per deployment, and `tests/parity/` holds a README and no questions. A swap before then is unmeasured
+for quality, and the manual says so rather than implying otherwise.
+
+**Two things the swap exposed.**
+
+**The answer reported the role, not the model.** It returned `model: 'analyst'` before and after, so a client
+could not tell that anything had changed and the swap this entry asks for would have been invisible. The answer
+carries `resolved_model` now, beside the role, because a role is a name in a manifest and a model is what ran.
+
+**Both processes must be restarted, and the failure is silent.** `render_manifest.py` writes the config and
+neither process re-reads it: restart only the gateway and the model genuinely changes at Bedrock while the API
+goes on reporting the old one from the manifest it loaded at startup. That is the worst shape of failure, because
+the record and the report disagree and the quieter one is wrong. The sequence is render, restart the gateway,
+**restart the API**, and verify with the spend log rather than with the answer.
+
+**The swap was reverted**, and the manifest is back to `nova-lite` in the commit rather than left changed.
 #### What proves it
 
 | # | Right | Act | What is asserted |
