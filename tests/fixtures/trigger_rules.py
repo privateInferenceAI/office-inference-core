@@ -8,11 +8,16 @@ This asks the narrower question: is there ANY combination of a distinct-document
 fires on the synthesis shapes and not on the single-fact ones? It prints every candidate rule and whether it
 separates them, so the answer is a table rather than an opinion.
 """
-import os, sys
+import os, pathlib, sys
 
-sys.path.insert(0, '/w/services/retrieval')
-sys.path.insert(0, '/w/services/session')
-sys.path.insert(0, '/w/services/ingestion')
+# **Resolve the services from wherever this file is, not from a hardcoded /w.** The manual tells a
+# reader to run this to see the table; run from the checkout it died with ModuleNotFoundError because
+# the only path it knew was the container mount. Found by the C3 panel's fidelity checker.
+_ROOT = pathlib.Path(__file__).resolve().parents[2]
+_W = pathlib.Path('/w') if pathlib.Path('/w/services').is_dir() else _ROOT
+sys.path.insert(0, str(_W / 'services' / 'retrieval'))
+sys.path.insert(0, str(_W / 'services' / 'session'))
+sys.path.insert(0, str(_W / 'services' / 'ingestion'))
 import access, ingest, retriever, session as sm
 
 # What each question shape actually is, so a rule can be scored against the truth rather than against a guess.
@@ -43,6 +48,16 @@ def passages_for(registry, question):
 
 
 def main():
+    # A readable failure rather than a traceback: this needs a deployment, and saying so is cheaper
+    # than a reader working out which of four things is missing.
+    if not os.environ.get("DATABASE_URL") and not os.environ.get("POSTGRES_USER"):
+        print("this needs a running deployment: it reads the corpus through the retriever.")
+        print("Run it the way the manual shows, in a container on the deployment network:")
+        print()
+        print("  docker run --rm --network ai-net --user \"$(id -u):$(id -g)\" \\")
+        print("    -v /opt/oi-core:/w -w /w --env-file rendered/env \\")
+        print("    --entrypoint python oi-core/session:local /w/tests/fixtures/trigger_rules.py")
+        return 2
     registry = access.load(os.environ.get('ACCESS_REGISTRY', '/w/rendered/access.json'))
     data = {}
     for name, question, truth in SHAPES:
