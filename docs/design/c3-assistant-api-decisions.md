@@ -251,6 +251,53 @@ step, with a test each.
 **The spike itself does not ship.** `services/spike/` holds three files that exist to record what was run,
 and step 4.2 deletes it once the real hook has its own tests.
 
+## 7c. The credential path, end to end, and the hole it left
+
+Run against the live gateway on 2026-10-14, with the hook in the real gateway image and teams provisioned
+from the manifest. Nine checks, and the results split cleanly.
+
+**What works.**
+
+| Check | Result |
+|---|---|
+| A valid signed statement | 200, a real Bedrock answer from the declared model |
+| No statement at all | 401, with the message naming what this deployment expects instead |
+| A tampered signature | 401, "the assertion signature does not match the key this gateway holds" |
+| A replayed statement | 401, "assertion ... was already presented: a statement is spent once" |
+| The admin exemption | 200 from `/team/list` with the master key, which is the lockout avoided |
+| A virtual key presented instead | 401. **The gateway no longer accepts long-lived model keys at all.** |
+| Team budgets | Provisioned per role from `budgets.roles`, one team each, ceilings reported |
+
+**What the same run found, and it is the important part.** A signed statement for one role reached a model
+that role is not scoped to. A `viewer` statement asked for `coder` and got an answer; a `front_desk` statement
+asked for `analyst` and got an answer. **The team's model allowlist is not enforced on the custom-auth path**,
+even with `enable_post_custom_auth_checks` on and `custom_auth_run_common_checks` on, which is the pair the
+documentation names for exactly this. The startup warning speaks only about budgets, model-access allowlists
+and rate limits being unenforced when common checks are *off*; turning them on enforced budgets, as the spike
+had already shown, and did not enforce the allowlist.
+
+**Why that is a smaller hole than it looks, and still one to close in code rather than in hope.** The API is
+the only thing that holds the signing key, and it chooses the model from the manifest for the session's role;
+a client never names one. So the allowlist is not load-bearing for the product's behaviour today. What is
+wrong is that the manifest's declaration of which model a role reaches is a promise the gateway does not keep,
+and a control that exists on paper and not in the path is the shape this project keeps paying for.
+
+**The decision that follows: the API enforces the model, not the gateway.** It resolves the role to a model
+from the manifest and requests that, which puts the choice in the one process that already knows the session,
+the role and the permit. The gateway's allowlist stays configured, because it costs nothing and might start
+working, and step 4.5 proves the mapping by changing it and watching the called model change.
+
+**A second consequence worth writing down.** With `custom_auth` in place the gateway accepts exactly two
+credentials: a signed statement, and the master key. Every virtual key minted by the `keys` tool is now inert
+for request traffic. They still exist, they are still scoped and budgeted, and nothing presents them, so the
+next step should either find them a use or stop minting them rather than leave a security control that has
+quietly become decoration.
+
+**And one correction to section 8 below.** "Do not describe gateway budgets as hard caps" was recorded from
+the research, and it was about key budgets. The team budget refused at HTTP 422 in the spike with the spend
+and the ceiling named, and it is enforced through the path a statement takes. The earlier correction still
+stands for keys; it is now wrong to apply it to teams. The manual and the schema get this right when the API
+page is written.
 ## 8. What we are deliberately not building
 
 - **A separate router process.** One Python process with routing behind a pure function. The pure function is
