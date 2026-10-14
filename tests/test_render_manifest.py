@@ -280,3 +280,23 @@ def test_every_shipped_manifest_declares_a_valid_denial_mode():
         if "denial" in declared:
             assert declared["denial"] in ("silent", "denied", "counted"), (
                 f"{manifest.name} declares denial: {declared['denial']!r}")
+
+
+def test_the_fault_endpoint_is_unset_by_default(tmp_path):
+    """**A rendered config carrying this would send every model call to a stub**, and the deployment would look
+    healthy while answering from a test double. So the default is asserted rather than assumed."""
+    out = tmp_path / "rendered"
+    result = render(DEV_CLOUD, out)
+    assert result.returncode == 0
+    assert "api_base" not in (out / "litellm.yaml").read_text()
+
+
+def test_the_fault_endpoint_redirects_every_model_when_asked(tmp_path, monkeypatch):
+    """The hook the fault-injection stub is reached through."""
+    monkeypatch.setenv("OI_FAULT_ENDPOINT", "http://stub:8099")
+    out = tmp_path / "rendered"
+    result = render(DEV_CLOUD, out)
+    assert result.returncode == 0
+    text = (out / "litellm.yaml").read_text()
+    assert text.count("api_base: http://stub:8099") >= 4, "every model entry should carry it"
+    assert "FAULT" in result.stdout, "and the run should say so out loud"
