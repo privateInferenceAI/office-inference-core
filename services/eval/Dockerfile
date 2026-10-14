@@ -10,7 +10,11 @@ FROM python:3.12-slim
 # requests through it rather than computing a SigV4 signature itself. Found by running the reranker acceptance:
 # the retriever now imports the reranker, so whatever image runs a retrieval needs the AWS SDK in it, and this
 # one did not.
-RUN pip install --no-cache-dir "PyYAML==6.0.2" "psycopg2-binary==2.9.13" "botocore==1.35.90"
+# psycopg 3 as well as psycopg2, and the pair is deliberate rather than leftover. The retrieval half of the
+# codebase talks to Postgres through psycopg2, and the audit tool, which owns the hash chain and is therefore
+# the only thing that may write to it or read it authoritatively, uses psycopg 3. A probe that exercises both
+# in one run needs both, and the alternative was a second image carrying a second copy of the retriever.
+RUN pip install --no-cache-dir "PyYAML==6.0.2" "psycopg2-binary==2.9.13" "botocore==1.35.90" "psycopg[binary]==3.2.*"
 
 WORKDIR /app
 # The harness itself, and nothing from the repository. The retriever and the ingestion modules it imports at run

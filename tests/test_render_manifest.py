@@ -204,11 +204,16 @@ def test_a_sellable_pack_pulls_in_core(tmp_path):
 
 
 def test_the_render_names_the_files_it_writes(tmp_path):
-    """Four of them, and the manual says so."""
+    """Five of them, and the manual says so.
+
+    `access.json` is the permission model the session tool and the retriever both read (SEC-ACL-002). It is
+    listed here rather than added quietly, because this test exists so that a file appearing in a deployment's
+    rendered directory is a decision somebody wrote down.
+    """
     out = tmp_path / "rendered"
     assert render(DEV_CLOUD, out).returncode == 0
     written = sorted(p.name for p in out.iterdir())
-    assert written == ["env", "litellm.yaml", "manifest.json", "services.txt"], written
+    assert written == ["access.json", "env", "litellm.yaml", "manifest.json", "services.txt"], written
 
 
 def test_the_denial_policy_reaches_the_env_file(tmp_path):

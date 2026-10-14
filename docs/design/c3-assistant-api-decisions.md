@@ -1,0 +1,261 @@
+# C3: the assistant API, and the decisions behind it
+
+Written 2026-10-14, before the assistant API is built. Six research passes were run over the open questions
+because these choices are expensive to reverse, and this records what they changed.
+
+**How to read this.** Each section states the decision, the evidence, and what would make us revisit it. Where
+the industry disagrees, both sides are here. The sources at the end are the ones that carried weight.
+
+## 1. Routing stays mechanical, and the gate moves in front of it
+
+**Decision.** The three registered triggers stay: a fixed task list, synthesis across more than one document,
+and an explicit request from the user. They choose a model **within a lane**. Which lane is permitted is a
+separate, earlier decision made by the data-class gate, and it is a policy lookup against the manifest rather
+than a judgement.
+
+**Why.** Two independent results, both from 2026, point the same way.
+
+- A July 2026 evaluation across 290 tasks and 2,610 candidate outcomes found three of four open-source routers
+  emit constant or near-constant tier assignments, and the only content-aware one, vLLM Semantic Router, had
+  "the highest observed success rate on none of the four benchmarks".
+- AWS benchmarked a model-as-router against an always-strong baseline: the router cost USD 1.068 per 1,000
+  decisions against USD 0.332 per 1,000 for simply answering with the strong model, roughly three times the
+  thing it was meant to save. The same benchmark, code-graded with no model as judge, scored always-cheap at
+  80.5 and always-strong at 93.1 out of 100.
+
+**What that means for us specifically.** Every routing cost figure in the literature prices a model call. There
+is no published comparison of router-as-rule against always-cheap, because a rule costs nothing to run and
+nothing to write down. Our router is arithmetic over signals we already hold, so the AWS cost result does not
+apply to it, and the quality result does: a cheap tier alone is measurably worse, so escalation earns its keep.
+Both halves of that belong in this document, because the cost numbers will otherwise be read as an argument
+against routing at all.
+
+**One correction to our own design.** Distinct `doc_id` count is a proxy for synthesis, not synthesis. It has
+false positives, when a query incidentally matches two documents that need no reconciling, and false negatives,
+when one long contract needs synthesis internally. It stays, because determinism is worth more here than
+accuracy, with two changes: the audit row says the trigger was a proxy test rather than a measured property,
+and there is a relevance threshold under it so "two documents" means two that scored rather than two incidental
+lexical matches.
+
+**Why the trigger is not where the explanation goes.** A compliance reviewer asks why a question reached an
+external model. If the answer is "a heuristic fired", that is a story about code. If it is "this deployment
+declares that this document class may be processed externally, and the user's session permitted it", that is a
+sentence about a permission the client reviewed and signed. The second is the artifact worth having, and it is
+why the gate goes first.
+
+**What would change our mind.** A measured router that beat constant-tier assignment on quality per unit cost
+at our scale, on document question answering rather than code, and that remained deterministic enough to audit.
+
+## 2. Sessions pin their tier, because caching and routing fight each other
+
+**Decision.** A session resolves its lane at the start, or at its first escalation, and holds it for the life of
+the session. LiteLLM calls this `session_affinity`, and it is opt-in.
+
+**Why.** Provider caches are per-model. Anthropic states that when a request moves to another model, "the
+conversation prefix already cached for the first model must be written into the new model's cache from scratch",
+and cache writes cost more than cache reads. Their own numbers on a current model: USD 4.00 per million input,
+USD 5.00 for a cache write, USD 0.20 for a cache read. So a 20,000-token conversation prefix that escalates on
+turn eight pays about USD 0.10 instead of about USD 0.004, and if the next turn returns to the cheap tier, the
+expensive prefix goes cold and the next escalation pays again. Their fallback credit reimburses a cache miss
+caused by a provider-side fallback inside one request. It does not reimburse our own tier switching.
+
+**Consequence for the register.** The triggers become session-level rather than turn-level. The first escalation
+in a conversation pins it, and later turns stay there. That is a change to how the routing step is written, and
+it belongs in the runbook when the step is written rather than discovered during it.
+
+**A warning against leaning on caching for engineering reasons.** On Bedrock, implicit caching is documented as
+best effort: an identical prompt does not guarantee a hit and hit rates vary. Explicit caching needs cache
+checkpoints and a 512 to 4,096 token minimum depending on the model, and any change to the prefix causes a miss.
+So caching is a discount that may arrive, never a load-bearing part of our cost model or our latency promises.
+
+## 3. A request has one deadline and three thresholds
+
+**Decision.** One wall-clock deadline per request, because the register and any interface need one number.
+Internally: per-tier sub-budgets, and never a sub-budget larger than the remaining deadline. Three thresholds
+rather than two, being time to first token, a **stall budget** for the gap between chunks after the first, and
+the total cap. Degradation triggers on the remaining budget, not on wall clock: surrender when the remainder is
+less than the cost of a first token plus one token, so there is always time to fetch passages, stream them and
+write the audit row.
+
+**The stall budget is the one everybody forgets.** A stream that emits a token every 80 seconds passes a
+first-token check and then burns the whole deadline with the user waiting.
+
+**The first-token budget must be derived, not chosen.** Prompt processing on CPU is roughly linear in prompt
+tokens, so a fixed ten seconds would kill healthy local requests while being absurdly generous for Bedrock.
+llama.cpp exposes `prompt_tokens_seconds` and `predicted_tokens_seconds`, so the budget is measured on our own
+box and set just above p95 at the largest context we permit. Then bound the CONTEXT rather than the timeout,
+because raising a timeout only moves the failure into the total cap.
+
+**The total cap is derived from the longest answer we will deliver**, not from the provider's maximum, with a
+**delivery reserve** carved out, because the degraded answer has to be produced and recorded inside the same
+budget.
+
+**Keepalive is a correctness requirement for our local tier, not a nicety.** The Anthropic guidance about
+streaming anything over ten minutes concerns *idle* connections. During slow CPU prompt processing our
+connection is idle, which is exactly the condition intermediaries kill. Without a heartbeat from our own API
+through that window, a slow local first token surfaces as a hard connection failure rather than a degraded
+answer, and it would be diagnosed as a networking fault.
+
+**One llama.cpp trap worth writing down.** `--parallel` divides the KV cache across slots and on CPU makes slots
+contend for the same cores. Raising it improves throughput and wrecks time to first token. We choose the
+tradeoff deliberately or rediscover it in production.
+
+## 4. The outcome is three-way, not two
+
+**Decision.** Classify on the provider's error TYPE, never on the HTTP status. Retry only before the first
+token, honour `Retry-After`, cap attempts, draw every wait from the single deadline, and on exhaustion return a
+typed degraded payload. Bulkhead concurrency with a semaphore. No circuit breaker, no hedged requests, no
+queueing service: at five to thirty users, the provider's queue is our queue.
+
+**Why status is not enough.** On Bedrock a 429 covers both `ThrottlingException` (our quota) and
+`ModelNotReadyException`, and AWS separates 429 from 503 and 529, which are capacity rather than our quota.
+Anthropic returns a spend-cap 429 with `rate_limit_error`, no `Retry-After` header, and docs stating that
+retrying fails until access resumes. Retrying on status alone burns the entire deadline on a request that
+cannot succeed.
+
+**No circuit breaker, and the reason is concrete.** With one provider there is nothing to break away from, and
+an open breaker turns a five-second throttle into a sixty-second outage.
+
+**No cross-lane fallback on failure.** A reliability fallback that moves work from the local lane to the
+frontier lane is a data-class decision wearing a reliability costume: a document that was never permitted to
+leave the building just left. Degradation moves data toward a LESS exposed lane or it does not move it. Any
+fallback that would increase exposure is refused and recorded as a refusal, the same shape as a role supplied
+in a request.
+
+**The degraded answer is the retrieved passages, cited, with a typed reason.** Retrieval and generation are
+already separate halves, so this is honest and still delivers the client's own data. A "try again" message
+throws away work already done, and a cheaper model's answer changes quality silently under the same branding.
+Google's SRE book endorses serving degraded results in chapter 22.
+
+## 5. Fault injection: no new component for the throttle
+
+**Decision.** There is no supported way to force a provider error through the LiteLLM proxy. The three
+`mock_testing_*_fallbacks` flags were stripped from Proxy requests in v1.85.0 and survive only on direct Router
+calls; the one documented mock facility, `mock_response`, mocks success. So the throttle is provoked for real.
+
+**How, and why it is the cheapest option.** AWS deducts `input tokens + max_tokens` from the per-model TPM quota
+at admission and throttles when that exceeds it. A request whose input plus `max_tokens` exceeds our quota
+produces a genuine `ThrottlingException` on demand, deterministically, with no new component and no blast radius
+beyond that one request. A retry with the same oversized `max_tokens` throttles again, which exercises
+sustained-throttle-to-degrade rather than retry-then-succeed. Shrinking `max_tokens` between attempts proves the
+other path.
+
+**For continuous testing, a stub rather than a product.** One small Python file behind uvicorn returning 429
+with Bedrock's error body and a `Retry-After`, reached through `AWS_ENDPOINT_URL_BEDROCK_RUNTIME`, which AWS
+documents as highest precedence in endpoint resolution. It covers 429 with and without `Retry-After`, 503, 529,
+a malformed chunk and a mid-stream error, which is the whole taxonomy. It is a CI test and not evidence of a real
+throttle, and the runbook says which is which.
+
+**Toxiproxy is the wrong tool for this one** and right for the timeout and hard-failure cases. It cannot emit a
+429 at all. Keep it out of the throttle evidence.
+
+**The local tier has no throttle and we will not pretend it does.** llama.cpp does not meter anyone. When slots
+are full it defers, and `llamacpp:requests_deferred` is the gauge. Its only error is a 503 while the model loads.
+So local saturation is a deadline problem and local 503 is the hard-failure case. Manufacturing a 429 from the
+local tier would put a fiction in the runbook.
+
+## 6. Requests and responses are recorded separately, and never the text
+
+**Decision.** The audit row records the lane that was permitted, the requested and resolved model separately,
+each sub-budget in force, and per attempt the provider error type, status, provider request id, whether
+`Retry-After` was present and the backoff actually slept. On surrender it records the remaining deadline, which
+threshold tripped, the classification and the rule that decided it. Plus a **`taxonomy_version`**, and a boolean
+for whether partial output had already reached the client.
+
+**Why requested and resolved are two fields.** A single model column conflates what we asked for with what ran,
+and a route receipt is supposed to record route facts rather than explanations. The route-receipt work names
+`requested_model` and `resolved_model` for exactly this reason, and the same pattern appears across vendors:
+Bedrock reports its service tier in the response, in CloudTrail and as a `ResolvedServiceTier` metric, and
+OpenAI shows a Priority request downgraded to Standard.
+
+**Why `taxonomy_version`.** The chain makes rows undeletable, so in six months an examiner reading a degraded
+row needs to know which rule set was in force when it was written. A classification without its version is not
+reproducible.
+
+**Why the partial-output boolean.** It is the retry-safety fact. A streamed generation is not idempotent: a
+retry after partial output is billed twice and cannot be replayed safely. OpenAI's Agents SDK now refuses to
+retry a streamed run once output has started, and Anthropic documents that a refusal can arrive mid-stream
+after partial output and that any partial output should be treated as incomplete and discarded.
+
+**What must never be recorded.** Prompt or passage text, because that creates a second copy of client content
+outside the retention controls of the document store. Credentials or signatures. Raw unnormalised provider
+error strings, because validation errors can echo input fragments. And nothing derived from a role supplied in
+a request, since that is the thing we refuse.
+
+**The residency claim becomes provable from the chain alone**, because lane and data class are in the row. That
+is the point of recording them, and it is why this is a compliance feature rather than an observability one.
+
+## 7. Credentials: the open decision
+
+**Where it stands.** Per-role virtual keys exist in the gateway's database and a plaintext copy sits in
+`rendered/keys.json`. The plan was to mount that file into the API. The argument against it: LiteLLM stores
+those keys hashed, so our plaintext copy becomes the crown jewel, and `docker inspect` or a support bundle would
+carry every credential.
+
+**The shape being considered.** One signing key delivered as a file, from which the API mints a short-lived
+signed assertion per request, bound to the session and the role, which the gateway validates through its OSS
+`custom_auth` hook. The gateway then holds no secret the API must fetch, and the only long-lived credential on
+the host is one file a rotation can replace. The standard name for the assertion is a transaction token.
+
+**Why this is not decided.** `custom_auth` has enforcement gaps: key-level `max_budget` is unsupported, and the
+model allowlist and expiry need `enable_post_custom_auth_checks`. Role budgets would move to team records. That
+is a redesign if it goes wrong, so it gets a spike before either shape is committed to.
+
+**A decision with a clock on it, recorded here because it is easy to lose.** `LITELLM_SALT_KEY` is not set.
+Without it the master key doubles as the at-rest encryption key for everything in the gateway's database, so the
+master key can never be rotated, and setting a salt key later leaves every stored credential unreadable. There
+are four virtual keys and spend history in that database today. It is free to fix while there is no client data
+and impossible to fix afterwards.
+
+## 8. What we are deliberately not building
+
+- **A separate router process.** One Python process with routing behind a pure function. The pure function is
+  the compliance artifact and the extraction seam; the process split buys nothing at one provider and thirty
+  users.
+- **Multiple Uvicorn workers.** LiteLLM registers shared background jobs once per worker, and with no Redis to
+  elect an owner they run unguarded in every process.
+- **Protocol-level stream resumability.** MCP removed it in its July 2026 revision. Replay comes from our own
+  run table.
+- **A vector database per permission set.** One team moved there for about 40 percent more storage. Our filter
+  is inside the query, which is the cheaper form of the same guarantee, and our denial policy is the client's
+  declared choice.
+- **A secrets manager, an outbox, or a message broker.** Named here so that adding one later is a decision with
+  a reason rather than a drift.
+
+## 9. Findings that are not decisions but change a later step
+
+- **Redaction must block in-stream.** A `post_call` guardrail runs on the assembled response after delivery, so
+  on a streaming path it audits and cannot block. If that holds for our pin, a PII pattern in a streamed token
+  reaches the browser before anything can redact it. **Verify against our deployment before the streaming
+  step.**
+- **Never trust the gateway's usage numbers for audit.** Providers send usage in the final chunk, so an early
+  client disconnect loses it. Count tokens from the deltas we already have.
+- **Ingress headers from the start.** `Incremental: ?1` (RFC 10036, August 2026) plus `X-Accel-Buffering: no`.
+  The nginx buffering failure turns 0.41s at the origin into 3.4s at the client and is invisible to load tests.
+- **A policy revision in the audit row**, so "which human caused this retrieval, under which policy" is
+  answerable.
+- **Snapshot for the record, enforce live.** Our session snapshots the document roots it resolved, which keeps
+  an old audit row accurate. The Zanzibar "new enemy problem" is the matching hazard: a snapshot must not be
+  what a request is authorised against. The session's roots are the record; the live manifest decides the
+  request. Both properties, in that order.
+- **Denial shape.** Google's AIP-211 argues explicitly against 404-instead-of-403 and specifies a 403 saying the
+  permission was denied "or it might not exist". Worth matching when the refusal wording is finalised.
+
+## Sources that carried weight
+
+- [Task- and Session-Level Model Routing, four routers on four benchmarks (arXiv 2608.14641)](https://arxiv.org/abs/2608.14641)
+- [Benchmarking Strands Decider, LLM classifiers and Bedrock routing (AWS Builder Center, Oct 2026)](https://builder.aws.com/content/3KRx3G8JMf1G06ZFu2dDEdE2DLw/benchmarking-strands-decider-llm-classifiers-and-bedrock-routing-for-model-routing)
+- [Model Routing as a Trust Problem: route receipts (arXiv 2605.01710)](https://arxiv.org/abs/2605.01710)
+- [Where Does Agent Reliability Come From? (arXiv 2607.17044)](https://arxiv.org/abs/2607.17044)
+- [Spanda: zero-cost lexical entropy matches neural semantic uncertainty (Zenodo, Sep 2026)](https://zenodo.org/records/22233648)
+- [When to Trust the Cheap Check (ICML 2026)](https://icml.cc/virtual/2026/poster/62754)
+- [Claude prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) and [refusals and fallback](https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback)
+- [Bedrock prompt caching](https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html), [token burndown in quota management](https://docs.aws.amazon.com/bedrock/latest/userguide/quotas-token-burndown.html), [API error codes](https://docs.aws.amazon.com/bedrock/latest/userguide/troubleshooting-api-error-codes.html)
+- [LiteLLM: reliability and which mocks were stripped](https://docs.litellm.ai/docs/proxy/reliability), [auto routing and session affinity](https://docs.litellm.ai/docs/proxy/auto_routing), [production practices](https://docs.litellm.ai/docs/proxy/prod), [custom auth](https://docs.litellm.ai/docs/proxy/custom_auth), [master key rotation and the salt key](https://docs.litellm.ai/docs/proxy/master_key_rotations)
+- [Google SRE Book, addressing cascading failures](https://sre.google/sre-book/addressing-cascading-failures/)
+- [RFC 10036, incremental forwarding of HTTP messages](https://www.rfc-editor.org/rfc/rfc10036.txt)
+- [MCP SEP-2567, sessionless MCP](https://modelcontextprotocol.io/seps/2567-sessionless-mcp.md)
+- [OWASP AISVS access controls on RAG indices](https://github.com/OWASP/AISVS)
+- [Google AIP-211 authorization checks](https://google.aip.dev/211)
+- [Authzed on the Zanzibar new enemy problem](https://authzed.com/docs/spicedb/concepts/zanzibar)
+- [Docker Compose secrets](https://docs.docker.com/compose/how-tos/use-secrets/)

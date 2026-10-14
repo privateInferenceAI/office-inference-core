@@ -10,6 +10,7 @@ Writes, into the output directory:
     litellm.yaml    the gateway's model list, built from the manifest's model roles
     services.txt    the services the chosen packs declare (informational for now)
     manifest.json   the normalized manifest, for drift comparison later
+    access.json     the declared permission model: roots, groups and users (SEC-ACL-002)
 
 Idempotent on purpose: if env already exists, its secrets are preserved. Regenerating the
 database password would lock the stack out of its own data.
@@ -33,6 +34,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import yaml  # noqa: E402
 
 from validate_manifests import check, load_catalog_packs  # noqa: E402
+
+# The access model is defined once, in the module the retriever and the session tool both read. The renderer
+# imports it rather than repeating its shape, so a field added there cannot be silently dropped here — the
+# failure that would leave a deployment enforcing a permission model nobody declared.
+sys.path.insert(0, str(ROOT / "services" / "retrieval"))
+import access  # noqa: E402
 
 DEFAULT_CTX = 8192
 DATA_CLASSES = ("public", "internal", "confidential", "regulated")
@@ -121,6 +128,104 @@ def build_litellm_config(manifest: dict, env: dict[str, str]) -> dict:
         "litellm_settings": {"drop_params": True, "set_verbose": False},
         "general_settings": {"master_key": "os.environ/LITELLM_MASTER_KEY"},
     }
+
+
+def build_access_registry(manifest: dict) -> dict:
+    """The declared permission model, normalized into the file the runtime reads.
+
+    **Absent and empty are different, and the difference is the whole point of `declared`.** A manifest with
+    no `access.roots`, `access.groups` or `access.users` keeps the built-in two folder roles, which is what
+    every manifest on the box does today. A manifest that declares any of the three gets exactly what it
+    declared, and the validator has already refused it if the three disagree.
+
+    **The model block is deliberately not read here.** A session resolves access and never a model role: which
+    model answers is a property of what the software is doing, not of who asked, so `models` belongs to the
+    gateway's config and this file never mentions it. A reader looking for a group-level model field will not
+    find one, and that is the decision rather than an omission.
+    """
+    block = manifest.get("access") or {}
+    declared = any(key in block for key in ("roots", "groups", "users"))
+
+    if not declared:
+        roles = {name: sorted(roots) for name, roots in access.DEFAULT_ROLES.items()}
+        return {
+            "registry_version": 1,
+            "declared": False,
+            "deployment_id": manifest["client"]["deployment_id"],
+            "roles": roles,
+            "groups": {},
+            "users": [],
+            "roots": sorted(access.DEFAULT_ROOTS),
+        }
+
+    groups = {name: sorted(group_roots(spec, f"access.groups.{name}"))
+              for name, spec in (block.get("groups") or {}).items()}
+    users = [
+        {
+            "subject": entry["subject"],
+            "name": entry.get("name", ""),
+            "groups": list(entry.get("groups") or []),
+        }
+        for entry in (block.get("users") or [])
+    ]
+    # Every root the deployment names, from either level. A root that no role and no group carries is a
+    # document label nothing can ever reach, which the validator reports as a warning rather than an error
+    # because a deployment may be mid-migration.
+    roots = sorted(set(block.get("roots") or []) | {r for rs in groups.values() for r in rs})
+    return {
+        "registry_version": 1,
+        "declared": True,
+        "deployment_id": manifest["client"]["deployment_id"],
+        "roles": declared_roles(block, groups, sorted(block.get("roots") or [])),
+        "groups": groups,
+        "users": users,
+        "roots": roots,
+    }
+
+
+def group_roots(spec, where: str) -> list:
+    """The roots a group carries, from the mapping form the manual documents.
+
+    ```yaml
+    groups:
+      staff: {roots: [company]}
+    ```
+
+    A mapping rather than a bare list, because a group will grow fields that are not its roots — a display
+    name, a description for the client's own review — and a bare list has nowhere to put them without
+    changing the shape later.
+    """
+    if isinstance(spec, dict):
+        roots = spec.get("roots")
+        if roots is None:
+            raise SystemExit(f"{where} has no roots. A group with no roots grants nothing.")
+        return roots
+    if isinstance(spec, list):
+        # The bare-list form, accepted so an older manifest still renders. The manual documents the mapping.
+        return spec
+    raise SystemExit(f"{where} must be a mapping with a roots key, got {type(spec).__name__}")
+
+
+def declared_roles(block: dict, groups: dict, roots: list) -> dict:
+    """The role map a declared registry implies.
+
+    **A role and a group answer different questions.** A role says what kind of caller this is and comes from
+    the session; a group says what a person may read and comes from the manifest. A deployment may write its
+    access at either level.
+
+    **When no roles are declared, this emits one that carries no roots of its own**, named `viewer`, which is
+    the case a grouped deployment wants: every person's permission comes from their groups and there is exactly
+    one place access is written down. `access.roles` overrides that for a deployment that would rather write
+    permissions beside the roles they belong to.
+
+    A declared role is still the session's claim and not the person's whole permission: the subject's groups
+    are unioned on top, which is stated here because a reader who assumes a role is the ceiling would expect
+    the opposite.
+    """
+    declared = block.get("roles")
+    if declared:
+        return {name: sorted(rts) for name, rts in declared.items()}
+    return {"viewer": []}
 
 
 def main() -> int:
@@ -258,11 +363,15 @@ def main() -> int:
     )
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
 
+    registry = build_access_registry(manifest)
+    (out_dir / "access.json").write_text(json.dumps(registry, indent=2, sort_keys=True) + "\n")
+
     print(f"rendered {manifest_path.name} -> {out_dir}")
     print(f"  profile      {manifest['profile']}")
     print(f"  packs        {', '.join(manifest['packs'])}")
     print(f"  local models {', '.join(models) if models else '(none)'}")
     print(f"  gateway      {len(gateway['model_list'])} model entries")
+    print(f"  access       {'declared: ' + str(len(registry['groups'])) + ' group(s), ' + str(len(registry['users'])) + ' user(s)' if registry['declared'] else 'built-in: two folder roles, no users'}")
     print(f"  secrets      {'generated' if generated else 'reused from the existing env file'}")
     print(f"  env file     {env_path} (mode 600)")
     return 0

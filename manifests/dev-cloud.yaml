@@ -48,6 +48,27 @@ content:
     public: full
     internal: redacted
 access:
+  # The declared permission model, SEC-ACL-002. A development deployment, so it declares the model the
+  # probe needs rather than one belonging to a client.
+  #
+  # **The roots are the two the corpus actually has.** An earlier draft invented a third called `finance`,
+  # and the probe that asks across the boundary reported zero passages withheld: no document carried the
+  # label, so the crossing question was not crossing anything and the right passed for no reason. The label
+  # set here is the one `ls documents/` prints.
+  roots: [company, executive]
+  groups:
+    staff:   {roots: [company]}
+    exec:    {roots: [company, executive]}
+  users:
+    # No subject here is a real person. The names say what each one is for, because a fixture whose purpose
+    # is not in its name becomes a mystery the first time it fails.
+    - subject: probe-staff@officeinference.com
+      name: Staff probe
+      groups: [staff]
+    - subject: probe-exec@officeinference.com
+      name: Executive probe
+      groups: [exec]
+
   # What a user is told when their role excludes content that would answer the
   # question. silent tells them nothing; denied says documents exist that they
   # cannot see; counted also says how many passages were withheld. The trade is
@@ -67,8 +88,14 @@ access:
     # redacting a card number is a payment incident in a provider's logs.
     redaction: "on"
 budgets:
-  # Per-role ceilings, in USD, over the period below. A hard cap: the gateway refuses over-budget
-  # requests rather than alerting about them. Internal cost control, not client billing.
+  # Per-role ceilings in USD, enforced by the gateway, which refuses a request once recorded spend is over
+  # the ceiling. Internal cost control, not client billing.
+  #
+  # **Not a hard cap, and the wording is deliberate.** LiteLLM checks admission against RECORDED spend, so
+  # concurrent requests can all pass before any of them is counted (open issues #34732 and #35567 as of
+  # 2026-10-14). This stops a runaway. It does not make the number unexceedable, and no client should be
+  # told otherwise. The ceilings that hold are the egress gate, which decides what may leave at all, and a
+  # per-request max_tokens.
   period_days: 30
   roles:
     front_desk: 2

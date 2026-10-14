@@ -154,6 +154,110 @@ def load_catalog_packs() -> set[str]:
     return packs
 
 
+def check_access(manifest: dict) -> list[str]:
+    """The declared permission model, checked before it is rendered rather than at a request.
+
+    SEC-ACL-002's verify line is about retrieval, so a mistake here is invisible until somebody reads a
+    document they should not. Every check below turns a class of that into a refusal at render time, when the
+    person reading the message is holding the manifest.
+
+    **The registry fields are all or nothing.** A manifest that declares groups and forgets roots, or users
+    and forgets groups, is not a manifest with defaults: it is one where the author meant something the
+    renderer would have to guess. Guessing is how a deployment ends up enforcing a model nobody wrote.
+    """
+    problems: list[str] = []
+    block = manifest.get("access") or {}
+    registry_fields = ("roles", "roots", "groups", "users")
+    declared = [k for k in registry_fields if k in block]
+
+    # denial and egress are not part of the registry, so a manifest carrying only those has declared no
+    # permission model and keeps the built-in roles.
+    if not declared:
+        return problems
+
+    for field in ("roots", "groups", "users"):
+        if field not in block:
+            problems.append(
+                f"access.{field} is missing while the rest of the permission model is declared. The four "
+                f"registry fields are all or nothing, because a renderer filling in the gap would be "
+                f"enforcing a model the manifest does not state. Declared so far: {sorted(declared)}")
+
+    roots = block.get("roots")
+    groups = block.get("groups") or {}
+    users = block.get("users") or []
+    roles = block.get("roles") or {}
+
+    if roots is not None and not roots:
+        problems.append("access.roots is empty, so no document label could ever be reached")
+
+    for name, rts in (roles or {}).items():
+        if not rts and not groups:
+            problems.append(
+                f"access.roles.{name} permits no roots and no groups are declared, so nothing a session "
+                f"of that role does could reach a document")
+
+    def roots_of(spec):
+        """A group's roots from either the mapping form or the older bare list."""
+        if isinstance(spec, dict):
+            return spec.get("roots") or []
+        return spec or []
+
+    declared_roots = set(roots or [])
+    for name, spec in (groups or {}).items():
+        rts = roots_of(spec)
+        if not rts:
+            problems.append(
+                f"access.groups.{name} permits no roots, which is a configuration error rather than a "
+                f"group that sees nothing")
+        unknown = sorted(set(rts or []) - declared_roots) if declared_roots else []
+        if unknown:
+            problems.append(
+                f"access.groups.{name} names root(s) {unknown} that access.roots does not declare. Either "
+                f"add them to access.roots or correct the name: a root nothing declares is a label no "
+                f"document carries")
+
+    if not groups and not any((roles or {}).values()):
+        problems.append(
+            "the permission model declares users but neither groups nor roles that carry roots, so every "
+            "subject would resolve to no access at all")
+
+    seen: set[str] = set()
+    for index, entry in enumerate(users):
+        entry = entry or {}
+        subject = entry.get("subject", "")
+        if not subject:
+            problems.append(f"access.users[{index}] has no subject")
+            continue
+        if subject in seen:
+            problems.append(f"access.users[{index}] declares {subject!r} a second time, and one of the "
+                            f"two would be dead")
+        seen.add(subject)
+        entry_groups = entry.get("groups") or []
+        unknown_groups = sorted(set(entry_groups) - set(groups))
+        if unknown_groups:
+            problems.append(
+                f"access.users[{index}] ({subject}) belongs to group(s) {unknown_groups} that "
+                f"access.groups does not declare. Known groups: {sorted(groups)}")
+        if not entry_groups:
+            problems.append(
+                f"access.users[{index}] ({subject}) belongs to no group, so it would resolve to no "
+                f"access")
+
+    # A root no role and no group carries is a document label nothing can reach. Reported rather than
+    # refused, so a deployment mid-migration can declare a root before the group that will use it.
+    carried = set()
+    for spec in list((groups or {}).values()) + [v for v in (roles or {}).values() if v]:
+        carried |= set(roots_of(spec))
+
+    unreachable = sorted(declared_roots - carried)
+    if unreachable:
+        problems.append(
+            f"access.roots declares {unreachable}, which no role and no group carries, so a document "
+            f"labelled with one is reachable by nobody")
+
+    return problems
+
+
 def check(manifest: dict, packs: set[str], path: Path) -> list[str]:
     problems: list[str] = []
 
@@ -177,6 +281,8 @@ def check(manifest: dict, packs: set[str], path: Path) -> list[str]:
     deployment_id = client.get("deployment_id", "")
     if deployment_id and not all(c.isalnum() or c == "-" for c in deployment_id):
         problems.append("client.deployment_id may contain only letters, digits, and hyphens")
+
+    problems.extend(check_access(manifest))
 
     used = manifest.get("packs", [])
     unknown = sorted(set(used) - packs)

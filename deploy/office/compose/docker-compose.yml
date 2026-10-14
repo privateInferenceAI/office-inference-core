@@ -309,6 +309,12 @@ services:
     # catalog) affects everything before 1.84.0, and CVE-2026-42271 affects 1.74.2 to 1.83.7.
     # Model swaps, budgets, and the audit trail all live here, which is why it is the one
     # component we never leave unpinned or unversioned.
+    # litellm 1.104.2, read from the running container on 2026-10-14. The version is recorded because the rule
+    # says a pin without one cannot answer the first question a security review asks, and because this image
+    # was the one place in the deployment where nobody could say which version was running.
+    #
+    # Against the advisories that mattered: CVE-2026-59822 (MCP auth bypass, before 1.84.0) and CVE-2026-42208
+    # (pre-auth SQL injection in key verification, 1.81.16 to 1.83.6) are both behind this pin.
     image: ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500
     container_name: litellm
     restart: unless-stopped
@@ -415,6 +421,56 @@ services:
       # Read-write, because retention unlinks the client's files. Read-only would make every destruction fail on
       # the unlink after the stores were already cleared, which is the unrecoverable order.
       - ${OI_ROOT}/documents:/documents
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [ai-net]
+
+  session:
+    # The session boundary as a tool: establish a session, inspect one, and rehearse the refusal. It runs when
+    # called and exits, like the audit sink and the retention commands.
+    #
+    # Its own image rather than a command inside the audit service, because it owns a table and a boundary the
+    # audit service does not know about. It is NOT a second writer of the chain: the refusal is recorded by
+    # invoking the audit tool, so the chain keeps exactly one definition of its own hash.
+    #
+    # The build context is the repository root because the image carries the access model from
+    # services/retrieval as well as this service's own module: the retriever and the session tool have to agree
+    # about what a root is, and one definition is the only way that stays true.
+    build:
+      context: ${OI_ROOT}
+      dockerfile: services/session/Dockerfile
+    # Tagged explicitly, like the eval and retention tools. Compose would name it oi-core-session, and a
+    # probe run by hand needs an image name that is written down rather than inferred.
+    image: oi-core/session:local
+    container_name: session
+    profiles: ["tools"]
+    user: "${HOST_UID}:${HOST_GID}"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DEPLOYMENT_ID: ${DEPLOYMENT_ID}
+      MIGRATIONS_DIR: /app/migrations
+      OI_ROOT: /opt/oi-core
+      # Where the rendered permission model is. Mounted rather than baked in, so a render takes effect without
+      # a rebuild, and read on every run rather than cached, so a drift between the file and the running
+      # deployment is not something this tool can be wrong about.
+      ACCESS_REGISTRY: /app/rendered/access.json
+      # The audit tool records the refusal. This service never inserts into the chain itself.
+      AUDIT_TOOL: /app/audit.py
+      # The content mode the audit tool applies to anything it stores. A refusal payload names fields and a
+      # role rather than content, so the deployment's policy has nothing to govern here, but the tool refuses
+      # to run without the variables and a second source of truth for them would be worse than passing them.
+      CONTENT_DEFAULT: ${CONTENT_DEFAULT:-hash}
+      CONTENT_MODE_PUBLIC: ${CONTENT_MODE_PUBLIC:-full}
+      CONTENT_MODE_INTERNAL: ${CONTENT_MODE_INTERNAL:-redacted}
+      CONTENT_MODE_CONFIDENTIAL: ${CONTENT_MODE_CONFIDENTIAL:-hash}
+      CONTENT_MODE_REGULATED: ${CONTENT_MODE_REGULATED:-hash}
+    volumes:
+      - ${OI_ROOT}/rendered:/app/rendered:ro
+      - ${OI_ROOT}/db/migrations:/app/migrations:ro
+      # The audit tool's own code, so the refusal goes through the same writer as every other event rather
+      # than through a copy of its hashing.
+      - ${OI_ROOT}/services/audit/audit.py:/app/audit.py:ro
     depends_on:
       postgres:
         condition: service_healthy

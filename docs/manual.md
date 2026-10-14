@@ -2885,6 +2885,210 @@ moment the feature ships.
 - A pair is flagged that is genuinely two documents: resolve it with `--distinct`, which records the decision
   and clears the flag without superseding anything. The flag is the feature working, not a false positive.
 
+### Per-user access and the session it comes from
+
+Sections above describe the two folder roles a deployment gets without asking: `staff` reads `company`, and
+`executive` reads `company` and `executive`. That is the whole model until a client needs a boundary that is
+not a folder, and then it is `access.groups`, `access.users` and `access.roots` in the manifest.
+
+**Two words, and they are not interchangeable.** A **role** says what kind of caller this is, and it comes
+from the session. A **group** says what a person may read, and it comes from the manifest. A session holds
+one role and any number of groups, and what it may read is the union of the two.
+
+**Access is a union with no deny rules and no precedence.** One user in `staff` and `finance` reads both, which
+is a decision rather than an omission: a model with no precedence is one that can be tested to exhaustion, and
+the union is a line a reader can check by eye. Per-document grants are not built. When a client needs one, the
+extension is to write group membership onto the chunk at ingest so the payload carries real labels and the
+filter stays a label match inside the query.
+
+**A session is a record, and the token carries nothing.** The client presents a random identifier that
+resolves to a row in `sessions`, and the row holds the subject, the role and the document roots. There is no
+role in the token to edit, no signature to forge, and no claim the server has to believe. The roots are
+**snapshotted when the session is minted**, so a later change to a group cannot change what an event recorded
+last week meant.
+
+**A request that supplies its own role is refused, and the refusal is written down.** That is the acceptance
+criterion for this phase, and it is why the refusal is committed to the audit chain *before* the error goes
+back to the caller. A refusal nobody can find afterwards is not a control.
+
+#### Declaring the model
+
+```yaml
+access:
+  roots: [company, finance, executive]
+  groups:
+    staff:     {roots: [company]}
+    finance:   {roots: [company, finance]}
+    executive: {roots: [company, executive]}
+  users:
+    - subject: dana@client.example
+      name: Dana Reyes
+      groups: [staff]
+    - subject: sam@client.example
+      groups: [staff, finance]
+```
+
+The four registry fields are **all or nothing**. A manifest that declares `groups` and forgets `roots` is
+refused rather than defaulted, because a renderer filling in the gap would be enforcing a model the manifest
+does not state. A manifest that declares none of them keeps the two built-in roles, which is what every
+manifest in this repository does.
+
+A role may carry no roots of its own, which is the usual shape when access is written with groups: the
+renderer emits one role named `viewer` for that case, and every subject's permission comes from its groups.
+If you would rather write permissions beside the roles, declare `access.roles` and those are used instead.
+**A subject's groups are still unioned on top of its role**, so a declared role is not a ceiling.
+
+#### Where it goes
+
+The renderer writes a fifth file:
+
+```
+$ python3 scripts/render_manifest.py --manifest manifests/example-standard-cloud.yaml
+rendered example-standard-cloud.yaml -> /opt/oi-core/rendered
+  profile      cloud
+  packs        core, document-chat
+  local models (none)
+  gateway      4 model entries
+  access       built-in: two folder roles, no users
+  secrets      reused from the existing env file
+  env file     /opt/oi-core/rendered/env (mode 600)
+```
+
+With a registry declared, that line reads `access       declared: 3 group(s), 2 user(s)`. The file itself is
+`rendered/access.json`, and both the session tool and the retriever read it from there. It is mounted rather
+than baked into an image, so re-rendering takes effect on the next command without a rebuild.
+
+#### The commands
+
+```
+$ alias oi='docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env'
+
+# What this deployment is actually enforcing, which is not always what the manifest says
+$ oi --profile tools run --rm session show
+registry   /app/rendered/access.json
+declared   yes
+deployment oi-core-dev-cloud
+
+roles   1: viewer=[]
+groups  3: executive=['company', 'executive'], finance=['company', 'finance'], staff=['company']
+users   2: dana@client.example[staff], sam@client.example[staff,finance]
+```
+
+```
+# Establish a session. Development only: without --dev it refuses and says what replaces it
+$ oi --profile tools run --rm session mint --dev --subject dana@client.example --role viewer
+token      <the session id, which is the whole token>
+subject    dana@client.example
+role       viewer
+roots      ['company']
+groups     ['staff']
+expires_at 2026-10-14T05:00:00+00:00
+```
+
+```
+# Ask what a token holds, which is what a request does
+$ oi --profile tools run --rm session verify --token <token>
+subject    dana@client.example
+role       viewer
+groups     ['staff']
+roots      ['company']
+permit     {"groups": ["staff"], "role": "viewer", "roots": ["company"], "subject": "dana@client.example"}
+```
+
+```
+# Rehearse the refusal. REFUSED is the pass; this command fails if the boundary is not enforced
+$ oi --profile tools run --rm session forge --dev --token <token> --field role --role executive
+REFUSED   refused: the request supplied 'role'. A role comes from the session and never from a
+          request field. The session holds 'viewer' and the refusal has been recorded.
+```
+
+#### Reading the refusal out of the record
+
+The refusal is in the chain, and the column a reviewer searches by holds the role the request **claimed**,
+not the one the session held:
+
+Two commands answer two different questions. `audit list` answers "what refusals happened", newest first:
+
+```
+$ oi --profile tools run --rm audit list --type access --limit 3
+    id  when                          type    actor                            outcome
+    64  2026-10-14T01:42:27.267199Z   access  probe-staff@officeinference.com  denied
+    63  2026-10-14T01:41:53.244849Z   access  probe-staff@officeinference.com  denied
+```
+
+And `session refusals` answers "what did THIS session try", which is the question an investigation actually
+starts from:
+
+```
+$ oi --profile tools run --rm session refusals --session <token>
+2026-10-14 01:58:07.443005+00:00  access/denied  claimed_role='executive'  session_role='viewer'  field='role'
+```
+
+A session with nothing against it exits non-zero and says so, because a clean session and a broken query look
+the same in an empty listing.
+
+| Column | What it holds for a refusal |
+|---|---|
+| `actor_role` | the role the request **claimed**, because that is the value you search by |
+| `outcome` | `denied` |
+| `payload.supplied_field` | the field the request used, such as `role` |
+| `payload.session_role` | the role the session actually held |
+| `payload.session_id` | which session, so repeated attempts from one session are visible |
+| `payload.roots_held` | what the session could read, so a refusal is not confused with a denial |
+
+A legitimate denial and a refused authority claim are the same `event_type` and different in structure: a
+denial sets `actor_role` to a role the session holds, and a refusal sets it to one it does not. That is what
+makes the two findable apart without reading payload prose.
+
+#### The rehearsal, end to end
+
+```
+$ python3 scripts/render_manifest.py --manifest manifests/dev-cloud.yaml
+$ oi --profile tools build session
+$ oi --profile tools run --rm session migrate
+$ docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
+    -v /opt/oi-core:/w -w /w --env-file rendered/env \
+    -e AUDIT_TOOL=/w/services/audit/audit.py \
+    --entrypoint python oi-core/eval:local /w/tests/fixtures/access_probe.py
+```
+
+The probe prints one line per right with the wrong path it rules out beside it, and exits non-zero if any
+right failed. It needs `AUDIT_TOOL` because the refusal is recorded by the audit tool, which owns the chain,
+and that tool is in the mounted checkout rather than in this image. The five rights are `ACCESS` (a session cannot retrieve a passage outside its roots), `SCOPED`
+(the boundary holds across both retrieval arms, not just the dense one), `FORGED` (a session cannot be minted
+for a role the deployment did not grant), `REFUSED` (a request supplying a role is refused), and `RECORDED`
+(the refusal is findable in the chain).
+
+**`FORGED` comes before `REFUSED` on purpose.** If a caller can mint its own authority then the refusal path
+proves nothing, because there is nothing legitimate to refuse against.
+
+#### Extending it
+
+- **A new boundary.** Add the name to `access.roots` and to whichever groups should read it, then re-render.
+  Documents are labelled from their top-level folder, so a document under `documents/finance/` carries the
+  `finance` label.
+- **A new person.** Add a `subject` with its groups and re-render. Access changes without code moving, which is
+  the point of the group level.
+- **A role of your own.** Declare `access.roles` with the roots it carries. A subject in that role gets those
+  roots plus its groups.
+- **A per-document grant.** Not built. The extension that keeps the filter inside the query is to write group
+  membership onto the chunk at ingest, so the payload carries real labels rather than a single folder name.
+
+**If it breaks.**
+
+- `unknown role`: the registry was rendered from a manifest whose roles do not include this one. Run
+  `session show` and use a role it lists.
+- `unknown subject`: the manifest declares users and this subject is not among them. A deployment that
+  declares users stops accepting subjects it was not told about, which is the intended behaviour.
+- `the registry could not be read`: the file is absent or malformed. Absent is fine and means the manifest
+  declares no registry, so the built-in roles apply; malformed means a render was interrupted.
+- `mint refuses ... Pass --dev`: working as intended. The mint command is a development stand-in, and the
+  identity provider replaces it at C7.
+- `the refusal could not be recorded`: the audit tool could not write. **Treat the deployment as having no
+  working record** and fix that before anything else, because a refusal nobody can find is not a control.
+- A session retrieves a passage outside its roots: check that the *lexical* arm ran. The filter is applied
+  inside both arms, and a deployment with no `DATABASE_URL` silently runs the dense arm alone.
+
 ## 13e. Redaction and the egress gate
 
 Two questions, asked in this order. May this request leave the building at all, and what must not go inside a
@@ -3428,7 +3632,7 @@ the manual also asks you to type.
 | Command | What it does |
 |---|---|
 | `python3 scripts/validate_manifests.py [manifest…]` | Checks manifests and the pack catalog, including residency and budget rules |
-| `python3 scripts/render_manifest.py --manifest <file>` | Writes `rendered/env`, `rendered/litellm.yaml`, `rendered/services.txt`, `rendered/manifest.json` |
+| `python3 scripts/render_manifest.py --manifest <file>` | Writes `rendered/env`, `rendered/litellm.yaml`, `rendered/services.txt`, `rendered/manifest.json`, `rendered/access.json` |
 | `python3 scripts/check_requirements.py` | Reports the register: verified, open, waived, by phase |
 | `python3 scripts/check_model_lifecycle.py [manifest…]` | Fails if a manifest names a deprecated, past-EOL, or unknown model |
 | `python3 -m venv ~/venv && ~/venv/bin/pip install -r requirements-dev.txt` | Once, on a machine that will run the tests. The box has no pytest otherwise, and Ubuntu 24.04 refuses a bare `pip install` under PEP 668 |
@@ -3437,6 +3641,11 @@ the manual also asks you to type.
 | `oi logs <service>` | Container logs |
 | `oi up -d` | Start everything, or reconcile a service whose *definition* changed |
 | `oi restart <service>` | Restart one service so it re-reads a mounted file, such as a new model list |
+| `oi --profile tools run --rm session show` | The permission model this deployment is enforcing |
+| `oi --profile tools run --rm session mint --dev --subject S --role R` | Establish a session. Refuses without `--dev` |
+| `oi --profile tools run --rm session verify --token T` | Resolve a token to the access it holds |
+| `oi --profile tools run --rm session forge --dev --token T --role R` | Rehearse a request supplying its own role. Refused is the pass |
+| `oi --profile tools run --rm session refusals --session ID` | The refusals recorded against one session, read out of the chain |
 | `oi run --rm audit migrate` | Apply database migrations |
 | `oi run --rm audit record …` | Write one event by hand. Needs `--dev` |
 | `oi run --rm audit list [--type T] [--limit N]` | Read the record |

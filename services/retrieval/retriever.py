@@ -494,13 +494,27 @@ def _search(services: ingest.Services, body: dict) -> list[dict]:
         return json.loads(response.read()).get("result") or []
 
 
-def permitted_roots(role: str) -> frozenset[str]:
+def permitted_roots(role: str, permit=None) -> frozenset[str]:
     """The roots a role may see, or a refusal.
 
     An unknown role raises rather than defaulting, and a role with an empty permission set raises too. The
     second is the one worth stating: a role that may see nothing is a configuration error, and treating it
     as a legitimate role that happens to see nothing makes a mistake look like a user with no documents.
+
+    **`permit` is where `SEC-ACL-002` enters, and it replaces the role rather than adding to it.** When a
+    session resolved the access, those roots are the permission: the role is not consulted at all, so there
+    is no precedence between two sources and nothing for a caller to widen by passing both. The object is
+    duck-typed rather than imported, because this module is shared with the ingestion image and the
+    permission registry is not — and because a retriever that can name the registry is one that could
+    consult it as a fallback, which is the failure this signature exists to prevent.
     """
+    if permit is not None:
+        roots = getattr(permit, "roots", None)
+        if not isinstance(roots, (frozenset, set, tuple, list)) or not roots:
+            raise ValueError(
+                "the permit resolved no document roots, which is a configuration error rather than a user "
+                "with no documents")
+        return frozenset(roots)
     if role not in ROLES:
         raise KeyError(
             f"unknown role {role!r}. Known roles: {sorted(ROLES)}. A missing role is refused rather than "
@@ -560,7 +574,7 @@ def _disclose(mode: DenialMode, role: str, withheld: int) -> Disclosure | None:
 
 
 def search(services: ingest.Services, question: str, role: str, limit: int = 10,
-           denial: str | None = None, rerank_passages: bool = True) -> Result:
+           denial: str | None = None, rerank_passages: bool = True, permit=None) -> Result:
     """Retrieve the passages a role may see, with the restriction applied by the store.
 
     The filter is a clause in the query, and the check afterwards is a second line. Both are present because
@@ -570,9 +584,14 @@ def search(services: ingest.Services, question: str, role: str, limit: int = 10,
     `denial` overrides the configured mode for one call. It exists so a test can exercise all three without
     touching the environment, and so a caller with a reason of its own can be explicit rather than relying on
     a global.
+
+    **`permit` is the session's access decision and it supersedes `role`.** A caller that holds a session
+    passes the permit and the role beside it for the record; the roots come from the permit alone. A caller
+    with no session — the probes, the tests, a diagnostic — passes the role and gets the deployment's
+    default, which is why every existing caller keeps working unchanged.
     """
     mode = denial_mode(denial)
-    roots = permitted_roots(role)
+    roots = permitted_roots(role, permit)
     result = Result(question=question, role=role)
 
     vectors = embed_query(services, [question])

@@ -1,0 +1,45 @@
+name: session
+location: either
+# The session boundary: a token becomes a record, the record carries a role and a set of document roots, and a
+# request that supplies its own role is refused and recorded.
+#
+# A tool rather than a service, like the audit sink: it runs when called and exits. The assistant API imports
+# this module at C3's next step rather than talking to it over the network, because the check belongs inside
+# the process that answers rather than beside it.
+build: .
+packs: [core]
+depends_on: [database]
+ports: {}
+healthcheck:
+  command: python3 /app/cli.py --help
+  interval_seconds: 0
+gpu:
+  required: false
+# A session carries a subject, a role and the roots they may read. That is an internal fact about the
+# deployment rather than client content, so it sits beside the audit record rather than beside documents.
+data_class: internal
+config_schema:
+  ttl_hours:
+    type: integer
+    default: 8
+    description: >-
+      How long a development session lives, at most 24. A deployment's sessions come from the identity
+      provider at C7 and carry the provider's own expiry, so this governs only the mint command.
+  verifier:
+    type: string
+    default: local
+    description: >-
+      Which module decides whether a presented token is a session. local is the development stand-in that
+      resolves a token against the sessions table. C7 adds a verifier that trusts a Cognito claim passed by
+      the load balancer and changes this field.
+substrate:
+  office:
+    notes: >-
+      The same tool and the same record. An office appliance has no identity provider at all, so its
+      sessions come from its own local accounts and the local verifier is the permanent one rather than a
+      stand-in.
+  cloud:
+    notes: >-
+      The record is the same. C7 puts an ALB and Cognito in front and swaps the verifier; the refusal path,
+      the record and the retriever call are unchanged, because a valid session asking for something it does
+      not hold is still a request the API has to refuse.
