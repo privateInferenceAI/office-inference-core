@@ -58,6 +58,24 @@ import access  # noqa: E402
 DEFAULT_AUDIT_TOOL = "/app/audit.py"
 
 
+def database_url() -> str:
+    """The connection string, from DATABASE_URL or assembled from the parts.
+
+    **A deployed service has DATABASE_URL and a bare container often does not.** Compose builds it for the
+    session service from the POSTGRES_* variables; a probe run by hand against the mounted checkout gets the
+    parts and nothing that joins them. Without this the audit tool refuses to run and the refusal is never
+    written, which is a control silently not working rather than an error anybody sees.
+    """
+    url = (os.environ.get("DATABASE_URL") or "").strip()
+    if url:
+        return url
+    user = os.environ.get("POSTGRES_USER", "")
+    password = os.environ.get("POSTGRES_PASSWORD", "")
+    database = os.environ.get("POSTGRES_DB", "")
+    if not (user and database):
+        return ""
+    return f"postgresql://{user}:{password}@postgres:5432/{database}"
+
 def audit_tool() -> str:
     """The audit tool for this call, from the environment if it is set."""
     return os.environ.get("AUDIT_TOOL", DEFAULT_AUDIT_TOOL)
@@ -350,7 +368,12 @@ def record_refusal(session: Session, payload: dict, *, dev: bool = False) -> Non
     ]
     if dev:
         command.append("--dev")
-    result = subprocess.run(command, capture_output=True, text=True)
+    # Assigned into a copy rather than defaulted, and passed explicitly. The audit tool reads DATABASE_URL from
+    # its environment; inheriting this process's environment gave it a variable that was absent, so it exited
+    # non-zero and the refusal went unrecorded while everything else looked healthy.
+    env = dict(os.environ)
+    env["DATABASE_URL"] = database_url()
+    result = subprocess.run(command, capture_output=True, text=True, env=env)
     if result.returncode != 0:
         raise SessionError(
             f"the refusal could not be recorded, so it is not a control: "
