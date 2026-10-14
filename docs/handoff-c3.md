@@ -254,7 +254,70 @@ mechanism, and none exists. Build one, or the criterion cannot be met honestly.
 `retention_policy_acceptance.py`, `rerank_acceptance.py`, and `ask.py`. C3 inserts a layer that everything
 else calls through, so their passing is part of C3's evidence, not just C2's.
 
-### 5.4 Golden questions: deferred to C8, with the reason
+### 5.4 Auth: a stand-in behind a seam, not a front-loaded C7
+
+**Decided. Do not build Cognito into C3, and do not treat the session mechanism as throwaway.**
+
+The brief's end state is an ALB validating a Cognito token, and `SEC-AUTH-001`, `SEC-TLS-001` and
+`SEC-LEAST-001` are all C7. So C3 needs a session mechanism that C7 replaces. Three reasons, in order of
+force:
+
+**1. The acceptance criterion cannot be met with production auth.** The phase's own sentence is *"a forged
+role refused and recorded."* A test cannot forge a Cognito token — that is the point of Cognito. If the only
+way to get a session is the identity provider, there is no forgery to refuse, and the test proves nothing
+about the code that does the refusing. **The stand-in is what makes the criterion falsifiable.**
+
+**2. Cognito cannot run on that box, so the manual page would be unfollowable.** It is one EC2 instance
+running compose. The ALB and the Cognito pool are C7's Terraform, and building them here means standing up
+auth infrastructure outside the deployment path — then writing an operating page for something that does not
+exist on the machine the phase is built on. `AGENTS.md` requires a stranger to be able to run the page.
+
+**3. The seam is the architecture; only the verifier is temporary.** The shape to build:
+
+- the API trusts exactly **one** thing, a session token, and resolves it to a **server-side session record**
+  that holds the role and the effective access set. **The record is the authority, not the token.**
+- the token carries a **session id, not a role**, so there is no claim in it to tamper with.
+- **every request that tries to set or override its own role is refused, and the refusal is committed to the
+  audit chain before the 403 goes out** — `event_type='access'`, `outcome='denied'`, `actor_role` set to the
+  role that was claimed, and a payload naming the supplied field and the session's real role. That is
+  findable, structurally distinguishable from a legitimate denial, and needs no migration.
+
+**C7 then changes three things and keeps four.** It swaps the verifier module, deletes the development mint
+command, and changes a manifest field. **The session record, the role resolution, the retriever call and the
+refusal path all stay.** Front-loading C7 inverts that: it builds the part that gets replaced and skips the
+part that stays.
+
+**The development mint command follows the pattern already in the tree.** `services/audit/audit.py` `cmd_record`
+refuses a hand-typed actor unless `--dev` is passed, and its comment says why:
+
+> An actor is an identity, not a word someone types. Until the assistant API passes an authenticated one
+> **(C3)**, recording from the command line is a development act, and it says so.
+
+That guard was written for this phase and is waiting for it. Put the mint behind the same kind of guard: it
+refuses outside development mode, it names what will replace it, and the guard runs **before** anything
+touches the database so a refusal cannot leave a half-written session behind.
+
+### 5.5 A session resolves access, never the model role
+
+**Decided. A session record holds a set of document roots and does not hold a model role.**
+
+The ask path uses the manifest's model role for every session. **Do not add a group-level model field**, and
+do not defer the question — refuse it, because the reasons are the same three that make the access model
+work:
+
+- **Different lifetimes.** Access is per user and per session. A model role is per deployment and per call
+  site: which model answers is a property of what the software is doing, not of who asked.
+- **The union argument applies to access and breaks for models.** One user in two groups resolves to a union
+  of roots with no precedence table. The same user's *model* role would need one, which is exactly the
+  ambiguity the permission model is designed not to have.
+- **A group-level model field makes authorisation an oracle.** If the model role is a function of group
+  membership, a refusal starts to hint at which groups the caller lacks and therefore at which documents
+  exist. A refusal should say no and nothing else.
+
+It is also what `INF-ROLE-001`'s criteria describe: *changing the analyst role in the manifest changes the
+model the API calls*. That is testable only if resolution runs through the manifest and nothing else.
+
+### 5.6 Golden questions: deferred to C8, with the reason
 
 **They do not exist and C3 is not the phase to build them.** `tests/parity/` is a README with no questions,
 and `docs/build-brief.md` says so: *"A README only. No golden questions exist."* They are assigned to C8, at
