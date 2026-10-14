@@ -28,6 +28,12 @@ import assertion
 
 # Where the hook finds the key and the nonce file. The same paths the API uses, mounted into both, which is
 # what makes them agree without either holding the other's copy.
+# The roles this deployment exposes as model names. Read from the environment the renderer writes,
+# which is the same source the gateway took its model list from.
+_KNOWN_ROLES = frozenset(
+    name.strip() for name in (os.environ.get("MODEL_ROLES") or "").split(",") if name.strip()
+) | frozenset({"front_desk", "analyst", "reader", "coder"})
+
 KEY_PATH = os.environ.get("OI_ASSERTION_KEY", "/app/rendered/assertion.key")
 
 
@@ -35,6 +41,37 @@ def _master_key() -> str:
     """Read at call time rather than import time, which is a bug the session tool had first."""
     return os.environ.get("LITELLM_MASTER_KEY", "")
 
+
+def _requested_model(request) -> str:
+    """The model named in the request body, or an empty string when it cannot be read."""
+    import json
+
+    body = getattr(request, "_body", None)
+    if not body:
+        return ""
+    try:
+        if isinstance(body, bytes):
+            body = body.decode("utf-8", errors="replace")
+        return str(json.loads(body).get("model") or "")
+    except Exception:  # noqa: BLE001 - an unreadable body is not this check's business
+        return ""
+
+
+def _refuse_a_model_this_role_may_not_use(request, role: str) -> None:
+    """Refuse a request whose model is another role's, which is what a forged statement would try."""
+    asked = _requested_model(request)
+    if not asked or asked == role:
+        return
+    # A deployment may name a variant of the role, such as `analyst-frontier` on a build with both lanes.
+    # A DIFFERENT role's name is the thing being refused, and it is a prefix comparison rather than an
+    # allowlist because the gateway takes models from the request rather than from a table it holds.
+    if asked == role + "-frontier":
+        return
+    if asked in _KNOWN_ROLES:
+        raise Exception(
+            f"this statement was minted for {role!r} and the request asks for {asked!r}. A role may "
+            f"only spend its own statement, and the model permission is what stops one role reaching "
+            f"another role's model.")
 
 def _team_rate_limits(role: str):
     """The team's tokens and requests per minute, or None when it declares neither.
@@ -128,6 +165,18 @@ async def user_api_key_auth(request: Request, api_key: str) -> UserAPIKeyAuth:
         raise Exception(f"the assertion was refused: {exc}") from exc
 
     role = payload["role"]
+
+    # ------------------------------------------------------------------ the model permission
+    #
+    # **A statement may only be spent on the role it names.** Without this, any signed statement reached
+    # any model: the assertion names a role, the role picks the team, and the REQUESTBODY names the
+    # model, with nothing joining the two. The drill the manual describes, asking as one role and naming
+    # another, returned 200 instead of a refusal, which is how this was found.
+    #
+    # It matters because the roles are priced differently and read different things: `reader` is the
+    # expensive one, and the gateway exposes each role as a model name. A statement for `analyst` asking
+    # for `reader` is a caller reaching past what it was granted.
+    _refuse_a_model_this_role_may_not_use(request, role)
 
     # ------------------------------------------------------------------ the budget
     #
