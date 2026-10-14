@@ -1,6 +1,6 @@
 r"""The access model: what a deployment declares, and what it resolves to.
 
-\`SEC-ACL-002\`'s verify line is about retrieval against a live stack, which is \`tests/fixtures/access_probe.py\`'s
+`SEC-ACL-002`'s verify line is about retrieval against a live stack, which is `tests/fixtures/access_probe.py`'s
 job. What this file can prove without a store is the part that decides: a registry read from a manifest, a
 subject resolved to a permit, and every refusal that has to happen before a search runs. A permission model
 whose bugs are only visible in a retrieval result is one where the failure looks like a bad answer.
@@ -299,7 +299,7 @@ def test_a_refusal_that_cannot_be_recorded_fails_loudly(monkeypatch):
 def undeclared_manifest(tmp_path):
     r"""A manifest that declares no permission model, which is what every manifest used to be.
 
-    Built from the example rather than from \`dev-cloud.yaml\`, because the development manifest declares the
+    Built from the example rather than from `dev-cloud.yaml`, because the development manifest declares the
     model the live probe needs and a test that used it as a stand-in for "nothing declared" would pass for
     the wrong reason the moment that changed. It did.
     """

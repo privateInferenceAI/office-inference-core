@@ -6,9 +6,9 @@ commands, and it holds no state of its own: the sessions live in the deployment'
 lives in the rendered registry.
 
 **It exists in this form because C7 replaces it rather than the thing it protects.** The mint command is the
-development stand-in for an identity provider, and it refuses without \`--dev\` and says so. What C7 keeps is
-everything else: the record, the resolution, and the refusal path, which is rehearsed here by the \`forge\`
-command and asserted by \`tests/fixtures/access_probe.py\` against the live stack.
+development stand-in for an identity provider, and it refuses without `--dev` and says so. What C7 keeps is
+everything else: the record, the resolution, and the refusal path, which is rehearsed here by the `forge`
+command and asserted by `tests/fixtures/access_probe.py` against the live stack.
 
 Usage on the box:
 

@@ -283,7 +283,7 @@ class Registry:
 def _roots(value, where: str, *, allow_empty: bool = False) -> frozenset[str]:
     r"""A root set from a manifest field, refused if it is empty or not a list of names.
 
-    \`allow_empty\` is for roles only. A group with no roots grants nothing and is a configuration error; a
+    `allow_empty` is for roles only. A group with no roots grants nothing and is a configuration error; a
     role with no roots is the declared-registry case, where every person's permission comes from their groups.
     """
     if isinstance(value, str) or not isinstance(value, (list, tuple)):

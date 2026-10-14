@@ -16,12 +16,12 @@ somewhere:
   which refuses before it opens a connection.
 * **The record is committed before the error is raised.** If the response went out first and the write
   second, a crash between them would leave an access decision with no trace.
-* **The claimed role is recorded as a role, not as text in a message.** The audit row's \`actor_role\` holds
+* **The claimed role is recorded as a role, not as text in a message.** The audit row's `actor_role` holds
   what the request *claimed*, because that is the value the row has to be findable by. The role the session
   actually held goes in the payload beside the field it was supplied in.
 
-**The development mint follows the pattern already in the tree.** \`services/audit/audit.py\` refuses a
-hand-typed actor unless \`--dev\` is passed and says why. This does the same, and its refusal names what will
+**The development mint follows the pattern already in the tree.** `services/audit/audit.py` refuses a
+hand-typed actor unless `--dev` is passed and says why. This does the same, and its refusal names what will
 replace it, because the person reading that message is the next agent.
 
 **What C7 changes, named here so it is inherited rather than rediscovered.** C7 swaps the verifier, deletes
@@ -133,7 +133,7 @@ class PostgresStore:
     def migrate(self, migrations_dir: str | Path) -> list[str]:
         """Apply the session migration, reusing the audit tool's bookkeeping.
 
-        The same \`schema_migrations\` table as every other migration in this repository, so a deployment has
+        The same `schema_migrations` table as every other migration in this repository, so a deployment has
         one record of what was applied rather than one per component.
         """
         import hashlib
@@ -200,7 +200,7 @@ class PostgresStore:
     def refusals_for(self, session_id: str, limit: int = 5) -> list[dict]:
         """The refusals recorded against one session, read back out of the chain.
 
-        \`\`RECORDED\`\` is the right that says a refusal must be findable afterwards, and it cannot be asserted
+        ``RECORDED`` is the right that says a refusal must be findable afterwards, and it cannot be asserted
         from the refusal's own return value: a message saying "the refusal has been recorded" is exactly what a
         broken writer would print. This reads the audit table, so the assertion is about the record rather
         than about the code that claims to have written it.
@@ -298,7 +298,7 @@ def check_role_claim(session: Session, supplied_field: str | None, claimed_role:
     role is a request that believes authority is a parameter, and accepting the ones that happen to match
     teaches a caller that the field is honoured. The refusal is about the attempt.
 
-    \`record\` is the audit writer, injected so a test can watch the order of operations and so the API can
+    `record` is the audit writer, injected so a test can watch the order of operations and so the API can
     pass its own. It defaults to the audit tool's CLI, which is what makes this the same writer as every other
     event rather than a second one.
     """
