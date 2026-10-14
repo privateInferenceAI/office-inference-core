@@ -3803,6 +3803,13 @@ cheaper than the error.
       --entrypoint python oi-core/ingestion:local /w/tests/fixtures/acl_probe.py
 
 **A probe that passes under one image and fails under another is a harness problem until proven otherwise.**
+
+**And `stream_probe` is load-sensitive, so run it on its own.** It has passed all four rights three times in a
+row when run by itself and failed once when several probes ran back to back, and the substantive properties held
+on every attempt: the canary was redacted, the frames arrived incrementally, and `X-Accel-Buffering` was `no`.
+Frame counts vary run to run (9 to 44 on the same question) because the provider's chunking varies, and one of
+its rights is a timing assertion. **A probe that fails under load is weak evidence**, so when it fails, re-run it
+alone before believing it, and treat a repeatable failure as real.
 Check the import before believing the failure.
 ## Phase 5 — Client app  *(outline)*
 
