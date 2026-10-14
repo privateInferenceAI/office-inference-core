@@ -373,6 +373,72 @@ in this phase that a declared control turned out to have no enforcer on the path
 **Two findings were recorded rather than fixed**, because both are disclosures that are already accurate: the
 request-side redaction module is not wired into the API, and the rate-limit drill does not produce a refusal.
 
+---
+
+## C3 panel, verification pass — round 2, 2026-10-14
+
+**Verdicts: two YES and one NO.** The cold reader and the executor both closed at yes. The fidelity checker found
+the worst defect of the phase and was right to hold the line.
+
+| Reviewer | Verdict | Deciding finding |
+|---|---|---|
+| cold reader | **YES** | the canary was redacted on both paths and the record carried the verdict; verified by running, not reading |
+| executor | **YES** | about forty documented commands ran verbatim; every acceptance probe passed on the current build |
+| fidelity checker | **NO** | **`/ask/stream` had no egress gate at all** |
+
+### The boundary bypass, and it is the same shape as the last one
+
+**`/ask` had a `lane == "none"` guard and `/ask/stream` did not.** The streaming handler computed the routing
+decision and never read it again except to pass the lane into a frame. A class the manifest forbade was refused
+with a 403 on one endpoint and **answered by the remote model on the other**, while the audit row recorded
+`egress_allowed: false` — a false record of a call that left the building.
+
+    under a manifest whose class may not leave:
+      JSON   /ask         -> 403 no_permitted_lane
+      STREAM /ask/stream  -> 200, full answer from the remote model
+      audit row           -> egress_allowed = false
+
+**This is the redaction defect again, one layer over.** A control implemented on the path somebody was looking
+at, absent on its sibling. The redaction was missing on the JSON path while the stream redacted; the gate was
+missing on the stream while the JSON refused. **Neither was visible to a probe, because the probes tested the
+path they were written for.** The reviewer found both by taking the same request to the other endpoint.
+
+Fixed: the stream refuses before the response starts, which is the one moment a stream can still say no, and
+records `data_class` and `egress_allowed` when it does. Verified by reproducing the check — and the first
+attempt was invalid, because the temp API fell back to the current manifest and both endpoints would have
+passed for the wrong reason.
+
+    after the fix, with the temp API confirmed to see data_class='regulated':
+      JSON   -> 403      STREAM -> 403
+      rows   -> 7895-7898  access denied  data_class=regulated  egress_allowed=f
+
+### Also found and fixed
+
+| Finding | Fix |
+|---|---|
+| The recorded prompt hash was of the **raw** question, so it could confirm a guess about a value that had been redacted | the API passes the redacted question, and the record hashes what it is given |
+| The refusal path never passed its data class to the column, so the row said `internal` while the payload said `regulated` | it passes both, and the verdict |
+| 13a said `healthy` is what to look for after a corpus load, with a dead-lettered document proving otherwise | the page says healthy is not evidence the corpus loaded, and to count with `--status` **and** `--failures` |
+| 13d's session commands used subjects this deployment does not declare, so copy-pasting failed | the commands use a declared subject, and the page says why the illustrative manifest differs |
+| The corpus table's rows summed to 1,131 against a stated total of 1,261 | the total explains that the table names only the declared twelve, and the box has forty |
+| 13h's heading said the gate runs first while its body said the trigger is evaluated first | the heading says the gate decides, which is what the code and the prose now say |
+| 13g named `OI_MODEL_<ROLE>` where the variable is keyed by API role and renders once | corrected, with the reason a reader would not find `OI_MODEL_SUMMARIZER` |
+| Section 16 printed a manifest that omitted the access registry and said `redaction: false` where the file says `true`, plus a validator warning this deployment does not print | the sample is the file the box runs, and the warning has its own labelled example |
+| Section 23's environment table omitted the eleven budget and stream variables 13h calls environment variables | all eleven listed with their defaults |
+| A workstation note said three commands when it lists four | four |
+
+**And the cold reader retracted one.** It reported in round 1 that 13b's `ModuleNotFoundError` demonstration did
+not reproduce; on re-running it, it does, exactly as the page says. **The page was right and the reviewer was
+not** — worth recording, because a panel whose findings are never wrong is a panel nobody should trust.
+
+### State at the close of round 2
+
+    611 passed
+    6/6 manifests valid; 8 packs known
+    api_probe 7/7   stream_probe 4/4   interface_probe 7/7   access_probe 4/4
+    the canary redacted on /ask and /ask/stream
+    a forbidden class refused on both, with the class and the verdict in the record
+    7 services, no stray containers
 ### Round 2 goes back to the cold reader
 
 Its NO rested entirely on the canary leak, which is fixed and verified — `POST /ask` now returns
