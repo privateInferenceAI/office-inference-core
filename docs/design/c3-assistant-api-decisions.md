@@ -185,7 +185,7 @@ a request, since that is the thing we refuse.
 **The residency claim becomes provable from the chain alone**, because lane and data class are in the row. That
 is the point of recording them, and it is why this is a compliance feature rather than an observability one.
 
-## 7. Credentials: the open decision
+## 7. Credentials: the decision, and how it was settled
 
 **Where it stands.** Per-role virtual keys exist in the gateway's database and a plaintext copy sits in
 `rendered/keys.json`. The plan was to mount that file into the API. The argument against it: LiteLLM stores
@@ -206,6 +206,50 @@ Without it the master key doubles as the at-rest encryption key for everything i
 master key can never be rotated, and setting a salt key later leaves every stored credential unreadable. There
 are four virtual keys and spend history in that database today. It is free to fix while there is no client data
 and impossible to fix afterwards.
+
+## 7a. The credential decision, resolved by spike on 2026-10-14
+
+**Decision: one signing key, short-lived assertions, and `custom_auth`. The spike says it works, including the
+part that would have made it unusable.**
+
+Five questions were put to the pinned version by loading a real hook into a throwaway gateway on the box,
+sharing the deployment's database. All five have answers, and two of them are the kind that only appear when
+something is actually run.
+
+| Question | Answer |
+|---|---|
+| Does `custom_auth` load? | Yes. A missing header and a bad signature both return a 401 `auth_error` with the message the hook raised. |
+| Does a valid assertion reach the model? | Yes, a real Bedrock answer, and the manifest's declared model was the one called. |
+| Does a team budget enforce? | **Yes, and it refuses hard**: `budget_exceeded`, HTTP 422, naming the spend and the ceiling. |
+| Does the team have to be a real row? | Yes. A `team_id` the database does not know returns a 404 telling you to create it. |
+| Is administration locked out? | **Only if the hook does not handle it**, and this is the finding. |
+
+**The lockout, and the one line that fixes it.** With `custom_auth` enabled the master key goes through the
+same hook, so a hook that only understands role assertions refuses the master key too: `/team/list` returned
+401 and the whole management surface became unreachable. That would have bricked budget administration, the
+`keys` tool and any future `/team/new` call, and it is not mentioned in the documentation the research found.
+The hook is handed `api_key`, so it can compare that against `LITELLM_MASTER_KEY` and return a
+`proxy_admin` identity. Confirmed: the log shows `matches_master=True` and `/team/list` answering normally
+afterwards.
+
+**Two consequences that change the design.**
+
+- **Budgets move from keys to teams.** A key-level `max_budget` is documented as unsupported with
+  `custom_auth`, and the spike confirms the identity's key budget is not what enforces. Team budgets do
+  enforce, so one team per role carrying that role's ceiling is the shape. The `keys` tool grows from minting
+  keys to provisioning teams, and the manifest's `budgets.roles` block is what it reads.
+- **This is a stronger budget story than the one we had, and it corrects something we already published.**
+  Section 5 of this note records that LiteLLM's key budgets admit against recorded spend, so concurrent
+  requests can pass before any is counted. That is true of key budgets. A team budget refused at 422 in the
+  spike with the spend and the ceiling named. It is a better ceiling, and it belongs on the team record
+  rather than claimed for the key.
+
+**What the spike does not settle.** Whether the token-per-minute ceiling counts concurrent admissions the way
+the team budget does, and whether a team's model allowlist is enforced on the assertion path. Both are for the
+step, with a test each.
+
+**The spike itself does not ship.** `services/spike/` holds three files that exist to record what was run,
+and step 4.2 deletes it once the real hook has its own tests.
 
 ## 8. What we are deliberately not building
 

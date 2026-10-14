@@ -1,0 +1,18 @@
+# The spike's gateway config: one model, custom_auth, and nothing else.
+model_list:
+  - model_name: analyst
+    litellm_params:
+      model: bedrock/amazon.nova-lite-v1:0
+      aws_region_name: us-east-1
+
+general_settings:
+  # Where the identity comes from. The whole question: does this hook get consulted, and does what it
+  # returns reach the budget check?
+  custom_auth: custom_auth.user_api_key_auth
+  # The two flags the research named as needing to be on for the model allowlist and expiry to be checked
+  # when custom_auth is in use.
+  custom_auth_run_common_checks: true
+  enable_post_custom_auth_checks: true
+
+litellm_settings:
+  drop_params: true
