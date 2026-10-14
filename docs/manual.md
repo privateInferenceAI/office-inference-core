@@ -3354,10 +3354,15 @@ request-side one is wired in, the control on the way out is the gate, and `egres
 **Run the boundary probe to check the claim rather than take it:**
 
 ```
-docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
-  -v /opt/oi-core:/w -w /w --env-file rendered/env \
-  --entrypoint python oi-core/session:local /w/tests/fixtures/gate_check.py
+bash tests/fixtures/gate_check_run.sh
 ```
+
+**Run it with the runner, not the bare probe.** The probe tests a deployment whose class may not leave, and this
+one permits the classes it uses, so the runner builds a copy of the manifest with a forbidden class, starts a
+second API container on it, waits until that container confirms it loaded the copy, and runs the probe against
+it. **It asks both endpoints and fails if one refuses and the other answers**, which is how the streaming bypass
+was found. It also fails if the refusal does not name the class, so a container that quietly fell back to the
+real manifest fails the run rather than passing for the wrong reason. That mistake was made once by hand.
 
 **The whole `docker run` invocation is spelled out here on purpose.** An earlier version of this block said
 `run --entrypoint ...`, which relies on a shell alias defined in a different section and fails with `run: command
@@ -3708,7 +3713,7 @@ Three, and that is deliberate. There is no fourth endpoint until a capability ne
 | `citations` | Document, access label and page for each passage the answer could cite |
 | `supported` / `unsupported` | The sentences the retrieved passages do and do not back, with a reason |
 | `denied`, `disclosure` | Whether passages outside the role matched, and what the client's policy says to tell the user |
-| `redactions` | **What was removed from this answer, by kind and count** — absent until the C3 panel found the JSON path returning a PII canary in clear while the streaming path redacted. A client that cannot see this cannot tell whether a value was replaced |
+| `redactions` | **What was removed from this answer, by kind and count.** The C3 panel found the JSON path returning a PII canary in clear while the streaming path redacted, and the field exists so a client can tell that a value was replaced |
 
 **The refusal that matters is the one in the chain, not the status code.** A 403 on its own is a control
 nobody can audit. Read it back the way the manual's access-control section describes:
