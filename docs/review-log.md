@@ -174,6 +174,57 @@ the thresholds 1.5/5/30 and 20/30/180, `num_retries: 0`, and the holdback with i
 
 **Round 3 re-tests from the manual**, including everything above.
 
+---
+
+## C3 panel, round 3 — 2026-10-14, the final round under the three-round cap
+
+### The verdicts, and they disagreed
+
+| Reviewer | Verdict | What it means |
+|---|---|---|
+| **cold reader** | **YES** | *A competent stranger can run this from the documentation alone.* The API is real, running and answering; the contradiction class is substantively gone |
+| **fidelity checker** | **NO** | Two documented drills behaved differently from the page, and the manual contradicted its own disclosure |
+| **executor** | interim only | Its round-3 measurements were contaminated by a runaway container of mine; the probes it did reach on a quiet box all passed |
+
+**The disagreement is the honest result and it is worth stating plainly.** The cold reader answers *can a stranger run this*, and after three rounds it says yes. The fidelity checker answers *does the page match the code*, and it found the page still ahead of the code in two operational drills. Both are right about different questions.
+
+### What round 3 found, and what was fixed
+
+**The emergency brake drilled wrong in both directions.** `keys --set-budget` writes the team row and the gateway caches that row, so the cap is not in force until a restart — the page showed it biting immediately. Worse, the documented release (`oi run --rm keys`) rewrites the *virtual keys*, which is not the row the assertion path enforces: an operator could cap a role and then be unable to release it with the command the page gave them. Both directions touch the team row now, and the page shows the restart and the release it takes.
+
+**A drill that silently did nothing.** Section 13h offered lowering a team's `tpm_limit` as a way to provoke a refusal through our own layer. Tested at last: the calls keep answering. The identity carries the limit and **whether the gateway enforces it on that path is unproven**, which is now what the page says instead of stating the opposite as fact.
+
+**A summary that promised a control its own detail denied.** Section 25 said the system redacts before anything leaves for a frontier model; section 13e discloses that the request-side redactor is not wired into the API. The code agrees with 13e. Section 25 now says what actually protects the boundary, which is the gate.
+
+**Two latent code defects, neither visible on this deployment.**
+
+The degraded **audit row** hardcoded `lane="frontier"` and `data_class="internal"` on the streaming path, so a local-lane deployment would have written a false residency claim while the response payload said local. Fixed: the record carries the lane that answered and the class the deployment declared.
+
+The **lane was a deployment-wide fact**. `local_lane_available()` answers whether *any* role has a local model, and the routing used that as the default lane for every request. On a hybrid manifest where the analyst role is frontier-only and other roles are local, a plain request went to a remote model with the gate never consulted and the record saying `local`. No shipped manifest has that shape, which is why it was latent. The lane now follows the model the role actually points at.
+
+### The three-round cap
+
+**Round 3 was the third round, which is the cap.** The rule for stopping is a round that returns only cosmetics, and this one did not: it returned two operational defects and two latent code defects, all now fixed and verified.
+
+**What that leaves is a re-test that the cap does not allow.** The cold reader's YES stands on the manual as it was when it read it, and every finding from the other two reviewers has since been fixed and verified by hand — the brake drill end to end, the throttle path, the four probes on a quiet box, 602 unit tests. **No fourth round re-read the manual after those fixes**, and saying the panel passed would be claiming a verification that did not happen.
+
+### The state at the close of round 3
+
+    602 passed
+    6/6 manifests valid; 8 packs known
+    api_probe          PASSED: 7 right(s)
+    stream_probe       PASSED: 4 right(s)
+    interface_probe    PASSED: 7 right(s)
+    access_probe       PASSED: 4 right(s)
+    gate_check         permitted class answers; a forbidden one is refused with lane='none'
+    7 services running
+
+### The runaway container, and whose fault it was
+
+The executor's round-3 measurements were contaminated by a `docker run` burst of **mine**, left behind by an aborted probe run and still driving roughly 1,500 spend rows a minute twelve minutes later. It throttled the provider, so every provider-dependent probe failed in the false-failure mode the panel brief warned about.
+
+The executor did the right thing: it did not kill a container outside its authorised set, it identified the cause, and it offered both options. **The lesson is mine.** A probe that bursts a shared provider should clean up after itself, and an aborted run leaves more than a mess — it leaves a deployment that lies to the next reviewer.
+
 ### Fixed after round 2 reported, from the same round's evidence
 
 **A regression in the degraded record, caught by the round-2 executor's last measurement.** Rows written after
