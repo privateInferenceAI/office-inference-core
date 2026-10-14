@@ -89,6 +89,18 @@ def resolved_model(role: str) -> str:
     return str(entry.get("frontier") or entry.get("local") or role)
 
 
+def frontier_model_for(role: str) -> str:
+    """The separate frontier model this deployment exposes for a role, or empty when there is none.
+
+    **Empty is information, not a failure.** The renderer publishes `<role>-frontier` only when a role has
+    both a local and a remote entry, because that is when the gateway names the remote one differently.
+    Where it is empty the deployment has a single model, and the caller says so rather than claiming a
+    stronger model answered. That claim was false on the cloud deployment, where both lanes resolve to the
+    same model. Found by the C3 panel.
+    """
+    variable = "OI_MODEL_" + role.upper().replace("-", "_") + "_FRONTIER"
+    return (os.environ.get(variable) or "").strip()
+
 def local_lane_available() -> bool:
     """Whether this deployment declares a model it serves itself.
 
@@ -191,6 +203,10 @@ def _resolve(request_token: str):
 @app.post("/ask")
 async def ask(request: Request):
     """A question in, a cited answer out."""
+    # **The arrival clock, taken before anything else happens.** The budget is anchored here so
+    # retrieval counts against the documented deadline. Taking it after retrieval made the time the
+    # client actually waited invisible to the thing that is supposed to bound it.
+    asked_at = time.monotonic()
     try:
         body = await request.json()
     except Exception:  # noqa: BLE001 - the message is the response
@@ -269,7 +285,7 @@ async def ask(request: Request):
         # stronger model; not escalating selects the ordinary one, which is still remote on a cloud
         # deployment. Conflating those made every unescalated request fail where there is no local model.
         default_lane="local" if local_lane_available() else "frontier",
-        local=local_lane_available(),
+        frontier_model=frontier_model_for(role),
     )
     if decision.lane == "local" and not local_lane_available():
         # **This deployment has no local lane**, so a decision to answer locally would name a model that
@@ -291,7 +307,7 @@ async def ask(request: Request):
     # **The lane decides the thresholds.** A local model is a different shape from a remote one, and
     # borrowing the frontier numbers would mark healthy local answers as failures. The arrival clock is
     # passed through so the deadline stays anchored where the client asked, not where routing finished.
-    request_budget = budget_module.Budget.for_lane(decision.lane)
+    request_budget = budget_module.Budget.for_lane(decision.lane, started=asked_at)
     answer, generation = _generate(session, permit, model, question, result.passages, request_budget)
     if answer is None:
         # **A degraded answer rather than an error.** The research and this step's own design say the
@@ -513,7 +529,7 @@ async def ask_stream(request: Request):
         user_wants_stronger=bool(body.get("stronger")),
         model_name=model,
         default_lane="local" if local_lane_available() else "frontier",
-        local=local_lane_available(),
+        frontier_model=frontier_model_for(role),
     )
 
     try:

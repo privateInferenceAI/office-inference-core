@@ -91,13 +91,13 @@ def test_a_refused_escalation_is_announced_when_a_local_model_exists():
 
 def test_the_gate_refuses_rather_than_defaulting_when_nothing_is_declared():
     """An empty egress declaration means nothing leaves, which is the safe direction to fail in."""
-    permitted, why = routing.gate('analyst', 'internal', [], remote=True)
+    permitted, why = routing.gate('internal', [])
     assert permitted is False
     assert 'nothing' in why
 
 
-def test_a_local_model_is_not_an_egress_question():
-    permitted, _ = routing.gate('analyst', 'regulated', [], remote=False)
+def test_a_permitted_class_is_permitted():
+    permitted, _ = routing.gate('regulated', ['regulated'])
     assert permitted is True
 
 
@@ -109,7 +109,7 @@ def test_the_audit_facts_carry_both_facts_separately():
     assert facts['escalation_requested'] is True
     assert facts['lane'] == 'local'
     assert facts['trigger'] == ''
-    assert facts['routing_version'] == 1
+    assert facts['routing_version'] == 2
 
 
 def test_every_decision_names_a_lane_and_a_reason():

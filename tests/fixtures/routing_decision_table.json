@@ -3,7 +3,7 @@
     "escalated": true,
     "escalation_requested": false,
     "lane": "frontier",
-    "reason": "the task reconcile is on the agentic pack list",
+    "reason": "the task reconcile is on the agentic pack list, and this deployment has a single model",
     "told_user": true,
     "trigger": "agentic_task"
   },
@@ -11,7 +11,7 @@
     "escalated": true,
     "escalation_requested": true,
     "lane": "frontier",
-    "reason": "the task compare is on the agentic pack list",
+    "reason": "the task compare is on the agentic pack list, and this deployment has a single model",
     "told_user": true,
     "trigger": "agentic_task"
   },
@@ -35,7 +35,7 @@
     "escalated": true,
     "escalation_requested": true,
     "lane": "frontier",
-    "reason": "the user asked for the stronger model",
+    "reason": "the user asked for the stronger model, and this deployment has a single model",
     "told_user": true,
     "trigger": "user_requested_stronger"
   },
@@ -43,7 +43,7 @@
     "escalated": true,
     "escalation_requested": false,
     "lane": "frontier",
-    "reason": "the task reconcile is on the agentic pack list",
+    "reason": "the task reconcile is on the agentic pack list, and this deployment has a single model",
     "told_user": true,
     "trigger": "agentic_task"
   },
@@ -51,7 +51,7 @@
     "escalated": true,
     "escalation_requested": true,
     "lane": "frontier",
-    "reason": "the task compare is on the agentic pack list",
+    "reason": "the task compare is on the agentic pack list, and this deployment has a single model",
     "told_user": true,
     "trigger": "agentic_task"
   },
@@ -75,7 +75,7 @@
     "escalated": true,
     "escalation_requested": true,
     "lane": "frontier",
-    "reason": "the user asked for the stronger model",
+    "reason": "the user asked for the stronger model, and this deployment has a single model",
     "told_user": true,
     "trigger": "user_requested_stronger"
   },
@@ -99,7 +99,7 @@
     "escalated": false,
     "escalation_requested": false,
     "lane": "local",
-    "reason": "the deployment permits ['public'] on a remote lane, and this request is regulated",
+    "reason": "no trigger fired",
     "told_user": false,
     "trigger": ""
   },
@@ -107,7 +107,7 @@
     "escalated": false,
     "escalation_requested": false,
     "lane": "local",
-    "reason": "the deployment permits ['public'] on a remote lane, and this request is regulated",
+    "reason": "no trigger fired",
     "told_user": false,
     "trigger": ""
   },
@@ -139,7 +139,7 @@
     "escalated": false,
     "escalation_requested": false,
     "lane": "local",
-    "reason": "the deployment permits nothing on a remote lane, and this request is regulated",
+    "reason": "no trigger fired",
     "told_user": false,
     "trigger": ""
   },
@@ -147,7 +147,7 @@
     "escalated": false,
     "escalation_requested": false,
     "lane": "local",
-    "reason": "the deployment permits nothing on a remote lane, and this request is regulated",
+    "reason": "no trigger fired",
     "told_user": false,
     "trigger": ""
   },

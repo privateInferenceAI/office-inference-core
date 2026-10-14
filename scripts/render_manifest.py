@@ -404,8 +404,19 @@ def main() -> int:
     # source of truth this exists to avoid.
     api_roles = sorted((manifest.get("access") or {}).get("roles") or {}) or ["viewer"]
     default_role = "analyst" if "analyst" in (manifest.get("models") or {}) else sorted(manifest["models"])[0]
+    # **The frontier lane gets its own variable, because the gateway names it differently.** A role with
+    # both lanes is exposed as `<role>` for the local entry and `<role>-frontier` for the remote one, and
+    # nothing told the API that second name. So `escalated: true` sent the same model name as before: the
+    # notice said the stronger model answered while the identical model answered. Found by the C3 panel.
+    #
+    # Empty when the deployment has no separate frontier entry, which is the cloud case. That emptiness is
+    # information: the API uses it to say there is no stronger model rather than to claim one answered.
     for api_role in api_roles:
-        env[f"OI_MODEL_{api_role.upper().replace('-', '_')}"] = default_role
+        upper = api_role.upper().replace("-", "_")
+        env["OI_MODEL_" + upper] = default_role
+        entry = (manifest.get("models") or {}).get(default_role) or {}
+        has_both = bool(entry.get("local")) and bool(entry.get("frontier"))
+        env["OI_MODEL_" + upper + "_FRONTIER"] = (default_role + "-frontier") if has_both else ""
     env["OI_DEFAULT_MODEL_ROLE"] = default_role
     env["OI_DEFAULT_API_ROLE"] = api_roles[0]
     env["DEPLOYMENT_ID"] = manifest["client"]["deployment_id"]

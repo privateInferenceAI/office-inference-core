@@ -126,7 +126,7 @@ def test_no_trigger_adds_exposure():
                 deployment['manifest'], data_class=deployment['data_class'],
                 default_lane=deployment['default_lane'], model_name='analyst', **request)
             if decision.escalated:
-                permitted, _ = routing.gate('analyst', deployment['data_class'],
+                permitted, _ = routing.gate(deployment['data_class'],
                                             ((deployment['manifest'].get('access') or {})
                                              .get('egress') or {}).get('frontier_classes'))
                 assert permitted, dname + ' | ' + rname + ' escalated past a gate that refused'
