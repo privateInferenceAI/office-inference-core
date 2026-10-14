@@ -21,14 +21,20 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 TRIGGER_AGENTIC = 'agentic_task'
-TRIGGER_SYNTHESIS = 'multi_document_synthesis'
 TRIGGER_USER = 'user_requested_stronger'
-TRIGGERS = (TRIGGER_AGENTIC, TRIGGER_SYNTHESIS, TRIGGER_USER)
+TRIGGERS = (TRIGGER_AGENTIC, TRIGGER_USER)
 
-# How many distinct documents retrieval must return before the synthesis trigger fires. **A proxy, and the
-# record says so.** It stays because a deterministic predicate is worth more here than an accurate one.
-SYNTHESIS_MIN_DOCUMENTS = 2
-SYNTHESIS_MIN_SCORE = 0.2
+# **There was a third trigger here and it was removed, not tuned.** It escalated when retrieval returned more
+# than one distinct document, on the theory that several documents means the answer needs reconciling. Two
+# measurements killed it. The first: a plain single-fact question returned SIX distinct documents while the
+# question that genuinely needed reconciling returned FOUR, because this corpus is small and one fact is
+# legitimately spread across several files. The second: every combination of a document count from 1 to 6 and a
+# score floor from 0.00 to 0.60 either fired on a single-fact question or missed a synthesis one, with no
+# separating rule in the whole table.
+#
+# So the proxy was not badly calibrated, it was unusable, and an unusable predicate that fires on everything is
+# worse than no trigger: it escalates cost silently and makes the audit row meaningless. The evidence is in
+# `tests/fixtures/trigger_rules.py`, which prints the whole table.
 
 AGENTIC_TASKS = frozenset({
     'summarise_across_documents',
@@ -51,7 +57,6 @@ class Decision:
     reason: str = ''
     notice: str = ''
     escalation_requested: bool = False
-    synthesis_is_proxy: bool = False
     steps: tuple = field(default_factory=tuple)
 
 
@@ -70,19 +75,6 @@ def gate(model: str, data_class: str, frontier_classes, *, remote: bool = True) 
     listed = list(allowed) or 'nothing'
     return False, ('the deployment permits ' + str(listed) + ' on a remote lane, and this request is '
                    + data_class)
-
-
-def synthesis_documents(passages, min_score: float = SYNTHESIS_MIN_SCORE) -> int:
-    """How many distinct documents cleared the floor. The integer the second trigger is decided on."""
-    seen = set()
-    for passage in passages or ():
-        score = getattr(passage, 'score', None)
-        if score is not None and score < min_score:
-            continue
-        doc = getattr(passage, 'doc_id', '')
-        if doc:
-            seen.add(doc)
-    return len(seen)
 
 
 def route(manifest: dict, *, data_class: str, task: str = '', user_wants_stronger: bool = False,
@@ -112,16 +104,6 @@ def route(manifest: dict, *, data_class: str, task: str = '', user_wants_stronge
                         notice='This is an agentic task, so the stronger model answered.',
                         escalation_requested=user_wants_stronger, steps=tuple(steps))
 
-    documents = synthesis_documents(passages)
-    if documents >= SYNTHESIS_MIN_DOCUMENTS:
-        steps.append('trigger: ' + str(documents) + ' distinct documents cleared the floor')
-        return Decision(lane='frontier', model=model_name, escalated=True, trigger=TRIGGER_SYNTHESIS,
-                        reason=str(documents) + ' distinct documents need reconciling',
-                        notice='This answer draws on ' + str(documents) + ' documents, so the stronger model '
-                               'was used to reconcile them.',
-                        escalation_requested=user_wants_stronger, synthesis_is_proxy=True,
-                        steps=tuple(steps))
-
     if user_wants_stronger:
         steps.append('trigger: the user asked for the stronger model')
         return Decision(lane='frontier', model=model_name, escalated=True, trigger=TRIGGER_USER,
@@ -143,6 +125,5 @@ def audit_facts(decision: Decision, data_class: str) -> dict:
         'trigger': decision.trigger,
         'reason': decision.reason,
         'escalation_requested': decision.escalation_requested,
-        'synthesis_is_proxy': decision.synthesis_is_proxy,
         'routing_version': 1,
     }

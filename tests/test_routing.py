@@ -43,24 +43,6 @@ def test_an_agentic_task_escalates_naming_its_trigger():
     assert decision.notice, 'the user is told'
 
 
-def test_synthesis_across_documents_escalates_and_is_labelled_a_proxy():
-    decision = routing.route(PERMISSIVE, data_class='internal', passages=[P('a.md', 0.9), P('b.md', 0.8)])
-    assert decision.trigger == routing.TRIGGER_SYNTHESIS
-    assert decision.synthesis_is_proxy is True, 'the record says the predicate is a proxy'
-
-
-def test_one_document_does_not_trigger_synthesis():
-    decision = routing.route(PERMISSIVE, data_class='internal', passages=[P('a.md', 0.9), P('a.md', 0.7)])
-    assert decision.escalated is False
-
-
-def test_an_incidental_match_below_the_floor_is_not_synthesis():
-    """Two documents, one of them noise from the lexical arm, is not two documents needing reconciling."""
-    decision = routing.route(PERMISSIVE, data_class='internal',
-                             passages=[P('a.md', 0.9), P('b.md', 0.05)])
-    assert decision.escalated is False
-
-
 def test_a_user_request_escalates():
     decision = routing.route(PERMISSIVE, data_class='internal', user_wants_stronger=True,
                              passages=[P('a.md', 0.9)])
@@ -73,7 +55,7 @@ def test_a_data_class_that_forbids_the_lane_stops_every_trigger():
     """**The one-way boundary.** No trigger may move content toward a more exposed lane."""
     cases = ({'task': 'reconcile', 'passages': [P('a.md', 0.9)]},
              {'user_wants_stronger': True, 'passages': [P('a.md', 0.9)]},
-             {'passages': [P('a.md', 0.9), P('b.md', 0.9)]})
+             {'task': 'compare', 'passages': [P('a.md', 0.9), P('b.md', 0.9)]})
     for kwargs in cases:
         decision = routing.route(FORBIDDING, data_class='regulated', **kwargs)
         assert decision.lane == 'local', kwargs
@@ -118,7 +100,7 @@ def test_every_decision_names_a_lane_and_a_reason():
     cases = [
         (PERMISSIVE, dict(data_class='internal', passages=[P('a.md', 0.9)])),
         (PERMISSIVE, dict(data_class='internal', task='compare', passages=[P('a.md', 0.9)])),
-        (PERMISSIVE, dict(data_class='internal', passages=[P('a.md', 0.9), P('b.md', 0.9)])),
+        (PERMISSIVE, dict(data_class='internal', passages=[P('a.md', 0.9), P('b.md', 0.9), P('c.md', 0.9)])),
         (PERMISSIVE, dict(data_class='internal', user_wants_stronger=True, passages=[P('a.md', 0.9)])),
         (FORBIDDING, dict(data_class='regulated', passages=[P('a.md', 0.9)])),
         (FORBIDDING, dict(data_class='regulated', user_wants_stronger=True, passages=[P('a.md', 0.9)])),
@@ -129,3 +111,17 @@ def test_every_decision_names_a_lane_and_a_reason():
         assert decision.reason, kwargs
         assert decision.steps, 'every decision leaves a trail'
 
+
+def test_many_documents_alone_does_not_escalate():
+    """**The third trigger was removed, and this is the assertion that keeps it removed.**
+
+    Escalating on a count of distinct documents was measured against real retrieval and failed: a plain
+    single-fact question returned six documents while a genuine multi-document question returned four, and no
+    combination of count and score floor separated them. An unusable predicate that fires on everything is
+    worse than no trigger, because it escalates cost silently and makes the audit row meaningless.
+    """
+    decision = routing.route(PERMISSIVE, data_class='internal',
+                             passages=[P('a.md', 0.9), P('b.md', 0.9), P('c.md', 0.9), P('d.md', 0.9)])
+    assert decision.escalated is False
+    assert decision.trigger == ''
+    assert decision.notice == ''
