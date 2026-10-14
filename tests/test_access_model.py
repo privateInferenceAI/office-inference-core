@@ -152,6 +152,45 @@ def test_the_permit_record_is_stable_under_ordering():
     assert json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
 
 
+# ------------------------------------------------------------------ a role may not exceed a grant
+
+
+def test_a_role_that_reaches_past_the_subjects_groups_is_refused():
+    """Otherwise the role is a way around the groups, and group membership is decoration."""
+    registry = declared()
+    registry.roles["exec_role"] = frozenset({"company", "executive"})
+    with pytest.raises(access.AccessError, match="reaches"):
+        access.resolve(registry, "dana@client.example", "exec_role")
+
+
+def test_a_role_inside_the_subjects_groups_is_allowed_and_does_not_narrow_them():
+    """A claim may not reach further than the grant, and it does not reach less far either."""
+    registry = declared()
+    registry.roles["company_only"] = frozenset({"company"})
+    permit = access.resolve(registry, "dana@client.example", "company_only")
+    assert permit.roots == frozenset({"company"})
+
+
+def test_an_empty_role_is_the_usual_case_and_stays_legal():
+    registry = declared()
+    assert access.resolve(registry, "dana@client.example", "viewer").roots == frozenset({"company"})
+
+
+def test_the_refusal_names_what_the_role_reached_for():
+    registry = declared()
+    registry.roles["exec_role"] = frozenset({"company", "executive"})
+    try:
+        access.resolve(registry, "dana@client.example", "exec_role")
+    except access.AccessError as exc:
+        assert "executive" in str(exc), "a refusal has to name the root, or the reader cannot fix the manifest"
+
+
+def test_a_builtin_registry_has_no_users_to_check_a_role_against():
+    """No user list means no grant for a role to exceed, which is why the rule applies only where users exist."""
+    registry = access.Registry.builtin()
+    assert access.resolve(registry, "dev@localhost", "executive").roots == frozenset({"company", "executive"})
+
+
 # ------------------------------------------------------------------ the refusals a document boundary needs
 
 

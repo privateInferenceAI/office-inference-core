@@ -45,9 +45,11 @@ Exit codes: 0 when every right held, 1 when one did not, 2 when nothing could be
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
+import urllib.request
 from pathlib import Path
 
 W = Path("/w")
@@ -61,13 +63,13 @@ import ingest  # noqa: E402
 import retriever  # noqa: E402
 import session as session_module  # noqa: E402
 
-# The two questions, and the boundary each one crosses. They are the two the corpus already answers: the
-# finance document carries a fee schedule, and the company document carries the mileage rate.
+# The two questions, and the boundary between them. The first is answerable from a document every role may
+# read. The second is answerable only from the executive compensation memorandum, and that is the crossing
+# the requirement is about.
 QUESTIONS = {
-    "finance": "What is the annual account fee on the fee schedule?",
     "company": "What is the mileage rate for reimbursement?",
+    "executive": "What is the Chief Executive Officer's base salary?",
 }
-
 
 def database_url() -> str:
     """The connection string, assembled from the parts the rendered env file carries.
@@ -99,6 +101,21 @@ def run_audit(args: list) -> subprocess.CompletedProcess:
     return subprocess.run([sys.executable, audit_tool()] + args, capture_output=True, text=True, timeout=120)
 
 
+def chunk_ids_for_root(services, root: str, limit: int = 200) -> set:
+    """Every chunk id the store holds under one root, asked of the store itself.
+
+    The store is the authority on what exists, so asking it is how SCOPED knows the boundary it is testing is
+    a real boundary rather than an empty index.
+    """
+    body = {"limit": limit, "with_payload": True, "with_vector": False,
+            "filter": {"must": [{"key": "acl", "match": {"value": root}}]}}
+    request = urllib.request.Request(
+        services.vector_url + "/collections/" + services.collection + "/points/scroll",
+        data=json.dumps(body).encode(), method="POST", headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(request, timeout=services.timeout) as response:
+        points = json.load(response).get("result", {}).get("points", [])
+    return {(p.get("payload") or {}).get("chunk_id") or p.get("id") for p in points}
+
 class Ledger:
     """Every right and the wrong path beside it, printed together, because a summary is not evidence."""
 
@@ -129,9 +146,12 @@ def ask(services, question: str, session):
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--subject", default="probe-staff@officeinference.com",
-                        help="a subject the manifest declares. A registry with users refuses an undeclared one")
-    parser.add_argument("--role", default=None, help="the role to hold. Defaults to the registry's first")
+    parser.add_argument("--staff-subject", default="probe-staff@officeinference.com",
+                        help="the subject outside the boundary. A registry with users refuses an undeclared one")
+    parser.add_argument("--exec-subject", default="probe-exec@officeinference.com",
+                        help="the subject inside it, so SCOPED can show the content is reachable by somebody")
+    parser.add_argument("--role", default="",
+                        help="the role to hold. Defaults to one that carries no roots, so the groups decide")
     args = parser.parse_args()
 
     registry_path = os.environ.get("ACCESS_REGISTRY", str(W / "rendered" / "access.json"))
@@ -155,45 +175,70 @@ def main() -> int:
     services = ingest.Services()
     if not services.database_url:
         services.database_url = url
+    if getattr(retriever, "rerank_module", None) is None:
+        print("note: the reranker is not importable in this image, so passages come back in fused order.")
+        print("      The access filter, both arms and the citation shape are unaffected.")
+        print()
+
     store = session_module.MemoryStore()
     ledger = Ledger()
 
+    # The role to hold: one that carries no roots of its own, so the groups are the whole permission.
+    role = args.role or next((name for name, roots in sorted(registry.roles.items()) if not roots), "")
+    if not role:
+        role = sorted(registry.roles)[0]
+
     # ------------------------------------------------------------------ ACCESS
-    role = args.role or sorted(registry.roles)[0]
     try:
-        session = session_module.mint(registry, store, args.subject, role, dev=True, deployment_id="probe")
+        staff = session_module.mint(registry, store, args.staff_subject, role, dev=True,
+                                    deployment_id="probe")
     except (session_module.SessionError, access_module.AccessError) as exc:
         print("FAILED with 1 problem: no session could be minted, so nothing below could be tested: "
               + str(exc), file=sys.stderr)
         return 2
 
-    acls, _ = ask(services, QUESTIONS["finance"], session)
-    held = "finance" not in acls
+    result = ask(services, QUESTIONS["executive"], staff)
+    acls = {p.acl for p in result.passages}
+    held = "executive" not in acls
     ledger.record("ACCESS", held,
-                  "as " + repr(role) + " over roots " + str(sorted(session.roots))
-                  + ", the finance question returned acls=" + str(sorted(acls) or "(none)"),
-                  "the finance passage would be in the answer and a model would read it")
+                  "as " + repr(role) + " over roots " + str(sorted(staff.roots))
+                  + ", the executive question returned acls=" + str(sorted(acls) or "(none)"),
+                  "the executive passage would be in the answer and a model would read it")
 
     # ------------------------------------------------------------------ SCOPED
-    _, result = ask(services, QUESTIONS["finance"], session)
+    # The withheld content has to exist, and somebody has to be able to reach it. Without both, ACCESS passed
+    # because there was nothing to withhold, which is a green run over an index that could not have failed.
+    executive_ids = chunk_ids_for_root(services, "executive")
     arms = result.arms or {}
     arms_ran = [arm for arm, count in arms.items() if count]
-    if not arms.get("lexical"):
-        ledger.skipped("SCOPED", "the lexical arm did not run, so only the dense arm was tested. Pass a")
-        print(" " * 10 + "DATABASE_URL, or the POSTGRES_* variables to build one, to test both arms.")
+    if not executive_ids:
+        ledger.record("SCOPED", False,
+                      "the store holds no chunk labelled executive, so ACCESS passed on an empty "
+                      + "boundary",
+                      "this run would prove nothing about the filter, and now says so instead of "
+                      + "passing")
     else:
-        scoped = result.restricted_matched > 0 and "finance" not in {p.acl for p in result.passages}
-        ledger.record("SCOPED", scoped,
-                      "both arms ran (" + ", ".join(arms_ran) + "), the boundary held in each, and "
-                      + str(result.restricted_matched) + " passage(s) matched outside it and were withheld",
-                      "one arm would return what the other filtered, which is how a leak hides in a hybrid "
-                      "search")
+        try:
+            boss = session_module.mint(registry, store, args.exec_subject, role, dev=True,
+                                       deployment_id="probe")
+            reached = {p.doc_id for p in ask(services, QUESTIONS["executive"], boss).passages}
+            reachable = bool(reached)
+        except (session_module.SessionError, access_module.AccessError) as exc:
+            reached, reachable = set(), False
+            print(" " * 10 + "the inside session could not be established: " + str(exc))
+        blocked = not ({p.doc_id for p in result.passages} & reached)
+        scoped = reachable and blocked
+        detail = (str(len(executive_ids)) + " chunk(s) are labelled executive, the inside session "
+                  + "reached " + str(sorted(reached) or "(nothing)")
+                  + ", the outside answer overlapped it by "
+                  + ("nothing" if blocked else "something")
+                  + ", and these arms ran: " + (chr(44).join(arms_ran) or "dense only"))
+        ledger.record("SCOPED", scoped, detail,
+                      "the boundary would be an empty index rather than a filter, or the inside "
+                      + "session would be unable to reach content the outside one is kept from")
 
     # ------------------------------------------------------------------ FORGED
-    subject_groups = registry.users[args.subject].groups if args.subject in registry.users else ()
-    granted = set(session.roots)
-    for group in subject_groups:
-        granted |= set(registry.groups.get(group, ()))
+    granted = set(staff.roots)
     ungranted = None
     for candidate in sorted(registry.roles):
         if candidate == role or not registry.roles[candidate]:
@@ -203,52 +248,58 @@ def main() -> int:
             break
 
     if ungranted is None:
-        ledger.skipped("FORGED", "no role in this registry reaches a root this subject does not already hold,")
-        print(" " * 10 + "so there is nothing to forge. A deployment with declared users and groups has one;")
-        print(" " * 10 + "the built-in two-role model does not.")
+        if registry.declared and registry.users:
+            ledger.skipped("FORGED", "every declared role stays inside the groups that grant it, so no role")
+            print(" " * 10 + "exists for this subject to claim beyond its grant. That is the rule working,")
+            print(" " * 10 + "and it is why there is nothing here to refuse.")
+        else:
+            ledger.skipped("FORGED", "this deployment declares no users, so every role is grantable")
+            print(" " * 10 + "to every subject, and there is nothing to forge.")
     else:
         try:
-            session_module.mint(registry, store, args.subject, ungranted, dev=True, deployment_id="probe")
+            session_module.mint(registry, store, args.staff_subject, ungranted, dev=True,
+                                deployment_id="probe")
             forged_refused = False
         except (session_module.SessionError, access_module.AccessError):
             forged_refused = True
         ledger.record("FORGED", forged_refused,
-                      ("minting a session as " + repr(ungranted) + " for " + args.subject + ", who holds "
-                       + str(sorted(granted)) + ", was refused") if forged_refused else
-                      ("a session was minted as " + repr(ungranted) + ", so the boundary is not enforced when "
-                       "a session is established"),
-                      "the caller would hold a role the deployment never granted and every later check would "
-                      "agree with it")
+                      ("minting a session as " + repr(ungranted) + " for " + args.staff_subject
+                       + ", who holds " + str(sorted(granted)) + ", was refused") if forged_refused else
+                      ("a session was minted as " + repr(ungranted) + ", so the boundary is not enforced "
+                       + "when a session is established"),
+                      "the caller would hold a role the deployment never granted and every later check "
+                      "would agree with it")
 
     # ------------------------------------------------------------------ REFUSED
-    # The audit tool needs the content-mode variables whether or not it stores anything. A refusal payload names
-    # fields and a role rather than content, so the mode has nothing to govern here.
+    # The audit tool needs the content-mode variables whether or not it stores anything. A refusal payload
+    # names fields and a role rather than content, so the mode has nothing to govern here.
     os.environ.setdefault("MIGRATIONS_DIR", str(W / "db" / "migrations"))
-    claimed = ungranted or "executive"
+    claimed = ungranted or (sorted(registry.roles)[-1] if len(registry.roles) > 1 else "executive")
     try:
-        session_module.check_role_claim(session, "role", claimed, dev=True)
+        session_module.check_role_claim(staff, "role", claimed, dev=True)
         refused = False
         refusal_note = "the request was accepted, so the boundary is not enforced"
     except session_module.SessionError as exc:
         refused = "refused" in str(exc).lower() and "recorded" in str(exc).lower()
         refusal_note = str(exc)
     ledger.record("REFUSED", refused,
-                  "a request supplying role=" + repr(claimed) + " while holding " + repr(role)
-                  + " was refused" if refused else refusal_note,
+                  ("a request supplying role=" + repr(claimed) + " while holding " + repr(role)
+                   + " was refused") if refused else refusal_note,
                   "a role would be honoured because a caller typed it, which is the whole of SEC-ACL-002")
 
     # ------------------------------------------------------------------ RECORDED
-    reading = run_audit(["list", "--type", "access", "--limit", "5"])
-    lines_out = [line for line in reading.stdout.strip().splitlines() if line.strip()]
-    found = reading.returncode == 0 and any(session.session_id[:12] in line for line in lines_out)
+    reading = run_audit(["list", "--type", "access", "--limit", "10"])
+    out_lines = [line for line in reading.stdout.strip().splitlines() if line.strip()]
+    found = reading.returncode == 0 and any(staff.session_id[:12] in line for line in out_lines)
     if found:
-        detail = "the chain holds the refusal, read back through the audit tool: " + lines_out[-1].strip()
+        detail = "the chain holds the refusal, read back through the audit tool: " + out_lines[-2].strip()
     else:
         detail = ("no event naming this session is in the chain ("
-                  + (reading.stderr.strip()[:160] or "the audit tool printed nothing") + ")")
+                  + (reading.stderr.strip()[:200] or "the audit tool printed nothing") + ")")
+        detail += " | tool said: " + ("; ".join(out_lines[-2:]) if out_lines else "(nothing)")
     ledger.record("RECORDED", bool(refused and found), detail,
-                  "the 403 would go out and the record would be missing, leaving an access decision with no "
-                  "evidence of what was attempted")
+                  "the 403 would go out and the record would be missing, leaving an access decision "
+                  "with no evidence of what was attempted")
 
     print()
     failures = ledger.failures()
@@ -260,7 +311,6 @@ def main() -> int:
     print("Read the refusal out of the chain yourself rather than trusting this line:")
     print("  oi --profile tools run --rm audit list --type access | head")
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

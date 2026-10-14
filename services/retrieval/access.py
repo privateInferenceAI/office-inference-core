@@ -173,25 +173,33 @@ class Registry:
 
         **The role comes from the session and the groups come from the manifest**, and the permission is the
         union of the two. In the built-in model the role is the whole decision, because no users are declared
-        and there are no groups to add, which is why this behaves exactly as it did before the registry
-        existed.
+        and there are no groups to add.
 
-        In a declared model the role typically carries nothing and the groups carry everything, so the union
-        is simply the groups. Both cases run through this one function on purpose: a second resolution path
-        for declared deployments is a second place for the permission to be decided, and the requirement is
-        that access is filtered by the store rather than assembled by whoever remembered.
+        **Where users are declared, the role may not exceed what the subject's groups grant.** Without that
+        rule the role is a way around the groups: a deployment that declares a role carrying `executive`
+        would hand that root to every subject who claimed the role, and the group membership that was
+        supposed to be the permission would be decoration. A subject therefore holds
+        `groups ∪ (role ∩ groups)`, and a role reaching outside is refused with the difference named.
 
-        **A subject the deployment does not declare is refused**, unless the deployment declares no users at
-        all — a built-in deployment has no user list, and its sessions are development tooling rather than
-        authenticated people. Once users exist, an unknown subject is an identity that was never granted, and
-        inventing one is the failure the refusal prevents.
+        This is the one place the two levels are ordered rather than unioned, and it is deliberate: a union is
+        right between groups, where there is no hierarchy to disagree about, and wrong between a claim and a
+        grant, where there is.
         """
-        roots = self.roots_for_role(role)
+        role_roots = self.roots_for_role(role)
         groups: tuple[str, ...] = ()
         if self.users:
             user = self.user(subject)
             groups = user.groups
-            roots = roots | self.roots_for_groups(groups)
+            granted = self.roots_for_groups(groups)
+            outside = role_roots - granted
+            if outside:
+                raise AccessError(
+                    f"role {role!r} reaches {sorted(outside)}, which the groups of {subject!r} "
+                    f"{list(groups)} do not grant. A role is a claim and the groups are the grant; a claim "
+                    f"that reaches past the grant would make group membership decorative.")
+            roots = granted
+        else:
+            roots = role_roots
         if not roots:
             raise AccessError(
                 f"subject {subject!r} resolves to no document roots. The role {role!r} permits none and its "

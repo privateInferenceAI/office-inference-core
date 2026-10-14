@@ -48,32 +48,26 @@ content:
     public: full
     internal: redacted
 access:
-  # The declared permission model, SEC-ACL-002. This is a development deployment, so it declares the model
-  # that exercises the feature rather than one belonging to a client.
+  # The declared permission model, SEC-ACL-002. A development deployment, so it declares the model the
+  # probe needs rather than one belonging to a client.
   #
-  # **It is declared here rather than left to the built-in default, and the reason is the FORGED right.** A
-  # deployment with the built-in two roles has no user list, so any subject may hold either role and there is
-  # nothing for a forged session to be refused against. Declaring users is what makes that refusal real, and
-  # the probe says so if it finds the built-in model instead of failing for a reason nobody can see.
-  roots: [company, executive, finance]
+  # **The roots are the two the corpus actually has.** An earlier draft invented a third called `finance`,
+  # and the probe that asks across the boundary reported zero passages withheld: no document carried the
+  # label, so the crossing question was not crossing anything and the right passed for no reason. The label
+  # set here is the one `ls documents/` prints.
+  roots: [company, executive]
   groups:
-    # Two groups rather than three, because two is enough to prove a union and the third would be a fixture
-    # that never fails. `staff` is the built-in role's set and `finance` is the one staff must not reach.
     staff:   {roots: [company]}
-    finance: {roots: [company, finance]}
-    executive: {roots: [company, executive]}
+    exec:    {roots: [company, executive]}
   users:
     # No subject here is a real person. The names say what each one is for, because a fixture whose purpose
     # is not in its name becomes a mystery the first time it fails.
     - subject: probe-staff@officeinference.com
       name: Staff probe
       groups: [staff]
-    - subject: probe-finance@officeinference.com
-      name: Finance probe
-      groups: [staff, finance]
     - subject: probe-exec@officeinference.com
       name: Executive probe
-      groups: [executive]
+      groups: [exec]
 
   # What a user is told when their role excludes content that would answer the
   # question. silent tells them nothing; denied says documents exist that they
