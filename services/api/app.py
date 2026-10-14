@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import subprocess
 import sys
 from contextlib import asynccontextmanager
@@ -33,11 +34,13 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from sse_starlette.sse import EventSourceResponse
 
 sys.path.insert(0, "/app/services/retrieval")
 sys.path.insert(0, "/app/services/ingestion")
 sys.path.insert(0, "/app/services/session")
 sys.path.insert(0, "/app/services/gateway")
+sys.path.insert(0, "/app/services/egress")
 
 import access as access_module  # noqa: E402
 import assertion  # noqa: E402
@@ -45,6 +48,7 @@ import citations  # noqa: E402
 import ingest  # noqa: E402
 import retriever  # noqa: E402
 import session as session_module  # noqa: E402
+import streaming  # noqa: E402
 
 GATEWAY_URL = os.environ.get("OI_GATEWAY_URL", "http://litellm:4000")
 DEPLOYMENT_ID = os.environ.get("DEPLOYMENT_ID", "unknown")
@@ -275,3 +279,167 @@ def _generate(session, permit, model: str, question: str, passages: list):
     if not choices:
         return None, "the gateway returned no choices"
     return (choices[0].get("message") or {}).get("content", ""), "ok"
+
+
+@app.post("/ask/stream")
+async def ask_stream(request: Request):
+    """The same question, answered in frames.
+
+    **Redaction happens here, and it is why this endpoint is not a thin wrapper.** A guardrail that runs after
+    delivery is audit-only: the bytes are already in the browser. So the response is redacted on the way out
+    through a holdback buffer sized from the pattern set, and the probe asserts over every frame the client
+    received rather than over the assembled answer.
+
+    Four things are deliberate and each is invisible to a load test: the heartbeat that keeps an idle connection
+    alive through prompt processing, the `Incremental` and `X-Accel-Buffering` headers that stop a proxy
+    buffering the stream, the terminal error event that a spent status code makes necessary, and the token count
+    taken from our own deltas rather than from the gateway, which reports usage in a final chunk an early
+    disconnect never receives.
+    """
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001 - the message is the response
+        return JSONResponse({"error": "the request body is not JSON"}, status_code=400)
+
+    token = body.get("session") or request.headers.get("X-OI-Session", "")
+    question = (body.get("question") or "").strip()
+    if not question:
+        return JSONResponse({"error": "no question was asked"}, status_code=400)
+
+    try:
+        session = _resolve(token)
+    except session_module.SessionError as exc:
+        return JSONResponse({"error": str(exc), "kind": "no_session"}, status_code=401)
+
+    supplied = next((field for field in ("role", "roles", "actor_role", "groups", "roots", "acl")
+                     if body.get(field) is not None), None)
+    if supplied:
+        try:
+            session_module.check_role_claim(session, supplied, body.get(supplied), dev=True)
+        except session_module.SessionError:
+            audit("access", session.subject, str(body.get(supplied)), "denied",
+                  {"supplied_field": supplied, "session_role": session.role,
+                   "session_id": session.session_id, "endpoint": "/ask/stream"})
+            return JSONResponse(
+                {"error": "Permission denied on this resource (or it might not exist). A role comes from an "
+                          "authenticated session and never from a request field.",
+                 "kind": "refused_authority_claim"},
+                status_code=403)
+
+    permit = session.permit()
+    role = body.get("model_role") or os.environ.get("OI_DEFAULT_API_ROLE", "viewer")
+    model = model_for(role)
+
+    try:
+        result = retriever.search(STATE["services"], question, permit.role, limit=PASSAGES, permit=permit)
+    except Exception as exc:  # noqa: BLE001
+        audit("access", session.subject, session.role, "error",
+              {"stage": "retrieval", "error": type(exc).__name__, "session_id": session.session_id})
+        return JSONResponse({"error": f"retrieval failed: {exc}", "kind": "retrieval_failed"}, status_code=502)
+
+    if not result.passages:
+        audit("access", session.subject, session.role, "denied",
+              {"stage": "retrieval", "reason": "no passage the session may read matched",
+               "session_id": session.session_id})
+        return JSONResponse({"answer": "No document you may read answers this question.", "citations": [],
+                             "kind": "no_source"}, status_code=200)
+
+    headers = {
+        "Incremental": "?1",
+        "X-Accel-Buffering": "no",
+        "Cache-Control": "no-cache",
+    }
+    return EventSourceResponse(
+        _frames(session, permit, model, question, result),
+        headers=headers,
+        ping=int(os.environ.get("OI_STREAM_PING_SECONDS", "15")),
+    )
+
+
+async def _frames(session, permit, model: str, question: str, result):
+    """The events, in the order a client should read them."""
+    import urllib.error
+    import urllib.request
+
+    redactor = streaming.StreamRedactor()
+    started = time.monotonic()
+    first_token_at = None
+    deltas = 0
+
+    def frame(kind: str, data: dict) -> dict:
+        return {"event": kind, "data": json.dumps(data, sort_keys=True)}
+
+    yield frame("start", {"model": model, "role": session.role, "roots": sorted(permit.roots),
+                          "citations": [{"index": n + 1, "doc_id": p.doc_id, "acl": p.acl,
+                                         "page_start": p.page_start, "page_end": p.page_end}
+                                        for n, p in enumerate(result.passages)]})
+
+    context = "\n\n".join(f"[{n + 1}] {p.text}" for n, p in enumerate(result.passages))
+    prompt = (
+        "Answer the question using only the numbered passages below. Cite the passages you use as [n]. "
+        "If they do not answer it, say so plainly. Do not use outside knowledge.\n\n"
+        f"Passages:\n{context}\n\nQuestion: {question}"
+    )
+    statement = assertion.mint(STATE["key"], model, session_id=session.session_id)
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": int(os.environ.get("OI_MAX_TOKENS", "700")),
+        "stream": True,
+    }
+    upstream = urllib.request.Request(
+        GATEWAY_URL + "/v1/chat/completions", data=json.dumps(payload).encode(), method="POST",
+        headers={"Content-Type": "application/json", assertion.HEADER: statement})
+
+    try:
+        response = urllib.request.urlopen(upstream, timeout=float(os.environ.get("OI_GATEWAY_TIMEOUT", "120")))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode(errors="replace")[:300]
+        audit("model_call", session.subject, session.role, "denied",
+              {"stage": "model", "status": exc.code, "model": model, "detail": detail[:160]}, model=model)
+        # A terminal error event rather than a status code, which was spent when the first frame went out.
+        yield frame("error", {"kind": "generation_failed", "status": exc.code,
+                              "detail": "the gateway refused the call"})
+        return
+    except Exception as exc:  # noqa: BLE001
+        yield frame("error", {"kind": "generation_failed",
+                              "detail": f"the gateway could not be reached: {type(exc).__name__}"})
+        return
+
+    try:
+        for raw in response:
+            line = raw.decode("utf-8", errors="ignore").strip()
+            if not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                break
+            try:
+                parsed = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+            delta = ((parsed.get("choices") or [{}])[0].get("delta") or {}).get("content") or ""
+            if not delta:
+                continue
+            deltas += 1
+            if first_token_at is None:
+                first_token_at = time.monotonic()
+            # The redactor decides what is safe to emit. Everything else is held.
+            safe = redactor.feed(delta)
+            if safe:
+                yield frame("delta", {"text": safe})
+        tail = redactor.finish()
+        if tail:
+            yield frame("delta", {"text": tail})
+    except Exception as exc:  # noqa: BLE001 - a mid-stream failure cannot change the status code
+        yield frame("error", {"kind": "stream_failed", "detail": type(exc).__name__})
+        return
+
+    report = redactor.report()
+    audit("model_call", session.subject, session.role, "ok",
+          {"stage": "ask_stream", "model": model, "deltas": deltas,
+           "passages": len(result.passages), "redactions": report["redactions"],
+           "holdback": report["holdback"], "session_id": session.session_id}, model=model)
+    yield frame("done", {"deltas": deltas, "redactions": report["redactions"],
+                         "first_token_ms": int((first_token_at - started) * 1000) if first_token_at else None,
+                         "total_ms": int((time.monotonic() - started) * 1000)})
