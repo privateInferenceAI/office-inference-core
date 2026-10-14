@@ -98,3 +98,32 @@ def test_the_shared_pipeline_records_its_refusal_too():
     assert 'audit("access"' in block, "the shared refusal is not recorded"
     assert "egress_allowed=False" in block, "and the record does not say egress was refused"
 
+
+
+def test_a_job_is_refused_before_it_is_created():
+    """**The third path, and the one the boundary probe found open.**
+
+    A job whose first attempt discovered the boundary answered HTTP 200 with a failed job row: the refusal
+    was inside `result`, the status code said fine, and a row existed for work no lane was permitted to do.
+    `/ask` refused the same request with a 403.
+
+    So the boundary is consulted before the job exists. This asserts the ordering in the source, because the
+    behaviour needs a deployment whose class may not leave and that is what `gate_check_run.sh --jobs` is for.
+    """
+    source = API.read_text()
+    create = source.index("async def create_job(")
+    check = source.index("answer_module.check_boundary(", create)
+    store_put = source.index("store.put(job)", create)
+    assert check < store_put, (
+        "the job is stored before the boundary is consulted, so work no lane may do gets a row and a 200")
+
+
+def test_the_boundary_check_is_not_duplicated():
+    """One implementation. The defect this whole file is about was two copies of a control."""
+    pipeline = PIPELINE.read_text()
+    assert pipeline.count("def check_boundary(") == 1
+    # `prepare` delegates rather than repeating the refusal, so the two paths cannot drift.
+    assert "check_boundary(manifest=" in pipeline
+    assert "def check_boundary(" in pipeline
+    assert API.read_text().count("no_permitted_lane") + pipeline.count("no_permitted_lane") <= 3, (
+        "the refusal wording appears in more than one place per path, which is how the copies drift")

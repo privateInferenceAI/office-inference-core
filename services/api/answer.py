@@ -110,6 +110,42 @@ def _data_class(manifest: dict) -> str:
     return data_class_for({}, manifest)
 
 
+def check_boundary(*, manifest: dict, data_class: str, task: str, model_name: str, default_lane: str,
+                   frontier_model: str, session, audit, endpoint: str):
+    """Step 4 on its own: which lane may answer, and a refusal when none may.
+
+    **A separate function because a job has to be refused before it is created.** The job path ran this
+    inside its first attempt and stored a job whose single step failed, answering HTTP 200 — so the request
+    the gate exists to refuse produced a job row and a cheerful status code, with the refusal buried in the
+    result. `/ask` refused the same request with a 403.
+
+    That is the C3 defect shape a third time: a control present on the path somebody was looking at. The fix
+    is not to make the job's status code depend on its outcome, which would conflate a refusal with a
+    failure; it is to consult the boundary **before the work exists**, so a job is never created for
+    something no lane is permitted to do.
+
+    **`none` refuses rather than falling through.** The first version of this guard covered only the `local`
+    case, so a decision of `none` skipped it and the ordinary remote model answered anyway while the notice
+    claimed no answer could be produced. A refusal that is not one, with a message saying it was.
+    """
+    decision = routing.route(
+        manifest or {}, data_class=data_class, task=task, user_wants_stronger=False,
+        model_name=model_name, default_lane=default_lane, frontier_model=frontier_model)
+
+    if decision.lane == "none" or (decision.lane == "local" and not local_lane_available()):
+        audit("access", session.subject, session.role, "denied",
+              {"stage": "routing", "reason": decision.reason, "lane": decision.lane,
+               "data_class": data_class, "escalation_requested": decision.escalation_requested,
+               "session_id": session.session_id, "endpoint": endpoint},
+              data_class=data_class, egress_allowed=False)
+        raise Refused(403, {
+            "error": "Permission denied on this resource (or it might not exist). This request needs a "
+                     "lane this deployment does not permit and has no local model to answer with.",
+            "kind": "no_permitted_lane", "reason": decision.reason, "notice": decision.notice},
+            "no_permitted_lane")
+    return decision
+
+
 def prepare(*, token: str, question: str, body: dict, ctx: Context, resolve, model_for, role_lane,
             frontier_model_for, local_lane_available, audit, endpoint: str) -> tuple:
     """Steps 1 to 4: resolve the session, refuse a supplied authority, retrieve, and route.
@@ -170,25 +206,19 @@ def prepare(*, token: str, question: str, body: dict, ctx: Context, resolve, mod
                             "roots": sorted(permit.roots)}, "no_source")
 
     data_class = data_class_for(body, ctx.manifest)
+    # **The boundary, in one place, so a job can consult it before the work exists.** `user_wants_stronger`
+    # is a property of the request rather than of the boundary check, so it is applied here where the whole
+    # request is known; the job path asks the same question with the task alone.
     decision = routing.route(
         ctx.manifest or {}, data_class=data_class, task=body.get("task") or "",
         user_wants_stronger=bool(body.get("stronger")), model_name=model,
         default_lane=role_lane(role), frontier_model=frontier_model_for(role))
-
-    # **`none` refuses rather than falling through.** The first version guarded only the `local` case, so
-    # a decision of `none` skipped the guard and the remote model answered anyway while the notice claimed
-    # no answer could be produced. A refusal that is not one, with a message saying it was.
     if decision.lane == "none" or (decision.lane == "local" and not local_lane_available()):
-        audit("access", session.subject, session.role, "denied",
-              {"stage": "routing", "reason": decision.reason, "lane": decision.lane,
-               "data_class": data_class, "escalation_requested": decision.escalation_requested,
-               "session_id": session.session_id},
-              data_class=data_class, egress_allowed=False)
-        raise Refused(403, {
-            "error": "Permission denied on this resource (or it might not exist). This request needs a "
-                     "lane this deployment does not permit and has no local model to answer with.",
-            "kind": "no_permitted_lane", "reason": decision.reason, "notice": decision.notice},
-            "no_permitted_lane")
+        # Through the same refusal path a job creation takes, so the two cannot say different things.
+        check_boundary(manifest=ctx.manifest, data_class=data_class, task=body.get("task") or "",
+                       model_name=model, default_lane=role_lane(role),
+                       frontier_model=frontier_model_for(role), session=session, audit=audit,
+                       endpoint=endpoint)
 
     return session, permit, model, result, decision, data_class
 

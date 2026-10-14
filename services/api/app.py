@@ -520,7 +520,25 @@ async def create_job(request: Request):
             {"error": f"This deployment does not declare a task called '{task}'.",
              "kind": "no_such_task", "declared": sorted(declared)}, status_code=403)
 
-    data_class = answer_module._data_class(STATE.get("manifest") or {})
+    data_class = answer_module.data_class_for(body, STATE.get("manifest") or {})
+    # **The boundary is consulted before the job exists.** The first version created the job and let its
+    # single attempt discover the refusal, so the request answered HTTP 200 with a failed job row and the
+    # refusal buried in the result, while `/ask` refused the same request with a 403. A job is not created
+    # for work no lane is permitted to do.
+    #
+    # The role is the default API role, because that is the role `prepare` resolves a job's steps under. If
+    # the two ever diverge the step would re-check and refuse, which is the safe direction rather than a
+    # hole: this is an early refusal, not the only one.
+    api_role = os.environ.get("OI_DEFAULT_API_ROLE", "viewer")
+    try:
+        answer_module.check_boundary(
+            manifest=STATE.get("manifest") or {}, data_class=data_class, task=task,
+            model_name=model_for(api_role), default_lane=role_lane(api_role),
+            frontier_model=frontier_model_for(api_role), session=session, audit=audit,
+            endpoint="/jobs")
+    except answer_module.Refused as refused:
+        return JSONResponse(refused.payload, status_code=refused.status)
+
     job = jobs_module.new_job(
         deployment_id=DEPLOYMENT_ID, subject=session.subject, actor_role=session.role,
         roots=session.permit().roots, session_id=session.session_id, task=task, input=text,
