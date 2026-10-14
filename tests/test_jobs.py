@@ -158,7 +158,7 @@ def test_one_step_that_succeeds_finishes_the_job_and_records_it():
     assert job.attempts == 1
     assert job.steps[0].state == jobs.SUCCEEDED
     assert job.result == {"answer": "yes"}
-    assert [r["payload"]["state"] for r in rows] == [jobs.RUNNING, jobs.SUCCEEDED]
+    assert [r["payload"]["state"] for r in rows] == [jobs.RUNNING, jobs.SUCCEEDED, jobs.SUCCEEDED]
     # `egress_allowed` is a column on the audit row rather than a key inside the payload, which is the
     # shape the audit tool takes it in. The first version of this test looked inside the payload and
     # failed on correct code.
@@ -373,7 +373,19 @@ def test_a_notice_reaches_the_log_so_a_screen_can_show_it():
 # audit. Every state change and every attempt writes its own row, and these tests read the row back.
 
 
-def test_a_job_that_succeeds_leaves_a_row_for_the_start_and_the_finish():
+def test_a_job_that_succeeds_leaves_a_row_for_the_start_the_attempt_and_the_finish():
+    """**Three rows, not two, and the middle one is the defect this test now exists for.**
+
+    The first version of the runner wrote a row when the job started and a row when it finished, and a row
+    per attempt only when an attempt failed. A job that worked first time therefore left two rows that both
+    said "job", and nothing in the chain recorded that a step had run at all. The live probe found it: "2
+    row(s) name the job, 0 name an attempt".
+
+    It is the C3 lesson in its general form. The columns existed, the flags existed, nobody connected them,
+    and the record could not answer the question it is kept for. **A successful attempt is a thing that
+    happened**, and a chain that only mentions work when something goes wrong is a chain that tells the
+    wrong story about a system that is working.
+    """
     store = jobs.MemoryStore()
     audit, rows = audit_log()
     job = make_job()
@@ -381,14 +393,31 @@ def test_a_job_that_succeeds_leaves_a_row_for_the_start_and_the_finish():
 
     jobs.run(job, store, scripted([ok()]), audit=audit)
 
-    assert len(rows) == 2
-    assert rows[0]["payload"]["job_id"] == job.job_id
+    stages = [r["payload"].get("stage") for r in rows]
+    assert stages == ["job", "job", "job"], f"unexpected rows: {stages}"
     assert rows[0]["payload"]["state"] == jobs.RUNNING
+    assert rows[1]["payload"]["attempt"] == 1, "the successful attempt has no row of its own"
     assert rows[1]["payload"]["state"] == jobs.SUCCEEDED
-    assert rows[1]["payload"]["attempts"] == 1
-    assert rows[1]["tool"] == "reconcile", "the row names what was run"
-    assert rows[1]["egress_allowed"] is True
-    assert rows[1]["data_class"] == "internal"
+    assert rows[2]["payload"]["state"] == jobs.SUCCEEDED
+    assert rows[2]["payload"]["attempts"] == 1
+    assert rows[-1]["tool"] == "reconcile", "the row names what was run"
+    assert rows[-1]["egress_allowed"] is True
+    assert rows[-1]["data_class"] == "internal"
+    assert all(r["payload"]["job_id"] == job.job_id for r in rows)
+
+
+def test_every_attempt_that_ran_has_a_row_whether_it_worked_or_not():
+    """The general property, so the case above cannot be fixed by special-casing one attempt."""
+    store = jobs.MemoryStore()
+    audit, rows = audit_log()
+    job = make_job(attempt_budget=5)
+    store.put(job)
+
+    jobs.run(job, store, scripted([bad("throttled", True), bad("timeout", True), ok()]), audit=audit)
+
+    attempts = [r["payload"]["attempt"] for r in rows if "attempt" in r["payload"]]
+    assert attempts == [1, 2, 3], f"attempts recorded: {attempts}"
+    assert len(attempts) == job.attempts
 
 
 def test_every_failed_attempt_leaves_its_own_row():

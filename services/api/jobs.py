@@ -570,6 +570,23 @@ def run(job: Job, store, attempt_once: Callable[[Job, int], StepOutcome], *,
                          {"state": SUCCEEDED, "attempts": job.attempts,
                           "duration_ms": int((time.monotonic() - started) * 1000)})
             if audit:
+                # **The attempt's own row, written for a success as well as for a failure.**
+                #
+                # The first version wrote one row when the job started and one when it finished, and a row
+                # per attempt only when an attempt FAILED. So a job that worked first time left two rows
+                # that both said "job", and nothing in the chain said a step had run. The probe caught it:
+                # "2 row(s) name the job, 0 name an attempt".
+                #
+                # This is the C3 lesson in its general form. The columns existed, the flags existed, and
+                # nobody connected them, so the record could not answer the question it is kept for. A
+                # successful attempt is a thing that happened and belongs in the chain beside the failures,
+                # or the chain tells a story in which work only occurs when something goes wrong.
+                audit("tool_call", job.subject, job.actor_role, "ok",
+                      {"stage": "job", "job_id": job.job_id, "task": job.task, "attempt": attempt,
+                       "state": SUCCEEDED, "attempts": job.attempts, "lane": step.lane,
+                       "duration_ms": step.duration_ms, "session_id": job.session_id},
+                      tool=job.task, model=step.model or None, data_class=job.data_class,
+                      egress_allowed=(step.lane == "frontier"))
                 audit("tool_call", job.subject, job.actor_role, "ok",
                       {"stage": "job", "job_id": job.job_id, "task": job.task, "state": SUCCEEDED,
                        "attempts": job.attempts, "lane": step.lane, "session_id": job.session_id},
