@@ -245,8 +245,12 @@ A client's deployment is described by one YAML file called a manifest. It names 
 profile (cloud, office, or hybrid), the roles and their models, the spending ceilings, what content
 the record may keep, where evidence ships, and any compliance profile.
 
-Nothing is hand-configured on a server. The renderer reads the manifest and writes six files: an
-environment file holding secrets and settings, the gateway's model list, the list of services the packs
+Nothing is hand-configured on a server. The renderer reads the manifest and writes **six** files:
+an environment file holding secrets and settings, the gateway's model list, the list of
+services the packs add up to, a normalized copy of the manifest, **the signing key the API mints
+statements with**, and **the permission registry the session tool and the retriever read**. Everything
+downstream reads those, so changing a deployment means changing the manifest and re-rendering, not
+editing files in place.
 add up to, and a normalized copy of the manifest. Everything downstream reads those, so changing a deployment means changing the manifest and
 re-rendering, not editing files in place.
 
@@ -1983,7 +1987,7 @@ seen 12, new 0, changed 0, skipped 12, failed 0
 chunks written 0, chunks removed 0, documents removed 0
 ```
 
-The counts depend on the corpus and on the chunker version. On this deployment, twelve documents and 1131
+The counts depend on the corpus and on the chunker version. On this deployment, forty documents and 1261
 points, measured from the index:
 
 **Twelve documents, and only four of them were fetched.** `fixtures/corpus/manifest.yaml` declares both
@@ -2020,7 +2024,7 @@ gives for the executive fixture would place them.
 | company/onboarding-notes.md | 1 | |
 | company/rate-card-2026.xlsx | 7 | spreadsheet |
 | executive/executive-compensation.md | 1 | the restricted root |
-| **total** | **1131** | matching the collection's own count |
+| **total** | **1261** | matching the collection's own count |
 
 At the start of a cycle the worker also reports the collection it is writing to: its dimension, its distance
 and how many points it holds. A collection whose dimension does not match what the embedding model produces
@@ -3851,7 +3855,10 @@ They are decided in that order, and the order is the design.
 ### The gate runs first, and the triggers choose inside it
 
 A request carries a data class, which the deployment declares in `access.data_class`. The gate compares that
-against `access.egress.frontier_classes`, and if the class is not permitted then no trigger is even consulted.
+against `access.egress.frontier_classes`. **A trigger is evaluated first and the gate then decides whether the
+lane it asked for is reachable**; a trigger that fires and is refused does not escalate, and the refusal is
+announced in the notice rather than applied silently. When no trigger fires, the gate still runs against the
+lane the request would otherwise use, because an ordinary answer on a remote model is egress too.
 
 **Why the order matters, and it is the sentence an auditor will ask for.** A trigger is a cost decision. The
 gate is a data-boundary decision. With the gate first, the answer to *why did this content reach an external
@@ -4220,7 +4227,7 @@ the manual also asks you to type.
 | Command | What it does |
 |---|---|
 | `python3 scripts/validate_manifests.py [manifest…]` | Checks manifests and the pack catalog, including residency and budget rules |
-| `python3 scripts/render_manifest.py --manifest <file>` | Writes `rendered/env`, `rendered/litellm.yaml`, `rendered/services.txt`, `rendered/manifest.json`, `rendered/access.json` |
+| `python3 scripts/render_manifest.py --manifest <file>` | Writes six: `rendered/env`, `rendered/litellm.yaml`, `rendered/services.txt`, `rendered/manifest.json`, `rendered/access.json`, `rendered/assertion.key` |
 | `python3 scripts/check_requirements.py` | Reports the register: verified, open, waived, by phase |
 | `python3 scripts/check_model_lifecycle.py [manifest…]` | Fails if a manifest names a deprecated, past-EOL, or unknown model |
 | `python3 -m venv ~/venv && ~/venv/bin/pip install -r requirements-dev.txt` | Once, on a machine that will run the tests. The box has no pytest otherwise, and Ubuntu 24.04 refuses a bare `pip install` under PEP 668 |
