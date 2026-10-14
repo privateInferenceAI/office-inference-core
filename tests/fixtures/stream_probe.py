@@ -139,7 +139,11 @@ def main() -> int:
     result = stream(session.session_id, long_q)
     first = next((d for d in result["deltas"] if d.get("text")), None)
     done = next((d for d in result["deltas"] if "total_ms" in d), {})
-    server_first = done.get("first_token_ms")
+    # **`ttft_ms` rather than `first_token_ms`, and the rename is the point.** The first version of this
+    # asserted on a field the API had while measuring from the wrong clock, and this probe kept asserting on
+    # the old name after the API started reporting the caller's wait. It failed with `first token at Nonems`,
+    # which is a probe testing a field name rather than the behaviour it names.
+    server_first = done.get("ttft_ms")
     total_ms = done.get("total_ms") or 0
     held = bool(first) and server_first is not None and total_ms > 0 and server_first < total_ms
     ledger.record("TTFT", held,
