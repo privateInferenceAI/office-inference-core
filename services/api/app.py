@@ -78,23 +78,31 @@ def model_for(role: str) -> str:
 
 
 def audit(event: str, actor: str, actor_role: str, outcome: str, payload: dict, **extra) -> None:
-    """One row in the chain, through the tool that owns it.
+    """One row in the chain, through the tool that owns it, with a statement vouching for the actor.
 
     The API does not write the chain itself. The chain has one writer and one definition of its hash, and a
     second implementation here would be a second answer to what the record means.
+
+    **The actor is certified rather than typed.** The audit tool refuses a hand-typed actor, and the first
+    version of this passed the tool's development flag to get around that, which was the wrong shape: it made
+    every production record carry a developer's escape. Instead the API signs a statement naming the actor it
+    resolved from the session, and the tool verifies the signature and takes the actor from inside it. The
+    actor in the row is now one that somebody proved, and a caller cannot name somebody else.
     """
-    command = [sys.executable, AUDIT_TOOL, "record", "--type", event, "--actor", actor or "unknown",
-               "--actor-role", actor_role or "unknown", "--outcome", outcome,
-               "--deployment-id", DEPLOYMENT_ID, "--payload", json.dumps(payload, sort_keys=True)]
-    if os.environ.get("OI_AUDIT_DEV") == "true":
-        command.append("--dev")
+    statement = assertion.mint_audit(STATE["key"], actor or "unknown", actor_role or "unknown",
+                                     deployment_id=DEPLOYMENT_ID)
+    command = [sys.executable, AUDIT_TOOL, "record", "--type", event,
+               "--assertion", statement,
+               "--outcome", outcome, "--deployment-id", DEPLOYMENT_ID,
+               "--payload", json.dumps(payload, sort_keys=True)]
+    if extra.get("model"):
+        command += ["--model", extra["model"]]
     env = dict(os.environ)
     env["DATABASE_URL"] = session_module.database_url()
     result = subprocess.run(command, capture_output=True, text=True, env=env, timeout=60)
     if result.returncode != 0:
         # Loud, because a request whose record is missing is a request the deployment cannot account for.
         print(f"the audit write failed: {result.stderr.strip()[:300]}", file=sys.stderr)
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

@@ -102,6 +102,43 @@ def mint(key: bytes, role: str, *, session_id: str = "", now: float | None = Non
     return f"{body}.{signature}"
 
 
+def mint_audit(key: bytes, actor: str, actor_role: str, *, deployment_id: str = "",
+               session_id: str = "", now: float | None = None) -> str:
+    """A statement that vouches for an audit row's actor.
+
+    **The purpose is in the payload and is checked on the other side.** A statement minted for a model call
+    must not be usable to write an audit row, and the reverse must not be true either: two capabilities, two
+    purposes, and one key between them means the purpose is the only thing keeping them apart.
+    """
+    issued = int(now if now is not None else time.time())
+    payload = {
+        "purpose": "audit",
+        "actor": actor,
+        "actor_role": actor_role,
+        "deployment_id": deployment_id,
+        "session_id": session_id,
+        "iat": issued,
+        "exp": issued + MAX_AGE_SECONDS,
+        "nonce": os.urandom(12).hex(),
+    }
+    body = _b64(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode())
+    signature = _b64(hmac.new(key, body.encode(), hashlib.sha256).digest())
+    return f"{body}.{signature}"
+
+
+def verify_audit(key: bytes, token: str, *, now: float | None = None) -> dict:
+    """The audit payload, or a refusal. The statement counterpart of `verify`, and the one the audit tool
+    calls, so that the writer and the reader cannot disagree about what a valid statement is.
+    """
+    payload = verify(key, token, now=now)
+    if payload.get("purpose") != "audit":
+        raise AssertionError_(
+            f"this statement was minted for {payload.get('purpose')!r} rather than for an audit row. A "
+            f"statement is good for the one thing it was minted for.")
+    if not payload.get("actor"):
+        raise AssertionError_("the statement names no actor")
+    return payload
+
 def verify(key: bytes, token: str, *, now: float | None = None) -> dict:
     """The payload, or a refusal that says which check failed.
 

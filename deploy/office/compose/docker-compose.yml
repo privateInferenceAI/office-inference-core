@@ -457,13 +457,6 @@ services:
       ACCESS_REGISTRY: /app/rendered/access.json
       OI_ASSERTION_KEY: /app/rendered/assertion.key
       AUDIT_TOOL: /app/audit.py
-      # **The audit tool refuses a hand-typed actor without this**, and every write the API made was refused.
-      # The tool's guard says an actor comes from an authenticated session, which is exactly what the API is:
-      # the subject came from a session row this process resolved, and nobody typed it. The flag is the CLI's
-      # development escape, so this line is the API certifying that its actor is authenticated. A future
-      # version should give the API its own trusted path rather than reuse the development one; recorded as
-      # a finding rather than left as a comment nobody reads.
-      OI_AUDIT_DEV: "true"
       EMBED_URL: http://embeddings:80
       VECTOR_URL: http://vector:6333
       COLLECTION: ${COLLECTION:-documents}
