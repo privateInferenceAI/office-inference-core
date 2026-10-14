@@ -1666,6 +1666,16 @@ through whatever the deployment puts in front of it, which is C7's work.
 
 **Checkpoint.** `docker port api` prints an empty line. If it prints a mapping, something published it.
 
+Every command below runs in a container on the deployment's own network, because the API publishes no port.
+Define this once and the rest of the stage reads cleanly:
+
+```
+cd /opt/oi-core
+alias oi='docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env'
+run() { docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
+  -v /opt/oi-core:/w -w /w --env-file rendered/env "$@"; }
+ask() { run --entrypoint python oi-core/session:local /w/tests/fixtures/ask_client.py "$@"; }
+```
 ## 13b.2. A session, which is what a request carries instead of a password
 
 The caller does not hold a model credential and does not name a role. It holds a **session token**, which
@@ -1685,8 +1695,7 @@ is refused, and that refusal is correct.
 
 ## 13b.3. Ask a question, and read the answer
 
-    oi --profile tools run --rm ask \
-      --session <the token> --question "What is the mileage rate for reimbursement?"
+    ask --question "What is the mileage rate for reimbursement?"
 
 Five fields matter more than the rest, and two of them exist to stop a lie:
 
@@ -1717,8 +1726,7 @@ resource might not exist**, and `session refusals` shows `claimed_role='executiv
 
 ## 13b.5. Streaming, and the redaction that has to come with it
 
-    oi --profile tools run --rm ask --stream \
-      --session <the token> --question "What is the mileage rate?"
+    ask --question "What is the mileage rate?" --stream
 
 The same request as Server-Sent Events. **Redaction on a stream is not the same problem as redaction on a
 finished answer**, because a value can reach the client in a token before anything has looked at the whole
@@ -1752,7 +1760,7 @@ Proving this needs a real failure, and the honest way to produce one is a real p
 
     # A burst of small concurrent calls exhausts the provider's REQUESTS-per-minute ceiling, which is far
     # cheaper to reach than the token ceiling. Ask the API while it runs.
-    oi --profile tools run --rm throttle-probe --concurrency 80
+    run --entrypoint python oi-core/session:local /w/tests/fixtures/throttle_probe.py
 
 **Checkpoint.** While the burst runs, `/ask` returns `kind: degraded` with `reason: throttled`, `attempts: 3`,
 and all three thresholds named. The audit row agrees. **`reason: unclassified` with `attempts: 2` means the
@@ -1778,8 +1786,8 @@ and there is nothing in the path that could form one.
 
 **Checkpoint.** A plain question returns `escalated: false` with an empty `trigger`. Then:
 
-    oi --profile tools run --rm ask --session <token> --task reconcile --question "..."
-    oi --profile tools run --rm ask --session <token> --stronger --question "..."
+    ask --question "..." --task reconcile
+    ask --question "..." --stronger
 
 Each returns `escalated: true` naming **its own** trigger, and a `notice` telling the user what happened.
 

@@ -1,90 +1,154 @@
-"""Does the real route to a ThrottlingException work, and does our classification read it?
+"""Provoke a REAL provider throttle, and check what the deployment makes of it.
 
-**Why a probe rather than a guess.** The first method proposed was admission arithmetic: send a request whose
-`input + max_tokens` exceeds the per-model quota. Bedrock validates `max_tokens` against the model output limit
-first and returns a 400, so the value never reaches the quota check. This tries the honest route instead: real
-concurrency against a real quota.
+**The request ceiling, not the token ceiling.** The first version of this sized its load against the tokens
+per minute quota: Nova Lite allows 4,000,000, a request may ask for at most 10,000, so exhausting it takes
+roughly four hundred maximum-size requests. That is out of reach from a development box and the probe said so,
+which made it useless as a test. The requests-per-minute ceiling is the cheap route, read from Service Quotas:
 
-The quota arithmetic, read from Service Quotas on 2026-10-14: Nova Lite is 4,000,000 tokens per minute and a
-single request may ask for at most 10,000, so exhausting it takes roughly four hundred maximum-size requests.
-That is not reachable from a development box, and this probe says so instead of pretending.
+    Nova Lite, on-demand              200 requests per minute
+    Nova Micro, on-demand             200
+    Nova Pro, on-demand                25
+    Nova Pro, latency-optimized         1
+
+So a burst of several hundred small concurrent calls reaches the ceiling in seconds and costs a fraction of a
+cent, because each call generates one token.
+
+**It asks the API while the burst is running**, because a throttle that has already passed proves nothing. What
+it is looking for is a degraded answer whose reason is a real classification, and all three attempts present:
+
+    reason    | attempts |  matched   |  threshold
+    ---------- | -------- | ---------- | -----------
+     throttled | 3        | throttling | first_token
+
+**`reason: unclassified` with `attempts: 2` is a defect, not a throttle.** It means the retry failed to
+authenticate, which is what a spent signed statement produces: the first attempt earns the real 429 and the
+retry replays a statement the gateway has already seen. That was a real bug, found by running this.
 """
 from __future__ import annotations
 
+import argparse
 import concurrent.futures
 import json
 import os
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
+from collections import Counter
 from pathlib import Path
 
 W = Path('/w')
-sys.path.insert(0, str(W / 'services' / 'gateway'))
+sys.path.insert(0, str(W / 'services' / 'retrieval'))
 sys.path.insert(0, str(W / 'services' / 'session'))
-sys.path.insert(0, str(W / 'services' / 'api'))
+sys.path.insert(0, str(W / 'services' / 'gateway'))
 
+import access as access_module  # noqa: E402
 import assertion  # noqa: E402
-import budget as budget_module  # noqa: E402
+import session as session_module  # noqa: E402
 
 GATEWAY = os.environ.get('OI_GATEWAY_URL', 'http://litellm:4000')
-MODEL = os.environ.get('OI_DEFAULT_MODEL_ROLE', 'analyst')
-CONCURRENCY = int(os.environ.get('OI_THROTTLE_CONCURRENCY', '8'))
-MAX_TOKENS = int(os.environ.get('OI_THROTTLE_MAX_TOKENS', '9000'))
+API = os.environ.get('OI_API_URL', 'http://api:8088')
 
 
-def one(index: int):
-    key = assertion.load_key('/w/rendered/assertion.key')
-    token = assertion.mint(key, MODEL, session_id='throttle-%d' % index)
-    # A large prompt plus a large output ceiling: this is the closest a single request can get to the quota.
-    filler = ('expense policy travel meals receipts ' * 900)
-    body = {'model': MODEL, 'max_tokens': MAX_TOKENS,
-            'messages': [{'role': 'user', 'content': filler + ' Say ok.'}]}
-    request = urllib.request.Request(GATEWAY + '/v1/chat/completions',
-                                     data=json.dumps(body).encode(), method='POST',
-                                     headers={'Content-Type': 'application/json', assertion.HEADER: token})
-    started = time.monotonic()
+def database_url() -> str:
+    url = (os.environ.get('DATABASE_URL') or '').strip()
+    if url:
+        return url
+    user = os.environ.get('POSTGRES_USER', '')
+    password = os.environ.get('POSTGRES_PASSWORD', '')
+    database = os.environ.get('POSTGRES_DB', '')
+    return ('postgresql://' + user + ':' + password + '@postgres:5432/' + database) if user else ''
+
+
+def burn(model: str, key, stop: threading.Event, results: list, index: int) -> None:
+    """Small calls, as fast as the ceiling allows. One output token, so the cost is rounding error."""
+    while not stop.is_set():
+        token = assertion.mint(key, model, session_id='burst-' + str(index))
+        body = json.dumps({'model': model,
+                           'messages': [{'role': 'user', 'content': 'ok'}],
+                           'max_tokens': 1}).encode()
+        request = urllib.request.Request(GATEWAY + '/v1/chat/completions', data=body, method='POST',
+                                         headers={'Content-Type': 'application/json',
+                                                  assertion.HEADER: token})
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                results.append(response.status)
+        except urllib.error.HTTPError as exc:
+            results.append(exc.code)
+        except Exception:  # noqa: BLE001
+            results.append(0)
+
+
+def ask(token: str, question: str):
+    body = json.dumps({'session': token, 'question': question}).encode()
+    request = urllib.request.Request(API + '/ask', data=body, method='POST',
+                                     headers={'Content-Type': 'application/json'})
     try:
         with urllib.request.urlopen(request, timeout=180) as response:
-            response.read()
-            return {'status': response.status, 'seconds': time.monotonic() - started, 'body': ''}
+            return response.status, json.loads(response.read())
     except urllib.error.HTTPError as exc:
-        return {'status': exc.code, 'seconds': time.monotonic() - started,
-                'body': exc.read().decode(errors='replace')[:400]}
-    except Exception as exc:  # noqa: BLE001
-        return {'status': 0, 'seconds': time.monotonic() - started, 'body': type(exc).__name__}
+        return exc.code, {'error': exc.read().decode(errors='replace')[:200]}
 
 
 def main() -> int:
-    print('sending %d concurrent request(s) of up to %d output tokens each' % (CONCURRENCY, MAX_TOKENS))
-    started = time.monotonic()
-    with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENCY) as pool:
-        results = list(pool.map(one, range(CONCURRENCY)))
-    elapsed = time.monotonic() - started
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument('--concurrency', type=int, default=60)
+    parser.add_argument('--seconds', type=float, default=12.0)
+    parser.add_argument('--asks', type=int, default=6)
+    parser.add_argument('--model', default=os.environ.get('OI_DEFAULT_MODEL_ROLE', 'analyst'))
+    parser.add_argument('--question', default='What is the mileage rate for reimbursement?')
+    args = parser.parse_args()
 
-    statuses = {}
-    for result in results:
-        statuses[result['status']] = statuses.get(result['status'], 0) + 1
-    print('statuses:', statuses, 'in %.1fs' % elapsed)
-
-    throttled = [r for r in results if 'Throttling' in r['body'] or 'Too many' in r['body']]
-    if not throttled:
-        print()
-        print('NO THROTTLE PROVOKED. That is the expected outcome and it is not a failure of the system:')
-        print('Nova Lite permits 4,000,000 tokens per minute and this sent %d requests of roughly 9,000.'
-              % CONCURRENCY)
-        print('Reaching the quota needs about four hundred of them. The method is sound; the ceiling is high.')
+    if not database_url():
+        print('no database credentials', file=sys.stderr)
         return 2
 
+    key = assertion.load_key(os.environ.get('OI_ASSERTION_KEY', '/w/rendered/assertion.key'))
+    registry = access_module.load(os.environ.get('ACCESS_REGISTRY', str(W / 'rendered' / 'access.json')))
+    store = session_module.PostgresStore(database_url())
+    role = next((n for n, r in sorted(registry.roles.items()) if not r), sorted(registry.roles)[0])
+    session = session_module.mint(registry, store, 'probe-staff@officeinference.com', role, dev=True,
+                                  deployment_id='throttle-probe')
+
+    stop = threading.Event()
+    results: list = []
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=args.concurrency)
+    futures = [pool.submit(burn, args.model, key, stop, results, i) for i in range(args.concurrency)]
+    print('bursting %d thread(s) for %.0fs against %s' % (args.concurrency, args.seconds, args.model))
+    time.sleep(args.seconds)
+
+    print('asking the API %d time(s) while the pressure holds' % args.asks)
+    seen = []
+    for _ in range(args.asks):
+        status, body = ask(session.session_id, args.question)
+        seen.append((status, body.get('kind'), body.get('reason'), body.get('attempts'),
+                     body.get('threshold')))
+
+    stop.set()
+    pool.shutdown(wait=False)
+    store.close()
+
+    for status, kind, reason, attempts, threshold in seen:
+        print('  HTTP %s kind=%r reason=%r attempts=%r threshold=%r'
+              % (status, kind, reason, attempts, threshold))
+    print('burst outcomes:', dict(Counter(results)))
+
+    degraded = [row for row in seen if row[1] == 'degraded']
+    typed = [row for row in degraded if row[2] and row[2] != 'unclassified']
     print()
-    print('A REAL THROTTLE ARRIVED from the provider. What our classification makes of it:')
-    for result in throttled[:2]:
-        kind = budget_module.classify(result['body'])
-        print('  status %d -> reason=%r retryable=%r matched=%r'
-              % (result['status'], kind['reason'], kind['retryable'], kind['matched']))
-        print('  provider said: ' + ' '.join(result['body'].split())[:200])
-    return 0
+    if typed:
+        print('A REAL THROTTLE, CORRECTLY CLASSIFIED. The provider refused, the deployment degraded, and the'
+              'reason is a real classification rather than an unrecognised failure.')
+        return 0
+    if degraded:
+        print('IT DEGRADED, BUT THE REASON IS unclassified. That is a defect rather than a throttle: it is what'
+              'a retry that cannot authenticate produces, because the first attempt earns the real 429 and the'
+              'retry replays a spent statement and gets a 401.')
+        return 1
+    print('NO THROTTLE PROVOKED. The burst answered every call, so the ceiling was not reached: raise'
+          ' --concurrency or --seconds, or the provider is not throttling this deployment at all.')
+    return 2
 
 
 if __name__ == "__main__":
