@@ -51,9 +51,16 @@ if not (_HERE / "access.py").exists():
 
 import access  # noqa: E402
 
-# Where the audit tool is, in the image and in the checkout. An environment variable because the tests run
-# from the checkout and the deployment runs from /app.
-AUDIT_TOOL = os.environ.get("AUDIT_TOOL", "/app/audit.py")
+# Where the audit tool is, in the image and in the checkout. **Read at call time rather than at import time**, 
+# which is a bug this had: the value was captured when the module loaded, so a caller that set the variable 
+# afterwards, which is exactly what a probe or a test does, silently recorded through a path that did not 
+# exist. It failed loudly in the end, but the loud failure was one layer away from the cause.
+DEFAULT_AUDIT_TOOL = "/app/audit.py"
+
+
+def audit_tool() -> str:
+    """The audit tool for this call, from the environment if it is set."""
+    return os.environ.get("AUDIT_TOOL", DEFAULT_AUDIT_TOOL)
 
 # The longest a session may live, whatever is asked for. A development session that outlives the work it was
 # minted for is a credential nobody is watching, and this is the only place that can bound it.
@@ -330,7 +337,7 @@ def record_refusal(session: Session, payload: dict, *, dev: bool = False) -> Non
     chain is the one thing in the system that has to have exactly one.
     """
     command = [
-        sys.executable, AUDIT_TOOL, "record",
+        sys.executable, audit_tool(), "record",
         "--type", "access",
         "--actor", session.subject,
         # The role the request CLAIMED, because that is what a reviewer searches by. The role the session

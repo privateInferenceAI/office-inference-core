@@ -327,7 +327,6 @@ def test_a_refusal_that_cannot_be_recorded_fails_loudly(monkeypatch):
     store = session_module.MemoryStore()
     session = session_module.mint(declared(), store, "dana@client.example", "viewer", dev=True)
     monkeypatch.setenv("AUDIT_TOOL", "/nonexistent/audit.py")
-    session_module.AUDIT_TOOL = "/nonexistent/audit.py"
     with pytest.raises(session_module.SessionError, match="could not be recorded"):
         session_module.check_role_claim(session, "role", "executive", dev=True)
 
