@@ -417,8 +417,12 @@ than the alias.
 
 ## 11. Making a model call
 
-The supported way to reach a model is through the gateway with a role's key. The `keys` tool has
-a probe that does exactly that and reports what came back:
+**The supported way to reach a model is `POST /ask`, documented at 13g.** The gateway authenticates a model
+call with a short-lived signed statement that only the assistant API can mint, so a role's virtual key is no
+longer something you present to make a call — see 13g's note on the two credentials the gateway accepts.
+
+The `keys` tool still mints a key per role, and that key is what the tool itself uses. Its probe now mints a
+statement the way the API does, so a 200 from it means a model call genuinely succeeded:
 
 ```
 oi run --rm keys --probe analyst
@@ -450,7 +454,11 @@ config and the bare ARN in the policy.
 
 That uses the master key, which administers the gateway and can therefore call any model in it. A call
 made with it bypasses the role ceilings and the model permissions, because those belong to role keys, so
-use it for diagnostics and never for work. `keys --probe` is how you call as a role.
+use it for diagnostics and never for work.
+
+**A role's key is not a calling credential any more.** `keys --probe` mints a signed statement for the role and
+presents that, which is why it can still prove the model permission; a key presented by hand is refused for
+request traffic. To ask a question as a role, use `POST /ask` — section 13g.
 
 ## 12. Keys and budgets
 
