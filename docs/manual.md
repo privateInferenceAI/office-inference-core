@@ -3364,15 +3364,7 @@ it. **It asks both endpoints and fails if one refuses and the other answers**, w
 was found. It also fails if the refusal does not name the class, so a container that quietly fell back to the
 real manifest fails the run rather than passing for the wrong reason. That mistake was made once by hand.
 
-**The whole `docker run` invocation is spelled out here on purpose.** An earlier version of this block said
-`run --entrypoint ...`, which relies on a shell alias defined in a different section and fails with `run: command
-not found` if you have not defined it. **A command on the page that exists only because of an alias three
-sections away is not a command.**
 
-It prints what this deployment permits, what a plain request with a class outside that gets (`lane: none` and a
-notice, rather than an answer), and what a permitted class gets. **It exists because the sentence above was
-false when it was written**, and a claim about a boundary that a reader cannot check from the page is the kind
-of claim this project has already been caught making once.
 
 **If it breaks.**
 
