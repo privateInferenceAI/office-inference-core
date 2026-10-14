@@ -3032,11 +3032,13 @@ $ oi --profile tools build session
 $ oi --profile tools run --rm session migrate
 $ docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
     -v /opt/oi-core:/w -w /w --env-file rendered/env \
+    -e AUDIT_TOOL=/w/services/audit/audit.py \
     --entrypoint python oi-core/eval:local /w/tests/fixtures/access_probe.py
 ```
 
 The probe prints one line per right with the wrong path it rules out beside it, and exits non-zero if any
-right failed. The five rights are `ACCESS` (a session cannot retrieve a passage outside its roots), `SCOPED`
+right failed. It needs `AUDIT_TOOL` because the refusal is recorded by the audit tool, which owns the chain,
+and that tool is in the mounted checkout rather than in this image. The five rights are `ACCESS` (a session cannot retrieve a passage outside its roots), `SCOPED`
 (the boundary holds across both retrieval arms, not just the dense one), `FORGED` (a session cannot be minted
 for a role the deployment did not grant), `REFUSED` (a request supplying a role is refused), and `RECORDED`
 (the refusal is findable in the chain).
