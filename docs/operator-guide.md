@@ -647,7 +647,7 @@ rather than repaired, because re-embedding is a decision rather than a repair.
 
 **There is no ask endpoint.** The retrieval path is a function, `search()` in
 `services/retrieval/retriever.py`, and the API that would expose it — sessions, caller identity, streaming —
-is C3. What exists is a probe that runs one question through the whole path, and it is how you answer
+is the assistant API, built in C3 and walked through at Stage 13b. What remains here is the probe that runs one question through the whole path, and it is how you answer
 "what does the system return for this" today.
 
 ```
@@ -871,7 +871,7 @@ a user so.
 
 Two retrieval roles exist, `staff` and `executive`, and they map to folders. `staff` sees `company`;
 `executive` sees both. **There is no manifest field for that map and no way to add a role without editing
-the code**, which is a real limitation rather than a convention: per-user and per-group permissions are C3.
+the code**, which is a real limitation rather than a convention: per-user and per-group permissions are built and walked through at Stage 8, above.
 
 There is a second vocabulary in this system that shares the word "role" and means something else entirely.
 The model roles — `analyst`, `front_desk` and so on — decide which model answers and what the caller may
@@ -1645,6 +1645,195 @@ stage 7c explains why the checks cannot. The suite proves the controls around th
 
 ---
 
+# Stage 13b: the assistant API, which is the first thing a client actually touches
+
+**Goal:** go from "the pieces work" to "a client application can ask a question and get a cited, permitted,
+redacted answer", and know what happens when the model will not answer.
+
+Everything before this stage exercised components. Retrieval was a function, the ACL was a filtered query, the
+gateway was a curl. **C3 puts one interface in front of all of it**, and after this stage the way to ask a
+question is `POST /ask` rather than a probe.
+
+## 13b.1. Why there is an API at all, and why it has no port
+
+Every capability the system has is reachable through this one interface, and it has no user interface of its
+own. **The port is unpublished on purpose.** A phase that builds an API should not also publish a debug port,
+and this project has already paid for that mistake once in another repository. A client reaches the API
+through whatever the deployment puts in front of it, which is C7's work.
+
+    oi ps api
+    docker port api          # prints nothing, and that is the check
+
+**Checkpoint.** `docker port api` prints an empty line. If it prints a mapping, something published it.
+
+## 13b.2. A session, which is what a request carries instead of a password
+
+The caller does not hold a model credential and does not name a role. It holds a **session token**, which
+resolves to a row holding the subject, the role and the document roots. The API holds one signing key and mints
+a short-lived statement for each model call, so a leaked session token is worth one question rather than the
+deployment's account.
+
+    oi --profile tools run --rm session mint --dev \
+      --subject probe-staff@officeinference.com --role viewer
+
+It prints `token`, `subject`, `role`, `roots`, `groups` and `expires_at`. **The subject must be one the manifest
+declares** — a made-up address is refused rather than defaulted, because a default here would invent an
+identity. The generator's message lists the declared subjects, which is where to look when it refuses.
+
+**Checkpoint.** The command prints a token and `roots ['company']` for a staff subject. A subject you invented
+is refused, and that refusal is correct.
+
+## 13b.3. Ask a question, and read the answer
+
+    oi --profile tools run --rm ask \
+      --session <the token> --question "What is the mileage rate for reimbursement?"
+
+Five fields matter more than the rest, and two of them exist to stop a lie:
+
+| Field | What it tells you |
+|---|---|
+| `answer` | The model's text, with `[n]` markers pointing at `citations` |
+| `citations` | Document, access label and page for every passage the answer may cite |
+| `model` and `resolved_model` | **The role, and the model that actually ran.** A role is a name in the manifest; the model is what answered. A client written against `model` alone cannot tell that a manifest swap took effect |
+| `notice` | What the user should be told. Empty when there is nothing to say, which is the common case |
+| `lane`, `escalated`, `trigger` | Where it was answered, whether a trigger moved it to a stronger model, and **which** trigger |
+
+**Checkpoint.** A 200 with six citations, `lane: frontier`, `escalated: false`, and an empty `notice`.
+
+## 13b.4. The three ways a request can be refused, and they are different
+
+| What you did | What comes back | Why it is not the same as the others |
+|---|---|---|
+| No session, or a made-up token | 403 `refused_authority_claim` or a session error | there is nobody to answer |
+| Put `"role": "executive"` in the body | 403 `refused_authority_claim`, **and a row in the chain** | a role comes from an authenticated session and never from a request field. The refusal is recorded before the error returns, which is what makes it a control rather than a message |
+| Ask something no permitted passage covers | 200, an answer that says so, `denied: true` | this is not a refusal. The system answered honestly about what it could see |
+
+Check the second one in the record rather than in the response, because that is the part that matters:
+
+    oi --profile tools run --rm session refusals --session <the token>
+
+**Checkpoint.** The forged-role request returns a 403 whose wording says the permission was denied **or the
+resource might not exist**, and `session refusals` shows `claimed_role='executive' session_role='viewer'`.
+
+## 13b.5. Streaming, and the redaction that has to come with it
+
+    oi --profile tools run --rm ask --stream \
+      --session <the token> --question "What is the mileage rate?"
+
+The same request as Server-Sent Events. **Redaction on a stream is not the same problem as redaction on a
+finished answer**, because a value can reach the client in a token before anything has looked at the whole
+response. So the streamer holds back a window of text, redacts it, and emits only what is settled.
+
+    event: start     the model, the role, the roots, and the citations retrieval found
+    event: delta     a piece of the answer, already redacted
+    event: degraded  when the model cannot answer at all, before any delta
+    event: error     if something fails mid-stream. Terminal, because the status code is spent
+    event: done      deltas, ttft_ms, model_first_ms, retrieval_ms, total_ms, redactions
+
+**`degraded` is the one a client forgets to handle**, and forgetting it renders an empty answer where the
+system meant to hand over the retrieved passages.
+
+**Checkpoint.** `stream_probe` reports four rights, including `REDACTED` with the canary absent from every
+frame. **Run it alone** — it is load-sensitive and will fail spuriously if other probes are running.
+
+## 13b.6. When the model will not answer, which is the part that was hard to build
+
+Three thresholds on one deadline anchored at the moment the client asked: first token 1.5s, stall 5s, total 30s,
+with 1.2s held back so a degraded answer still fits. Retries happen **only before the first token**, because a
+streamed generation is not idempotent and a retry after output has begun is billed twice.
+
+When the model cannot answer, the response is a 200 carrying the retrieved passages and a typed reason. **A
+client must branch on `kind`**, because a degraded answer and a real answer look alike otherwise:
+
+    { "kind": "degraded", "reason": "throttled", "lane": "frontier",
+      "passages": [ ... ], "attempts": 3, "threshold": "first_token" }
+
+Proving this needs a real failure, and the honest way to produce one is a real provider throttle:
+
+    # A burst of small concurrent calls exhausts the provider's REQUESTS-per-minute ceiling, which is far
+    # cheaper to reach than the token ceiling. Ask the API while it runs.
+    oi --profile tools run --rm throttle-probe --concurrency 80
+
+**Checkpoint.** While the burst runs, `/ask` returns `kind: degraded` with `reason: throttled`, `attempts: 3`,
+and all three thresholds named. The audit row agrees. **`reason: unclassified` with `attempts: 2` means the
+retry path failed to authenticate**, which is a defect rather than a throttle.
+
+## 13b.7. Routing, and the boundary it keeps
+
+Two questions with one answer each: **which model may see this**, and **which model should**. They are decided
+in that order, and the order is the design.
+
+| Trigger | How it is decided |
+|---|---|
+| `agentic_task` | the `task` field is on a configured list |
+| `user_requested_stronger` | the `stronger` field is true |
+
+A third was built and removed. It escalated when retrieval returned more than one document, and measurement
+killed it: a plain single-fact question returned **six** documents while a genuine multi-document question
+returned **four**, and no combination of count and score floor separated them. An unusable predicate that fires
+on everything is worse than none, because it escalates cost silently and makes the record meaningless.
+
+**Nothing assesses difficulty.** A question the cheap tier answers badly must not escalate on its own judgement,
+and there is nothing in the path that could form one.
+
+**Checkpoint.** A plain question returns `escalated: false` with an empty `trigger`. Then:
+
+    oi --profile tools run --rm ask --session <token> --task reconcile --question "..."
+    oi --profile tools run --rm ask --session <token> --stronger --question "..."
+
+Each returns `escalated: true` naming **its own** trigger, and a `notice` telling the user what happened.
+
+## 13b.8. The one-way boundary, proved rather than asserted
+
+The gate runs before any trigger, and it decides whether content may reach a remote model at all. **A
+deployment that declares no permitted classes sends nothing off-box**, and a deployment that declares some
+still refuses anything outside them.
+
+On a deployment with a local model, an escalation the gate refuses is answered locally **and announced**. On a
+cloud deployment there is no local lane, so it is refused outright and the refusal is recorded.
+
+**Checkpoint.** With a manifest whose `access.egress.frontier_classes` is empty, a `--stronger` request is
+**not** escalated, and the response says why. The row in the chain carries `escalation_requested: true` beside
+`lane: local`, which is the pair that proves what was asked for was not what ran.
+
+## 13b.9. The interface test, which is the one to run after any change
+
+    run --entrypoint python oi-core/session:local /w/tests/fixtures/interface_probe.py
+
+Seven rights, each one a sentence the manual tells you to expect. **If the manual and the service disagree,
+this fails**, which is the point of it.
+
+    ok   ANSWER     [200] 6 citation(s), lane='frontier'
+    ok   NO-JUDGE   escalated=False trigger='' notice=False
+    ok   TRIGGERS   agentic->'agentic_task' stronger->'user_requested_stronger'
+    ok   FACTS      the row carries asked and answered separately
+    ok   TOLD       an escalation the gate refuses is announced
+    ok   STREAM     a first token well before the last
+    ok   DEGRADED   the last recorded degradation carries its reason, attempts and threshold
+
+**Checkpoint.** `PASSED: 7 right(s) held against the documented interface`.
+
+## 13b.10. Changing which model answers, which takes two restarts
+
+    # edit models.analyst in the manifest
+    python3 scripts/validate_manifests.py
+    python3 scripts/render_manifest.py --manifest manifests/dev-cloud.yaml
+    oi restart litellm
+    oi restart api          # <-- the one people miss
+
+**Both restarts, and the second is the one that gets forgotten.** Neither process re-reads the rendered config.
+Restart only the gateway and the model genuinely changes at the provider while the API goes on reporting the old
+one from the manifest it loaded at startup — the worst shape of failure, because the record is right and the
+report is wrong.
+
+Confirm it from the provider's side rather than from ours:
+
+    docker exec postgres psql -U oicore -d oicore -c \
+      'select model from "LiteLLM_SpendLogs" order by "startTime" desc limit 3'
+
+**Checkpoint.** The spend log names the new model, and the answer's `resolved_model` agrees with it. **A swap
+before the golden questions exist is unmeasured for quality** — that is C8's work, and this checkpoint proves the
+mechanism rather than the answer.
 # Stage 14: onboarding a second client's corpus
 
 **Goal:** add a corpus to a deployment that is already holding one, without disturbing it.
@@ -1665,7 +1854,7 @@ name is the label. Two questions, both of which are the client's to answer:
 
 **A root named anything else is a folder nobody can read.** If the client's organisation implies
 `finance/` or `hr/`, you have three options and only one of them is free: file those documents under
-`executive/` and accept that only the executive role sees them; add the root to the code; or wait for C3's
+`executive/` and accept that only the executive role sees them; add the root to the code; or use C3's
 per-user permissions. Decide before the corpus is laid out, because relabelling afterwards means
 re-ingesting.
 
