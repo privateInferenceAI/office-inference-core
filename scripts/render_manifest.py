@@ -228,6 +228,29 @@ def declared_roles(block: dict, groups: dict, roots: list) -> dict:
     return {"viewer": []}
 
 
+def custom_auth_setting() -> dict:
+    """The gateway's general_settings, including the identity hook.
+
+    **The hook is configured here rather than in a file somebody edits on the box.** Where a deployment gets
+    its identities from is a decision with a review trail, and the manifest render is where this repository
+    keeps those.
+
+    It is written for every deployment, and it is inert until the gateway image carries the module, which is
+    the same image that ships the tool. A deployment that never receives an assertion is unaffected: the hook
+    only runs when a request arrives without a key the gateway already knows.
+    """
+    return {
+        "custom_auth": "custom_auth.user_api_key_auth",
+        # Off deliberately, and this is the interesting one. With common checks on, the gateway applies its
+        # own key-shaped checks to the identity the hook returns, and the spike showed the identity's
+        # key-level budget is not what enforces: the TEAM budget is. Turning the common checks on would add
+        # a second, weaker ceiling that refuses nothing useful and reports differently.
+        "custom_auth_run_common_checks": False,
+        # On, because this one is the model allowlist and the expiry: without it a signed assertion could
+        # name a model the role is not scoped to.
+        "enable_post_custom_auth_checks": True,
+    }
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", required=True)
@@ -357,6 +380,7 @@ def main() -> int:
     env_path.chmod(0o600)
 
     gateway = build_litellm_config(manifest, env)
+    gateway["general_settings"] = custom_auth_setting()
     (out_dir / "litellm.yaml").write_text(
         "# Generated from the manifest by scripts/render_manifest.py. Do not edit by hand.\n"
         + yaml.safe_dump(gateway, sort_keys=False)

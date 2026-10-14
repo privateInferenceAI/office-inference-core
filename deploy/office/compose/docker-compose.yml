@@ -315,7 +315,10 @@ services:
     #
     # Against the advisories that mattered: CVE-2026-59822 (MCP auth bypass, before 1.84.0) and CVE-2026-42208
     # (pre-auth SQL injection in key verification, 1.81.16 to 1.83.6) are both behind this pin.
-    image: ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500
+    build:
+      context: ${OI_ROOT}
+      dockerfile: services/litellm/Dockerfile
+    image: oi-core/litellm:local
     container_name: litellm
     restart: unless-stopped
     command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "1"]
@@ -328,8 +331,16 @@ services:
       # hop limit is 2, which is what lets a container reach the metadata service at all.
       AWS_REGION: ${AWS_REGION}
       AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
+      # Where the identity hook reads the signing key and the spent-statement list. The key is a file rather
+      # than a variable because an environment variable is visible to `docker inspect` and to anything that
+      # can read /proc, and this one is the difference between speaking as a role and not.
+      OI_ASSERTION_KEY: /app/rendered/assertion.key
+      OI_ASSERTION_NONCES: /tmp/oi-assertions-seen.json
     volumes:
       - ${OI_ROOT}/rendered/litellm.yaml:/app/config.yaml:ro
+      # The whole rendered directory rather than the one file, because the signing key and the nonce list live
+      # there too. Read-only: the gateway verifies statements, it does not mint them.
+      - ${OI_ROOT}/rendered:/app/rendered:ro
     # Deliberately no dependency on llamacpp. Compose refuses a project whose dependency sits in
     # an inactive profile ("depends on undefined service"), which would make the cloud build
     # invalid. The gateway does not need the local lane to boot: it needs it per request, and only
