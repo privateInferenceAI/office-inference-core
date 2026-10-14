@@ -183,6 +183,7 @@ that stays becomes a warning nobody reads.
 **Goal:** the files the deployment actually reads, generated from the manifest rather than typed.
 
 ```
+python3 scripts/check_model_lifecycle.py
 python3 scripts/render_manifest.py --manifest manifests/my-client.yaml
 ```
 
@@ -202,6 +203,11 @@ Four files come out, and each has one job:
 |---|---|
 | `rendered/env` | Every tool and every service. Mode 600, holds the generated secrets **and** the settings |
 | `rendered/litellm.yaml` | The gateway's model list. It is mounted read-only into `litellm` |
+
+**`check_model_lifecycle.py` runs before the render, and it is not decoration.** It checks every remote model
+a manifest names against `data/model-lifecycle.json`, which records each model's status and what replaces it.
+A model that is not in the table fails here and names itself. It checks all six manifests and about fourteen
+remote references in a second, so there is no reason to skip it.
 | `rendered/keys.json` | The per-role API keys, mode 600, written by `keys` rather than by the renderer |
 | `rendered/manifest.json` | The manifest as the system sees it, for a tool that wants the parsed form |
 
@@ -1651,6 +1657,11 @@ So the honest options are:
 
 - **A second deployment** for a second client, which is the shape section 19 describes and what the
   `deployment_id` in the manifest is for
+
+**Two different things are called a role, and this stage is about only one of them.** The roots under
+`documents/` map to *retrieval* roles in the `ROLES` map in `services/retrieval/retriever.py`, which is a
+**code change**. The roles in `models:` are *model* roles — a manifest change, covered in stage 14b. Keep them
+apart when you plan, because one is an edit and the other is a redeploy.
 - **One shared corpus** when the two bodies of documents genuinely are one pool, which is the case for a
   single firm's departments and is what the fixture corpus looks like
 
@@ -1696,6 +1707,134 @@ back, **stop** — that is the access filter failing, and stage 8d is where to g
 vector collection and one role map. The unit of isolation is the deployment, and a second client means a
 second deployment. That is a real architectural limit and worth saying to a client who asks whether they can
 share.
+
+---
+
+---
+
+# Stage 14b: adding a role, and the two steps that fail late
+
+**Goal:** give a piece of work its own model, ceiling, and key, and know which steps fail *after* everything
+looks finished.
+
+Manual section 17 is the procedure. This stage is the operator's version: the order, and the two places a
+new role breaks without warning at validation time.
+
+## 14b.1. When a role is the right answer
+
+A role is a permission boundary. Add one when the work needs something an existing role cannot give it:
+
+| Add a role when | Do not add one when |
+|---|---|
+| it needs a **different model** — agentic work against an email writer | it is a label you might use later |
+| it needs a **different ceiling** that a person owns | the ceiling would match an existing role's |
+| the **record** has to separate it, for billing or for an audit question | separation only matters "in case" |
+| it needs **narrower model access** — a key that cannot reach the expensive model | it would hold the same permissions as one that exists |
+
+**The manual's own framing is the rule:** *"If two components should have different ceilings, give them
+different roles, even if they point at the same model."*
+
+**A role nothing calls is indistinguishable from a role nothing wired up**, which is why this stage argues for
+few rather than many. Declare a catalogue of plausible roles and you cannot tell "no email has been sent" from
+"the email component is pointed at the wrong key".
+
+## 14b.2. The order
+
+```
+cd /opt/oi-core
+$EDITOR manifests/<client>.yaml      # 1. the role under models:, its ceiling under budgets.roles:
+python3 scripts/validate_manifests.py <client>.yaml    # 2.
+python3 scripts/check_model_lifecycle.py               # 3. only if the model is new to this deployment
+python3 scripts/render_manifest.py --manifest manifests/<client>.yaml   # 4.
+oi restart litellm                                      # 5. required, and not the command you would guess
+oi run --rm keys                                        # 6.
+oi run --rm keys --probe <role>                         # 7.
+```
+
+`budgets.roles.<role>` is **not optional** while remote inference is on. A role with no ceiling fails
+validation, which is the good kind of failure.
+
+## 14b.3. Step 5, which looks like it worked and did not
+
+```
+oi restart litellm        # correct: restarts the process, which re-reads the mounted config
+oi up -d litellm          # WRONG: prints "Container litellm Running" and does nothing
+```
+
+**A mounted file changing underneath a running container is not a change Compose can see.** So `up -d` finds
+nothing to do, reports success, and the model list is unchanged. LiteLLM reads its config once at startup and
+does not watch the file. This is worth understanding rather than memorising: it is a property of mounts and
+Compose, not a LiteLLM quirk, and it applies to any service here that reads a mounted file once.
+
+**The check that settles it**, because it asks the gateway what it actually serves rather than what you
+rendered:
+
+```
+MASTER=$(grep '^LITELLM_MASTER_KEY=' rendered/env | cut -d= -f2-)
+docker run --rm --network ai-net -e MASTER="$MASTER" curlimages/curl -sS \
+  -H "Authorization: Bearer $MASTER" http://litellm:4000/v1/models
+```
+
+## 14b.4. The two steps that fail late, which is the point of this stage
+
+Both of these pass validation, pass the render, pass the restart, and then fail **when a call is made**. A
+role that hits either one looks correctly configured until someone uses it.
+
+**One: the model is not in `data/model-lifecycle.json`.** `check_model_lifecycle.py` fails and names it. The
+format and the refresh procedure are in `docs/model-lifecycle.md`. Adding a model without its lifecycle entry
+means nothing knows when it is deprecated or what replaces it.
+
+**Two: the model's ARN is not in the instance role's Bedrock policy.** The policy allows a fixed list, so a
+new model answers `AccessDenied` at call time and nothing before that catches it. Check the list:
+
+```
+aws iam get-policy-version --profile oi-credits \
+  --policy-arn arn:aws:iam::878451098165:policy/oi-core-dev-bedrock-invoke \
+  --version-id v1 --query 'PolicyVersion.Document.Statement[].Resource'
+```
+
+**`get-role-policy` returns `NoSuchEntity` for this policy**, because it is attached to the role rather than
+written into it. That error reads like the policy does not exist, and it means you asked the wrong question.
+
+**Checkpoint.** The probe in step 7 passes, **and** the model appears in the gateway's own list from 14b.3.
+A passing probe on the old model list means the restart did not take.
+
+## 14b.5. Changing which model a role uses
+
+The same order, minus the key mint if the role already has one:
+
+```
+$EDITOR manifests/<client>.yaml      # change the one line under models.<role>
+python3 scripts/validate_manifests.py <client>.yaml
+python3 scripts/check_model_lifecycle.py
+python3 scripts/render_manifest.py --manifest manifests/<client>.yaml
+oi restart litellm
+oi run --rm keys --probe <role>
+```
+
+**Nothing in the application changes**, because applications ask for a role rather than for a model. That is
+the whole reason roles exist as a layer.
+
+**Two rules, and the first is a contract term rather than a preference.** If the client's contract names a
+single region, an inference-profile-only model is disqualified, and the validator says so rather than leaving
+it to the first call. And a model swap means **rerunning the golden questions before the client sees the new
+answers** — a different model gives different answers to the same question, and that is C8's work rather than
+something to skip because the probe passed.
+
+## 14b.6. Taking a role away
+
+```
+oi run --rm keys --revoke <role>
+```
+
+Then remove it from `models:` and `budgets.roles:`, validate and render. **Revoking the key and leaving the
+manifest entry is a half-done removal**, and the mint path says so: *"The role may still exist in the
+manifest. Add it back to models: and budgets.roles:"*. A role in the manifest with no key refuses every call,
+which is safe, and reports as a role rather than as a deployment fault, which is confusing.
+
+**A role is not the same thing as an access root.** Stage 14 covers the roots under `documents/`, and those
+are a **code change** to the `ROLES` map in `services/retrieval/retriever.py`. This stage is about model
+roles, which are a manifest change. Different mechanisms, and the words collide.
 
 ---
 
