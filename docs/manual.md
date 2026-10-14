@@ -3007,9 +3007,25 @@ REFUSED   refused: the request supplied 'role'. A role comes from the session an
 The refusal is in the chain, and the column a reviewer searches by holds the role the request **claimed**,
 not the one the session held:
 
+Two commands answer two different questions. `audit list` answers "what refusals happened", newest first:
+
 ```
 $ oi --profile tools run --rm audit list --type access --limit 3
+    id  when                          type    actor                            outcome
+    64  2026-10-14T01:42:27.267199Z   access  probe-staff@officeinference.com  denied
+    63  2026-10-14T01:41:53.244849Z   access  probe-staff@officeinference.com  denied
 ```
+
+And `session refusals` answers "what did THIS session try", which is the question an investigation actually
+starts from:
+
+```
+$ oi --profile tools run --rm session refusals --session <token>
+2026-10-14 01:58:07.443005+00:00  access/denied  claimed_role='executive'  session_role='viewer'  field='role'
+```
+
+A session with nothing against it exits non-zero and says so, because a clean session and a broken query look
+the same in an empty listing.
 
 | Column | What it holds for a refusal |
 |---|---|
@@ -3629,6 +3645,7 @@ the manual also asks you to type.
 | `oi --profile tools run --rm session mint --dev --subject S --role R` | Establish a session. Refuses without `--dev` |
 | `oi --profile tools run --rm session verify --token T` | Resolve a token to the access it holds |
 | `oi --profile tools run --rm session forge --dev --token T --role R` | Rehearse a request supplying its own role. Refused is the pass |
+| `oi --profile tools run --rm session refusals --session ID` | The refusals recorded against one session, read out of the chain |
 | `oi run --rm audit migrate` | Apply database migrations |
 | `oi run --rm audit record …` | Write one event by hand. Needs `--dev` |
 | `oi run --rm audit list [--type T] [--limit N]` | Read the record |
