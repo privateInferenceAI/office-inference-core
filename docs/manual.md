@@ -343,7 +343,7 @@ cd /opt/oi-core
 docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env ps
 ```
 
-You should see seven services running, five of them healthy. Seven is the current number, and the
+You should see seven services running, four of them healthy. Seven is the current number, and the
 **assistant API is one of them**: a `ps` without it means the API is not deployed, which is a deployment that
 cannot answer a question. The count has grown with each phase — six before C3 added the API — so an older copy of
 this page showing a different number is a stale page rather than a broken box. Compose prints seven columns; the sample below
@@ -367,10 +367,10 @@ text with page numbers, and `ingestion` is the worker that drives both. A `ps` s
 deployment that cannot read a client's documents at all, and it is what an older copy of this manual
 showed.
 
-Two of the six are not healthy and that is correct. `litellm` and `vector` declare no healthcheck, so
-compose has nothing to report; for those two, `Up` is the whole of the information. `postgres`,
-`ingestion`, `parser` and `embeddings` do declare one, and healthy means something specific in each case
-— for `ingestion` it means the last cycle finished with no failures, not that the process is alive.
+Three of the seven are not healthy and that is correct. `api`, `litellm` and `vector` declare no healthcheck,
+so compose has nothing to report; for those three, `Up` is the whole of the information. `postgres`,
+`ingestion`, `parser` and `embeddings` do declare one, and healthy means something specific in each case —
+for `ingestion` it means the last cycle finished with no failures, not that the process is alive.
 
 `ps` shows only the long-running services. `audit`, `keys`, `retention` and `eval` are behind the compose
 `tools` profile, so they never appear here and `oi up -d` never starts them. They run when you call them.
@@ -1918,7 +1918,7 @@ first run over a client's corpus takes minutes or hours.
 `docker logs ingestion` shows **JSON**, because the container runs the cycle with `--json`:
 
 ```
-collection documents: 1024 dimensions, Cosine, 1131 points
+collection documents: 1024 dimensions, Cosine, 1261 points
 {
   "seen": 12,
   "new": 0,
@@ -1938,7 +1938,7 @@ is the one the manual can show you because only a hand run produces it:
 
 ```
 $ docker exec ingestion python3 /app/ingest.py --documents /documents
-collection documents: 1024 dimensions, Cosine, 1131 points
+collection documents: 1024 dimensions, Cosine, 1261 points
 
 seen 12, new 0, changed 0, skipped 12, failed 0
 chunks written 0, chunks removed 0, documents removed 0
