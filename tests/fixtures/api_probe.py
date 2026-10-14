@@ -117,9 +117,9 @@ def sql(statement: str, params: tuple = ()):
     nothing to do with what is being tested. The driver is psycopg2 because the image this runs from is the one
     that talks to Postgres through it.
     """
-    import psycopg2
+    import psycopg
 
-    conn = psycopg2.connect(database_url())
+    conn = psycopg.connect(database_url())
     try:
         with conn.cursor() as cur:
             cur.execute(statement, params)
