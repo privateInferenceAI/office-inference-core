@@ -680,7 +680,9 @@ async def _frames(session, permit, model: str, question: str, result, requested_
               budget_module.audit_facts(reason=kind["reason"], matched=kind["matched"],
                                         retryable=kind["retryable"], attempts=attempt,
                                         threshold=request_budget.timed_out(), budget=request_budget,
-                                        partial_output=False, errors=errors), model=model)
+                                        partial_output=False, errors=errors, lane=lane,
+                                        data_class=((STATE.get("manifest") or {}).get("access") or {}).get(
+                                            "data_class") or "regulated"), model=model)
         # No frame has gone out yet, so a degraded answer is still possible and is the better outcome.
         yield frame("degraded", budget_module.degraded(kind["reason"], _degrade_detail(kind["reason"]),
                                                       result.passages, request_budget, attempt,
