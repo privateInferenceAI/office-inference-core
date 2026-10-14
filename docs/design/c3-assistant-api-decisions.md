@@ -667,6 +667,27 @@ structured audit traces (arXiv 2603.27299).
 **And the agentic task list needs a review cadence.** It is a list that decides cost, and the most-documented
 regret in the field is a threshold nobody revisited. An annual check of the list against audit-row counts per
 trigger is enough to stop it silently becoming a rule that fires on everything.
+## 7k. A rate limit nobody enforced, found while hunting a throttle
+
+**`tpm_limit` and `rpm_limit` were declarations without an enforcer.** `LiteLLM_TeamTable` has carried both
+columns since it was created. Our `custom_auth` hook read `max_budget` and `spend` from that row and returned a
+`UserAPIKeyAuth` whose other limit fields were left at their defaults. The identity object accepts `tpm_limit`,
+`rpm_limit`, `max_parallel_requests` and more; we passed none of them.
+
+**Found by trying to provoke a real throttle, not by reading the code.** The probe lowered a team's
+`tpm_limit` to 100, expecting the gateway to refuse, and every request still answered. That is the shape of a
+control that exists in a configuration file and nowhere else, and it is the second one this phase has found: an
+allowlist that was not enforced on the statement path was the first.
+
+**Fixed, and the fix is not yet proven to be sufficient.** The hook reads the two columns and passes them
+through, with `None` preserved as `None` rather than becoming a limit of zero. Whether the gateway applies the
+identity's limits when the identity comes from a custom auth hook is still unproven, and the honest state is
+recorded in the runbook rather than closed.
+
+**The lesson, which is the one this phase keeps teaching.** A declaration in a manifest, a database column or a
+config file is not a control until something reads it and refuses. Every claim of this kind needs a test that
+makes the control fire, and the test has to be written against the deployed path: 591 unit tests passed while a
+rate limit was inert, because nothing exercised the hook with a limit set.
 ## 8. What we are deliberately not building
 
 - **A separate router process.** One Python process with routing behind a pure function. The pure function is

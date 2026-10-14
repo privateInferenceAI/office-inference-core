@@ -3484,9 +3484,33 @@ Nova Pro V1 is **40,000 tokens per minute**, and a single request may ask for up
 concurrent requests exhaust it. That is the route to a genuine throttle: the same model, a different service
 tier, and a ceiling four requests away rather than four hundred.
 
-**Not yet run, and recorded as owed rather than assumed.** Which field LiteLLM 1.104.2 passes to Bedrock to
-select the latency-optimized tier is unverified, and a wrong field would silently use the standard quota and
-produce no throttle at all.
+**Attempted on 2026-10-14 and not reached, with the arithmetic to show why.** Concurrency is the only honest
+route and the ceiling is too high for this box:
+
+    concurrency  8, max_tokens  9000  -> 8 of 8 answered 200
+    concurrency 12, max_tokens  9000  -> 12 of 12 answered 200 in 2.8s
+    concurrency 40, max_tokens 19000  -> 40 of 40 rejected 400, the model ceiling is 10000
+
+Forty maximum-size requests is roughly 360,000 tokens against Nova Lite's 4,000,000 per minute. **Reaching the
+quota needs about four hundred of them in one minute**, which a development box cannot produce and which would
+burn credit for evidence rather than for a product. The latency-optimized Nova Pro tier at 40,000 would take
+about four, and selecting that tier is the unverified step: LiteLLM passing the wrong field there would silently
+use the standard quota and look like a bug in our budget.
+
+**So a real provider throttle is not provoked, and this step does not claim it is.** What is verified for
+`INF-TIMEOUT-001` is the whole path *except* the provider's own 429: the deadline, the three thresholds, the
+classification of a terminal refusal, the retry rules, the degraded answer with its passages, and the audit row.
+The one thing missing is a real `ThrottlingException` body arriving from Bedrock, and the classification of that
+body was unit-tested against the shape AWS documents.
+
+**A real defect found while trying.** The team row has carried `tpm_limit` and `rpm_limit` columns all along and
+the auth hook never read them, so **a rate limit declared on a team was silently unenforced**. The hook passes
+them now. Whether the gateway enforces the identity's limits when the identity arrives from a custom auth hook
+is still unproven: setting a team's `tpm_limit` to 100 did not produce a 429, which means either the gateway
+ignores it on this path or the limit is not consumed as expected. A limit that is not passed to the component
+that enforces it is a comment, and this is the second time in this phase that a declaration turned out to have
+no enforcer.
+
 
     # The real throttle, once per release, with the provider's own request id in the record.
     OI_MAX_TOKENS=100000 oi restart api       # far above the per-model TPM quota
