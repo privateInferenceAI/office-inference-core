@@ -36,6 +36,31 @@ def _master_key() -> str:
     return os.environ.get("LITELLM_MASTER_KEY", "")
 
 
+def _team_rate_limits(role: str):
+    """The team's tokens and requests per minute, or None when it declares neither.
+
+    **Why this exists.** The team row always had these columns and the auth hook never read them, so a
+    rate limit declared on a team was silently unenforced. A limit that is not passed to the component
+    that enforces it is not a limit; it is a comment.
+    """
+    import psycopg
+
+    url = (os.environ.get("DATABASE_URL") or "").strip()
+    if not url:
+        return (None, None)
+    conn = psycopg.connect(url)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select tpm_limit, rpm_limit from \"LiteLLM_TeamTable\" where team_id = %s", (role,))
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return (None, None)
+    return (int(row[0]) if row[0] else None, int(row[1]) if row[1] else None)
+
+
 def _team_budget(role: str) -> float:
     """How much of this role's ceiling is left, which is what the gateway enforces.
 
@@ -52,7 +77,11 @@ def _team_budget(role: str) -> float:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "select max_budget, spend from \"LiteLLM_TeamTable\" where team_id = %s", (role,))
+                # tpm_limit and rpm_limit are read here because they were NOT before: the table had
+                # them, the identity object accepts them, and a ceiling nobody passed to the gateway
+                # was a ceiling nobody enforced. Found while trying to provoke a real throttle for 4.4.
+                'select max_budget, spend, tpm_limit, rpm_limit from "LiteLLM_TeamTable" '
+                'where team_id = %s', (role,))
             row = cur.fetchone()
     finally:
         conn.close()
@@ -62,7 +91,7 @@ def _team_budget(role: str) -> float:
             f"no team named {role!r} exists, so this role has no ceiling and no call may be allowed. "
             f"Run: oi --profile tools run --rm keys --provision-teams"
         )
-    ceiling, spend = row
+    ceiling, spend = row[0], row[1]  # the query also returns tpm_limit and rpm_limit, read by _team_rate_limits
     if ceiling is None:
         # A deployment that declared no ceiling for this role. The manifest allows it, and the honest answer
         # is a number the gateway can enforce a spend against rather than an unlimited lane.
@@ -115,9 +144,14 @@ async def user_api_key_auth(request: Request, api_key: str) -> UserAPIKeyAuth:
     # not turn a budget into an unmetered lane, which is the direction this fails in and the reason it is a
     # raise rather than a default.
     budget = _team_budget(role)
+    limits = _team_rate_limits(role)
 
     return UserAPIKeyAuth(
         max_budget=budget,
+        # Passed through so the gateway enforces them. None is passed through as None, which is
+        # how a deployment says it has no rate limit rather than one of zero.
+        tpm_limit=limits[0],
+        rpm_limit=limits[1],
         api_key="oi-assertion",
         # The team is what carries the ceiling. One team per role, provisioned from the manifest.
         team_id=role,
