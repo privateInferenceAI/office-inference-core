@@ -3645,6 +3645,49 @@ what its criteria ask.
       -v /opt/oi-core:/w -w /w --env-file rendered/env \
       --entrypoint python oi-core/session:local /w/tests/fixtures/route_probe.py
 
+**The result, 2026-10-14, on the live deployment.** All four cases behave, and the streaming path that had no
+retry now has one:
+
+    plain     (200, 'frontier', False, 'answer')
+    agentic   (200, 'frontier', True,  'answer')
+    stronger  (200, 'frontier', True,  'answer')
+    streaming (8 frames, ttft 318ms, total 584ms)
+
+    the routing decision table is unchanged: 20 decisions
+    587 passed
+    6/6 manifests valid; 8 packs known
+    PASSED: 7 right(s) held against the running service
+    PASSED: 4 right(s) held against the streaming service
+
+**A plain question escalates nothing**, which is the requirement's own words and the thing the first attempt
+got wrong. The record carries both facts, so a refused escalation is never confused with a permitted one.
+
+#### Four calibration defects the research found in this code, fixed here
+
+**The gateway was retrying behind our back.** LiteLLM's `DEFAULT_MAX_RETRIES = 2` applies when `num_retries`
+is unset, and it was unset. So our three counted attempts could become **nine** upstream calls, none of them
+visible to the deadline and none counted in the record. The rendered config sets `num_retries: 0` now, with the
+reasoning in the file: a retry that ignores the caller's deadline is an unaccounted one, and AWS states that
+retries "can make the overload worse instead of better".
+
+**The lane did not decide the thresholds.** The office build's CPU lane was inheriting a first-token budget of
+1.5s measured against Bedrock, which would mark healthy local answers as failures. `Budget.for_lane` gives the
+local lane 20s/30s/180s, and the numbers are **placeholders until the office build is measured**, which the code
+says rather than implying they are derived.
+
+**The degraded payload said `frontier` while a local model served.** It takes the lane now, and the budget that
+decides the thresholds is the same one that builds the payload, so they cannot disagree.
+
+**The streaming path forfeited a safe retry.** The identical 429 retried three times on the non-streaming path
+and degraded immediately on the streaming path, which is the one real clients use. It retries now, which is safe
+because no answer byte has been emitted; the start frame carries citations rather than text. After the first
+delta the rule is unchanged, and the field agrees: LiteLLM is the only system that attempts mid-stream recovery
+and it does so by replaying the prefix as an assistant prefill, which re-bills it.
+
+**Two runtime defects of mine, found by exercising the paths rather than by the unit suite.** A `passages`
+argument the signature no longer took, and a `decision` referenced outside its scope. Both would have been
+instant failures for a client and neither was visible to 587 passing tests, because the tests do not run the
+handlers.
 #### What proves it
 
 | # | Right | Act | What is asserted |
