@@ -254,6 +254,10 @@ async def ask(request: Request):
         user_wants_stronger=bool(body.get("stronger")),
         passages=result.passages,
         model_name=model,
+        # The lane the configured model actually runs in, from the manifest. Escalation selects a
+        # stronger model; not escalating selects the ordinary one, which is still remote on a cloud
+        # deployment. Conflating those made every unescalated request fail where there is no local model.
+        default_lane="local" if local_lane_available() else "frontier",
         local=local_lane_available(),
     )
     if decision.lane == "local" and not local_lane_available():

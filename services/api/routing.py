@@ -78,24 +78,34 @@ def gate(model: str, data_class: str, frontier_classes, *, remote: bool = True) 
 
 
 def route(manifest: dict, *, data_class: str, task: str = '', user_wants_stronger: bool = False,
-          passages=None, model_name: str = '', local: bool = False) -> Decision:
+          model_name: str = '', default_lane: str = 'frontier', local: bool = False) -> Decision:
     """The whole decision, in one pure function.
 
     Order matters and is the point: the gate is consulted first, so no trigger can move content to a lane the
     deployment has not permitted.
+
+    **`default_lane` is where the deployment's configured model runs**, taken from the manifest rather than
+    assumed. Not escalating does NOT mean answering locally: escalation selects a stronger model, and no
+    escalation selects the ordinary one, which on a cloud deployment is still remote. Conflating the two was a
+    defect that made every unescalated request fail on a deployment with no local model.
     """
     egress = ((manifest.get('access') or {}).get('egress') or {})
     permitted, why = gate(model_name, data_class, egress.get('frontier_classes'), remote=not local)
     steps = ['gate: ' + why]
 
     if not permitted:
-        # A refused escalation goes to the local lane rather than nowhere: the content is already on this box,
-        # and the user is told rather than left guessing. Decided 2026-10-14; design note section 7h.
+        # A refused escalation is told to the user rather than silently applied. Where it is answered depends
+        # on whether the deployment has a lane the content may use at all, which is the caller's fact.
+        note = ''
+        if user_wants_stronger:
+            note = ('You asked for the stronger model, and this content may not be sent to it.')
+            if default_lane == 'local':
+                note += ' The answer below comes from the model this deployment serves locally.'
+            else:
+                note += (' This deployment has no local model, so no answer could be produced.')
         return Decision(
-            lane='local', model=model_name, escalated=False, reason=why,
-            notice=('You asked for the stronger model, and this content may not be sent to it. The answer '
-                    'below comes from the model this deployment serves locally.'),
-            escalation_requested=user_wants_stronger, steps=tuple(steps))
+            lane=default_lane if default_lane == 'local' else 'none', model=model_name, escalated=False,
+            reason=why, notice=note, escalation_requested=user_wants_stronger, steps=tuple(steps))
 
     if task and task in AGENTIC_TASKS:
         steps.append('trigger: ' + task + ' is on the agentic list')
@@ -111,9 +121,10 @@ def route(manifest: dict, *, data_class: str, task: str = '', user_wants_stronge
                         notice='You asked for the stronger model, so it answered.',
                         escalation_requested=True, steps=tuple(steps))
 
-    steps.append('no trigger fired')
-    return Decision(lane='local', model=model_name, escalated=False, reason='no trigger fired',
+    steps.append('no trigger fired: the ordinary model answers')
+    return Decision(lane=default_lane, model=model_name, escalated=False, reason='no trigger fired',
                     escalation_requested=user_wants_stronger, steps=tuple(steps))
+
 
 
 def audit_facts(decision: Decision, data_class: str) -> dict:
