@@ -405,7 +405,13 @@ def _step_once(job, attempt):
         return jobs_module.StepOutcome(ok=False, failure_kind="no_session", failure_detail=str(exc),
                                        retryable=False)
 
-    body = {"session": job.session_id, "question": job.input, "task": job.task}
+    body = {"session": job.session_id, "question": job.input, "task": job.task,
+            # **The class the job was created under, not today's manifest.** A job outlives the request that
+            # started it, and re-reading the manifest at execution time meant work created while a class was
+            # permitted would run under a manifest that forbids it. The boundary probe found exactly that on
+            # this path: /ask refused with a 403 and /jobs answered with a 200. Stating the class cannot
+            # widen anything, because the gate compares it against the same allowlist.
+            "data_class": job.data_class}
     try:
         _sess, permit, model, result, decision, data_class = answer_module.prepare(
             token=job.session_id, question=job.input, body=body, ctx=STATE["ctx"], resolve=_resolve,

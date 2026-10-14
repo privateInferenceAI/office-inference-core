@@ -79,15 +79,35 @@ class Refused(Exception):
 AUTHORITY_FIELDS = ("role", "roles", "actor_role", "groups", "roots", "acl")
 
 
-def _data_class(manifest: dict) -> str:
-    """The class a request carries, from the deployment's declaration.
+def data_class_for(body: dict, manifest: dict) -> str:
+    """The class a request carries.
 
-    **An undeclared deployment is the most restrictive class, not a middle one.** A forgotten field must
-    not be the reason content left the building. Read from `access.data_class`, and the first version read
-    `content.default`, which is a content MODE (`hash`, `redacted`, `full`) and therefore refused every
-    request on the deployment.
+    **The request may state it, and that is not the caller choosing its own permission.** The class a piece
+    of content IS belongs to the client's declaration rather than to the caller, so it is stored on the job
+    when the work is created and read back here. What the caller cannot do is name a class the deployment
+    has not declared, because the gate compares whatever comes out of this against the manifest's own
+    allowlist: stating a class only ever moves a request toward being refused.
+
+    **Why the job carries its class rather than reading today's manifest.** A job outlives the request that
+    started it, and the manifest can change underneath it. Re-reading the manifest at execution time meant a
+    job created while a class was permitted would run under a manifest that forbids it — which is the defect
+    the boundary probe found on the job path, in the exact shape C3 shipped twice. The class is fixed when
+    the work is created and the gate is consulted against it every time the work runs.
     """
+    stated = (body or {}).get("data_class")
+    if isinstance(stated, str) and stated in ENGINE_CLASSES:
+        return stated
     return ((manifest or {}).get("access") or {}).get("data_class") or "regulated"
+
+
+# The classes the deployment's own vocabulary uses. A stated class outside this set is ignored rather than
+# passed through, so a typo cannot produce a class the gate has never been told about.
+ENGINE_CLASSES = frozenset({"public", "internal", "confidential", "regulated"})
+
+
+def _data_class(manifest: dict) -> str:
+    """The class a request carries when nothing states one. Kept for callers that have only a manifest."""
+    return data_class_for({}, manifest)
 
 
 def prepare(*, token: str, question: str, body: dict, ctx: Context, resolve, model_for, role_lane,
@@ -149,7 +169,7 @@ def prepare(*, token: str, question: str, body: dict, ctx: Context, resolve, mod
                             "kind": "no_source", "role": session.role,
                             "roots": sorted(permit.roots)}, "no_source")
 
-    data_class = _data_class(ctx.manifest)
+    data_class = data_class_for(body, ctx.manifest)
     decision = routing.route(
         ctx.manifest or {}, data_class=data_class, task=body.get("task") or "",
         user_wants_stronger=bool(body.get("stronger")), model_name=model,

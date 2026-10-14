@@ -21,13 +21,15 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 # **The file name is checked before the container starts.** The first version of this mapping said
-# `jobs_probe` where the file is `job_probe`, and the run failed inside the container with "can't open
-# file" — while the pipeline's last command exited 0, so the runner reported success. A probe that cannot
-# be found is not a probe, and a runner that calls that a pass is worse than one that crashes.
+# `jobs_probe` where the file is `job_probe`, and the second said `gate_check_probe` where it is
+# `gate_check`. Both runs failed inside the container with "can't open file" while the pipeline's last
+# command exited 0, so the runner reported success. A probe that cannot be found is not a probe, and a
+# runner that calls that a pass is worse than one that crashes.
 PROBE=gate_check
 [ "${1:-}" = "--jobs" ] && PROBE=job
 PROBE_FILE="tests/fixtures/${PROBE}_probe.py"
-[ -f "$PROBE_FILE" ] || { echo "FAILED: $PROBE_FILE does not exist, so nothing would be tested"; exit 1; }
+[ -f "$PROBE_FILE" ] || PROBE_FILE="tests/fixtures/${PROBE}.py"
+[ -f "$PROBE_FILE" ] || { echo "FAILED: no probe for '${1:-}' exists, so nothing would be tested"; exit 1; }
 
 CLASS="${GATE_CHECK_CLASS:-regulated}"
 NAME=gate-check-tmp-api
