@@ -148,12 +148,37 @@ def main() -> int:
 
     registry = access_module.load(os.environ.get("ACCESS_REGISTRY", str(W / "rendered" / "access.json")))
     store = session_module.PostgresStore(database_url())
-    role = next((n for n, r in sorted(registry.roles.items()) if not r), sorted(registry.roles)[0])
-    session = session_module.mint(registry, store, "probe-staff@officeinference.com", role, dev=True,
-                                  deployment_id="job-probe")
-    # A second session, so OTHER can ask for the first one's job without being it.
-    other = session_module.mint(registry, store, "probe-other@officeinference.com", role, dev=True,
-                                deployment_id="job-probe")
+
+    # **The subjects come from the deployment's own registry, not from a literal here.** The first version
+    # of this probe invented an address and the registry refused it: "A subject is refused rather than
+    # defaulted, because a default here invents an identity." That refusal is the control working, and a
+    # probe that writes its own identity into a deployment's registry is testing something else.
+    users = sorted(getattr(registry, "users", {}) or {})
+    if len(users) < 2:
+        print(f"FAILED: OTHER needs two declared subjects and this deployment declares {users}",
+              file=sys.stderr)
+        return 2
+
+    def mint_for(subject: str):
+        """A session for a declared subject, under the first role the registry will grant it.
+
+        The role is discovered rather than assumed, because the mapping from a subject's groups to a role is
+        the deployment's business and hard-coding one here would make the probe fail on a deployment whose
+        permissions are arranged differently.
+        """
+        last = None
+        for candidate in sorted(registry.roles or {"viewer": None}):
+            try:
+                return session_module.mint(registry, store, subject, candidate, dev=True,
+                                           deployment_id="job-probe")
+            except access_module.AccessError as exc:
+                last = exc
+        print(f"FAILED: no role in {sorted(registry.roles)} admits {subject}: {last}", file=sys.stderr)
+        raise SystemExit(2)
+
+    session = mint_for(users[0])
+    # A second subject, so OTHER can ask for the first one's job without being it.
+    other = mint_for(users[1])
 
     # ---- TASKS: what this deployment offers, read from the deployment rather than from the app
     status, offered = call("/tasks", method="GET", session_id=session.session_id)
