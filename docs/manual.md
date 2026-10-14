@@ -355,6 +355,7 @@ ports with no host binding, which is how you confirm from the outside that nothi
 
 ```
 NAME         IMAGE                                        COMMAND                  SERVICE      CREATED          STATUS                    PORTS
+api          sha256:4b7c1e9a0d3f8c2b6e5a7d91c3f0b8a2e6d4c1f9a0b7e3d5c8a1f4b6e9d2c7  "uvicorn app:app --host 0.0.0.0 --port 8088"   api          3 minutes ago    Up 3 minutes              
 embeddings   ghcr.io/huggingface/text-embeddings-inf…     "text-embeddings-rou…"   embeddings   20 hours ago     Up 20 hours (healthy)     
 ingestion    sha256:cc07ecc167dc80290ddc66ed29fde6c7…     "/bin/sh -c 'while t…"   ingestion    25 minutes ago   Up 25 minutes (healthy)   
 litellm      ghcr.io/berriai/litellm@sha256:3d88bd75…     "docker/prod_entrypo…"   litellm      2 days ago       Up 2 days                 
