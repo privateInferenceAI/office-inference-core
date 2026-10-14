@@ -112,4 +112,66 @@ is a false claim in a user-facing message and it deserves a proper fix rather th
 
 **Round 2 will re-test from the manual**, including everything fixed here.
 
+---
+
+## C3 panel, round 2 — 2026-10-14
+
+**Verdict: NO from all three, again.** The head verdict did not move, and the reason is the most useful thing
+this panel produced: **the same class of defect was on more pages than round 1 found, and one of them was in the
+service rather than the page.**
+
+### What round 2 found that round 1 had not
+
+**The data boundary guarded only escalations.** `routing.route()` consulted the gate when a trigger wanted the
+frontier lane, and returned the default lane untouched when none fired. On a deployment whose ordinary model is
+remote, a request whose class the manifest did not permit **went to the provider anyway**, with
+`escalated: false` and no notice. The page promised a boundary and the code drew one around a door nobody had to
+use. Fixed: the gate is consulted on every request that would reach a remote model, and a refused class returns
+`lane: none`.
+
+**A refusal that was not one.** `lane: 'none'` fell through the model guard, because the guard only handled the
+`local` case, so the remote model answered while the notice claimed no answer could be produced. That is the
+worst combination available: a refusal that is not a refusal, with a message saying it was. Found by reading the
+guard and asking what the other value did.
+
+**The model-permission drill proved nothing, and that was my defect from hours earlier.** `keys --probe
+--as-model reader` minted the assertion for *the model being requested*, so the gateway resolved that role's
+team and permitted it: 200 for every combination. The drill is the one documented way to prove the model ACL and
+it had been inverted. Fixed: the assertion names the role, and the drill now returns the 403 the page always
+documented.
+
+**The emergency brake could not run at all.** `keys --set-budget` needs a database, the keys service had none,
+and the tool's own advice pointed at `rendered/env`, where the operator already was. Fixed with a `DATABASE_URL`
+in the service.
+
+### The documentation class, which was live on five pages
+
+| Finding | Fix |
+|---|---|
+| The `ps` sample showed six services and no API, three paragraphs under a caption saying seven with the API | the sample shows seven |
+| Section 25 said the API was built in a table and did not exist twelve lines later | the prose says it exists and names what is missing: a user interface |
+| Three more pages said C3 would add the API | corrected |
+| Section 19 said adding an access root needs a code change; section 13d said it is a manifest setting | **13d was right** and 19 was wrong: the permit's roots are the permission and the code map is only a fallback for a caller with no permit |
+| Section 16 named the wrong three scripts as answering `--help`, proved backwards by running it | the right three are named, with the failures shown |
+| A migration count of fifteen, with a paragraph insisting sixteen was never the count | sixteen, and the paragraph now says why a count in a manual goes stale |
+| 13g's field table called `model` the model that answered | it is the role; `resolved_model` is the model, and 13g now says so |
+| The record's model column, the contents list, the endpoint heading, the chapter list | corrected |
+| `trigger_rules.py` died with `ModuleNotFoundError` when run as the page implies | it resolves its own paths and states what it needs |
+
+### One thing deliberately not fixed, and disclosed in the page instead
+
+**The request-side redaction module is not wired into the API.** `services/egress/egress.py` is imported by
+nothing but its own tests, and `_generate()` posts the raw question and raw passages. The stream-side redaction
+is in the API and runs on every frame; the request-side one is a module the acceptance probe exercises directly.
+**That is now stated in section 13e rather than implied away**, because a boundary that covers less than a reader
+assumes is worse than one whose shape they know. Wiring it in is real work and belongs to the next phase.
+
+### What round 2 confirmed as already correct
+
+`api_probe` 7 of 7, `stream_probe` 4 of 4 alone, `interface_probe` 7 of 7, `access_probe` 4 of 4, `audit`
+migrate, list and verify, the `audit_feed` view, `keys --provision-teams`, `session mint`, the `/ask` field set,
+the thresholds 1.5/5/30 and 20/30/180, `num_retries: 0`, and the holdback with its boundary walk-back.
+
+**Round 3 re-tests from the manual**, including everything above.
+
 
