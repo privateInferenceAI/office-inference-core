@@ -601,6 +601,36 @@ async def ask_stream(request: Request):
         frontier_model=frontier_model_for(role),
     )
 
+    # **The streaming path needs the same guard as the JSON one, and it did not have it.** The first
+    # version computed the routing decision here and then never read it again except to pass the lane
+    # into a frame, so a data class the manifest forbids was refused with a 403 on `/ask` and answered
+    # by the remote model on `/ask/stream` — with an audit row that said `egress_allowed: false` while
+    # the content left the building. A boundary that holds on one endpoint and not the other is not a
+    # boundary, and this is the same shape as the redaction defect the same review found: a control
+    # implemented on the path somebody was looking at.
+    #
+    # Found by the C3 panel's fidelity checker, who ran a second API container against a manifest copy
+    # with a forbidden class and read both answers.
+    #
+    # Refused before the response starts, so this is a status code rather than a frame: nothing has been
+    # sent yet, which is the one moment a stream can still say no.
+    stream_data_class = ((STATE.get("manifest") or {}).get("access") or {}).get("data_class") or "regulated"
+    if stream_decision.lane == "none" or (
+            stream_decision.lane == "local" and not local_lane_available()):
+        audit("access", session.subject, session.role, "denied",
+              {"stage": "routing", "reason": stream_decision.reason,
+               "lane": stream_decision.lane, "data_class": stream_data_class,
+               "escalation_requested": stream_decision.escalation_requested,
+               "session_id": session.session_id},
+              data_class=stream_data_class, egress_allowed=False)
+        return JSONResponse(
+            {"error": "Permission denied on this resource (or it might not exist). "
+                      "This request needs a lane this deployment does not permit and has no "
+                      "local model to answer with.",
+             "kind": "no_permitted_lane", "reason": stream_decision.reason,
+             "notice": stream_decision.notice},
+            status_code=403)
+
     try:
         result = retriever.search(STATE["services"], question, permit.role, limit=PASSAGES, permit=permit)
     except Exception as exc:  # noqa: BLE001
