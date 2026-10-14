@@ -531,7 +531,7 @@ async def create_job(request: Request):
     # hole: this is an early refusal, not the only one.
     api_role = os.environ.get("OI_DEFAULT_API_ROLE", "viewer")
     try:
-        pass and answer_module.check_boundary(
+        answer_module.check_boundary(
             manifest=STATE.get("manifest") or {}, data_class=data_class, task=task,
             model_name=model_for(api_role), default_lane=role_lane(api_role),
             frontier_model=frontier_model_for(api_role), session=session, audit=audit,

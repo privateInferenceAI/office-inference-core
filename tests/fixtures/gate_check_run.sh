@@ -65,10 +65,23 @@ docker run -d --name "$NAME" --network ai-net \
 
 for _ in $(seq 1 30); do
   sleep 2
-  seen=$(docker exec "$NAME" python -c "import json,pathlib;print(json.loads(pathlib.Path('/app/rendered/$(basename "$COPY")').read_text())['access']['data_class'])" 2>/dev/null || true)
-  [ "$seen" = "$CLASS" ] && { echo "second container loaded: data_class=$seen"; break; }
+  # **The confirmation asks the service, not the file.** The earlier version read the class out of the copy
+  # it had just written, which proves the copy is right and says nothing about the container: the app loads
+  # OI_MANIFEST at startup, and a diagnosis run showed a container reporting `internal` from its default
+  # manifest while this loop was satisfied with `regulated` from the file.
+  set +e
+  confirmation=$(docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
+    -v "$PWD:/w" -w /w --env-file rendered/env -e "DATABASE_URL=$DB_URL" \
+    --entrypoint python oi-core/session:local /w/tests/fixtures/confirm_class.py "http://$NAME:8088" "$CLASS" 2>&1)
+  confirmed=$?
+  set -e
+  case "$confirmed" in
+    0) echo "$confirmation"; break ;;
+    1) echo "FAILED: $confirmation"; exit 1 ;;
+    *) : ;;
+  esac
 done
-[ "${seen:-}" = "$CLASS" ] || { echo "FAILED: the second container never confirmed it loaded $CLASS"; exit 1; }
+[ "${confirmed:-}" = "0" ] || { echo "FAILED: the second container never confirmed it enforces $CLASS"; exit 1; }
 
 # The probe's own exit code is the runner's. **Without capturing it, a probe that failed inside the
 # container still left this script exiting 0**, because the last command in a pipeline decides the status
