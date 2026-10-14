@@ -3496,6 +3496,35 @@ this document.
       -v /opt/oi-core:/w -w /w --env-file rendered/env \
       --entrypoint python oi-core/session:local /w/tests/fixtures/degrade_probe.py
 
+**The result, 2026-10-14, on the live deployment.** A terminal provider failure was forced by putting the
+role's spend over its ceiling, and the answer that came back was the degraded one:
+
+    status 200
+    kind: degraded | reason: budget | attempts: 1 | threshold: None
+    passages: 6
+    detail: this role's budget ceiling has been reached, so no model call was made
+
+**And the chain recorded it**, from the row rather than from the response:
+
+     event_type | outcome | reason | threshold | attempts | partial
+    ------------+---------+--------+-----------+----------+---------
+     model_call | denied  | budget |           | 1        | false
+
+**Three things about that are worth naming.** The answer is a 200 with cited passages, not an error: retrieval
+had already done the expensive part and the client is entitled to their own material. `attempts` is 1, because a
+budget refusal is terminal and waiting would spend the budget the degraded answer needed. And `threshold` is
+empty rather than a word, because no deadline tripped: a budget refusal is not a timeout, and blurring the two
+would waste the three thresholds this step exists to distinguish.
+
+**A defect the first run of this test found.** The threshold field was carrying the catch-all word `surrender`
+for any failure, which reads as though a deadline had tripped. It carries None now, and the reason field says
+what actually happened. Found by reading the row rather than the response, which is the habit this project keeps
+having to relearn.
+
+**The real throttle has not been provoked yet.** It is the next thing this step owes: a request whose input plus
+`max_tokens` exceeds the per-model tokens-per-minute quota produces a genuine `ThrottlingException` from
+Bedrock, which is the requirement's own words rather than a stand-in. The budget path proved above exercises
+the same code, and it is not the same evidence.
 #### What proves it
 
 | # | Right | Act | What is asserted |
