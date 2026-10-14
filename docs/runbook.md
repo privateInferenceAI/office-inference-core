@@ -3036,11 +3036,50 @@ session asking for something it does not hold. That path is what this phase is f
     # The four rights, and the wrong path beside each.
     docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
       -v /opt/oi-core:/w -w /w --env-file rendered/env \
-      --entrypoint python oi-core/ingestion:local /w/tests/fixtures/access_probe.py
+      -e AUDIT_TOOL=/w/services/audit/audit.py \
+      --entrypoint python oi-core/eval:local /w/tests/fixtures/access_probe.py
 
     # The refusal, read back out of the chain rather than out of the probe's own report.
     oi --profile tools run --rm audit list --type access | head
 
+**The result, 2026-10-14, on the live stack.**
+
+    THE PERMISSION MODEL THIS DEPLOYMENT IS ENFORCING
+      registry   /w/rendered/access.json
+      declared   yes
+      roles   1: viewer=[]
+      groups  2: exec=['company', 'executive'], staff=['company']
+      users   2: probe-exec@officeinference.com[exec], probe-staff@officeinference.com[staff]
+
+    ok   ACCESS    as 'viewer' over roots ['company'], the executive question returned acls=['company']
+    ok   SCOPED    10 chunk(s) are labelled executive; the inside session reached 4 document(s), 2 of them
+                    beyond the other session's reach, and the outside answer overlapped those by 0
+    skip FORGED    every declared role stays inside the groups that grant it, so no role exists for this
+                    subject to claim beyond its grant
+    ok   REFUSED   a request supplying role='executive' while holding 'viewer' was refused
+    ok   RECORDED  the chain holds 1 refusal(s) for this session: 2026-10-14 01:41:53 access/denied
+                    actor_role='executive' payload.session_role='viewer'
+
+    PASSED: 4 right(s) held against the live stack
+
+**The refused role is stored as the claimed role.** `actor_role='executive'` is what the request asked for,
+and `payload.session_role='viewer'` is what it held. A reviewer searching the chain by role finds the attempt,
+and a refusal is told apart from a legitimate denial structurally rather than by reading prose.
+
+**FORGED is skipped, and that is the rule working rather than a gap.** A subject's role may not reach past
+what its groups grant, so in a registry where every declared role stays inside its groups there is no role to
+forge. The rule arrived during this step: without it a role was a way around the groups, and a deployment
+that declared a role carrying `executive` would have handed that root to every subject who claimed it.
+
+**Four defects this step found by running rather than reading**, all in the probe and one in the boundary:
+
+- The declared root `finance` matched no document, so the crossing question crossed nothing and the right
+  passed on an index that could not have failed. The roots are now the two the corpus has.
+- The role could exceed the groups. Fixed in `access.py`, with five tests.
+- `DATABASE_URL` was assembled by compose for a service and absent for a bare `docker run`, so the refusal
+  writer exited without writing while every other part of the run looked healthy.
+- `AUDIT_TOOL` was captured at import time, so a caller that set it afterwards recorded through a missing
+  path.
 **What proves it.** The probe prints one line per right and its wrong path beside it, and ends with a count.
 `access_probe.py` exits non-zero on any failure, so the operator does not have to read the ledger to know.
 
