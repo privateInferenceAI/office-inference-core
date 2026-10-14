@@ -1,0 +1,805 @@
+{
+  "components": {
+    "schemas": {
+      "Answer": {
+        "description": "The answer to a question, with what it was built from and what it cost.\n\n**`kind` is declared on both this and `Degraded`, and that is a decision rather than symmetry.** The\ntwo share the 200 status and look alike otherwise, so a client has to be able to tell them apart\nwithout guessing from which fields are present. The service sets `kind` on a degraded payload and\ndoes not set it here, so the default is what a runtime payload will not carry: a client should\nbranch on `kind == \"degraded\"` being absent-or-not, and a generated client built from this schema\ngets a discriminator it can switch on either way.",
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/Citation"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
+          "denied": {
+            "description": "whether passages outside the role matched",
+            "title": "Denied",
+            "type": "boolean"
+          },
+          "disclosure": {
+            "description": "what this deployment's policy tells a denied user",
+            "title": "Disclosure",
+            "type": "string"
+          },
+          "escalated": {
+            "title": "Escalated",
+            "type": "boolean"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "const": "answer",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "absent on a real answer; `degraded` on a degradation",
+            "title": "Kind"
+          },
+          "lane": {
+            "enum": [
+              "frontier",
+              "local",
+              "none"
+            ],
+            "title": "Lane",
+            "type": "string"
+          },
+          "model": {
+            "description": "the ROLE, as the manifest names it, not the model that ran",
+            "title": "Model",
+            "type": "string"
+          },
+          "notice": {
+            "description": "what the user is told about routing, empty when there is nothing to say",
+            "title": "Notice",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "redactions": {
+            "$ref": "#/components/schemas/Redactions"
+          },
+          "resolved_model": {
+            "description": "the provider model behind that role. A client reading only `model` cannot see a manifest swap take effect",
+            "title": "Resolved Model",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "roots": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Roots",
+            "type": "array"
+          },
+          "supported": {
+            "description": "sentences a retrieved passage backs",
+            "items": {
+              "type": "string"
+            },
+            "title": "Supported",
+            "type": "array"
+          },
+          "trigger": {
+            "description": "which trigger moved it, by name, or empty when none fired",
+            "title": "Trigger",
+            "type": "string"
+          },
+          "unsupported": {
+            "description": "sentences it does not, with the reason",
+            "items": {
+              "$ref": "#/components/schemas/UnsupportedClaim"
+            },
+            "title": "Unsupported",
+            "type": "array"
+          }
+        },
+        "required": [
+          "answer",
+          "model",
+          "resolved_model",
+          "role",
+          "roots",
+          "citations",
+          "supported",
+          "unsupported",
+          "redactions",
+          "notice",
+          "lane",
+          "escalated",
+          "trigger",
+          "reason",
+          "denied",
+          "disclosure"
+        ],
+        "title": "Answer",
+        "type": "object"
+      },
+      "BudgetReport": {
+        "description": "What the deadline did, recorded on every degraded answer.\n\n**`threshold` is null when no threshold tripped**, and that is the honest value: a budget refusal is\nnot a timeout, and recording one as a threshold would blur the three the design distinguishes.",
+        "properties": {
+          "elapsed_ms": {
+            "title": "Elapsed Ms",
+            "type": "integer"
+          },
+          "first_token_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Token Ms"
+          },
+          "first_token_seconds": {
+            "title": "First Token Seconds",
+            "type": "number"
+          },
+          "remaining_ms": {
+            "title": "Remaining Ms",
+            "type": "integer"
+          },
+          "reserve_seconds": {
+            "title": "Reserve Seconds",
+            "type": "number"
+          },
+          "stall_seconds": {
+            "title": "Stall Seconds",
+            "type": "number"
+          },
+          "taxonomy_version": {
+            "title": "Taxonomy Version",
+            "type": "string"
+          },
+          "total_seconds": {
+            "title": "Total Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "elapsed_ms",
+          "remaining_ms",
+          "first_token_seconds",
+          "stall_seconds",
+          "total_seconds",
+          "reserve_seconds",
+          "taxonomy_version"
+        ],
+        "title": "BudgetReport",
+        "type": "object"
+      },
+      "Citation": {
+        "description": "One passage the answer could cite. `index` is what the `[n]` markers in the answer refer to.",
+        "properties": {
+          "acl": {
+            "description": "the access label the passage carries; the session's roots must include it",
+            "title": "Acl",
+            "type": "string"
+          },
+          "doc_id": {
+            "description": "the document, relative to the deployment's documents root",
+            "title": "Doc Id",
+            "type": "string"
+          },
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "page_end": {
+            "title": "Page End",
+            "type": "integer"
+          },
+          "page_start": {
+            "title": "Page Start",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "index",
+          "doc_id",
+          "acl",
+          "page_start",
+          "page_end"
+        ],
+        "title": "Citation",
+        "type": "object"
+      },
+      "Degraded": {
+        "description": "The answer when the model will not answer, at HTTP 200.\n\n**`kind` is the field a client must branch on.** An answer and a degradation look alike otherwise,\nand a client that renders one as the other shows passages as though the model had written them.\n`notice` is absent here and deliberately: the manual records that a degraded payload carries no\nnotice, which is why the interface probe reads a correct degradation as a silent downgrade.",
+        "properties": {
+          "attempts": {
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/BudgetReport"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "kind": {
+            "const": "degraded",
+            "default": "degraded",
+            "title": "Kind",
+            "type": "string"
+          },
+          "lane": {
+            "enum": [
+              "frontier",
+              "local",
+              "none"
+            ],
+            "title": "Lane",
+            "type": "string"
+          },
+          "partial_output": {
+            "title": "Partial Output",
+            "type": "boolean"
+          },
+          "passages": {
+            "items": {
+              "$ref": "#/components/schemas/Passage"
+            },
+            "title": "Passages",
+            "type": "array"
+          },
+          "reason": {
+            "description": "throttled, timeout, budget, unclassified, and the like",
+            "title": "Reason",
+            "type": "string"
+          },
+          "threshold": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "which of the three thresholds tripped: first_token, stall, or total",
+            "title": "Threshold"
+          }
+        },
+        "required": [
+          "reason",
+          "lane",
+          "detail",
+          "passages",
+          "attempts",
+          "partial_output",
+          "budget"
+        ],
+        "title": "Degraded",
+        "type": "object"
+      },
+      "Health": {
+        "description": "Liveness, and what the process actually loaded.\n\n`deployment_id` is how the app knows which deployment answered, which is not decoration on a build\nthat ships more than once. `status` is `loading` until the registry is read, and a client should say\nso rather than treat it as an error.",
+        "properties": {
+          "default_model_role": {
+            "title": "Default Model Role",
+            "type": "string"
+          },
+          "deployment_id": {
+            "title": "Deployment Id",
+            "type": "string"
+          },
+          "registry_declared": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Registry Declared"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "loading"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "deployment_id",
+          "default_model_role"
+        ],
+        "title": "Health",
+        "type": "object"
+      },
+      "Passage": {
+        "description": "A retrieved passage in a degraded answer, with an excerpt so it can be read without another call.",
+        "properties": {
+          "acl": {
+            "title": "Acl",
+            "type": "string"
+          },
+          "doc_id": {
+            "title": "Doc Id",
+            "type": "string"
+          },
+          "excerpt": {
+            "title": "Excerpt",
+            "type": "string"
+          },
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "page_end": {
+            "title": "Page End",
+            "type": "integer"
+          },
+          "page_start": {
+            "title": "Page Start",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "index",
+          "doc_id",
+          "acl",
+          "page_start",
+          "page_end",
+          "excerpt"
+        ],
+        "title": "Passage",
+        "type": "object"
+      },
+      "Redactions": {
+        "additionalProperties": true,
+        "description": "Kinds and counts of what redaction removed, from the answer and from the question.\n\nA free-form object rather than fixed fields, because the pattern set is a list in\n`services/egress/redaction.py` that grows. A client should render whatever keys it is given.",
+        "properties": {},
+        "title": "Redactions",
+        "type": "object"
+      },
+      "Refusal": {
+        "description": "A refusal. `kind` is the machine-readable reason; the human wording is in `error`.\n\n**Both are always present**, because the app has to branch on the kind and the person has to read a\nsentence. The 403 wording is AIP-211's position: a permission refusal says the permission was denied\nor the resource might not exist, which is why it does not simply say \"you may not read this\".",
+        "properties": {
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "no_session",
+              "refused_authority_claim",
+              "no_permitted_lane",
+              "retrieval_failed"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error",
+          "kind"
+        ],
+        "title": "Refusal",
+        "type": "object"
+      },
+      "StreamDegraded": {
+        "description": "The model could not answer at all. A client that branches only on the events above renders this\nas nothing, which reads to a user as an empty answer.",
+        "properties": {
+          "attempts": {
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/BudgetReport"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "kind": {
+            "const": "degraded",
+            "default": "degraded",
+            "title": "Kind",
+            "type": "string"
+          },
+          "lane": {
+            "title": "Lane",
+            "type": "string"
+          },
+          "partial_output": {
+            "title": "Partial Output",
+            "type": "boolean"
+          },
+          "passages": {
+            "items": {
+              "$ref": "#/components/schemas/Passage"
+            },
+            "title": "Passages",
+            "type": "array"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "threshold": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Threshold"
+          }
+        },
+        "required": [
+          "reason",
+          "lane",
+          "detail",
+          "passages",
+          "attempts",
+          "partial_output",
+          "budget"
+        ],
+        "title": "StreamDegraded",
+        "type": "object"
+      },
+      "StreamDelta": {
+        "description": "A piece of the answer, **already redacted**. The redaction happens before the frame is emitted.",
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "StreamDelta",
+        "type": "object"
+      },
+      "StreamDone": {
+        "description": "The last event. `ttft_ms` is the caller's wait with retrieval included; `model_first_ms` is the\nmodel's own share. The two were once conflated.",
+        "properties": {
+          "deltas": {
+            "title": "Deltas",
+            "type": "integer"
+          },
+          "model_first_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model First Ms"
+          },
+          "redactions": {
+            "$ref": "#/components/schemas/Redactions"
+          },
+          "retrieval_ms": {
+            "title": "Retrieval Ms",
+            "type": "integer"
+          },
+          "total_ms": {
+            "title": "Total Ms",
+            "type": "integer"
+          },
+          "ttft_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ttft Ms"
+          }
+        },
+        "required": [
+          "deltas",
+          "redactions",
+          "retrieval_ms",
+          "total_ms"
+        ],
+        "title": "StreamDone",
+        "type": "object"
+      },
+      "StreamError": {
+        "description": "Terminal, because the status code is already spent by the time one of these can be sent.\n\n**`partial_output` is optional because the frames are not uniform.** A timeout reports whether text\nhad already reached the client; a mid-stream failure reports only its kind. Declaring it as always\npresent would have been a contract the service does not honour, which is the class of mistake this\nwhole file exists to stop.",
+        "properties": {
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "stream_timeout",
+              "stream_failed",
+              "redaction_failed"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "partial_output": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Partial Output"
+          },
+          "threshold": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Threshold"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "StreamError",
+        "type": "object"
+      },
+      "StreamStart": {
+        "description": "Before the model is called. Carries the citations, so a client can show sources immediately.",
+        "properties": {
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/Citation"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "roots": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Roots",
+            "type": "array"
+          }
+        },
+        "required": [
+          "model",
+          "role",
+          "roots",
+          "citations"
+        ],
+        "title": "StreamStart",
+        "type": "object"
+      },
+      "UnsupportedClaim": {
+        "description": "A sentence no retrieved passage backs. Marked rather than dropped, so a client can show it.",
+        "properties": {
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "reason"
+        ],
+        "title": "UnsupportedClaim",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "Office Inference assistant API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/ask": {
+      "post": {
+        "description": "A question in, a cited answer out.",
+        "operationId": "ask_ask_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/Answer"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Degraded"
+                    }
+                  ],
+                  "title": "Response 200 Ask Ask Post"
+                }
+              }
+            },
+            "description": "A cited answer, or a degraded one at the same status when the model would not answer. **`kind` is what tells them apart**, and a client that renders a degradation as an answer shows retrieved passages as though a model wrote them."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "the body was not JSON, or no question was asked"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "no session, an expired one, or a revoked one. The three are one answer on purpose."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "the request supplied its own authority, or the data boundary permits no lane that can answer. The refusal is written to the chain before this returns."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "retrieval failed, or the model could not be reached after the budget was spent"
+          }
+        },
+        "summary": "Ask"
+      }
+    },
+    "/ask/stream": {
+      "post": {
+        "description": "The same question, answered in frames.\n\n**Redaction happens here, and it is why this endpoint is not a thin wrapper.** A guardrail that runs after\ndelivery is audit-only: the bytes are already in the browser. So the response is redacted on the way out\nthrough a holdback buffer sized from the pattern set, and the probe asserts over every frame the client\nreceived rather than over the assembled answer.\n\nFour things are deliberate and each is invisible to a load test: the heartbeat that keeps an idle connection\nalive through prompt processing, the `Incremental` and `X-Accel-Buffering` headers that stop a proxy\nbuffering the stream, the terminal error event that a spent status code makes necessary, and the token count\ntaken from our own deltas rather than from the gateway, which reports usage in a final chunk an early\ndisconnect never receives.",
+        "operationId": "ask_stream_ask_stream_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/StreamStart"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StreamDelta"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StreamError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StreamDegraded"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StreamDone"
+                    }
+                  ],
+                  "title": "Response 200 Ask Stream Ask Stream Post"
+                }
+              },
+              "text/event-stream": {}
+            },
+            "description": "Server-Sent Events. `event:` is one of `start`, `delta`, `error`, `degraded`, `done`, and `data:` is a JSON object matching the corresponding model here. **A client that branches only on `error` and `delta` renders the `degraded` event as an empty answer**, which is why it is in this list."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "the body was not JSON, or no question was asked"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "no session, an expired one, or a revoked one"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "**A refusal here is a JSON 403 before the first event, not an SSE error event.** A client that only handles stream events never sees it."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "retrieval failed before the stream began"
+          }
+        },
+        "summary": "Ask Stream"
+      }
+    },
+    "/health": {
+      "get": {
+        "description": "Liveness, and what this process actually loaded.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            },
+            "description": "Liveness, and what the process loaded. `status` is `loading` until the registry is read, which a client should say rather than treat as a fault."
+          }
+        },
+        "summary": "Health"
+      }
+    }
+  }
+}

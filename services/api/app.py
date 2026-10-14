@@ -61,6 +61,14 @@ import budget as budget_module  # noqa: E402
 import routing  # noqa: E402
 import streaming  # noqa: E402
 
+# **What a client is promised, declared rather than described.** These are attached with
+# `responses={...}` so they reach `/openapi.json`, which is the artifact the client app is built from.
+# They are deliberately NOT `response_model`: that would re-validate and filter every payload on the way
+# out, making a second place where the wire format is decided, and the first place is the code that has
+# been tested against a live deployment. `tests/test_api_contract.py` fails when a declaration and the
+# code that produces the payload stop agreeing.
+import models as contract  # noqa: E402
+
 GATEWAY_URL = os.environ.get("OI_GATEWAY_URL", "http://litellm:4000")
 DEPLOYMENT_ID = os.environ.get("DEPLOYMENT_ID", "unknown")
 AUDIT_TOOL = os.environ.get("AUDIT_TOOL", "/app/audit.py")
@@ -213,7 +221,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Office Inference assistant API", lifespan=lifespan)
 
 
-@app.get("/health")
+@app.get("/health", responses={
+    200: {"model": contract.Health,
+          "description": "Liveness, and what the process loaded. `status` is `loading` until the "
+                         "registry is read, which a client should say rather than treat as a fault."},
+})
 async def health():
     """Liveness, and what this process actually loaded."""
     registry = STATE.get("registry")
@@ -230,7 +242,20 @@ def _resolve(request_token: str):
     return session_module.resolve_token(STATE["store"], request_token)
 
 
-@app.post("/ask")
+@app.post("/ask", responses={
+    200: {"model": contract.Answer | contract.Degraded,
+          "description": "A cited answer, or a degraded one at the same status when the model would not "
+                         "answer. **`kind` is what tells them apart**, and a client that renders a "
+                         "degradation as an answer shows retrieved passages as though a model wrote them."},
+    400: {"model": contract.Refusal, "description": "the body was not JSON, or no question was asked"},
+    401: {"model": contract.Refusal, "description": "no session, an expired one, or a revoked one. "
+                                                   "The three are one answer on purpose."},
+    403: {"model": contract.Refusal,
+          "description": "the request supplied its own authority, or the data boundary permits no lane "
+                         "that can answer. The refusal is written to the chain before this returns."},
+    502: {"model": contract.Refusal,
+          "description": "retrieval failed, or the model could not be reached after the budget was spent"},
+})
 async def ask(request: Request):
     """A question in, a cited answer out."""
     # **The arrival clock, taken before anything else happens.** The budget is anchored here so
@@ -557,7 +582,23 @@ def _backoff(attempt: int, retry_after: str | None) -> float:
             pass
     return min(2.0 ** attempt * 0.25, 2.0) * (0.5 + random.random())
 
-@app.post("/ask/stream")
+@app.post("/ask/stream", responses={
+    200: {
+        "model": contract.StreamStart | contract.StreamDelta | contract.StreamError
+                 | contract.StreamDegraded | contract.StreamDone,
+        "description": "Server-Sent Events. `event:` is one of `start`, `delta`, `error`, `degraded`, "
+                       "`done`, and `data:` is a JSON object matching the corresponding model here. "
+                       "**A client that branches only on `error` and `delta` renders the `degraded` event "
+                       "as an empty answer**, which is why it is in this list.",
+        "content": {"text/event-stream": {}},
+    },
+    400: {"model": contract.Refusal, "description": "the body was not JSON, or no question was asked"},
+    401: {"model": contract.Refusal, "description": "no session, an expired one, or a revoked one"},
+    403: {"model": contract.Refusal,
+          "description": "**A refusal here is a JSON 403 before the first event, not an SSE error "
+                         "event.** A client that only handles stream events never sees it."},
+    502: {"model": contract.Refusal, "description": "retrieval failed before the stream began"},
+})
 async def ask_stream(request: Request):
     """The same question, answered in frames.
 
