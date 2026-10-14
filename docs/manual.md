@@ -1571,8 +1571,26 @@ python3 scripts/validate_manifests.py
 python3 scripts/check_model_lifecycle.py
 python3 scripts/render_manifest.py --manifest manifests/dev-cloud.yaml
 oi restart litellm
+oi restart api
 oi run --rm keys --probe analyst
 ```
+
+**Both restarts, and the second one is the one people miss.** The renderer writes the config, and neither
+process re-reads it. Restart only the gateway and the model genuinely changes at the provider while the API goes
+on reporting the old one from the manifest it loaded at startup. That is the worst shape of failure: the record
+is right and the report is wrong, and the report is the quieter of the two.
+
+Confirm it from the provider's side rather than from ours, because the API's own answer is the thing that can be
+stale:
+
+```
+docker exec postgres psql -U oicore -d oicore -c \
+  'select model from "LiteLLM_SpendLogs" order by "startTime" desc limit 3'
+```
+
+That is the gateway saying what it asked the provider for. The API's answer carries both facts too: `model` is
+the role the manifest names and `resolved_model` is the provider model it points at, so a response whose two
+fields disagree with the spend log means a process was not restarted.
 
 Nothing in the application changes, because applications ask for the analyst role rather than for a
 model. Two rules apply. If the client's contract names a single region, an inference-profile-only
