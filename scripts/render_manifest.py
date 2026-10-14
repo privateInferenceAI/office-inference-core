@@ -255,6 +255,19 @@ def custom_auth_setting() -> dict:
         "enable_post_custom_auth_checks": True,
     }
 
+def fault_endpoint() -> str:
+    """Where to point every model, when a test run wants the gateway to fail on purpose.
+
+    **Unset in any real deployment, and that is the point.** A rendered config carrying this would send every
+    model call to a stub, so it is read from the environment rather than from the manifest: a manifest field
+    could be committed by accident, and the failure would be a deployment that answers from a test double
+    while looking healthy.
+
+    `api_base` is the field LiteLLM honours for this on a Bedrock model, verified by pointing one at a stub and
+    watching the request arrive there. Environment-variable endpoint overrides are not read by this version.
+    """
+    return os.environ.get("OI_FAULT_ENDPOINT", "").strip()
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", required=True)
@@ -396,6 +409,12 @@ def main() -> int:
 
     gateway = build_litellm_config(manifest, env)
     gateway["general_settings"] = custom_auth_setting()
+
+    endpoint = fault_endpoint()
+    if endpoint:
+        for entry in gateway.get("model_list", []):
+            entry.setdefault("litellm_params", {})["api_base"] = endpoint
+        print(f"  FAULT      every model points at {endpoint}. This config is for a test run only.")
     (out_dir / "litellm.yaml").write_text(
         "# Generated from the manifest by scripts/render_manifest.py. Do not edit by hand.\n"
         + yaml.safe_dump(gateway, sort_keys=False)
