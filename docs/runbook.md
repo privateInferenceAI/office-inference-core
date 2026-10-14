@@ -3378,6 +3378,179 @@ client received. A test that checked the assembled reply would pass on exactly t
   nothing logged. The event is there; look for it.
 - **Time to first token is much worse than the non-streaming path.** The holdback is too large for the pattern
   set, or the heartbeat interval is shorter than the model's first-token time.
+### 4.4 Bounded time, a retry that is safe, and an answer when the provider will not
+
+**Goal.** `INF-TIMEOUT-001`: *with the provider throttling, requests return a clear degraded answer within the
+timeout, and it is recorded.*
+
+**The numbers come from a measurement, not from a preference.** Nine streamed requests on this deployment gave
+the figures below, and the derivation is in `docs/design/c3-assistant-api-decisions.md` section 7f. **They
+describe the frontier lane**, which is what this deployment answers from: the office build runs a local
+llama.cpp server where prompt processing is compute-bound on CPU, and it will need its own measurement.
+
+| Threshold | Value | Where it comes from |
+|---|---|---|
+| time to first token | 1.5s | measured p50 260ms, p95 359ms, so four times the observed worst |
+| stall between chunks | 5s | nothing measured; a gap this long is a failure rather than a slow model |
+| total | 30s | **provisional.** The longest measured answer was 2.9s, and the shape of the tail is unknown |
+| delivery reserve | 1.2s | enough to build the degraded answer, stream it, and write the record |
+
+**The deadline is measured from the client's arrival, not from when the model starts**, which is a defect this
+step's measurement found rather than assumed: the first version reported time to first token from inside the
+stream generator, understating what a person waits by the whole of retrieval.
+
+**One boundary is not a number.** A stream that never starts and a stream that starts and then stalls are
+different failures, with different fixes and different words in the record. The stall threshold exists so the
+second one is not reported as the first.
+
+#### The rules, each of which is a decision
+
+**Retry only before the first token.** A streamed generation is not idempotent. A retry after output has begun
+is billed twice, and the client already holds text from a response that was abandoned. If the failure arrives
+after the first byte, the only honest move is a terminal error event.
+
+**Classify on the error type, never on the status.** On Bedrock a 429 covers both `ThrottlingException` (our
+quota, worth waiting for) and `ModelNotReadyException` (not ours to wait out). Anthropic returns a spend-cap 429
+with no `Retry-After` and documentation saying retrying fails until access resumes. Retrying on status alone
+spends the entire deadline on a request that cannot succeed.
+
+**Every wait comes out of one budget.** Three attempts with per-attempt timeouts is three times the wait. The
+deadline is wall-clock from arrival, and a retry only happens if what remains can hold it.
+
+**No circuit breaker, and the reason is concrete.** With one provider there is nothing to break away from, and
+an open breaker turns a five-second throttle into a sixty-second outage.
+
+**No cross-lane fallback.** Degradation may only move data toward a less exposed lane. A reliability fallback
+that sends a question from the local lane to the frontier lane is a data-class decision wearing a reliability
+costume, and a document that was never permitted to leave the building just left. A fallback that would
+increase exposure is refused and recorded as a refusal.
+
+#### The degraded answer
+
+**The retrieved passages, cited, with a typed reason.** Retrieval and generation are already separate halves, so
+this is honest and still delivers the client's own data. A "try again" message throws away work already done,
+and a cheaper model's answer changes quality silently under the same branding.
+
+    {
+      "kind": "degraded",
+      "reason": "throttled",
+      "detail": "the provider is throttling and the answer could not be generated within 30s",
+      "passages": [{"index": 1, "doc_id": "company/travel-policy.md", "page_start": 1,
+                     "excerpt": "The mileage rate is 0.67 per mile ..."}],
+      "attempts": 3,
+      "threshold": "total"
+    }
+
+**A deployment whose data class forbids the frontier lane meets this path routinely rather than in an
+emergency.** That is a client's declared choice, so the degraded answer has to read like a feature: it says
+what it is, gives the passages that answer the question, and does not pretend the answer is complete.
+
+#### The record, which is the half that makes it a control
+
+| Field | Why an examiner needs it |
+|---|---|
+| `lane` and `data_class` | makes the residency claim provable from the chain alone |
+| `requested_model`, `resolved_model` | a single model column conflates what was asked for with what ran |
+| `attempts` and each error type | a throttle and a hard failure are different events |
+| `threshold` that tripped | first token, stall or total: three different faults |
+| `deadline_remaining_ms` at surrender | how close the call came to finishing |
+| `partial_output` | whether the client already held text, which is the retry-safety fact |
+| `taxonomy_version` | the chain is append-only, so a classification needs its rule set |
+
+**Never recorded:** prompt or passage text, credentials, raw provider error strings, or anything derived from a
+role supplied in a request. Counts and identifiers only.
+
+#### Provoking a real throttle, which is not something you can wait for
+
+**There is no supported way to force a provider error through the gateway.** The three `mock_testing_*`
+flags were stripped from proxy requests in LiteLLM 1.85.0, and the one documented mock facility mocks success.
+
+**The honest method uses the provider's own admission arithmetic.** AWS deducts `input tokens + max_tokens`
+from the per-model tokens-per-minute quota when a request is admitted, and throttles when that exceeds it. So a
+request whose input plus `max_tokens` is larger than our quota produces a genuine `ThrottlingException`, on
+demand, deterministically, with no new component and no blast radius beyond that request. A retry with the same
+oversized `max_tokens` throttles again, which exercises sustained-throttle-to-degrade rather than
+retry-then-succeed.
+
+    # The real throttle, once per release, with the provider's own request id in the record.
+    OI_MAX_TOKENS=100000 oi restart api       # far above the per-model TPM quota
+    (ask a question)
+    oi restart api                            # back to the normal ceiling
+
+**For every commit, a stub rather than a product.** One small service that speaks the provider's error shapes,
+reached through `AWS_ENDPOINT_URL_BEDROCK_RUNTIME`, which AWS documents as highest precedence in endpoint
+resolution. It covers 429 with and without `Retry-After`, 503, 529, a malformed chunk and a mid-stream error.
+**It is a test and not evidence of a real throttle**, and the runbook will say which is which.
+
+**The local lane has no throttle and this step will not pretend otherwise.** llama.cpp does not meter anyone.
+When its slots are full it defers. Its only error is a 503 while the model loads. So local saturation is a
+deadline problem and local 503 is the hard-failure case, and manufacturing a 429 from it would put a fiction in
+this document.
+
+#### Run it
+
+    cd /opt/oi-core
+    alias oi='docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env'
+    oi build api && oi up -d api
+    docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
+      -v /opt/oi-core:/w -w /w --env-file rendered/env \
+      --entrypoint python oi-core/session:local /w/tests/fixtures/degrade_probe.py
+
+**The result, 2026-10-14, on the live deployment.** A terminal provider failure was forced by putting the
+role's spend over its ceiling, and the answer that came back was the degraded one:
+
+    status 200
+    kind: degraded | reason: budget | attempts: 1 | threshold: None
+    passages: 6
+    detail: this role's budget ceiling has been reached, so no model call was made
+
+**And the chain recorded it**, from the row rather than from the response:
+
+     event_type | outcome | reason | threshold | attempts | partial
+    ------------+---------+--------+-----------+----------+---------
+     model_call | denied  | budget |           | 1        | false
+
+**Three things about that are worth naming.** The answer is a 200 with cited passages, not an error: retrieval
+had already done the expensive part and the client is entitled to their own material. `attempts` is 1, because a
+budget refusal is terminal and waiting would spend the budget the degraded answer needed. And `threshold` is
+empty rather than a word, because no deadline tripped: a budget refusal is not a timeout, and blurring the two
+would waste the three thresholds this step exists to distinguish.
+
+**A defect the first run of this test found.** The threshold field was carrying the catch-all word `surrender`
+for any failure, which reads as though a deadline had tripped. It carries None now, and the reason field says
+what actually happened. Found by reading the row rather than the response, which is the habit this project keeps
+having to relearn.
+
+**The real throttle has not been provoked yet.** It is the next thing this step owes: a request whose input plus
+`max_tokens` exceeds the per-model tokens-per-minute quota produces a genuine `ThrottlingException` from
+Bedrock, which is the requirement's own words rather than a stand-in. The budget path proved above exercises
+the same code, and it is not the same evidence.
+#### What proves it
+
+| # | Right | Act | What is asserted |
+|---|---|---|---|
+| 1 | `THROTTLE` | provoke a real throttle by admission arithmetic | a `kind: degraded` answer with `reason: throttled`, inside the timeout, not a hang |
+| 2 | `RECORDED` | read the row the degraded answer wrote | attempts, error type, threshold and `partial_output` are all present |
+| 3 | `NO-RETRY-AFTER-TOKEN` | fail the provider after the first frame | a terminal error event, and **no second upstream call** |
+| 4 | `STALL` | a stub that sends two tokens then stops | the stall threshold fires rather than the total cap |
+| 5 | `NO-CROSS-LANE` | ask with a data class that forbids the frontier lane | refused and recorded as a refusal, not silently upgraded |
+| 6 | `INFRA` | a stub speaking 503 | the hard-failure path, distinguished from the throttle in the record |
+
+**Right 3 is the one that cannot be reasoned into existence.** It needs a provider that fails after the first
+token, which the stub exists for, and its assertion is about an absence: the upstream is called once.
+
+#### How it breaks
+
+- **A request hangs past the total cap.** The deadline is enforced around the upstream call rather than inside
+  the generator. A generator that never yields cannot be interrupted from outside.
+- **A degraded answer says nothing useful.** It is being built without the retrieved passages, which is the
+  whole reason it is honest.
+- **Every request degrades after a quota change.** The tokens-per-minute ceiling was hit by ordinary traffic,
+  not by the probe: check the per-model quota and `OI_MAX_TOKENS` before assuming a bug in the budget.
+- **The record says `throttled` for a hard failure.** The classification fell back to the status code. The
+  taxonomy is keyed on the error type for exactly this reason.
+- **A retry happens after the first token.** The partial output has already been emitted, so the client holds
+  text from an abandoned generation and the second call is billed. This is the failure the ordering exists for.
 ## Phase 5 — Client app  *(outline)*
 
 Ask, Do, Review, Activity, Settings, with citations as first-class objects and the lane indicator.
