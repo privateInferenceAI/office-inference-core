@@ -3529,9 +3529,9 @@ print(json.dumps(json.load(urllib.request.urlopen(req, timeout=180)), indent=2)[
 |---|---|---|
 | GET | `/health` | Liveness, and what the process loaded: the registry, the deployment, the default model role |
 | POST | `/ask` | `{"session": "<token>", "question": "..."}` in, a cited answer out |
+| POST | `/ask/stream` | the same request, answered as Server-Sent Events. See the streaming pages above |
 
-Two, and that is deliberate. Streaming arrives in `4.3` and the routing triggers in `4.5`; there is no third
-endpoint until a capability needs one.
+Three, and that is deliberate. There is no fourth endpoint until a capability needs one.
 
 ### What the answer carries, and why each field is there
 
@@ -3692,6 +3692,169 @@ audit-only control redacts.
   the frame shapes, and neither knows how the bytes travel.
 - **A stricter guarantee for names and addresses** needs a different mechanism, not a longer holdback: redact
   the request before the model call, or stop streaming for that class of question.
+
+## 13h. Routing, and what happens when the model will not answer
+
+**What it is for.** Two questions with one answer each: *which model may see this*, and *which model should*.
+They are decided in that order, and the order is the design.
+
+### The gate runs first, and the triggers choose inside it
+
+A request carries a data class, which the deployment declares in `access.data_class`. The gate compares that
+against `access.egress.frontier_classes`, and if the class is not permitted then no trigger is even consulted.
+
+**Why the order matters, and it is the sentence an auditor will ask for.** A trigger is a cost decision. The
+gate is a data-boundary decision. With the gate first, the answer to *why did this content reach an external
+model* is a sentence about a declared permission somebody approved. With the triggers first, the answer is a
+story about a heuristic firing, which is not a control anybody can review.
+
+**The boundary is one-way.** No trigger moves content toward a more exposed lane, ever. A user asking for the
+stronger model cannot reach the frontier lane from a deployment whose data class forbids it. Escalation only
+happens inside what the gate already permitted.
+
+**A deployment that declares nothing sends nothing.** An absent `access.data_class` is treated as the most
+restrictive class, so a forgotten field cannot put documents on a remote provider. That is deliberate: the
+failure is a request that answers locally or not at all, rather than one that leaves the building.
+
+### The two triggers, each a predicate over something already known
+
+| Trigger | How it is decided | What it is not |
+|---|---|---|
+| `agentic_task` | the `task` field is on a configured list | not a judgement about the question |
+| `user_requested_stronger` | the `stronger` field is true | not a permission to leave the permitted lane |
+
+A third was built and removed. It escalated when retrieval returned more than one distinct document, on the
+theory that several documents means an answer needs reconciling. It was measured against real retrieval and
+failed: a plain single-fact question returned **six** documents while a genuine multi-document question returned
+**four**, because this corpus is small and one fact is legitimately spread across several files. Every
+combination of a document count from 1 to 6 with a score floor from 0.00 to 0.60 either fired on the single-fact
+question or missed the synthesis one. `tests/fixtures/trigger_rules.py` prints that table.
+
+**An unusable predicate that fires on everything is worse than no trigger**, because it escalates cost silently
+and makes the audit row meaningless. Nothing here assesses difficulty, and that is a requirement rather than an
+omission: a question the cheap tier answers badly must not escalate on its own judgement.
+
+### What a request and an answer carry
+
+    POST /ask
+    {"session": "<token>", "question": "...", "task": "reconcile", "stronger": true}
+
+Both extra fields are optional. The answer adds:
+
+| Field | Why |
+|---|---|
+| `lane` | Where it was answered: `frontier`, `local`, or `none` when nothing may answer |
+| `escalated` | Whether a trigger moved it to a stronger model |
+| `trigger` | **Which** trigger, by name, or empty when none fired |
+| `reason` | The decision in a sentence, for the record and for a person reading it |
+| `notice` | What the user is told, empty when there is nothing to tell |
+
+### The user is always told
+
+| Situation | What the answer says |
+|---|---|
+| escalated, and the gate permitted it | which trigger moved it, and which model answered |
+| asked for the stronger model, and the gate forbade it | that it was asked for, that this content may not reach that lane, and which model answered instead |
+| asked for it, the gate forbade it, and there is no local model | that no permitted lane exists, as a refusal rather than a promise |
+| not escalated | nothing, because there is nothing the user needs to know |
+
+**Refusing silently and downgrading silently are both rejected.** A quiet downgrade is the thing the mechanical
+design exists to prevent: the user believes they got the stronger model while the content never left the
+building, and the only place the substitution exists is a log they cannot read.
+
+### When the model will not answer
+
+Three thresholds on one wall-clock deadline, anchored at the moment the client asked rather than at the moment
+generation started:
+
+| Threshold | Frontier | Local | Where the number comes from |
+|---|---|---|---|
+| time to first token | 1.5s | 20s | measured p50 260ms, p95 359ms on the frontier lane, so four times the observed worst |
+| stall between chunks | 5s | 30s | nothing measured; a gap this long is a failure rather than a slow model |
+| total | 30s | 180s | **provisional.** The longest measured answer was 2.9s and the tail is unmeasured |
+
+**The local column is a placeholder and says so.** A llama.cpp server on CPU is compute-bound on prompt
+processing, which is a different shape from a network round trip, and borrowing the frontier figure would mark
+every healthy local answer as a failure. Derive the real ones from llama.cpp's own `prompt_tokens_seconds` and
+`predicted_tokens_seconds` when that build is measured.
+
+**A stream that never starts and a stream that starts then stalls are different failures**, with different
+causes and different words in the record. That is why there are three thresholds and not one total cap.
+
+**A failed model call still answers.** When generation fails, the response is the retrieved passages, cited,
+with a typed reason, at HTTP 200 rather than as an error. Retrieval already did the expensive part and the
+client is entitled to their own material. A question whose answer needs the model then degrades to a
+document list rather than to nothing:
+
+    {
+      "kind": "degraded",
+      "reason": "throttled",
+      "lane": "frontier",
+      "passages": [{"index": 1, "doc_id": "company/travel-policy.md", "excerpt": "..."}],
+      "attempts": 3,
+      "threshold": "total",
+      "partial_output": false
+    }
+
+**`kind` is the field a client must branch on.** An answer and a degradation look alike otherwise, and a client
+that renders one as the other shows passages as though the model had written them.
+
+**Retries happen only before the first token.** A streamed generation is not idempotent: a retry after output
+has begun is billed twice, and the client already holds text from an abandoned response. After the first byte
+the only honest move is a terminal error event.
+
+**Classification is on the provider's error type, never the status code.** A 429 covers both a quota throttle
+worth waiting for and a spend cap that retrying cannot fix. An unrecognised error is treated as terminal, which
+is the safe direction: a retry spent on an unknown failure is a retry spent on a request that probably cannot
+succeed, and the budget it consumes is the budget the degraded answer needed.
+
+**The gateway does not retry on its own.** `num_retries: 0` is set in the rendered config deliberately. LiteLLM
+defaults it to 2 when unset, which would have made three budgeted attempts into nine upstream calls, none of
+them visible to the deadline and none counted in the record.
+
+### Run it
+
+    cd /opt/oi-core
+    alias oi='docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env'
+    oi build api && oi up -d api
+    docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
+      -v /opt/oi-core:/w -w /w --env-file rendered/env \
+      --entrypoint python oi-core/session:local /w/tests/fixtures/interface_probe.py
+
+Seven rights, and each one is a sentence this page told you to expect. If the page and the service disagree,
+that probe fails, which is the point of it.
+
+    ok   ANSWER     [200] 6 citation(s), lane='frontier'
+    ok   NO-JUDGE   escalated=False trigger='' notice=False
+    ok   TRIGGERS   agentic->'agentic_task' stronger->'user_requested_stronger'
+    ok   FACTS      6 row(s), asked true and false both present, every row names a lane
+    ok   TOLD       notice=True kind=None
+    ok   STREAM     9 frame(s), first delta at 620ms, total 503ms
+    ok   DEGRADED   the last recorded degradation carries reason, attempts, threshold, partial_output, lane, ...
+    PASSED: 7 right(s) held against the documented interface
+
+### How it breaks
+
+- **Everything escalates.** The task list is matching too broadly. Check the audit rows counted per trigger,
+  which is what the review cadence is for.
+- **Nothing escalates.** The gate is refusing a class the manifest permits, or `access.data_class` is missing
+  and the deployment is falling back to the most restrictive class on purpose.
+- **The answer says nothing about an escalation.** A client is rendering the answer and ignoring `notice`.
+- **The model did not change after a manifest edit.** The renderer wrote the old value, or the API was not
+  restarted. The model is read at startup.
+- **A request waits far longer than the table says.** Check the lane: a local answer legitimately has a longer
+  budget, and a request answered locally was never going to finish in 1.5 seconds.
+- **The count in the record does not match the number of upstream calls.** It should. If it does not, something
+  below the API is retrying; `num_retries: 0` in `rendered/litellm.yaml` is the setting that stops it.
+
+### Extending it
+
+- **A new trigger** is a new predicate in `services/api/routing.py`, and it must be over something already
+  known. Nothing that asks a model whether a question is hard, for the reason in the step's own register entry.
+- **A new deployment shape** is a new entry in `tests/test_routing_contract.py`. The decision table is diffed on
+  every commit, so a routing change that nobody looked at fails the build and prints what moved.
+- **Different thresholds** are environment variables, and the two lanes have separate ones. Deriving the local
+  numbers from the llama.cpp server's own counters is the work that is still owed.
 ## 21. Troubleshooting
 
 Every item below is something that actually happened, with what it looked like and what fixed it.
