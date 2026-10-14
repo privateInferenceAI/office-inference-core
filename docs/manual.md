@@ -621,7 +621,7 @@ ls db/migrations/
 016_retention_policy.sql
 ```
 
-The next one here would be `017_`. **The number decides the order, and the order is the only ordering
+The next one here would be `018_`. **The number decides the order, and the order is the only ordering
 mechanism**: files are sorted by name and applied in that sequence, so `017_` runs after `016_` on every
 machine. Do not renumber an existing file to make room.
 
@@ -2380,10 +2380,12 @@ or accept that you are testing the dense arm alone and read the output knowing t
 
 **Why the `-v` and `-w` are needed even on `compose run`.** The `eval` service does not mount the checkout: its
 compose definition sets `RETRIEVAL_PATH` and `INGESTION_PATH` to paths under `/w` but declares no volume, on the
-assumption that whoever runs it passes one. `oi run --rm eval` does that for the plain harness invocation, and
-**overriding the entrypoint drops it**, so this probe arrives at a container with no `/w` and stops with
-`can't open file '/w/tests/fixtures/ask.py': [Errno 2] No such file or directory`. Mount it explicitly, as the
-command above does. The same applies to every probe in this manual run with `--entrypoint`.
+assumption that whoever runs it passes one. **So mount it explicitly, as the command above does, and do not
+rely on the bare invocation.** The bare `oi run --rm eval` reaches the container with no `/w` and fails with
+`ModuleNotFoundError: No module named 'ingest'`, which reads like a broken image rather than a missing argument.
+Overriding the entrypoint has the same effect and reports it differently —
+`can't open file '/w/tests/fixtures/ask.py': [Errno 2] No such file or directory` — because the two failures
+happen at different points. The same applies to every probe in this manual run with `--entrypoint`.
 
 ```
 question: What is the standard labour rate per hour?
@@ -3599,7 +3601,7 @@ print(json.dumps(json.load(urllib.request.urlopen(req, timeout=180)), indent=2)[
 |---|---|---|
 | GET | `/health` | Liveness, and what the process loaded: the registry, the deployment, the default model role |
 | POST | `/ask` | `{"session": "<token>", "question": "..."}` in, a cited answer out |
-| POST | `/ask/stream` | the same request, answered as Server-Sent Events. See the streaming pages above |
+| POST | `/ask/stream` | the same request, answered as Server-Sent Events. See the streaming page below |
 
 Three, and that is deliberate. There is no fourth endpoint until a capability needs one.
 
@@ -4169,7 +4171,7 @@ the manual also asks you to type.
 | `oi run --rm keys` | Mint or update every role's key from the manifest |
 | `oi run --rm keys --set-budget ROLE AMOUNT` | Cap one role now |
 | `oi run --rm keys --probe ROLE [--as-model M]` | One small call with that role's key |
-| `oi run --rm eval` | Run the fixed question set against retrieval. Section 13b |
+| `oi run --rm -v /opt/oi-core:/w eval` | Run the fixed question set against retrieval. **The mount is required.** Section 13b |
 | `oi run --rm retention --holds` | List the legal holds in force. Section 13f |
 | `oi run --rm retention --purge DOC_ID [--dry-run]` | Delete one document from every store. Refused if a hold covers it |
 | `oi run --rm retention --enforce DATASET [--dry-run]` | Destroy what a retention period has run out on. Needs a policy to exist |
