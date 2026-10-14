@@ -1213,27 +1213,31 @@ lanes:
     account_owner: office_inference
     data_classes_allowed: [public, internal]
     requires_approval: false
-    redaction: false
+    redaction: true                 # the line the earlier sample had as false
 content:
   default: hash
-  classes:
-    public: full
-    internal: redacted
+  classes: {public: full, internal: redacted}
 access:
+  data_class: internal              # what a request IS. Absent means the most restrictive class
+  roots: [company, executive]       # the registry: SEC-ACL-002 lives here, not in code
+  groups:
+    staff: {roots: [company]}
+    exec:  {roots: [company, executive]}
+  users:
+    - subject: probe-staff@officeinference.com
+      name: Staff probe
+      groups: [staff]
+    - subject: probe-exec@officeinference.com
+      name: Executive probe
+      groups: [exec]
   denial: counted
   egress:
     frontier_classes: [public, internal]
     redaction: "on"
 budgets:
   period_days: 30
-  roles:
-    front_desk: 2
-    analyst: 10
-    reader: 10
-    coder: 5
-compliance:
-  profile: none
-  audit_retention_days: 90
+  roles: {front_desk: 2, analyst: 10, reader: 10, coder: 5}
+compliance: {profile: none, audit_retention_days: 90}
 offsite:
   provider: s3
   account_owner: office_inference
