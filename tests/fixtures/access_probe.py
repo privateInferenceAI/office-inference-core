@@ -61,6 +61,9 @@ sys.path.insert(0, str(W / "services" / "session"))
 import access as access_module  # noqa: E402
 import ingest  # noqa: E402
 import retriever  # noqa: E402
+# session.py reads this at call time, and the mount is the only copy of the audit tool this image has.
+os.environ.setdefault("AUDIT_TOOL", str(W / "services" / "audit" / "audit.py"))
+
 import session as session_module  # noqa: E402
 
 # The two questions, and the boundary between them. The first is answerable from a document every role may
@@ -121,6 +124,33 @@ def chunk_ids_for_root(services, root: str, limit: int = 200) -> set:
     with urllib.request.urlopen(request, timeout=services.timeout) as response:
         points = json.load(response).get("result", {}).get("points", [])
     return {(p.get("payload") or {}).get("chunk_id") or p.get("id") for p in points}
+
+def refusal_rows(session_id: str, limit: int = 5):
+    """The audit rows that name this session, read out of the chain with libpq.
+
+    **The chain, not a claim about it.** A refusal that reported its own success would prove nothing, so this
+    goes to the table. libpq rather than a driver because it is the one Postgres client both this probe and the
+    audit tool agree on: the tool owns the chain and uses psycopg 3, the retrieval half uses psycopg2, and
+    neither is worth a second image for one read.
+    """
+    try:
+        import psycopg2
+    except ImportError:
+        return None, "psycopg2 is not importable in this image"
+    try:
+        conn = psycopg2.connect(database_url() or "")
+    except Exception as exc:  # noqa: BLE001 - the message is the report
+        return None, "could not reach the database: " + str(exc)[:160]
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select occurred_at, event_type, actor, actor_role, outcome, payload "
+                "from audit_events where payload @> %s::jsonb "
+                "order by occurred_at desc limit %s",
+                (json.dumps({"session_id": session_id}), limit))
+            return cur.fetchall(), ""
+    finally:
+        conn.close()
 
 class Ledger:
     """Every right and the wrong path beside it, printed together, because a summary is not evidence."""
@@ -298,15 +328,19 @@ def main() -> int:
                   "a role would be honoured because a caller typed it, which is the whole of SEC-ACL-002")
 
     # ------------------------------------------------------------------ RECORDED
-    reading = run_audit(["list", "--type", "access", "--limit", "10"])
-    out_lines = [line for line in reading.stdout.strip().splitlines() if line.strip()]
-    found = reading.returncode == 0 and any(staff.session_id[:12] in line for line in out_lines)
+    # Read back out of the chain rather than out of the refusal's own message. A refusal nobody can find
+    # afterwards is not a control, and a message claiming to have recorded one is exactly what a broken
+    # writer would print.
+    rows, why = refusal_rows(staff.session_id)
+    found = bool(rows)
     if found:
-        detail = "the chain holds the refusal, read back through the audit tool: " + out_lines[-2].strip()
+        row = rows[0]
+        detail = ("the chain holds " + str(len(rows)) + " refusal(s) for this session: "
+                  + str(row[0]) + " " + str(row[1]) + "/" + str(row[4])
+                  + " actor_role=" + repr(row[3]) + " payload.session_role="
+                  + repr((row[5] or {}).get("session_role")))
     else:
-        detail = ("no event naming this session is in the chain ("
-                  + (reading.stderr.strip()[:200] or "the audit tool printed nothing") + ")")
-        detail += " | tool said: " + ("; ".join(out_lines[-2:]) if out_lines else "(nothing)")
+        detail = "no audit row names this session: " + (why or "the query returned nothing")
     ledger.record("RECORDED", bool(refused and found), detail,
                   "the 403 would go out and the record would be missing, leaving an access decision "
                   "with no evidence of what was attempted")
