@@ -34,11 +34,12 @@ trap cleanup EXIT
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 docker run -d --name "$NAME" --network ai-net \
   --user "$(id -u):$(id -g)" -v "$PWD:/w" -w /w \
-  --env-file rendered/env -e "OI_MANIFEST=/w/$COPY" oi-core/api:local >/dev/null
+  --env-file rendered/env -v "$PWD/rendered:/app/rendered" \
+  -e "OI_MANIFEST=/app/rendered/$(basename "$COPY")" oi-core/api:local >/dev/null
 
 for _ in $(seq 1 30); do
   sleep 2
-  seen=$(docker exec "$NAME" python -c "import json,pathlib;print(json.loads(pathlib.Path('/w/$COPY').read_text())['access']['data_class'])" 2>/dev/null || true)
+  seen=$(docker exec "$NAME" python -c "import json,pathlib;print(json.loads(pathlib.Path('/app/rendered/$(basename "$COPY")').read_text())['access']['data_class'])" 2>/dev/null || true)
   [ "$seen" = "$CLASS" ] && { echo "second container loaded: data_class=$seen"; break; }
 done
 [ "${seen:-}" = "$CLASS" ] || { echo "FAILED: the second container never confirmed it loaded $CLASS"; exit 1; }
