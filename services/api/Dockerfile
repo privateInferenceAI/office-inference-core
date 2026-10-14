@@ -9,7 +9,7 @@
 FROM python:3.12-slim
 
 RUN pip install --no-cache-dir \
-    "fastapi==0.143.0" "uvicorn[standard]==0.38.0" "psycopg[binary]==3.2.*" \
+    "fastapi==0.143.0" "uvicorn[standard]==0.38.0" "psycopg[binary]==3.2.*" "sse-starlette==3.0.2" \
     "psycopg2-binary==2.9.13" "botocore==1.35.90"
 
 WORKDIR /app
