@@ -3595,6 +3595,103 @@ gateway's own tables and that image carries the driver which reaches them.
   `OI_MODEL_<ROLE>` variables are what the API reads, and the probe's `CITED` line prints which model answered.
 - **A different identity provider** replaces the verifier behind the same seam. The session record, the role
   resolution, the retriever call and the refusal path stay.
+### Streaming, and the redaction that comes with it
+
+**What it is for.** The same question answered in frames, so the first words appear while the rest is still
+being written. `POST /ask` returns one JSON document; `POST /ask/stream` returns Server-Sent Events.
+
+**The two are not the same capability and the second is not a wrapper.** Streaming opens a window that the
+non-streamed path does not have: a value can reach the browser in a token before anything gets a chance to
+look at the finished answer. So the streamed path redacts **before each frame is emitted**, and that is why it
+is its own endpoint rather than a flag on the first one.
+
+### What a client receives
+
+    event: start    data: {"citations": [...], "model": "analyst", "role": "viewer", "roots": ["company"]}
+    event: delta    data: {"text": "The mileage rate is "}
+    event: delta    data: {"text": "0.67 per mile"}
+    event: done     data: {"deltas": 36, "first_token_ms": 544, "redactions": {}, "total_ms": 1011}
+
+| Event | When | What it carries |
+|---|---|---|
+| `start` | before the model is called | the model, the role, the roots, and the citations retrieval found |
+| `delta` | as tokens arrive | a piece of the answer, **already redacted** |
+| `error` | if something fails mid-stream | `kind` and a short detail. A terminal event, because the status code is spent |
+| `done` | at the end | frame count, time to first token, total time, and the redaction counts |
+
+**A comment line every 15 seconds** keeps the connection alive while the model is processing the prompt. This
+is not decoration: an idle connection is what intermediaries kill, and prompt processing is idle. Without it a
+slow first token looks like a connection failure rather than a slow answer.
+
+### The redaction, which is the part worth understanding
+
+**A holdback buffer.** Each chunk is appended to a buffer, the buffer is redacted, and only the part older than
+64 characters is emitted. A pattern split across two chunks is two fragments that match nothing, so it is held
+until it is complete. On the last chunk the remainder is flushed, redacted.
+
+    # what a client sees when the answer contains a reserved test number
+    data: {"text": "The"}
+    data: {"text": " p"}
+    data: {"text": "rima"}
+    data: {"text": "ry contact reference for the Acme engagement is [REDACTED-SSN] [1]."}
+    data: {"deltas": 7, "first_token_ms": 301, "redactions": {"ssn": 1}, "total_ms": 558}
+
+**Sized from the pattern set, not chosen.** The longest pattern in `services/egress/redaction.py` is a
+private-key header at 36 characters; an SSN is 11, a card with separators 19. 64 covers the set with headroom,
+and a test fails if a longer pattern is added, because a pattern longer than the holdback is a pattern that can
+straddle it.
+
+**The holdback is unconditional, and that is a tested property rather than an implementation detail.** A design
+that withholds only when it has found something leaks the prefix of a pattern that completes later, and emitted
+bytes cannot be recalled. A spike against the gateway demonstrated exactly that failure mode in a different
+implementation: the raw prefix went out, and the stream then failed with a 400.
+
+**What it does not cover, said plainly.** This catches patterns with a shape: card numbers, social security
+numbers, IBANs, keys, emails, phone numbers, IP addresses. A personal name or a street address has no bounded
+form, so no holdback can prove it will not appear. For those the control is redacting the request before it
+reaches a model, and streaming is best-effort for anything the model introduces by itself.
+
+### Run it
+
+    cd /opt/oi-core
+    alias oi='docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env'
+    oi build api && oi up -d api
+
+    # The canary has to be in the index for the redaction right to mean anything.
+    cp fixtures/corpus/canary-pii.md documents/company/
+    docker exec ingestion python3 /app/ingest.py --documents /documents --json
+
+    docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
+      -v /opt/oi-core:/w -w /w --env-file rendered/env \
+      --entrypoint python oi-core/session:local /w/tests/fixtures/stream_probe.py
+
+Four rights: `END-TO-END`, `TTFT`, `INCREMENTAL` and `REDACTED`. The last one reads **the raw bytes the client
+received** rather than a reassembled answer, because an answer assembled from a stream is exactly what an
+audit-only control redacts.
+
+**If it breaks.**
+
+- **The whole answer arrives in one frame.** Something is buffering. Check the response headers for
+  `X-Accel-Buffering: no` and `Incremental: ?1`, then check what sits in front of the API.
+- **A long silence after the first token, then everything.** The heartbeat is not reaching the client, so
+  something upstream is holding the connection.
+- **A canary appears in a frame.** The holdback is too small for the pattern set, or a pattern was added that
+  is longer than it. `tests/test_streaming_redaction.py` fails on that too, so check the tests first.
+- **`redactions` is empty on a question whose answer should contain a pattern.** Either the canary is not
+  ingested or the redactor did not run. The probe reports which.
+- **The answer is truncated with an `error` event.** A mid-stream failure. The status code was already spent,
+  so the error arrives as an event; look for it in the frames rather than in the HTTP status.
+- **Time to first token is much worse than the non-streamed path.** The holdback is doing its job and the
+  answer is short, or the heartbeat interval is shorter than the model's first-token time.
+
+### Extending it
+
+- **A new identifier to redact** is a new pattern in `services/egress/redaction.py`. If it is longer than the
+  holdback, raise the holdback in the same change; the test fails until you do.
+- **A different transport** would replace `sse-starlette`. Everything above the transport is the redactor and
+  the frame shapes, and neither knows how the bytes travel.
+- **A stricter guarantee for names and addresses** needs a different mechanism, not a longer holdback: redact
+  the request before the model call, or stop streaming for that class of question.
 ## 21. Troubleshooting
 
 Every item below is something that actually happened, with what it looked like and what fixed it.
