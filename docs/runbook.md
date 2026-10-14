@@ -3322,6 +3322,35 @@ Four things go in from the start because each is invisible to a load test and ob
       -v /opt/oi-core:/w -w /w --env-file rendered/env \
       --entrypoint python oi-core/session:local /w/tests/fixtures/stream_probe.py
 
+**The result, 2026-10-14, on the live deployment.** Four rights held, and the honest one is `REDACTED`:
+
+    ok   END-TO-END  9 frame(s), 6 citation(s), answer starts 'The mileage rate for reimbursement is 0.67'
+    ok   TTFT        first token at 336ms of 1542ms total, 104 frame(s)
+    ok   INCREMENTAL 104 frame(s) at 37 distinct arrival times, spread 1.54s, X-Accel-Buffering='no'
+    ok   REDACTED    canary in any frame: no; the stream reported redactions {'ssn': 1}
+
+    PASSED: 4 right(s) held against the streaming service
+
+**The canary is a document, not an assertion.** `fixtures/corpus/canary-pii.md` carries two reserved social
+security numbers that belong to nobody, and the probe asks a question that retrieves it. The model repeats the
+number, and a client reading raw frames receives:
+
+    data: {"text": "The"}
+    data: {"text": " p"}
+    data: {"text": "rima"}
+    data: {"text": "ry contact reference for the Acme engagement is [REDACTED-SSN] [1]."}
+    data: {"deltas": 7, "first_token_ms": 301, "redactions": {"ssn": 1}, "total_ms": 558}
+
+**The value was in the model's output and not in anything the client received.** Frames are small enough that
+a split is the normal case rather than the interesting one, which is why the redactor holds back unconditionally
+and why the probe reads raw bytes rather than a reassembled answer.
+
+**A spike on the gateway settled the question this step was designed around, and corrected part of the
+research.** The legacy `post_call` hook does run on a stream and cannot affect the client: it fires after the
+iterator ends. But `post_call` is a mode rather than a mechanism, and an `apply_guardrail` guardrail under
+`incremental_diff` **can** change streamed bytes. Two findings from that spike are now tests: the default
+`block_only` silently drops a rewrite, and withholding only on the rounds that rewrite leaks the raw prefix and
+then fails with a 400, because emitted bytes cannot be retracted. Full evidence in the design note at 7e.
 #### What proves it
 
 | # | Right | Act | What is asserted |

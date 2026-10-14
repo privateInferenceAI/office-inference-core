@@ -116,3 +116,29 @@ def test_a_clean_stream_passes_through_unchanged():
     out, r = run([text[i:i + 20] for i in range(0, len(text), 20)])
     assert out == text
     assert r.counts == {}
+
+
+def test_the_holdback_is_requested_even_when_nothing_is_rewritten():
+    """**The property a spike on the gateway proved matters, moved here where it is cheap to check.**
+
+    A gateway guardrail that withheld output only on the rounds where it happened to rewrite leaked the raw
+    prefix on the rounds where it did not, and then failed with `stream_transform_underflow` because emitted
+    bytes cannot be retracted. Any holdback design has the same trap, so this pins the behaviour: the holdback
+    is unconditional, not a response to having found something.
+    """
+    r = streaming.StreamRedactor()
+    # Clean text, so nothing is rewritten, and the holdback must still apply.
+    out = r.feed("a" * 200)
+    assert len(out) == 200 - streaming.HOLDBACK, (
+        "the holdback was skipped because nothing matched, which is the leak: the next chunk could complete "
+        "a pattern whose prefix has already gone to the client")
+
+
+def test_a_pattern_completed_after_clean_text_is_still_caught():
+    """The same property as the outcome it protects: clean chunks first, then a pattern."""
+    r = streaming.StreamRedactor()
+    out = r.feed("The number is 219-")
+    out += r.feed("09-9999 and done.")
+    out += r.finish()
+    assert SSN not in out
+    assert "[REDACTED-SSN]" in out

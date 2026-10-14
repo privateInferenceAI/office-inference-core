@@ -359,6 +359,45 @@ code, and each was obvious within a minute of running it.
 while doing nothing: an audit write that failed loudly into a log nobody was reading, and a budget that
 returned an answer. Neither would have been found by reading the code, and the second was found only because
 the probe spent the money rather than checking the config.
+## 7e. Streaming redaction, settled by running the gateway
+
+**The question.** Can a guardrail block on a streamed response, or is it audit-only? A researcher reported from
+documentation that LiteLLM's `post_call` guardrails cannot affect a stream, and that a setting named
+`stream_holdback_chars` exists for blocking redaction. The second half of that was wrong in an interesting way,
+so the whole thing was put to the running gateway.
+
+**What a spike on the box established, by registering a custom guardrail that observably rewrites text and
+comparing a streamed request against a non-streamed one:**
+
+- **The legacy `post_call` success hook runs on a streamed response and cannot affect the client.** It fires
+  after the streaming iterator has ended, so the status line and every content byte are already on the wire.
+  The claim was right.
+- **`post_call` is a mode, not a mechanism, and that is the correction.** A guardrail that overrides
+  `apply_guardrail` *does* change streamed bytes, provided `streaming_transform_mode` is `incremental_diff`
+  and it returns a holdback. Under the default `block_only` the rewrite is computed and then silently
+  dropped, which is the worst of both.
+- **The holdback is load-bearing rather than decorative, and its absence does not fail quietly.** An A/B with
+  a redactor that cannot decide until later text arrives: with the holdback, the client received one frame
+  containing only redacted content. Without it, the raw prefix went out and the stream then failed with a 400
+  because emitted bytes cannot be retracted. It fails closed, which is the right direction, and the prefix is
+  still gone.
+- **`stream_holdback_chars` is not a configuration key.** It is a value the guardrail returns per round, and it
+  has to be returned on **every** round including the ones that change nothing. Withholding only when a
+  rewrite happens is exactly what produces the leak above.
+
+**Why none of that changed the design, and what it confirmed.** The API already redacts in its own writer,
+which the spike's conclusion endorses: redaction belongs inside the byte-emitting path, and if the service
+streams to the browser itself it must hold its own window. What the spike added is the property that the
+holdback is unconditional. That is now a test, because it is the difference between the working case and the
+leaking one, and it would otherwise have been a line of code somebody later optimised into a bug.
+
+**The gateway keeps its guardrails for the audit record**, which is what the legacy hook is genuinely good at:
+it sees the assembled response after delivery, which is what a row wants. It is not the control.
+
+**And a claim in section 9 needs narrowing.** "Redaction must block in-stream" was recorded there as something
+to verify. It is verified, and the answer is narrower than the wording: **the API's own writer must block
+in-stream.** A gateway may or may not, depending on which hook it uses and which mode it is in, and a control
+whose behaviour depends on two settings nobody reads is not one to promise a client.
 ## 8. What we are deliberately not building
 
 - **A separate router process.** One Python process with routing behind a pure function. The pure function is
