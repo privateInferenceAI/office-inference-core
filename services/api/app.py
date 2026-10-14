@@ -449,6 +449,13 @@ async def _frames(session, permit, model: str, question: str, result, requested_
     first_token_at = None
     deltas = 0
 
+    # **The same budget the non-streaming path has, on the clock the client experiences.** The deadline is
+    # anchored at `requested_at` rather than here, so retrieval counts against it: a budget that starts
+    # after the work has begun is not a bound on the request.
+    request_budget = budget_module.Budget(started=requested_at)
+    errors: list = []
+    emitted = False
+
     def frame(kind: str, data: dict) -> dict:
         return {"event": kind, "data": json.dumps(data, sort_keys=True)}
 
@@ -474,23 +481,57 @@ async def _frames(session, permit, model: str, question: str, result, requested_
         GATEWAY_URL + "/v1/chat/completions", data=json.dumps(payload).encode(), method="POST",
         headers={"Content-Type": "application/json", assertion.HEADER: statement})
 
+    # **A read cannot be interrupted, so it is bounded instead.** The socket timeout is the time the budget
+    # has left, and the watchdog below checks between reads. A generator that never yields cannot be
+    # cancelled from outside, which is why the deadline lives in here rather than around the call.
+    def _open():
+        return urllib.request.urlopen(upstream, timeout=max(1.0, request_budget.remaining()))
+
     try:
-        response = urllib.request.urlopen(upstream, timeout=float(os.environ.get("OI_GATEWAY_TIMEOUT", "120")))
+        response = _open()
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode(errors="replace")[:300]
+        detail = exc.read().decode(errors="replace")[:400]
+        kind = budget_module.classify(detail)
+        errors.append({"attempt": 1, "status": exc.code, "reason": kind["reason"],
+                       "matched": kind["matched"], "retryable": kind["retryable"]})
         audit("model_call", session.subject, session.role, "denied",
-              {"stage": "model", "status": exc.code, "model": model, "detail": detail[:160]}, model=model)
-        # A terminal error event rather than a status code, which was spent when the first frame went out.
-        yield frame("error", {"kind": "generation_failed", "status": exc.code,
-                              "detail": "the gateway refused the call"})
+              budget_module.audit_facts(reason=kind["reason"], matched=kind["matched"],
+                                        retryable=kind["retryable"], attempts=1,
+                                        threshold=request_budget.timed_out(), budget=request_budget,
+                                        partial_output=False, errors=errors), model=model)
+        # No frame has gone out yet, so a degraded answer is still possible and is the better outcome.
+        yield frame("degraded", budget_module.degraded(kind["reason"], _degrade_detail(kind["reason"]),
+                                                      result.passages, request_budget, 1,
+                                                      request_budget.timed_out(), False))
         return
     except Exception as exc:  # noqa: BLE001
-        yield frame("error", {"kind": "generation_failed",
-                              "detail": f"the gateway could not be reached: {type(exc).__name__}"})
+        kind = budget_module.classify(type(exc).__name__)
+        yield frame("degraded", budget_module.degraded(kind["reason"], _degrade_detail(kind["reason"]),
+                                                      result.passages, request_budget, 1,
+                                                      request_budget.timed_out(), False))
         return
 
     try:
         for raw in response:
+            # **The watchdog, and the reason it is inside the loop.** A generator that never yields cannot be
+            # cancelled from outside, so the deadline is enforced between reads rather than around them. The
+            # socket timeout above bounds a single read; this bounds the whole stream and tells the three
+            # thresholds apart, which a total cap alone cannot do.
+            deadline = request_budget.timed_out()
+            if deadline:
+                tripped = deadline
+                yield frame("error", {"kind": "stream_timeout", "threshold": tripped,
+                                      "partial_output": emitted,
+                                      "detail": "the stream stopped arriving within the time allowed"})
+                audit("model_call", session.subject, session.role, "denied",
+                      budget_module.audit_facts(reason="timeout", matched=tripped, retryable=False,
+                                                attempts=1, threshold=tripped, budget=request_budget,
+                                                partial_output=emitted, errors=errors), model=model)
+                return
+            try:
+                response.fp.raw._sock.settimeout(max(1.0, request_budget.remaining()))
+            except Exception:  # noqa: BLE001 - a socket we cannot reach is not a reason to fail the stream
+                pass
             line = raw.decode("utf-8", errors="ignore").strip()
             if not line.startswith("data:"):
                 continue
@@ -505,11 +546,13 @@ async def _frames(session, permit, model: str, question: str, result, requested_
             if not delta:
                 continue
             deltas += 1
+            request_budget.note_chunk()
             if first_token_at is None:
                 first_token_at = time.monotonic()
             # The redactor decides what is safe to emit. Everything else is held.
             safe = redactor.feed(delta)
             if safe:
+                emitted = True
                 yield frame("delta", {"text": safe})
         tail = redactor.finish()
         if tail:
