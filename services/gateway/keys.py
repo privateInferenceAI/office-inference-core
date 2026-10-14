@@ -255,7 +255,11 @@ def probe(env: dict, args: argparse.Namespace) -> int:
                "messages": [{"role": "user", "content": "Reply with the single word: ready"}],
                "max_tokens": 16}
 
-    header, token, how = _assertion_header(env, model)
+    # **Minted for the ROLE, never for the model being asked for.** The first version passed `model`,
+    # so the assertion named whatever the caller requested, the gateway resolved THAT role's team, and
+    # the drill returned 200 for every combination. It proved nothing, which is worse than failing.
+    # Found by the C3 panel's fidelity checker, who ran it.
+    header, token, how = _assertion_header(env, args.role)
     status, body = request("/v1/chat/completions", keys[args.role]["key"], payload, extra_headers=header)
     if status == 200:
         usage = body.get("usage") or {}

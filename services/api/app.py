@@ -287,7 +287,13 @@ async def ask(request: Request):
         default_lane="local" if local_lane_available() else "frontier",
         frontier_model=frontier_model_for(role),
     )
-    if decision.lane == "local" and not local_lane_available():
+    # **`none` means no lane may answer, and it must refuse rather than fall through.** The first version
+    # guarded only the `local` case, so a decision of `none` skipped the model guard and the ordinary
+    # remote model answered anyway, while the notice claimed no answer could be produced. That is the
+    # worst combination: a refusal that is not one, with a message saying it was.
+    #
+    # Found by the C3 panel's fidelity checker, who read the guard and asked what `none` did.
+    if decision.lane == "none" or (decision.lane == "local" and not local_lane_available()):
         # **This deployment has no local lane**, so a decision to answer locally would name a model that
         # does not exist. The honest outcome is a refusal that says so, recorded, rather than a notice
         # claiming an answer that cannot be produced. A deployment that declares a local model gets the

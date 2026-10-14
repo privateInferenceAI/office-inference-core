@@ -95,10 +95,29 @@ def route(manifest: dict, *, data_class: str, task: str = '', user_wants_stronge
         why = 'the user asked for the stronger model'
 
     if not wanted:
-        # Nothing wants the frontier lane, so no remote model is reached and the gate has nothing to decide.
+        # **No trigger, and the boundary is still consulted.** The first version returned the default lane
+        # without asking, on the reasoning that nothing had escalated. That left the boundary guarding only
+        # escalations: on a deployment whose ordinary model is remote, a request whose class the manifest does
+        # not permit went straight to the provider with `escalated: false` and no notice. The page promised a
+        # data boundary and the code drew one around a door nobody had to use.
+        #
+        # Found by the C3 panel's fidelity checker, who ran a plain request against a forbidden class and
+        # watched it leave.
+        if default_lane == 'frontier':
+            permitted, why_not = gate(data_class, egress.get('frontier_classes'))
+            if not permitted:
+                return Decision(lane='none', model=model_name, escalated=False, reason=why_not,
+                                notice='This question cannot be answered, because its content may not '
+                                       'be sent to the model that would answer it.',
+                                escalation_requested=user_wants_stronger,
+                                steps=('gate: ' + why_not, 'no trigger fired, and the default lane is remote'))
+            return Decision(lane=default_lane, model=model_name, escalated=False, reason='no trigger fired',
+                            escalation_requested=user_wants_stronger,
+                            steps=('gate: permitted', 'no trigger fired: the ordinary model answers'))
+        # A local default lane reaches no remote model, so there is nothing for the gate to decide.
         return Decision(lane=default_lane, model=model_name, escalated=False, reason='no trigger fired',
                         escalation_requested=user_wants_stronger,
-                        steps=('no trigger fired: the ordinary model answers',))
+                        steps=('no trigger fired: the answer is produced on this deployment',))
 
     # A trigger wants the frontier lane, so the boundary decides whether it may have it.
     permitted, why_not = gate(data_class, egress.get('frontier_classes'))

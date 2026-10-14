@@ -367,6 +367,11 @@ services:
     user: "${HOST_UID}:${HOST_GID}"
     environment:
       LITELLM_URL: http://litellm:4000
+      # **The database, because the emergency brake writes the team row.** `keys --set-budget` sets a
+      # ceiling on the row the auth hook reads, so it needs a connection. Without this the documented
+      # command could not run at all, and the tool told the operator to go somewhere rendered/env
+      # already was. Found by the C3 panel's fidelity checker.
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
     volumes:
       - ${OI_ROOT}/rendered:/app/rendered
     networks: [ai-net]
