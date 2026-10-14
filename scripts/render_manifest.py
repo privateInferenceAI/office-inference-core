@@ -133,13 +133,13 @@ def build_litellm_config(manifest: dict, env: dict[str, str]) -> dict:
 def build_access_registry(manifest: dict) -> dict:
     """The declared permission model, normalized into the file the runtime reads.
 
-    **Absent and empty are different, and the difference is the whole point of \`declared\`.** A manifest with
-    no \`access.roots\`, \`access.groups\` or \`access.users\` keeps the built-in two folder roles, which is what
+    **Absent and empty are different, and the difference is the whole point of `declared`.** A manifest with
+    no `access.roots`, `access.groups` or `access.users` keeps the built-in two folder roles, which is what
     every manifest on the box does today. A manifest that declares any of the three gets exactly what it
     declared, and the validator has already refused it if the three disagree.
 
     **The model block is deliberately not read here.** A session resolves access and never a model role: which
-    model answers is a property of what the software is doing, not of who asked, so \`models\` belongs to the
+    model answers is a property of what the software is doing, not of who asked, so `models` belongs to the
     gateway's config and this file never mentions it. A reader looking for a group-level model field will not
     find one, and that is the decision rather than an omission.
     """
@@ -186,10 +186,10 @@ def build_access_registry(manifest: dict) -> dict:
 def group_roots(spec, where: str) -> list:
     """The roots a group carries, from the mapping form the manual documents.
 
-    \`\`\`yaml
+    ```yaml
     groups:
       staff: {roots: [company]}
-    \`\`\`
+    ```
 
     A mapping rather than a bare list, because a group will grow fields that are not its roots — a display
     name, a description for the client's own review — and a bare list has nowhere to put them without
@@ -213,9 +213,9 @@ def declared_roles(block: dict, groups: dict, roots: list) -> dict:
     the session; a group says what a person may read and comes from the manifest. A deployment may write its
     access at either level.
 
-    **When no roles are declared, this emits one that carries no roots of its own**, named \`viewer\`, which is
+    **When no roles are declared, this emits one that carries no roots of its own**, named `viewer`, which is
     the case a grouped deployment wants: every person's permission comes from their groups and there is exactly
-    one place access is written down. \`access.roles\` overrides that for a deployment that would rather write
+    one place access is written down. `access.roles` overrides that for a deployment that would rather write
     permissions beside the roles they belong to.
 
     A declared role is still the session's claim and not the person's whole permission: the subject's groups

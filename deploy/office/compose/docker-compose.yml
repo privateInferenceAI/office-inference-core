@@ -434,6 +434,9 @@ services:
     build:
       context: ${OI_ROOT}
       dockerfile: services/session/Dockerfile
+    # Tagged explicitly, like the eval and retention tools. Compose would name it oi-core-session, and a
+    # probe run by hand needs an image name that is written down rather than inferred.
+    image: oi-core/session:local
     container_name: session
     profiles: ["tools"]
     user: "${HOST_UID}:${HOST_GID}"
