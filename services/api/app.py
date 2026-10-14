@@ -77,6 +77,18 @@ PASSAGES = int(os.environ.get("OI_PASSAGES", "6"))
 STATE: dict = {}
 
 
+def resolved_model(role: str) -> str:
+    """The provider model a role points at, read from the manifest.
+
+    **Why the answer carries both.** A role is a name in a manifest; a model is what actually ran. An
+    answer that reports only the role cannot show that a manifest change took effect, which is the
+    evidence INF-ROLE-001 asks for, and an auditor reading the row wants the model rather than the alias.
+    """
+    models = (STATE.get("manifest") or {}).get("models") or {}
+    entry = models.get(role) or {}
+    return str(entry.get("frontier") or entry.get("local") or role)
+
+
 def local_lane_available() -> bool:
     """Whether this deployment declares a model it serves itself.
 
@@ -303,7 +315,12 @@ async def ask(request: Request):
     verified = citations.verify(answer, result.passages)
     body_out = {
         "answer": answer,
+        # **The role and the model are different facts.** `model` is the role the routing chose, which is
+        # what a manifest names; `resolved_model` is the provider model that role points at. Reporting
+        # only the role made the manifest swap that proves INF-ROLE-001 invisible from the answer: the
+        # client saw `analyst` before and after and could not tell the model had changed.
         "model": model,
+        "resolved_model": resolved_model(model),
         "role": session.role,
         "roots": sorted(permit.roots),
         "citations": [
