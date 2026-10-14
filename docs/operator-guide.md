@@ -112,7 +112,29 @@ resolves service build contexts relative to itself, so moving the checkout break
 unit files hard-code `/opt/oi-core`. And `rendered/env` is read from that directory by every tool, so a
 checkout elsewhere needs `oi` redefined everywhere it appears.
 
-**Checkpoint.** `git -C /opt/oi-core log --oneline -1` prints a commit. If that fails, nothing later will
+**Two things the machine needs that are easy to assume are already there, and on a fresh Ubuntu 24.04 are
+not.** Neither one announces itself: the guide's later commands fail in ways that look like the system's
+fault rather than the machine's.
+
+```
+# 1. The compose shorthand every later stage uses. A shell alias, so it exists only in the shell you typed
+#    it in — ssh host 'command', a script, and docker run do not have it.
+alias oi='docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env'
+
+# 2. A Python environment, once, for the tests. Ubuntu 24.04 refuses a bare pip install under PEP 668,
+#    and this box ships with no pip, no pytest and no venv.
+sudo apt-get install -y python3-venv python3-pip
+python3 -m venv ~/venv
+~/venv/bin/pip install -r requirements-dev.txt
+```
+
+**Use `~/venv/bin/python -m pytest`, not a bare `python3`.** And note what happens if you skip the install:
+**the test suite imports its optional dependencies in a way that skips cleanly when they are absent**, so
+`pytest` passes with fewer checks than it should. A green suite on a machine with no `docling_core` and no
+`psycopg` is not the same suite.
+
+**Checkpoint.** `git -C /opt/oi-core log --oneline -1` prints a commit, `oi ps` lists containers, and
+`~/venv/bin/python -m pytest tests/ -q` ends with a passing count. If the first fails, nothing later will
 work and the cause is a git or permissions problem, not this system.
 
 **How this breaks.**
