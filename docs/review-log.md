@@ -184,9 +184,27 @@ the thresholds 1.5/5/30 and 20/30/180, `num_retries: 0`, and the holdback with i
 |---|---|---|
 | **cold reader** | **YES** | *A competent stranger can run this from the documentation alone.* The API is real, running and answering; the contradiction class is substantively gone |
 | **fidelity checker** | **NO** | Two documented drills behaved differently from the page, and the manual contradicted its own disclosure |
-| **executor** | interim only | Its round-3 measurements were contaminated by a runaway container of mine; the probes it did reach on a quiet box all passed |
+| **executor** | **YES** | *A competent stranger can run this deployment from the manual alone.* Every command the manual names, it ran; nothing blocked a task. Its first measurements were contaminated by a runaway container of mine and it withdrew them after a clean re-run |
+
+**Two of three returned YES, and the third's findings were all fixed afterwards.** That is the panel's outcome, and it is stated with the caveat below rather than as a clean sweep.
 
 **The disagreement is the honest result and it is worth stating plainly.** The cold reader answers *can a stranger run this*, and after three rounds it says yes. The fidelity checker answers *does the page match the code*, and it found the page still ahead of the code in two operational drills. Both are right about different questions.
+
+### The executor's round-3 findings, fixed after it reported
+
+**The boundary fix had no rehearsal in the manual.** `gate_check.py` proves it, and the manual named every other
+probe it relies on and not this one — so the sentence in 13e was a claim a reader could not check from the page.
+It is named there now, with the note that it exists because the sentence was false when it was written.
+
+**Three commands ran from the wrong machine.** Section 14's `s3api list-object-versions`, section 18's
+`iam get-policy-version` and the row in section 22 all present themselves as host commands with a workstation
+profile; the box has no AWS CLI and fails with `aws: command not found`, which reads like a broken deployment
+rather than a command in the wrong place. All three say where they run now, and section 22 carries the note once.
+
+**The `ps` sample finally shows the api row.** The caption was corrected to seven services two rounds ago and the
+sample below it kept listing six, because the replacement silently failed to match: the sample uses a single
+Unicode ellipsis character and the pattern used three dots. **A silent no-op edit is worse than a wrong one**,
+and it took a reviewer reading the sample to find it.
 
 ### What round 3 found, and what was fixed
 
