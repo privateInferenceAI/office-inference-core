@@ -41,7 +41,16 @@ packs:
     services:
       - workflow
     requires: [core]
-    open_question: n8n licence terms for a paid managed service (may require Enterprise).
+    # Read 2026-10-13 at https://github.com/n8n-io/n8n/blob/master/LICENSE.md (Sustainable Use
+    # Licence). The clause, verbatim: "You may use or modify the software only for your own internal
+    # business purposes or for non-commercial or personal use. You may distribute the software or
+    # provide it to others only if you do so free of charge for non-commercial purposes."
+    #
+    # That is not a terms question that Enterprise resolves by default: it restricts the paid client
+    # build this pack is sold as. The question is open with a named owner rather than assumed
+    # answered, because the answers are a commercial decision (buy Enterprise, ship a different
+    # workflow engine, or stop selling this pack) and none of them is an edit to this file.
+    open_question: "n8n Sustainable Use Licence: does it permit deploying n8n into a client's building as part of a paid build? On its face it does not - 'provide it to others only if you do so free of charge for non-commercial purposes'. Needs a decision, not a reading."
 
   - id: agentic-desk
     name: Agentic Desk

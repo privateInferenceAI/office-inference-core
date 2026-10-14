@@ -271,3 +271,38 @@ def test_a_scan_finds_duplicates_in_a_corpus_that_predates_the_check():
         for other, _overlap in manifest.near_duplicates(doc_id, ingest.DUPLICATE_OVERLAP_THRESHOLD):
             pairs.add(tuple(sorted((doc_id, other))))
     assert pairs == {("company/a.pdf", "company/b.pdf")}, pairs
+
+
+# --------------------------------------------------------------------------- naming the replacement
+
+def test_the_superseded_marker_names_its_replacement(monkeypatch, wired):
+    """**The marker said `superseded by None` until this was fixed.**
+
+    `search` read `document_versions` for the boolean and never read the `superseded_by` column on the same
+    row, so a reader was told a document had been replaced but not what replaced it. The name is the useful
+    half: it is what tells a person which document to look at instead, and a marker that only says "not this
+    one" leaves them to work it out from a corpus listing.
+    """
+    services, versions = wired([_hit("company/fee-schedule-2025.md",
+                                     "Standard labour, business hours | per hour | 132.00")])
+    versions["company/fee-schedule-2025.md"] = False
+    monkeypatch.setattr(retriever, "superseded_replacement",
+                        lambda s, doc_id: "company/fee-schedule-2026.md")
+
+    result = retriever.search(services, "What is the standard labour rate?", role="staff")
+
+    marked = [p for p in result.passages if not p.is_current]
+    assert marked, "the passage should be marked superseded"
+    assert marked[0].superseded_by == "company/fee-schedule-2026.md"
+
+
+def test_an_unreadable_registry_leaves_the_replacement_unnamed(monkeypatch):
+    """No database means no replacement name, and that must not be an error.
+
+    Retrieval already treats an unreadable registry as "everything is current", in the permissive direction.
+    The same rule applies here: an unnamed replacement is a worse marker, not a failed search.
+    """
+    import types
+
+    services = types.SimpleNamespace(database_url="")
+    assert retriever.superseded_replacement(services, "company/anything.md") is None

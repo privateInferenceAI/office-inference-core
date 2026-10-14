@@ -45,7 +45,12 @@ services:
       retries: 5
 
   # Embeddings and reranking, both on CPU through the same image, both unmodified upstream.
-  # Text Embeddings Inference from Hugging Face, Apache-2.0.
+  # Text Embeddings Inference from Hugging Face, Apache-2.0, read 2026-10-13 at
+  # https://github.com/huggingface/text-embeddings-inference/blob/main/LICENSE
+  # The model WEIGHTS are licensed separately from the server and both are commercially clean:
+  # bge-m3 is MIT (https://huggingface.co/BAAI/bge-m3) and bge-reranker-v2-m3 is Apache-2.0
+  # (https://huggingface.co/BAAI/bge-reranker-v2-m3). A model card, not a LICENSE file, is the
+  # authority for the weights; neither repository ships one.
   # The models are downloaded on first start into a shared cache under OI_ROOT, so a rebuild does not
   # re-download them and an air-gapped office build can ship with the cache pre-filled.
   embeddings:
@@ -115,7 +120,11 @@ services:
       start_period: 180s
 
   # The parser: documents become structured text with page numbers, before anything is chunked or
-  # embedded. Docling Serve, MIT, whose licence posture is recorded in docs/search-architecture.md.
+  # embedded. Docling Serve, MIT, read 2026-10-13 at
+  # https://github.com/docling-project/docling-serve/blob/main/LICENSE (IBM copyright). That is
+  # docling-serve's own file rather than docling's; the projects are separate repositories with
+  # separate licences, and this citation pointed at neither before.
+  # The layout and TableFormer weights are cdla-permissive-2.0 and apache-2.0 respectively.
   #
   # It is its own service rather than a library inside the ingestion worker for one reason: the
   # layout, table and OCR models are the largest thing in the pipeline, and a worker that restarts on
@@ -390,6 +399,18 @@ services:
       # out means there is no document, and a run that cleared the indexes and left the file would report
       # success while the thing the client asked to be destroyed sat in their documents directory.
       DOCUMENTS_ROOT: /documents
+    # Runs as the operator, like every other tool here, and **this line is what makes destruction
+    # possible at all.** The image ships its own unprivileged user (uid 10002) and the documents mount
+    # belongs to the operator (uid 1000), so without this the container can read a client's files and
+    # cannot unlink one: the image user has no write bit on the documents directory, and unlinking needs
+    # one on the DIRECTORY rather than on the file.
+    #
+    # It failed as `PermissionError: [Errno 13]` on the first real retention run ever attempted on a
+    # deployment, after the failure above it was fixed. Both were invisible for the same reason: every
+    # rehearsal returns before the deletion happens, so a dry run tested the dry run. An operator who
+    # ran the rehearsal, saw it pass, and scheduled the real thing would have had a job that reported
+    # INCOMPLETE every night and never destroyed anything.
+    user: "${HOST_UID}:${HOST_GID}"
     volumes:
       # Read-write, because retention unlinks the client's files. Read-only would make every destruction fail on
       # the unlink after the stores were already cleared, which is the unrecoverable order.

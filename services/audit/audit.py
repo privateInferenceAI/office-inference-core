@@ -601,28 +601,123 @@ def cmd_verify(args) -> int:
             problems.append(f"line {index}: the stored payload does not match payload_sha256")
         previous_hash = row["row_hash"]
 
+    # This file's own window, as the FILE states it. Both checks below need it: the anchor check to place
+    # the anchored row, and the manifest check to notice that the manifest describes a longer window than
+    # the file does. Defined here rather than inside either block, because a branch that skipped the anchor
+    # used to leave it unset and the manifest check then raised.
+    window_rows = [row for row in lines if row.get("id") is not None]
+    window_first = window_rows[0]["id"] if window_rows else None
+    window_last = window_rows[-1]["id"] if window_rows else None
+
     # The only check that can catch a deleted tail, because it compares this export against a hash
     # published earlier, somewhere the database owner does not control.
+    #
+    # **This compares POSITIONS, not counts, and the difference is the whole correctness of the check.**
+    # An export is a window over the chain (first_id..last_id); an anchor is a point in it (last_id,
+    # last_row_hash, event_count). The first version compared `len(lines)` against the anchor's
+    # `event_count`, which is a cumulative whole-table count — a category error that is invisible on a
+    # chain one day long, because there the export IS the chain. On a deployment older than a day it
+    # reported "the chain is shorter than it was" against a file nobody had touched, and when the anchor
+    # happened to be written after the window's last event it accused the client's file of losing rows.
+    #
+    # The vocabulary for the fix was already being recorded and simply never read: the anchor has carried
+    # `last_id` since it was written, and the manifest carries `first_id` and `last_id`. With positions,
+    # three relations exist and only one of them is a finding:
+    #
+    #   anchor before the window   the window is newer than the anchor, so the anchor says nothing about
+    #                              this file in either direction. A note, not a verdict.
+    #   anchor inside the window   the ordinary case. The anchored row must be present, which is what makes
+    #                              a deleted tail visible: removing rows from the end removes the anchor.
+    #   anchor beyond the window   the window is older than the anchor, which is the one genuine
+    #                              "the chain was longer than this file shows".
+    #
+    # `event_count` deliberately plays no part in any of those. It is recorded for a person reading the
+    # anchor, and nothing decides on it.
     if args.anchor:
         anchor_path = Path(args.anchor)
         if not anchor_path.exists():
             die(f"no such anchor file: {anchor_path}")
         anchor = json.loads(anchor_path.read_text())
         anchored_hash = anchor.get("last_row_hash")
+        anchored_id = anchor.get("last_id")
         anchored_count = anchor.get("event_count")
+
+        # **An empty file is the case that matters most.** With no rows there is no window to read, and an
+        # empty export against an anchor saying rows existed is the loudest signal this check can receive.
+        # Treating it as "no position, conclude nothing" would turn the worst possible finding into a note,
+        # so the manifest's own window stands in.
+        if window_first is None and manifest:
+            window_first = manifest.get("first_id")
+            window_last = manifest.get("last_id")
+
         if not anchored_hash:
             problems.append(f"the anchor {anchor_path.name} carries no last_row_hash, so it cannot "
                             "prove anything")
+        elif window_first is None:
+            # **The loudest case, and the one where a count comparison was accidentally right.** An empty
+            # export against an anchor that records rows is the worst finding this check can receive, so
+            # it must not degrade into a note just because there are no row ids to reason with.
+            #
+            # Time is the honest fallback. Both artifacts carry it: the anchor its `created_at`, the export
+            # its day. An anchor written on or before the day this export claims to cover should be visible
+            # in it. Ordering by time is a sound relation; ordering by a cumulative count was not, which is
+            # the error this whole block replaced.
+            anchored_day = str(anchor.get("created_at") or "")[:10]
+            exported_day = str((manifest or {}).get("date") or "")
+            if anchored_day and exported_day and anchored_day <= exported_day:
+                problems.append(
+                    f"the anchor records row {anchored_id} and was written on {anchored_day}, on or before "
+                    f"the day this export covers ({exported_day}), and this export holds no rows at all. "
+                    f"Rows that existed when the anchor was written are not in this file")
+            elif any(row.get("row_hash") == anchored_hash for row in lines):
+                notes.append("the anchored row is in this export, but neither artifact carries the row ids "
+                             "needed to place it, so completeness cannot be shown")
+            else:
+                notes.append(f"the anchor {anchor_path.name} carries no row id and its row is not in this "
+                             f"export, so nothing can be concluded about this file in either direction")
+        elif anchored_id is None:
+            notes.append(f"the anchor {anchor_path.name} carries no row id, so it cannot be placed against "
+                         f"this window ({window_first}..{window_last}) and completeness cannot be shown")
+        elif anchored_id < window_first:
+            notes.append(f"the anchor was written before this export's window (anchored row {anchored_id}, "
+                         f"this file starts at {window_first}), so it says nothing about this file. Verify "
+                         f"it against a later export, or against one that covers row {anchored_id}")
+        elif anchored_id > window_last:
+            # The anchored row is past the end of this window. **This is where the check has to be honest
+            # about a limit rather than choose a verdict**, and the limit is worth stating because it took a
+            # wrong answer in each direction to find it.
+            #
+            # Two situations produce this shape and one anchor cannot separate them:
+            #
+            #   the chain grew         the anchor was taken after this window closed, and the extra rows
+            #                          are simply later work. Nothing was lost.
+            #   the file was truncated the window really did lose its tail, and the anchor's row is beyond
+            #                          the shortened end.
+            #
+            # Counting cannot separate them: both make the anchor's count exceed this window's last row id.
+            # Reporting it as loss accuses an honest file, which is what this check used to do. Reporting it
+            # as a match claims a completeness the file has not demonstrated.
+            #
+            # What does separate them is the NEXT export: its opening `first_prev_hash` must equal this
+            # file's closing `last_row_hash`. That is a two-file check, and the manual documents it as a
+            # manual step. Until a verifier performs it, an auditor is told plainly what this file does and
+            # does not establish.
+            notes.append(
+                f"the anchor records row {anchored_id} and this export ends at row {window_last}, so the "
+                f"anchored row is past this window. Either the chain grew after this window closed or this "
+                f"file lost its tail, and one anchor cannot tell them apart. Check the next day's export: "
+                f"its first_prev_hash must equal this file's last_row_hash")
         elif not any(row.get("row_hash") == anchored_hash for row in lines):
-            problems.append(f"the anchored row {anchored_hash[:12]}... from {anchor_path.name} is "
-                            "missing from this export, so rows that existed when the anchor was "
-                            "written are gone")
-        elif anchored_count is not None and len(lines) < anchored_count:
-            problems.append(f"this export holds {len(lines)} rows and the anchor records "
-                            f"{anchored_count}: the chain is shorter than it was")
+            problems.append(f"the anchored row {anchored_hash[:12]}... (row {anchored_id}) falls inside "
+                            f"this export's window {window_first}..{window_last} and is not in the file, so "
+                            f"it has been removed from the middle of this export")
         else:
+            # Name the two numbers for what they are. The anchor's `event_count` is how many rows the
+            # chain held when it was written, which is not the row id, and printing them as "row 61 of 49"
+            # reads as a contradiction rather than as two different facts.
             notes.append(f"matches the anchor written {anchor.get('created_at', 'at an unknown time')} "
-                         f"({anchored_hash[:12]}..., {anchored_count} rows)")
+                         f"({anchored_hash[:12]}..., the anchor's row {anchored_id}; the chain held "
+                         f"{anchored_count} rows then)")
     else:
         notes.append("no external anchor was supplied, so completeness cannot be shown: deleting "
                      "rows from the end and re-exporting would still verify. Pass --anchor with the "
@@ -635,6 +730,24 @@ def cmd_verify(args) -> int:
             problems.append("the final row hash does not match the manifest")
         if manifest.get("event_count") != len(lines):
             problems.append("the event count does not match the manifest")
+        # The row ids, which is the check that catches a truncated tail even when the manifest was
+        # regenerated to match. `event_count` and `last_row_hash` are both recomputable by whoever truncated
+        # the file; `first_id` and `last_id` are the chain's own sequence numbers, and a file that ends at
+        # row 47 while its manifest claims a window ending at row 49 has lost rows whatever the hashes say.
+        #
+        # Without this, the anchor was the only defence against a deleted tail, and it defends only when the
+        # anchored row falls INSIDE the window -- truncation past the anchor's row moves it outside and the
+        # anchor stops seeing it. This closes that.
+        if manifest.get("last_id") is not None and window_last is not None \
+                and manifest["last_id"] != window_last:
+            problems.append(
+                f"the manifest says this export ran to row {manifest['last_id']} and the file ends at row "
+                f"{window_last}: rows are missing from the end of this file")
+        if manifest.get("first_id") is not None and window_first is not None \
+                and manifest["first_id"] != window_first:
+            problems.append(
+                f"the manifest says this export started at row {manifest['first_id']} and the file starts "
+                f"at row {window_first}: rows are missing from the start of this file")
         if not has_manifest_start:
             notes.append("the manifest carries no starting hash, so this file cannot show where in "
                          "the chain it begins")

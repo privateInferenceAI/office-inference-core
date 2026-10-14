@@ -27,6 +27,90 @@ OFFSITE_ARTIFACTS = frozenset({"anchors", "exports", "backups"})
 CONTENT_MODES = frozenset({"hash", "redacted", "full"})
 DATA_CLASSES = frozenset({"public", "internal", "confidential", "regulated"})
 
+# The data classes in order of sensitivity. This exists so a divergence can be reported as a DIRECTION
+# rather than as two lists that differ, which is the difference between a warning somebody reads and one
+# they learn to ignore. `regulated` is most sensitive, `public` least.
+DATA_CLASS_ORDER = ("public", "internal", "confidential", "regulated")
+
+
+def _sensitivity(classes) -> int:
+    """How far up the sensitivity order a set of classes reaches. -1 for none."""
+    ranked = [DATA_CLASS_ORDER.index(str(c)) for c in (classes or []) if str(c) in DATA_CLASS_ORDER]
+    return max(ranked) if ranked else -1
+
+
+def divergences(manifest: dict) -> list[str]:
+    """Where declaration and enforcement disagree about the same policy, as warnings.
+
+    **Why this exists and why it warns rather than refuses.** Two fields carry the same enum and the same
+    meaning: `lanes.frontier.data_classes_allowed` and `access.egress.frontier_classes`. The validator reads
+    the first and `services/egress/lane.py` reads the second, which is rendered from it. A client's manifest
+    can therefore declare one policy in one place and enforce another in the other, pass validation, and
+    behave according to whichever field the reader happened to look at.
+
+    Both fields stay, because every shipped manifest before C2 declared only the lane one and removing it
+    would make those manifests invalid rather than merely stale. What this adds is that a disagreement is
+    **visible** instead of silent. It is not an error for two reasons: a manifest that declares one field and
+    not the other is not contradictory, and a manifest that is genuinely contradictory today is working, so
+    failing it would break a deployment on upgrade — which is a worse outcome than a warning nobody reads.
+
+    The direction matters more than the fact. `access.egress` is what leaves, so:
+
+      access.egress wider than the lane   -> material leaves that the declaration does not permit.
+                                             This is the dangerous direction and the message says so.
+      access.egress narrower              -> nothing leaves that was not permitted, which is safe and
+                                             misleading rather than unsafe.
+
+    The same pairing applies to redaction, and it is already divergent in a shipped manifest: the lane block
+    says `redaction: false` while the egress block says `on`, and the renderer's default has been deciding.
+    """
+    warnings: list[str] = []
+    lane = (manifest.get("lanes") or {}).get("frontier") or {}
+    egress = (manifest.get("access") or {}).get("egress") or {}
+
+    lane_classes = list(lane.get("data_classes_allowed") or [])
+    egress_classes = list(egress.get("frontier_classes") or [])
+
+    if not lane_classes or not egress_classes:
+        return warnings
+
+    def show(classes) -> str:
+        return "[" + ", ".join(str(c) for c in classes) + "]"
+
+    missing_from_egress = [c for c in lane_classes if c not in egress_classes]
+    extra_in_egress = [c for c in egress_classes if c not in lane_classes]
+    if missing_from_egress or extra_in_egress:
+        header = (
+            "lanes.frontier.data_classes_allowed and access.egress.frontier_classes disagree, and "
+            "access.egress is the one that governs egress: "
+            f"declared {show(lane_classes)}, enforced {show(egress_classes)}."
+        )
+        if extra_in_egress:
+            warnings.append(
+                header + f" **{show(extra_in_egress)} may leave for a frontier model although the lane "
+                "block does not permit it.** Set both fields to the classes the client's contract allows, "
+                "and read the contract before changing either: this is a divergence a person has to "
+                "resolve, not one the renderer should guess at.")
+        else:
+            warnings.append(
+                header + f" The gate is narrower, so nothing leaves that the declaration forbids — safe, "
+                f"but the manifest reads as though {show(missing_from_egress)} may be sent when it may "
+                "not. Set both fields to the same list.")
+
+    lane_redaction = lane.get("redaction")
+    egress_redaction = egress.get("redaction")
+    if lane_redaction is not None and egress_redaction is not None:
+        def truthy(value) -> bool:
+            return str(value).strip().lower() in ("1", "true", "yes", "on")
+        if truthy(lane_redaction) != truthy(egress_redaction):
+            warnings.append(
+                "lanes.frontier.redaction and access.egress.redaction disagree, and access.egress is the "
+                f"one the egress gate reads: declared {lane_redaction!r}, enforced {egress_redaction!r}. "
+                "Nothing downstream reconciles them, so the rendered value decides and the lane block is "
+                "decoration. Set both to what the client asked for.")
+
+    return warnings
+
 
 def load_catalog_requires() -> dict[str, list[str]]:
     """The `requires` edges between packs, read from the same catalog as the ids."""
@@ -143,9 +227,54 @@ def check(manifest: dict, packs: set[str], path: Path) -> list[str]:
                 "compliance claim belongs in the client's own account")
         allowed = frontier.get("data_classes_allowed") or []
         if not allowed:
-            problems.append("frontier lane enabled with no data classes allowed: that allows everything")
+            # The message used to read "that allows everything", which was true when this was the field the
+            # gate read. It is not: `services/egress/lane.py` reads `FRONTIER_CLASSES`, rendered from
+            # `access.egress.frontier_classes`. So an empty list here cannot allow anything — it is an intent
+            # check, and the dangerous case is the reverse one, which is why the rule below exists.
+            problems.append(
+                "frontier lane enabled with an empty data_classes_allowed: the lane declares no intent about "
+                "which classes may leave. Note the gate reads access.egress.frontier_classes, so this field "
+                "alone does not govern egress")
         if profile == "cloud" and frontier.get("redaction") is False and "regulated" in allowed:
             problems.append("regulated data allowed through the frontier lane without redaction")
+
+        # The rule that closes the silent failure. The gate renders `FRONTIER_CLASSES` from
+        # `access.egress.frontier_classes`, and an absent block renders an EMPTY string, which the gate reads as
+        # a permission set with nothing in it and refuses every request. A manifest that says three classes are
+        # allowed then sends nothing, validation passes, and the first symptom is a model call that will not go
+        # out. Three of the shipped example manifests had exactly this shape.
+        egress = (manifest.get("access") or {}).get("egress") or {}
+        # **`access.egress` is the authoritative declaration of what may leave, so an empty one is a
+        # configuration error rather than a policy.** The two shapes it arrives in are different mistakes and
+        # are reported differently, because the fix for each is different:
+        #
+        #   the block or the field is ABSENT   the manifest was written against the older table, where
+        #                                      `lanes.frontier.data_classes_allowed` was the only place to say
+        #                                      this. Nothing has been decided about egress.
+        #   the field is present and EMPTY     somebody wrote the policy out and left it permitting nothing,
+        #                                      while the lane above it says classes may go. The two disagree
+        #                                      and the empty one governs, so the manifest reads as permissive
+        #                                      and behaves as closed.
+        #
+        # Both refuse every frontier call, and both are errors rather than warnings: a warning beside a valid
+        # manifest is for a divergence a person should look at, and this is a deployment that cannot send
+        # anything at all. The reader is told to check the manifest either way, which is the point.
+        if "frontier_classes" not in egress:
+            problems.append(
+                "the frontier lane is enabled and access.egress declares nothing. The gate reads "
+                "access.egress.frontier_classes, renders it to FRONTIER_CLASSES, and refuses every call when "
+                "it is absent -- so this deployment would send nothing while lanes.frontier."
+                "data_classes_allowed appears to permit it. Declare the classes you intend, or switch the "
+                "lane off. **Check the manifest against the client's contract before choosing**: the lane "
+                "block and this field are two statements of one policy, and only this one is enforced")
+        elif not (egress.get("frontier_classes") or []):
+            problems.append(
+                "the frontier lane is enabled and access.egress.frontier_classes is empty. An empty list is "
+                "not 'unset': it is a decision that nothing may leave, and it overrides the classes named in "
+                "lanes.frontier.data_classes_allowed. **That is almost never what was intended**, because the "
+                "lane above says classes may go and this field makes the deployment refuse every call while "
+                "reading as permissive. Set it to the classes the client's contract allows, or set "
+                "lanes.frontier.enabled to false and let the empty list mean what it says")
 
     # A cloud build has no local lane, so switching the frontier lane off leaves it with no models at
     # all. The renderer used to emit frontier entries regardless on a cloud profile, which quietly
@@ -296,6 +425,10 @@ def main(argv: list[str]) -> int:
     for path in paths:
         manifest = parse(path.read_text()) or {}
         problems = check(manifest, packs, path)
+        # Warnings are printed whether or not the manifest validates, and they never affect the exit code.
+        # A divergence between the two places the same policy can be declared is a thing for a person to go
+        # and read the contract about; it is not a reason to refuse a manifest that is working.
+        warnings = divergences(manifest)
         if problems:
             failed += 1
             print(f"FAIL {path.name}")
@@ -303,6 +436,8 @@ def main(argv: list[str]) -> int:
                 print(f"  - {p}")
         else:
             print(f"ok   {path.name}  (profile={manifest['profile']}, packs={manifest['packs']})")
+        for w in warnings:
+            print(f"  ! {path.name}: {w}")
 
     print()
     print(f"{len(paths) - failed}/{len(paths)} manifests valid; {len(packs)} packs known")

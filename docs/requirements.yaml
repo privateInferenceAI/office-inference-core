@@ -9,6 +9,33 @@
 # status:  open | verified | waived  (waived requires waiver_reason)
 # verify:  the test that would FAIL if the requirement were not met. If you cannot write one, the
 #          requirement is a wish and belongs in status: open with a note.
+#
+# ---------------------------------------------------------------- C1 and C2, closed together
+#
+# All 30 C1 and C2 items read `verified` against the deployed store. That was true before the C2
+# deliverable review ran, and it is what made the review necessary: a register can be accurate about the
+# code and wrong about the phase, which is exactly what happened here.
+#
+# What was missing was step 2 of "What finished means" — the operating pages — and then steps 3 and 4.
+# Those are now done for C2, and the evidence is:
+#
+#   docs/manual.md              the six operating pages, 13a to 13f
+#   docs/reviews/c2-round-1.md  the original panel: 42 findings, three agents, all three verdicts "no"
+#   docs/review-log.md          rounds 5 and 6, what each covered and what it caught
+#
+# Three rounds ran. Round 3 returned fourteen findings and a scoped re-check of the fifteen corrections
+# returned twelve right and three wrong, all three of them cross-references and a count rather than a
+# behavioural claim. The process caps at three rounds and stops when a round returns only cosmetics; that
+# is the state recorded here, and it is a judgement rather than a measurement.
+#
+# **C1's items are a weaker version of this claim than C2's.** They were reviewed by earlier rounds in
+# docs/review-log.md, but those rounds predate the C2 work and the manual has changed a great deal since
+# (section 9's service list, section 3's machine row, the paths table). No review has re-run C1's own
+# pages against the box since. Nothing here is known to be wrong; it is known not to have been re-checked.
+#
+# The end-to-end build from zero — docs/runbook.md step 3.15 — has still never been run. It is the one
+# thing that tests the images as a reader receives them, and it is the next step rather than part of this
+# closure.
 
 items:
   # ---------------------------------------------------------------- identity and access
@@ -711,6 +738,28 @@ items:
       duplicates; and detection ran only when a file arrived, so a corpus that predates the check was never
       examined at all -- which is why the first two produced no visible symptom. There is now a
       --scan-duplicates command for that case, and the floor is measured in characters of identical text.
+  - id: RET-FORMAT-002
+    title: Every suffix the worker accepts is a format the parser actually reads
+    tier: [cloud, office, hosted]
+    phase: C2
+    verify: a file of each accepted suffix is ingested and answerable, and any format the parser cannot read is either fixed or removed from the accepted set
+    status: verified
+    note: >-
+      VERIFIED 2026-10-13 against the deployed store, BY FINDING A FORMAT THAT FAILED IT. `.rtf` is in the worker's
+      accepted-suffix set and was never parsed: Docling reads RTF by converting it through LibreOffice, and the
+      parser image did not install it, so every RTF raised "LibreOffice is required to convert a .rtf file to
+      .docx". The worker classified that as a permanent failure and dead-lettered the file after two cycles, so a
+      SUPPORTED FORMAT WAS SILENTLY NEVER INDEXED and the only evidence was a failure count. Fixed by installing
+      libreoffice-writer in the parser image -- one line, no application code, 332 MB -- with the build asserting
+      that Docling resolves the binary so an image that cannot parse RTF fails to build rather than dead-lettering.
+      Verified end to end: a genuine RTF is indexed and answerable at rank 1, and a deliberately malformed RTF is
+      refused. Two things this exposed that are fixed with it: the corpus generator's "RTF" fixture was plain text
+      with an .rtf extension (faker-file's provider writes no header and no control words), so the corpus claimed
+      15/15 formats covered while containing no valid RTF at all; and the failure reason was recorded in the
+      manifest's last_error and never surfaced, which is why a missing system binary and a corrupt client document
+      both looked like a one-line count. There is now an ingest --failures command that reads the manifest and
+      prints the reason, and clearing the dead-letter latch is documented as required after any parser fix,
+      because the latch is keyed on the content hash and otherwise makes a correct fix look like it did not work.
   - id: RET-FORMAT-001
     title: Email, spreadsheets, and slides are ingested
     tier: [cloud, office, hosted]

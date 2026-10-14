@@ -260,6 +260,12 @@ def document_versions(services: ingest.Services) -> dict[str, bool]:
 
     Absent for a document with no declaration, which reads as current. A corpus that has never used the
     registry therefore behaves as though every document is current, which is what it did before this existed.
+
+    `doc_id -> is_current`. **`superseded_by` is deliberately not merged in here** even though the same row
+    carries it: this function's contract is a boolean per document, tests stub it with plain booleans, and
+    widening the value type to satisfy one caller would make every caller check which shape it got. The
+    replacement name is fetched separately by `superseded_replacement`, which costs nothing on the path
+    that needs it and leaves this one alone.
     """
     if not services.database_url:
         return {}
@@ -276,6 +282,34 @@ def document_versions(services: ingest.Services) -> dict[str, bool]:
         print(f"could not read the version registry, so every document is treated as current: "
               f"{type(exc).__name__}: {exc}")
         return {}
+
+
+def superseded_replacement(services: ingest.Services, doc_id: str) -> str | None:
+    """What replaced this document, when a person recorded one.
+
+    Separate from `document_versions`, and separate on purpose. That function answers "may I rely on this"
+    for every document a single query needs, and its value type is a boolean that callers and tests rely on.
+    This answers "what took its place" for the one passage being marked, which is a different question asked
+    once per superseded passage rather than once per search.
+
+    The marker used to read `superseded by None` because `search` set `is_current` from the registry and never
+    read the replacement name, so the fact that a document had been replaced reached the reader and the name of
+    its replacement did not. The name is the useful half: it tells a person which document to look at instead.
+    """
+    if not services.database_url:
+        return None
+    try:
+        import psycopg2
+        with psycopg2.connect(services.database_url) as connection:
+            with connection.cursor() as cur:
+                cur.execute("select superseded_by from document_versions where doc_id = %s", (doc_id,))
+                row = cur.fetchone()
+        return (row[0] or None) if row else None
+    except Exception as exc:  # noqa: BLE001
+        # Same permissive direction as `document_versions`: a registry that cannot be read does not stop
+        # retrieval, and an unnamed replacement is a worse marker than a named one but not a wrong one.
+        print(f"could not read the replacement for {doc_id!r}: {type(exc).__name__}: {exc}")
+        return None
 
 
 def lexical_search(services: ingest.Services, question: str, roots: frozenset[str],
@@ -624,6 +658,9 @@ def search(services: ingest.Services, question: str, role: str, limit: int = 10,
         # Default true, so only a declaration can mark a passage. A document nobody has ruled on is usable.
         passage.is_current = versions.get(passage.doc_id, True)
         if not passage.is_current:
+            # Named, not just flagged: the marker read `superseded by None` until this line, because the
+            # registry's boolean was read and its replacement column was not.
+            passage.superseded_by = superseded_replacement(services, passage.doc_id)
             result.superseded.append(passage.doc_id)
         result.passages.append(passage)
 

@@ -335,3 +335,209 @@ def test_a_cloud_build_cannot_switch_off_the_frontier_lane(packs):
     manifest["lanes"]["frontier"]["enabled"] = False
     found = problems(manifest, packs)
     assert mentions(found, "needs the frontier lane enabled"), found
+
+
+def test_a_frontier_lane_without_an_egress_block_is_refused(packs):
+    """**The silent failure this rule exists for.**
+
+    The egress gate renders `FRONTIER_CLASSES` from `access.egress.frontier_classes` and reads an empty list as
+    a permission set with nothing in it, so it refuses every request. A manifest that declares classes under
+    `lanes.frontier.data_classes_allowed` and no `access` block therefore validates, then sends nothing, and the
+    first symptom is a model call that will not go out.
+
+    Three of the shipped example manifests had exactly this shape before the rule was added: they named three
+    classes in the lane block and rendered an empty gate list.
+    """
+    manifest = load(ROOT / "manifests" / "dev-cloud.yaml")
+    manifest.pop("access", None)
+    assert manifest["lanes"]["frontier"]["enabled"] is True
+    # The lane block still declares classes, so the older rule is satisfied and only the new one fires.
+    assert manifest["lanes"]["frontier"]["data_classes_allowed"]
+    found = problems(manifest, packs)
+    assert mentions(found, "access.egress.frontier_classes"), found
+
+
+def test_an_empty_egress_class_list_is_refused(packs):
+    """Declaring the block and leaving the list empty is the same failure with more typing."""
+    manifest = load(ROOT / "manifests" / "dev-cloud.yaml")
+    manifest["access"]["egress"]["frontier_classes"] = []
+    found = problems(manifest, packs)
+    assert mentions(found, "access.egress.frontier_classes"), found
+
+
+def test_an_office_build_with_no_frontier_lane_needs_no_egress_block(packs):
+    """The rule is about an ENABLED lane, and an office build's is off.
+
+    `dev-office.yaml` declares an empty `frontier_classes` on purpose, which is that build's policy rather than
+    an oversight: it has no frontier lane, so nothing may leave. The rule must not turn that into a failure.
+    """
+    manifest = load(ROOT / "manifests" / "dev-office.yaml")
+    assert manifest["lanes"]["frontier"]["enabled"] is False
+    assert problems(manifest, packs) == []
+
+
+# --------------------------------------------------------------------------- divergence warnings
+#
+# Two fields carry the same enum and the same meaning: `lanes.frontier.data_classes_allowed` and
+# `access.egress.frontier_classes`. The validator reads the first, the egress gate reads the second, and
+# nothing reconciled them until these warnings. Both fields stay, so a disagreement has to be VISIBLE
+# rather than fatal — a manifest that works today must not stop working on upgrade.
+
+def test_agreeing_fields_produce_no_warning(packs):
+    """The common case, and the one that must stay quiet.
+
+    `example-hybrid` declares both blocks with the same classes on purpose: it is what a client manifest
+    should look like, and a warning here would teach people to ignore warnings.
+    """
+    manifest = load(ROOT / "manifests" / "example-hybrid.yaml")
+    assert vm.divergences(manifest) == []
+
+
+def test_a_gate_wider_than_the_declaration_is_reported_as_dangerous(packs):
+    """The direction that matters: material leaves that the lane block does not permit.
+
+    This is the case a client's contract would call a breach, and it is the one the warning has to name.
+    Saying only "the two lists differ" would leave a reader to work out which way was bad.
+    """
+    manifest = load(ROOT / "manifests" / "dev-cloud.yaml")
+    manifest["lanes"]["frontier"]["data_classes_allowed"] = ["public"]
+    manifest["access"]["egress"]["frontier_classes"] = ["public", "internal"]
+    # The redaction pair is made to agree so this test asserts one thing.
+    manifest["lanes"]["frontier"]["redaction"] = True
+    manifest["access"]["egress"]["redaction"] = "on"
+
+    found = vm.divergences(manifest)
+    assert len(found) == 1, found
+    assert "may leave for a frontier model although the lane block does not permit it" in found[0]
+    assert "[internal]" in found[0]
+
+
+def test_a_gate_narrower_than_the_declaration_is_reported_as_safe_but_misleading(packs):
+    """The other direction, and it deserves different words.
+
+    Nothing leaves that was forbidden, so this is not a breach — it is a manifest that reads as though
+    something may be sent when it may not. Calling both directions "a disagreement" would make the safe
+    one look as urgent as the dangerous one.
+    """
+    manifest = load(ROOT / "manifests" / "dev-cloud.yaml")
+    manifest["lanes"]["frontier"]["data_classes_allowed"] = ["public", "internal"]
+    manifest["access"]["egress"]["frontier_classes"] = ["public"]
+    manifest["lanes"]["frontier"]["redaction"] = True
+    manifest["access"]["egress"]["redaction"] = "on"
+
+    found = vm.divergences(manifest)
+    assert len(found) == 1, found
+    assert "safe, but the manifest reads as though" in found[0]
+    assert "may leave for a frontier model although" not in found[0]
+
+
+def test_one_field_absent_is_not_a_divergence(packs):
+    """A manifest written against the old table declares only the lane field.
+
+    That is stale rather than contradictory, and warning about it would fire on manifests that are working
+    exactly as intended. The check is about two declarations disagreeing, not about one being missing.
+    """
+    manifest = load(ROOT / "manifests" / "dev-cloud.yaml")
+    manifest.pop("access", None)
+    assert vm.divergences(manifest) == []
+
+
+def test_redaction_disagreeing_is_reported(packs):
+    """The same pairing on the other decision, and it is divergent in two shipped manifests already.
+
+    `dev-cloud` says `redaction: false` in the lane block and `on` in the access block. The renderer's
+    default has been deciding which wins, silently, which is the whole problem this warning exists for.
+    """
+    manifest = load(ROOT / "manifests" / "dev-cloud.yaml")
+    manifest["lanes"]["frontier"]["data_classes_allowed"] = ["public", "internal"]
+    manifest["access"]["egress"]["frontier_classes"] = ["public", "internal"]
+    manifest["lanes"]["frontier"]["redaction"] = False
+    manifest["access"]["egress"]["redaction"] = "on"
+
+    found = vm.divergences(manifest)
+    assert len(found) == 1, found
+    assert "access.egress.redaction disagree" in found[0]
+
+
+def test_no_shipped_manifest_diverges(packs):
+    """Every manifest we ship must validate without a warning.
+
+    **This reverses a test that deliberately asserted the opposite.** That one read: `dev-cloud` and
+    `example-standard-cloud` both declare `redaction: false` in the lane block while the access block says
+    `on`. Either the manifests get corrected or this test gets corrected; what must not happen is the warning
+    silently disappearing. The manifests were corrected, so this is the test being corrected, in the
+    direction that keeps the guarantee: a shipped example that warns is one a reader learns to ignore, and
+    there is no reason to ship one.
+
+    The divergence behaviour itself is still covered -- `test_a_manifest_declaring_one_policy_two_ways_is_
+    reported` builds the shape synthetically, so the rule is tested without needing a bad example on disk.
+    """
+    for path in sorted((ROOT / "manifests").glob("*.yaml")):
+        manifest = load(path)
+        found = vm.divergences(manifest)
+        assert not found, f"{path.name} ships with a divergence warning: {found}"
+
+
+def test_a_warning_never_makes_a_valid_manifest_fail(packs):
+    """The property the whole design rests on: visible, not fatal.
+
+    A divergence warning printed beside a FAIL would make every divergent manifest unshippable, and refusing
+    a manifest that is working today is a worse outcome than a warning nobody reads. `check` and
+    `divergences` are separate functions for this reason.
+    """
+    manifest = load(ROOT / "manifests" / "dev-cloud.yaml")
+    manifest["lanes"]["frontier"]["data_classes_allowed"] = ["public"]
+    manifest["access"]["egress"]["frontier_classes"] = ["public", "internal"]
+    assert vm.divergences(manifest), "this manifest diverges"
+    assert vm.check(copy.deepcopy(manifest), packs, Path("test-manifest.yaml")) == [], (
+        "a divergence must not add a problem that fails validation")
+
+
+def test_an_absent_egress_field_and_an_empty_one_are_reported_differently(packs):
+    """Two shapes of the same failure, and the fix differs, so the message must too.
+
+    `access.egress` is what leaves, so an empty one is a configuration error rather than a policy: the lane
+    above it says classes may go and the empty list makes the deployment refuse every call while reading as
+    permissive.
+
+    An ABSENT field is a manifest written against the older table, where the lane block was the only place
+    to say this — nothing has been decided. A field PRESENT and EMPTY is somebody having written the policy
+    out and left it permitting nothing. Both fail; a reader needs to know which one they have.
+    """
+    absent = load(ROOT / "manifests" / "dev-cloud.yaml")
+    absent["access"]["egress"].pop("frontier_classes")
+    absent_problems = problems(absent, packs)
+    assert mentions(absent_problems, "access.egress declares nothing"), absent_problems
+
+    empty = load(ROOT / "manifests" / "dev-cloud.yaml")
+    empty["access"]["egress"]["frontier_classes"] = []
+    empty_problems = problems(empty, packs)
+    assert mentions(empty_problems, "is empty"), empty_problems
+    assert mentions(empty_problems, "override"), empty_problems
+
+    # The two must not produce the same text, or the distinction is decoration.
+    assert absent_problems != empty_problems
+
+
+def test_an_empty_egress_list_is_an_error_not_a_warning(packs):
+    """A warning is for a divergence a person should look at. This is a deployment that cannot send anything.
+
+    The distinction matters because warnings do not fail the run: a manifest with an empty authoritative
+    field would pass validation and then refuse every model call, which is the silent failure this rule
+    exists to prevent.
+    """
+    manifest = load(ROOT / "manifests" / "dev-cloud.yaml")
+    manifest["access"]["egress"]["frontier_classes"] = []
+    assert problems(manifest, packs), "an empty authoritative field must fail validation, not warn"
+
+
+def test_an_office_build_may_declare_an_empty_egress_list(packs):
+    """The rule is about an ENABLED lane. An office build's is off, and an empty list is its policy.
+
+    `dev-office.yaml` declares exactly that, and it is correct: the build has no frontier lane, so nothing
+    may leave, and the empty list says so. Turning that into a failure would be the rule overreaching.
+    """
+    manifest = load(ROOT / "manifests" / "dev-office.yaml")
+    assert manifest["lanes"]["frontier"]["enabled"] is False
+    assert manifest["access"]["egress"]["frontier_classes"] == []
+    assert problems(manifest, packs) == []

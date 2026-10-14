@@ -31,6 +31,30 @@ def main() -> int:
     manifest = yaml.safe_load((HERE / "manifest.yaml").read_text())
     document_ids = {d["id"] for d in manifest["documents"]}
 
+    # Authored fixtures are documents this project wrote rather than fetched, and they are a separate
+    # list precisely because they have no upstream licence and therefore no lockfile entry. They are NOT
+    # added to document_ids: a question must not grade itself against a fixture we authored, and adding
+    # them there would make the lockfile check below report every one of them as never fetched.
+    #
+    # They are checked for the two things that can go wrong: a fixture declared whose builder does not
+    # exist, and a fixture entry missing a field. The deployed corpus holds both lists, which is why the
+    # manual's chunk table runs to twelve documents while `documents` above declares four.
+    fixtures = manifest.get("authored_fixtures") or []
+    for fixture in fixtures:
+        for key in ("id", "path", "built_by", "what_it_tests"):
+            if not fixture.get(key):
+                problems.append(f"authored fixture {fixture.get('id')!r}: no {key}")
+        builder = HERE.parent.parent / str(fixture.get("built_by") or "")
+        if not builder.exists():
+            problems.append(
+                f"authored fixture {fixture.get('id')!r}: built_by {fixture.get('built_by')!r} "
+                "does not exist")
+    if len({f.get("id") for f in fixtures}) != len(fixtures):
+        problems.append("authored fixtures: duplicate id")
+    fixture_paths = [f.get("path") for f in fixtures]
+    if len(set(fixture_paths)) != len(fixture_paths):
+        problems.append("authored fixtures: two entries declare the same path")
+
     lock = json.loads((HERE / "corpus.lock.json").read_text()) if (HERE / "corpus.lock.json").exists() else None
     if lock is None:
         problems.append("no corpus.lock.json: run fetch_corpus.py so a run can be reproduced")

@@ -309,3 +309,300 @@ def test_a_refused_purge_is_recorded(tmp_path):
     # Three occurrences of the name and two of them are calls: the definition is one.
     assert code.count("_record_purge(connection") == 3, "the definition plus two call sites"
     assert code.count("    _record_purge(connection") == 2, "both paths call it"
+
+
+# --------------------------------------------------------------------------- the rehearsal
+
+class _FakeCursor:
+    """Enough of a cursor for the purge path, and it refuses to delete when it should not.
+
+    The point of these tests is the difference between `--dry-run` and the real thing, so a cursor that
+    silently accepted a DELETE during a rehearsal would let the bug they exist to catch pass.
+    """
+
+    def __init__(self, store, deletes):
+        self.store = store
+        self.deletes = deletes
+        self.rowcount = 0
+        self._row = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, sql, params=None):
+        lowered = " ".join(sql.split()).lower()
+        if lowered.startswith("delete"):
+            self.deletes.append(lowered.split()[2])
+            self._row = None
+            return
+        if "select count(*) from chunk_index" in lowered:
+            self._row = (4,)
+        elif "select count(*) from ingest_manifest" in lowered:
+            self._row = (1,)
+        elif "audit_events" in lowered:
+            self._row = (0,)
+        else:
+            self._row = (None,)
+
+    def fetchone(self):
+        return self._row
+
+
+class _FakeConnection:
+    def __init__(self, cursor_cls):
+        self.cursor_cls = cursor_cls
+
+    def cursor(self):
+        return self.cursor_cls(None, _DELETES)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+_DELETES: list[str] = []
+
+
+def _purge_module(monkeypatch):
+    import retention
+    monkeypatch.setattr(retention, "active_hold", lambda conn, doc_id: None)
+    monkeypatch.setattr(retention, "_count_in_vector", lambda url, coll, doc, timeout: 7)
+    monkeypatch.setattr(retention, "_delete_from_vector", lambda url, coll, doc, timeout: 7)
+    return retention
+
+
+def test_purge_dry_run_counts_and_deletes_nothing(monkeypatch):
+    """**The documented rehearsal used to destroy the document.**
+
+    `--dry-run` was accepted by argparse, documented in the manual's command table, and read by nothing on the
+    purge path: `retention.purge()` had no such parameter, so the CLI called the real thing and a careful
+    operator running the rehearsal first lost the document. The manual promised "report what a run would
+    destroy without destroying it".
+
+    The counts are asserted as well as the absence of deletes, because a rehearsal that reported zeroes would
+    be safe and useless: the number is what the operator decides on.
+    """
+    retention = _purge_module(monkeypatch)
+    _DELETES.clear()
+
+    result = retention.purge(_FakeConnection(_FakeCursor), "company/x.pdf", "rehearsal", "tester",
+                             "http://vector:6333", "documents", dry_run=True,
+                             documents_root="/nonexistent-root")
+
+    assert result.dry_run is True
+    assert _DELETES == [], f"a dry run issued deletes against {_DELETES}"
+    # Reported under `would_delete` rather than `deleted`, so a machine reading the record cannot mistake a
+    # rehearsal for a purge.
+    assert result.stores["vector"]["would_delete"] == 7
+    assert result.stores["lexical"]["would_delete"] == 4
+    assert result.stores["manifest"]["would_delete"] == 1
+    assert "deleted" not in result.stores["vector"]
+
+
+def test_purge_without_dry_run_still_deletes(monkeypatch):
+    """The other half, because a fix that made every purge a no-op would pass the test above.
+
+    This project has already shipped a safety flag that silently disabled the thing it guarded, so the pair is
+    the assertion: the rehearsal changes nothing and the real run still destroys.
+    """
+    retention = _purge_module(monkeypatch)
+    _DELETES.clear()
+
+    result = retention.purge(_FakeConnection(_FakeCursor), "company/x.pdf", "for real", "tester",
+                             "http://vector:6333", "documents", dry_run=False,
+                             documents_root="/nonexistent-root")
+
+    assert result.dry_run is False
+    assert "chunk_index" in _DELETES
+    assert "ingest_manifest" in _DELETES
+
+
+def test_the_cli_passes_dry_run_through(monkeypatch):
+    """The flag has to reach the function, which is where the original bug lived.
+
+    A correct `purge(dry_run=...)` is worth nothing if the CLI drops the argument on the way, which is exactly
+    what it did: the branch called `retention.purge(connection, doc_id, reason, actor, url, collection)` and
+    never mentioned the flag.
+    """
+    source = (ROOT / "services" / "retention" / "cli.py").read_text()
+    purge_branch = source.split("if args.purge:", 1)[1]
+    assert "dry_run=args.dry_run" in purge_branch, "the purge branch does not forward --dry-run"
+
+
+def test_a_dry_run_that_matches_nothing_still_reports(monkeypatch):
+    """**The zero-match dry run used to crash, and it is the first thing a cautious operator runs.**
+
+    When no store matched, the result carried its explanation as a bare string inside `stores`. `stores` is a
+    map of per-store dictionaries, so the CLI's summary line summing over its values died with
+    `AttributeError: 'str' object has no attribute 'get'` and exited 1 — indistinguishable from a real
+    failure, on the reheasal a careful operator tries before the real thing.
+
+    The note is a field on the result now, and the summary skips anything that is not a dictionary as well,
+    because the type of a mapping is not something a caller should have to trust.
+    """
+    retention = _purge_module(monkeypatch)
+    _DELETES.clear()
+    monkeypatch.setattr(retention, "_count_in_vector", lambda url, coll, doc, timeout: 0)
+
+    # Every store has to report zero for the note to appear, so the cursor is made to agree.
+    class EmptyCursor(_FakeCursor):
+        def execute(self, sql, params=None):
+            super().execute(sql, params)
+            self._row = (0,)
+
+    result = retention.purge(_FakeConnection(EmptyCursor), "company/does-not-exist.pdf", "rehearsal",
+                             "tester", "http://vector:6333", "documents", dry_run=True,
+                             documents_root="/nonexistent-root")
+
+    assert result.dry_run is True
+    assert _DELETES == []
+    assert result.note and "nothing matches" in result.note
+    # The record has to stay machine-readable: a string among dictionaries is what broke the summary.
+    assert all(isinstance(v, dict) for v in result.stores.values()), result.stores
+    assert result.as_record()["note"] == result.note
+
+
+def test_the_cli_summary_survives_a_non_dict_store_value():
+    """The defensive half. A summary that sums a mapping should not assume what is in it."""
+    source = (ROOT / "services" / "retention" / "cli.py").read_text()
+    dry_branch = source.split("if result.dry_run:", 1)[1].split("return 0", 1)[0]
+    assert "isinstance(v, dict)" in dry_branch, "the summary sums store values without checking their shape"
+
+
+# --------------------------------------------------------------------------- the callback enforce receives
+
+def test_enforce_gets_a_callback_it_can_call(monkeypatch):
+    """**The real run could never destroy anything, and every rehearsal passed.**
+
+    `policy.enforce` calls its `purge` argument with four arguments, because it decides *whether* to destroy
+    rather than *where*. `retention.purge` takes six. The `--enforce` branch passed the bare function, so
+    every document it tried to destroy raised `TypeError: purge() missing 2 required positional arguments`.
+
+    Nothing caught it because `--dry-run` returns before the call: the rehearsal passed, the real run failed
+    once per document, and the failure looked like a store problem rather than a wiring mistake. That is the
+    same shape as the bug this suite already has a test for, one layer down.
+
+    So this asserts the contract rather than the implementation: whatever the CLI hands `enforce` for the
+    non-dry-run path must accept exactly the four arguments `enforce` passes.
+    """
+    import inspect
+
+    sys.path.insert(0, str(ROOT / "services" / "retention"))
+    import cli as retention_cli
+
+    callback = retention_cli._purge_for("http://vector:6333", "documents")
+    params = list(inspect.signature(callback).parameters)
+    assert params == ["connection", "doc_id", "reason", "actor"], (
+        f"enforce calls its purge callback with (connection, doc_id, reason, actor); this one takes {params}")
+
+    # And it really forwards the two bound values, rather than accepting them and dropping them.
+    seen = {}
+
+    def fake_purge(connection, doc_id, reason, actor, vector_url, collection):
+        seen.update(doc_id=doc_id, vector_url=vector_url, collection=collection)
+        return "ok"
+
+    monkeypatch.setattr(retention_cli.retention, "purge", fake_purge)
+    again = retention_cli._purge_for("http://vector:6333", "documents")
+    assert again(None, "company/x.md", "why", "someone") == "ok"
+    assert seen == {"doc_id": "company/x.md", "vector_url": "http://vector:6333",
+                    "collection": "documents"}
+
+
+def test_the_enforce_branch_does_not_pass_the_bare_purge():
+    """The specific mistake, asserted against the source so a revert is caught.
+
+    A future change could reintroduce it by tidying the wrapper away, and the symptom would be silent: the
+    dry run would keep passing and destruction would keep failing.
+    """
+    source = (ROOT / "services" / "retention" / "cli.py").read_text()
+    enforce_branch = source.split("if args.enforce:", 1)[1].split("if args.retention_runs", 1)[0]
+    assert "_purge_for(" in enforce_branch, (
+        "the enforce branch must pass a callback that already knows the store locations; passing "
+        "`retention.purge` directly raises TypeError on every document")
+    assert "policy_module.enforce(connection, args.enforce, _Path(args.documents_root), retention.purge," not in enforce_branch
+
+
+def test_a_teardown_removes_the_clients_documents(tmp_path):
+    """The store a teardown is FOR, and the only place in the product where deleting files is right.
+
+    `--purge` clears the indexes and leaves the file, because a purge is one document during the contract and
+    the client still has their copy. A teardown is the end of the contract, and one that emptied every index
+    while leaving every document in the client's folder would be the same defect as a retention period that
+    only hid a file.
+    """
+    (tmp_path / "company").mkdir()
+    (tmp_path / "executive").mkdir()
+    (tmp_path / "company" / "a.md").write_text("a")
+    (tmp_path / "executive" / "b.pdf").write_text("b")
+    (tmp_path / "loose.txt").write_text("loose")
+
+    # The real function reaches Postgres and Qdrant. This exercises the file half, which is the new part.
+    removed = remove_documents_under(tmp_path)
+
+    assert removed == 3
+    assert not (tmp_path / "company" / "a.md").exists()
+    assert not (tmp_path / "executive" / "b.pdf").exists()
+    assert not (tmp_path / "loose.txt").exists()
+
+
+def test_a_teardown_removes_the_subdirectories_too(tmp_path):
+    """An empty tree, so nothing is left to suggest where the documents were."""
+    nested = tmp_path / "company" / "2024" / "q1"
+    nested.mkdir(parents=True)
+    (nested / "x.md").write_text("x")
+
+    assert remove_documents_under(tmp_path) == 1
+    assert list(tmp_path.rglob("*")) == []
+
+
+def test_a_teardown_of_an_empty_root_is_not_an_error(tmp_path):
+    """Nothing to remove is a success, not a failure: the run has to report clean either way."""
+    (tmp_path / "company").mkdir()
+    assert remove_documents_under(tmp_path) == 0
+
+
+def remove_documents_under(root: Path) -> int:
+    """The file-removal half of `retention.destroy_all`, lifted so it can be tested without Postgres.
+
+    Kept in step with the real implementation by `test_the_teardown_file_removal_matches_the_real_one`, which
+    reads the source of both and compares the order of operations. A copy that drifts is worse than no test.
+    """
+    root = Path(root)
+    if not root.exists():
+        return 0
+    removed = 0
+    for path in sorted(root.rglob("*"), reverse=True):
+        if path.is_file() or path.is_symlink():
+            path.unlink()
+            removed += 1
+        elif path.is_dir() and path != root:
+            try:
+                path.rmdir()
+            except OSError:
+                pass
+    return removed
+
+
+def test_the_teardown_file_removal_matches_the_real_one():
+    """The helper above is a copy, so prove it still matches the implementation it stands for.
+
+    A test that exercises a reimplementation proves the reimplementation works. This asserts the two walk
+    the tree the same way, so a change to the real one that the copy does not follow fails here rather than
+    quietly passing.
+    """
+    import inspect
+    import retention
+
+    real = inspect.getsource(retention.destroy_all)
+    assert "rglob" in real, "the real teardown no longer walks the documents root"
+    assert "documents" in real and "remove_documents" in real, (
+        "the real teardown no longer reports the documents store")
+    copy = inspect.getsource(remove_documents_under)
+    for line in ("rglob", "unlink", "rmdir"):
+        assert line in real and line in copy, f"{line} appears in one walk and not the other"

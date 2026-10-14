@@ -166,8 +166,15 @@ them.
 `~/projects/office-inference-core`. Feature branch and a green PR per change; **check whether a PR is still open
 before pushing to its branch**; never commit to `main`.
 
-**The box.** `ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@52.204.202.66`, a t3.large in the credits account
-`878451098165`. Repo at `/opt/oi-core`. The helper `/tmp/oibox '<command>'` runs a shell command there.
+**The box.** `ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@52.204.202.66`, an **m7i.4xlarge** in the credits
+account `878451098165` — instance `i-096bebd46308d1673`, us-east-1b, 16 vCPU / 61 GiB, 200 GB gp3, IAM role
+`oi-core-dev-instance`. Repo at `/opt/oi-core`. The helper `/tmp/oibox '<command>'` runs a shell command there.
+
+This page said `t3.large` until it was corrected against the instance metadata. **That was the retired box:**
+`i-0887564c9fe06b0b5` was terminated on 2026-10-10 and `docs/build-brief.md` records it. The difference matters
+when reading the older steps in `docs/runbook.md`, where phases 0 to 2 were first run on the t3.large and say
+so. Everything from that point runs on the m7i, and `nproc` plus `free -g` on the box settle it rather than any
+document.
 
 **All testing is on the cloud build.** The office build is a documented target and not a test environment. No
 GPU anywhere in this phase.

@@ -86,3 +86,83 @@ documents:
     what_it_tests: the dense policy prose case, and the one a small business would plausibly ask
       questions about. Rate tables and percentage methods, which are the figures where a wrong reading
       produces a wrong answer with a real citation.
+
+# ---------------------------------------------------------------------------------------------------
+# Authored fixtures: documents this project wrote rather than fetched.
+#
+# These are NOT corpus documents and they have no upstream licence, which is exactly why they are a
+# separate list rather than mixed into `documents` above: the four above are real filings with a
+# licence read at the source, and these are fixtures whose whole purpose is to exercise a control.
+#
+# **They still land in the deployed corpus, and nothing declared them there.** The builders below write
+# straight into the deployment's documents root, so the running index holds twelve documents while this
+# manifest declares four. A reader comparing the two finds eight unexplained files. That is the gap this
+# section closes: it is the inventory of what those eight are and which control each one proves.
+#
+# They are ingested under the `company` root except where noted, so every one of them is reachable by
+# the staff role. That is deliberate: a control exercised by a fixture has to be reachable by the role
+# the control applies to, or the test proves the fixture is unreachable rather than that the control
+# works.
+authored_fixtures:
+  # How each one ARRIVES in a deployed corpus, which is not the same for all eight and is why it is
+  # recorded per entry:
+  #
+  #   install: written-directly   the builder writes into /w/documents, so running it installs it
+  #   install: copied-by-hand     the builder writes into the repository and an operator copies it in
+  #   install: no-install-step    nothing in the repository places it; a reader rebuilding a corpus must
+  #                               copy it by hand, and the three below are a real gap rather than a choice
+  #
+  # Four write directly (the three fee schedules and onboarding-notes), one is copied by the runbook
+  # (executive-compensation, step 3.8 "Access labels"), and the three format fixtures have no install step
+  # anywhere. The
+  # twelve-document deployed corpus is therefore not reproducible by following the repository alone, which
+  # a reader should know before trying.
+  - id: fee-schedule-2025
+    path: company/fee-schedule-2025.md
+    built_by: tests/fixtures/versioning_acceptance.py
+    install: written-directly
+    what_it_tests: the superseded case. A 2025 schedule that a 2026 one replaces, so retrieval has a
+      real choice between two documents that both answer the question.
+  - id: fee-schedule-2026
+    path: company/fee-schedule-2026.md
+    built_by: tests/fixtures/versioning_acceptance.py
+    install: written-directly
+    what_it_tests: the current schedule, and the document the superseded one is refused in favour of.
+  - id: fee-schedule-2026-copy
+    path: company/fee-schedule-2026-copy.md
+    built_by: tests/fixtures/versioning_acceptance.py
+    install: written-directly
+    what_it_tests: the near-duplicate case. An exact copy, so duplicate detection has a true positive,
+      and the pair is resolved with --distinct or --supersede rather than deleted.
+  - id: executive-compensation
+    path: executive/executive-compensation.md
+    built_by: tests/fixtures/build_executive_fixture.py
+    install: copied-by-hand
+    what_it_tests: the access filter. The one document under the restricted root, carrying figures that
+      appear nowhere else, so a leak is found by searching for one. It is the only fixture NOT under
+      `company`.
+  - id: callout-rate-approval
+    path: company/callout-rate-approval.eml
+    built_by: tests/fixtures/build_format_fixtures.py
+    install: no-install-step
+    what_it_tests: RET-FORMAT-001's email case, and the .eml suffix that was missing from the accepted
+      set until that requirement was built.
+  - id: rate-card-2026
+    path: company/rate-card-2026.xlsx
+    built_by: tests/fixtures/build_format_fixtures.py
+    install: no-install-step
+    what_it_tests: RET-FORMAT-001's spreadsheet case, with a table a question can be answered from.
+  - id: dispatch-review-q1
+    path: company/dispatch-review-q1.pptx
+    built_by: tests/fixtures/build_format_fixtures.py
+    install: no-install-step
+    what_it_tests: RET-FORMAT-001's slide case.
+  - id: onboarding-notes
+    path: company/onboarding-notes.md
+    built_by: tests/fixtures/injection_acceptance.py
+    install: written-directly
+    what_it_tests: SEC-INJECT-001, prompt injection from document content, and the unanswerable cases
+      Q08 and Q09 that depend on what the corpus does and does not say.
+
+# What the deployed corpus therefore holds: four fetched documents plus eight authored fixtures, which
+# is the twelve documents and 1131 points the manual's section 13a tabulates.

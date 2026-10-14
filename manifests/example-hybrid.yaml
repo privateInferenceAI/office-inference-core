@@ -27,6 +27,14 @@ lanes:
     data_classes_allowed: [public, internal]
     requires_approval: true
     redaction: true
+access:
+  # The egress gate reads this block, not the lane's list above. Same classes in both places until the
+  # overlap is resolved; declaring only the lane's list renders an empty permission set and refuses
+  # everything, including the public material this hybrid build is meant to send.
+  denial: denied
+  egress:
+    frontier_classes: [public, internal]
+    redaction: "on"
 budgets:
   # Per-role ceilings in USD. A hard cap: the gateway refuses over-budget requests rather
   # than alerting about them. Example figures for a small firm.

@@ -20,6 +20,27 @@ def connect():
     return psycopg.connect(os.environ["DATABASE_URL"], autocommit=True)
 
 
+def _purge_for(vector_url: str, collection: str):
+    """`retention.purge` with the two settings `policy.enforce` cannot supply.
+
+    `enforce` calls its `purge` argument with four arguments — connection, doc_id, reason, actor — because it
+    is deciding *whether* to destroy rather than *where*. The store locations are the caller's, so the caller
+    binds them.
+
+    **This function exists because the `--enforce` branch passed the bare `retention.purge` instead**, which
+    takes six arguments and therefore raised `TypeError: purge() missing 2 required positional arguments` on
+    every document it tried to destroy. The failure was safe in the sense that nothing was destroyed and the
+    run recorded `failed: 1` — and it was invisible for as long as it lasted, because `--dry-run` returns
+    before reaching the call, so every rehearsal passed while the real run could never do anything at all.
+
+    **That is the shape of bug this project has been caught by repeatedly: the rehearsal exercised a path the
+    real command does not take.** A dry run that returns early tests the dry run.
+    """
+    def bound(connection, doc_id: str, reason: str, actor: str):
+        return retention.purge(connection, doc_id, reason, actor, vector_url, collection)
+    return bound
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Purge a client's document everywhere it is stored.")
     parser.add_argument("--purge", metavar="DOC_ID",
@@ -75,7 +96,8 @@ def main() -> int:
         from pathlib import Path as _Path
         with connect() as connection:
             run = policy_module.enforce(connection, args.enforce, _Path(args.documents_root),
-                                        retention.purge, actor=args.actor, dry_run=args.dry_run)
+                                        _purge_for(args.vector_url, args.collection),
+                                        actor=args.actor, dry_run=args.dry_run)
         print(json.dumps(run.as_record(), indent=2, sort_keys=True))
         if run.retain_days == 0:
             print()
@@ -154,8 +176,13 @@ def main() -> int:
             print("--destroy-all needs --reason", file=sys.stderr)
             return 1
         with connect() as connection:
+            # The documents root is passed so the teardown removes the client's own files as well as the
+            # indexes. Without it a teardown would clear everything this system built and leave every
+            # document sitting in the client's folder, which is the same defect as a retention period that
+            # only hid a file.
             record = retention.destroy_all(connection, args.reason, args.actor,
-                                           args.vector_url, args.collection)
+                                           args.vector_url, args.collection,
+                                           documents_root=args.documents_root)
         print(json.dumps(record, indent=2, sort_keys=True))
         print()
         print("Keep that file. Its hash is what lets you show later that it is the record we produced.")
@@ -168,12 +195,29 @@ def main() -> int:
             return 1
         with connect() as connection:
             result = retention.purge(connection, args.purge, args.reason, args.actor,
-                                     args.vector_url, args.collection)
+                                     args.vector_url, args.collection,
+                                     dry_run=args.dry_run, documents_root=args.documents_root)
         print(json.dumps(result.as_record(), indent=2, sort_keys=True))
+        # The rehearsal exits 0 and says what it would do, after the refusal check, because a refusal is a
+        # refusal whether or not the run was real and it is the outcome a careful operator is checking for.
         if result.refused:
             print()
             print(f"REFUSED: {result.refusal_reason}")
             return 1
+        if result.dry_run:
+            # Every value here is a per-store dictionary. It is summed defensively anyway, because the note
+            # used to live inside this map as a bare string and this line died with `'str' object has no
+            # attribute 'get'` on the one case it exists for: a document id that matches nothing.
+            counts = [int(v.get("would_delete") or 0) for v in result.stores.values() if isinstance(v, dict)]
+            total = sum(counts)
+            print()
+            print(f"DRY RUN, nothing was changed. A real purge would remove {total} object(s) across "
+                  f"{len([c for c in counts if c])} store(s).")
+            if result.note:
+                print(result.note)
+            if not result.complete:
+                print("It would be INCOMPLETE for the reason recorded under audit_payload.")
+            return 0
         if not result.complete:
             print()
             print("INCOMPLETE: at least one store did not confirm. The document is NOT purged, whatever the "
