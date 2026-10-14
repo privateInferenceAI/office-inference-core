@@ -42,11 +42,16 @@ def _master_key() -> str:
     return os.environ.get("LITELLM_MASTER_KEY", "")
 
 
-def _requested_model(request) -> str:
+async def _requested_model(request) -> str:
     """The model named in the request body, or an empty string when it cannot be read."""
     import json
 
-    body = getattr(request, "_body", None)
+    # `request.body()` rather than a private attribute: Starlette caches the read, so this costs
+    # nothing later when the gateway parses the same body for the model call.
+    try:
+        body = await request.body()
+    except Exception:  # noqa: BLE001
+        return ""
     if not body:
         return ""
     try:
@@ -57,9 +62,9 @@ def _requested_model(request) -> str:
         return ""
 
 
-def _refuse_a_model_this_role_may_not_use(request, role: str) -> None:
+async def _refuse_a_model_this_role_may_not_use(request, role: str) -> None:
     """Refuse a request whose model is another role's, which is what a forged statement would try."""
-    asked = _requested_model(request)
+    asked = await _requested_model(request)
     if not asked or asked == role:
         return
     # A deployment may name a variant of the role, such as `analyst-frontier` on a build with both lanes.
@@ -176,7 +181,7 @@ async def user_api_key_auth(request: Request, api_key: str) -> UserAPIKeyAuth:
     # It matters because the roles are priced differently and read different things: `reader` is the
     # expensive one, and the gateway exposes each role as a model name. A statement for `analyst` asking
     # for `reader` is a caller reaching past what it was granted.
-    _refuse_a_model_this_role_may_not_use(request, role)
+    await _refuse_a_model_this_role_may_not_use(request, role)
 
     # ------------------------------------------------------------------ the budget
     #
