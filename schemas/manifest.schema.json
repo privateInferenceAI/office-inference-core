@@ -128,7 +128,8 @@
     "budgets": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Per-role ceilings in USD over a period. A hard cap: the gateway refuses over-budget requests rather than alerting about them. Internal cost control, not client billing. Required wherever the frontier lane is enabled, because a remote call costs money.",
+      "description":
+        "Per-role ceilings in USD over a period, enforced by the gateway, which refuses a request once recorded spend is over the ceiling. Internal cost control, not client billing. Required wherever the frontier lane is enabled, because a remote call costs money. NOT a hard cap, and the wording matters: LiteLLM checks admission against RECORDED spend, so concurrent requests can all pass before any of them is counted, and the global spend counter is known to lose concurrent increments (issues #34732 and #35567, open as of 2026-10-14). Treat this as a budget that stops a runaway, never as a number that cannot be exceeded. The enforced ceilings are the egress gate, which decides what may leave at all, and a per-request max_tokens.",
       "properties": {
         "period_days": {
           "type": "integer",

@@ -268,8 +268,11 @@ maps it to a role, and the tooling refuses a hand-typed actor outside an explici
 Today the audit CLI takes `--actor` as free text and the runbook demonstrates a hand-typed admin. No
 client has seen that, and it stops before one does.
 
-**Per-role virtual keys with hard budgets**, one set per deployment. A hard cap, not an alert. The
-master key exists for administration and appears nowhere else.
+**Per-role virtual keys with budgets**, one set per deployment, enforced by the gateway rather than
+alerted on. **Corrected 2026-10-14: not a hard cap.** Admission is checked against recorded spend, so
+concurrent requests can pass before any is counted (open LiteLLM issues #34732, #35567). It stops a
+runaway; it does not make the number unexceedable. The ceilings that hold are the egress gate and a
+per-request max_tokens. The master key exists for administration and appears nowhere else.
 
 ### The refusal path
 

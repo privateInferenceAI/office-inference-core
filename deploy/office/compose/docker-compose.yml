@@ -309,6 +309,12 @@ services:
     # catalog) affects everything before 1.84.0, and CVE-2026-42271 affects 1.74.2 to 1.83.7.
     # Model swaps, budgets, and the audit trail all live here, which is why it is the one
     # component we never leave unpinned or unversioned.
+    # litellm 1.104.2, read from the running container on 2026-10-14. The version is recorded because the rule
+    # says a pin without one cannot answer the first question a security review asks, and because this image
+    # was the one place in the deployment where nobody could say which version was running.
+    #
+    # Against the advisories that mattered: CVE-2026-59822 (MCP auth bypass, before 1.84.0) and CVE-2026-42208
+    # (pre-auth SQL injection in key verification, 1.81.16 to 1.83.6) are both behind this pin.
     image: ghcr.io/berriai/litellm@sha256:3d88bd757134a00e8c00237b85a021ab1f6d54abb9c1df750f411dbe7256a500
     container_name: litellm
     restart: unless-stopped

@@ -326,7 +326,7 @@ the assistant API maps it to a role, and the tooling refuses a hand-typed actor 
 development mode. Today the audit CLI takes `--actor` as free text and the runbook demonstrates a
 hand-typed admin. No client has seen that, and it stops before one does.
 
-**Per-role virtual keys with hard budgets**, one set per deployment, a hard cap rather than an alert.
+**Per-role virtual keys with budgets**, one set per deployment, enforced by the gateway rather than alerted on. **Corrected 2026-10-14: this is not a hard cap.** LiteLLM admits against recorded spend, so concurrent requests can pass before any is counted (open issues #34732, #35567), which makes the budget a runaway stopper and not a ceiling that cannot be crossed. The ceilings that hold are the egress gate and a per-request max_tokens.
 The LiteLLM master key exists for administration and appears nowhere else. Today the tools use it.
 
 ### Refusals
