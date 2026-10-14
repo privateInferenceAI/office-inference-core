@@ -147,7 +147,9 @@ def main() -> int:
         print(f"  {line}")
     print()
 
-    services = ingest.Services.from_env()
+    # The same construction the ask probe uses. `Services` reads its endpoints from the environment when
+    # it is built, so there is no factory to call.
+    services = ingest.Services()
     ledger = Ledger()
 
     # ------------------------------------------------------------------ ACCESS
