@@ -1,0 +1,162 @@
+{
+  "permissive_remote_only | agentic": {
+    "escalated": true,
+    "escalation_requested": false,
+    "lane": "frontier",
+    "reason": "the task reconcile is on the agentic pack list",
+    "told_user": true,
+    "trigger": "agentic_task"
+  },
+  "permissive_remote_only | agentic_and_wants_stronger": {
+    "escalated": true,
+    "escalation_requested": true,
+    "lane": "frontier",
+    "reason": "the task compare is on the agentic pack list",
+    "told_user": true,
+    "trigger": "agentic_task"
+  },
+  "permissive_remote_only | plain": {
+    "escalated": false,
+    "escalation_requested": false,
+    "lane": "frontier",
+    "reason": "no trigger fired",
+    "told_user": false,
+    "trigger": ""
+  },
+  "permissive_remote_only | unknown_task": {
+    "escalated": false,
+    "escalation_requested": false,
+    "lane": "frontier",
+    "reason": "no trigger fired",
+    "told_user": false,
+    "trigger": ""
+  },
+  "permissive_remote_only | wants_stronger": {
+    "escalated": true,
+    "escalation_requested": true,
+    "lane": "frontier",
+    "reason": "the user asked for the stronger model",
+    "told_user": true,
+    "trigger": "user_requested_stronger"
+  },
+  "permissive_with_local | agentic": {
+    "escalated": true,
+    "escalation_requested": false,
+    "lane": "frontier",
+    "reason": "the task reconcile is on the agentic pack list",
+    "told_user": true,
+    "trigger": "agentic_task"
+  },
+  "permissive_with_local | agentic_and_wants_stronger": {
+    "escalated": true,
+    "escalation_requested": true,
+    "lane": "frontier",
+    "reason": "the task compare is on the agentic pack list",
+    "told_user": true,
+    "trigger": "agentic_task"
+  },
+  "permissive_with_local | plain": {
+    "escalated": false,
+    "escalation_requested": false,
+    "lane": "local",
+    "reason": "no trigger fired",
+    "told_user": false,
+    "trigger": ""
+  },
+  "permissive_with_local | unknown_task": {
+    "escalated": false,
+    "escalation_requested": false,
+    "lane": "local",
+    "reason": "no trigger fired",
+    "told_user": false,
+    "trigger": ""
+  },
+  "permissive_with_local | wants_stronger": {
+    "escalated": true,
+    "escalation_requested": true,
+    "lane": "frontier",
+    "reason": "the user asked for the stronger model",
+    "told_user": true,
+    "trigger": "user_requested_stronger"
+  },
+  "public_only | agentic": {
+    "escalated": false,
+    "escalation_requested": false,
+    "lane": "local",
+    "reason": "the deployment permits ['public'] on a remote lane, and this request is regulated",
+    "told_user": false,
+    "trigger": ""
+  },
+  "public_only | agentic_and_wants_stronger": {
+    "escalated": false,
+    "escalation_requested": true,
+    "lane": "local",
+    "reason": "the deployment permits ['public'] on a remote lane, and this request is regulated",
+    "told_user": true,
+    "trigger": ""
+  },
+  "public_only | plain": {
+    "escalated": false,
+    "escalation_requested": false,
+    "lane": "local",
+    "reason": "the deployment permits ['public'] on a remote lane, and this request is regulated",
+    "told_user": false,
+    "trigger": ""
+  },
+  "public_only | unknown_task": {
+    "escalated": false,
+    "escalation_requested": false,
+    "lane": "local",
+    "reason": "the deployment permits ['public'] on a remote lane, and this request is regulated",
+    "told_user": false,
+    "trigger": ""
+  },
+  "public_only | wants_stronger": {
+    "escalated": false,
+    "escalation_requested": true,
+    "lane": "local",
+    "reason": "the deployment permits ['public'] on a remote lane, and this request is regulated",
+    "told_user": true,
+    "trigger": ""
+  },
+  "undeclared | agentic": {
+    "escalated": false,
+    "escalation_requested": false,
+    "lane": "local",
+    "reason": "the deployment permits nothing on a remote lane, and this request is regulated",
+    "told_user": false,
+    "trigger": ""
+  },
+  "undeclared | agentic_and_wants_stronger": {
+    "escalated": false,
+    "escalation_requested": true,
+    "lane": "local",
+    "reason": "the deployment permits nothing on a remote lane, and this request is regulated",
+    "told_user": true,
+    "trigger": ""
+  },
+  "undeclared | plain": {
+    "escalated": false,
+    "escalation_requested": false,
+    "lane": "local",
+    "reason": "the deployment permits nothing on a remote lane, and this request is regulated",
+    "told_user": false,
+    "trigger": ""
+  },
+  "undeclared | unknown_task": {
+    "escalated": false,
+    "escalation_requested": false,
+    "lane": "local",
+    "reason": "the deployment permits nothing on a remote lane, and this request is regulated",
+    "told_user": false,
+    "trigger": ""
+  },
+  "undeclared | wants_stronger": {
+    "escalated": false,
+    "escalation_requested": true,
+    "lane": "local",
+    "reason": "the deployment permits nothing on a remote lane, and this request is regulated",
+    "told_user": true,
+    "trigger": ""
+  }
+}
