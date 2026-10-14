@@ -69,6 +69,10 @@ for _ in $(seq 1 30); do
   # it had just written, which proves the copy is right and says nothing about the container: the app loads
   # OI_MANIFEST at startup, and a diagnosis run showed a container reporting `internal` from its default
   # manifest while this loop was satisfied with `regulated` from the file.
+  # **`--network ai-net` is not optional here, and leaving it out is what the first version did.** Without
+  # it the container cannot resolve the service name at all: the run reports "Temporary failure in name
+  # resolution", which reads like a broken deployment rather than a missing flag. The probe below has always
+  # passed this; the confirmation did not.
   set +e
   confirmation=$(docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
     -v "$PWD:/w" -w /w --env-file rendered/env -e "DATABASE_URL=$DB_URL" \
