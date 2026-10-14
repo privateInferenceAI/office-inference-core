@@ -3866,6 +3866,43 @@ that probe fails, which is the point of it.
     ok   DEGRADED   the last recorded degradation carries reason, attempts, threshold, partial_output, lane, ...
     PASSED: 7 right(s) held against the documented interface
 
+### Provoking a failure on purpose, so the degraded path can be seen
+
+**A rule that is never exercised is a rule you are trusting.** The degraded path only appears when the provider
+refuses, and waiting for a provider to misbehave is not a test. Two ways to produce one, both real:
+
+**The cheap route is the request ceiling**, not the token ceiling. From Service Quotas, read 2026-10-14:
+
+| Model, on-demand | Requests per minute |
+|---|---|
+| Nova Lite | 200 |
+| Nova Micro | 200 |
+| Nova Pro | 25 |
+| Nova Pro, latency-optimized | **1** |
+
+A burst of several hundred small concurrent calls reaches a request ceiling in seconds, and because each call
+generates one token it costs a fraction of a cent. The token arithmetic — four million tokens per minute against
+a ten-thousand maximum per request, so about four hundred maximum-size requests — is true and useless here.
+
+    cd /opt/oi-core
+    run() { docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
+      -v /opt/oi-core:/w -w /w --env-file rendered/env "$@"; }
+    run --entrypoint python oi-core/session:local /w/tests/fixtures/throttle_probe.py
+
+It **asks the API while the burst is running**, because a throttle that has already passed proves nothing, and
+it prints both the burst outcomes and the answers. Exit 0 means a real throttle was correctly classified:
+
+    HTTP 200 kind='degraded' reason='throttled' attempts=3 threshold='first_token'
+    burst outcomes: {200: 474, 429: 1991}
+
+**Exit 1 is the one to understand.** It means the answer degraded but the reason was `unclassified` with
+`attempts: 2`, and that is a defect rather than a throttle: attempt one earns the real 429, the retry presents a
+signed statement the gateway has already spent, and the 401 that comes back is what gets classified. It was a
+real bug and this probe is how it was found.
+
+**The second way is to lower a team's `tpm_limit`** and restart the gateway, which produces a refusal through
+our own layer rather than the provider's. It exercises the same classification path and the same degraded
+payload, and it is **not** evidence of a provider throttle. Useful for a quick check; say which one you ran.
 ### How it breaks
 
 - **Everything escalates.** The task list is matching too broadly. Check the audit rows counted per trigger,
