@@ -32,9 +32,16 @@ cleanup() { docker rm -f "$NAME" >/dev/null 2>&1 || true; rm -f "$COPY"; }
 trap cleanup EXIT
 
 docker rm -f "$NAME" >/dev/null 2>&1 || true
+
+# **The database URL comes from the compose service, not from rendered/env.** The API resolves a session token
+# against Postgres, so a container started without this answers `401 no_session` to every request — which looks
+# like a broken session rather than a missing environment variable. Learned the hard way.
+DB_URL=$(docker inspect api --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^DATABASE_URL=//p' | head -1)
+[ -n "$DB_URL" ] || { echo "FAILED: could not read DATABASE_URL from the running api container"; exit 1; }
+
 docker run -d --name "$NAME" --network ai-net \
   --user "$(id -u):$(id -g)" -v "$PWD:/w" -w /w \
-  --env-file rendered/env -v "$PWD/rendered:/app/rendered" \
+  --env-file rendered/env -e "DATABASE_URL=$DB_URL" -v "$PWD/rendered:/app/rendered" \
   -e "OI_MANIFEST=/app/rendered/$(basename "$COPY")" oi-core/api:local >/dev/null
 
 for _ in $(seq 1 30); do
