@@ -226,12 +226,15 @@ async def ask(request: Request):
         reason, kind, attempts = generation if isinstance(generation, tuple) else ("unclassified", {}, 1)
         facts = budget_module.audit_facts(
             reason=reason, matched=(kind or {}).get("matched", ""), retryable=bool((kind or {}).get("retryable")),
-            attempts=attempts, threshold=request_budget.timed_out() or "surrender", budget=request_budget,
+            # `threshold` is carrying None when no deadline tripped, and that is the honest value: a budget
+            # refusal is not a timeout, and recording one as a threshold would blur the three the spec
+            # exists to distinguish. The reason field already says what happened.
+            attempts=attempts, threshold=request_budget.timed_out(), budget=request_budget,
             partial_output=False, errors=[], lane="frontier", data_class="internal")
         audit("model_call", session.subject, session.role, "denied", facts, model=model)
         return JSONResponse(
             budget_module.degraded(reason, _degrade_detail(reason), result.passages, request_budget,
-                                   attempts, request_budget.timed_out() or "surrender", False),
+                                   attempts, request_budget.timed_out(), False),
             status_code=200)
 
     verified = citations.verify(answer, result.passages)
