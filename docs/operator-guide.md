@@ -31,6 +31,7 @@ Where a stage can destroy something, it says so before the command, not after.
 | **An AWS account** with Bedrock model access | The frontier lane calls Amazon Bedrock. Four models: three Nova and one DeepSeek in the reference deployment | The manual's section 3 lists them |
 | **The repository** at `/opt/oi-core` | The path is load-bearing: the systemd unit files hard-code it and the compose file resolves mounts relative to it | `ls /opt/oi-core` |
 | **A free hour** | The first ingestion of a real corpus takes minutes, and the model downloads take longer | — |
+| **A subject the manifest declares** | A session names a subject, and a made-up address is refused rather than defaulted. `rendered/access.json` lists the declared ones, and Stage 13b is where you use it | `oi --profile tools run --rm session mint --dev --subject <yours> --role viewer` |
 
 **If the box is small, stop and resize it.** This project has a rule about that, in `AGENTS.md`: ask what a
 competent production team would deploy, and let that decide. A four-vCPU box will work for the fixtures and
@@ -39,7 +40,7 @@ hardware limit.
 
 ## The shape of the thing
 
-Five containers run all the time. Four tools run when you call them. Knowing which is which makes the
+Six containers run all the time, and the assistant API is one of them. Four tools run when you call them. Knowing which is which makes the
 rest of this guide readable.
 
 ```
@@ -1566,6 +1567,7 @@ run --entrypoint python oi-core/ingestion:local /w/tests/fixtures/citations_acce
 | `figures_acceptance` | Damaged figures are caught, intact ones are not, arithmetic confirms what the document states, and scanned and digital chunks are labelled apart |
 | `api_contract_probe` | The services answer what the contract says they answer. **Its last line — "Findings are what the services answered, not what a document said they would" — is the point of the whole suite** |
 | `citations_acceptance` | An invented citation is rejected, an unsupported sentence is marked and kept, and a correct sentence survives |
+| `interface_probe` | **Every claim the assistant API's pages make, as seven rights.** If the manual and the service disagree, this fails, which is the point of it. Run it after any change to the API, the routing, or the budget |
 
 And the one that needs the reranker's paid subscription rather than just the checkout:
 
