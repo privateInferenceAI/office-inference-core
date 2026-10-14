@@ -16,7 +16,7 @@ On your deployment the numbers will be your own, which is the point of a hash ch
 **Status when this was written:** phases C1 and C2 complete. The system runs, answers through a
 gateway, records what it did, ships that record off the machine, and can prove the record was not
 altered. It reads a client's documents: ingestion, hybrid retrieval, citation verification, access
-control, egress redaction and retention are sections 13a to 13f.
+control, egress redaction and retention are sections 13a to 13f, and the assistant API and its routing are 13g and 13h.
 
 Sections 1 to 25 are ordered by when they were written rather than by what a reader needs first, so
 the six C2 pages sit between section 20 and the troubleshooting part rather than beside the audit
@@ -49,7 +49,7 @@ section they are numbered next to. The contents below lists them where they are.
 
 **Part 3b, reading documents (phase C2)**
 
-These six pages sit in the file after section 20, as the front matter explains. They are numbered as part
+These eight pages sit in the file after section 20, as the front matter explains. They are numbered as part
 of 13 because they are operations like the rest of it.
 
 13a. Ingesting documents
@@ -58,6 +58,8 @@ of 13 because they are operations like the rest of it.
 13d. Access control
 13e. Redaction and the egress gate
 13f. Retention and deletion
+13g. The assistant API
+13h. Routing, and what happens when the model will not answer
 
 **Part 4, changing things**
 16. The manifest, field by field
