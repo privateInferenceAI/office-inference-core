@@ -11,7 +11,8 @@ import json, os, sys, urllib.request
 
 sys.path.insert(0, '/w/services/retrieval')
 sys.path.insert(0, '/w/services/session')
-import access, retriever, session as sm
+sys.path.insert(0, '/w/services/ingestion')
+import access, ingest, retriever, session as sm
 
 # One question per shape, including the shapes the old triggers were meant to catch and the ones they wrongly
 # caught. `mileage` is the plain single-fact question that escalated on the first live run.
@@ -39,7 +40,7 @@ def search(registry, question, want):
         permit = session.permit()
     finally:
         store.close()
-    result = retriever.search(None, question, permit.role, limit=want, permit=permit)
+    result = retriever.search(ingest.Services(), question, permit.role, limit=want, permit=permit)
     return result
 
 
