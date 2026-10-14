@@ -320,14 +320,16 @@ async def ask(request: Request):
         # retrieved passages with a typed reason, because retrieval already did the expensive part and the
         # client is entitled to their own material. A client whose data class forbids the frontier lane meets
         # this path routinely, so it has to read like a feature rather than an outage.
-        reason, kind, attempts = generation if isinstance(generation, tuple) else ("unclassified", {}, 1)
+        reason, kind, attempts, attempt_errors = generation if isinstance(generation, tuple) else (
+            "unclassified", {}, 1, [])
         facts = budget_module.audit_facts(
             reason=reason, matched=(kind or {}).get("matched", ""), retryable=bool((kind or {}).get("retryable")),
             # `threshold` is carrying None when no deadline tripped, and that is the honest value: a budget
             # refusal is not a timeout, and recording one as a threshold would blur the three the spec
             # exists to distinguish. The reason field already says what happened.
             attempts=attempts, threshold=request_budget.timed_out(), budget=request_budget,
-            partial_output=False, errors=[], lane="frontier", data_class="internal")
+            partial_output=False, errors=attempt_errors, lane=decision.lane,
+            data_class=data_class)
         audit("model_call", session.subject, session.role, "denied", facts, model=model)
         return JSONResponse(
             budget_module.degraded(reason, _degrade_detail(reason), result.passages, request_budget,
@@ -423,7 +425,7 @@ def _generate(session, permit, model: str, question: str, passages: list, budget
                 data = json.load(r)
             choices = data.get("choices") or []
             if not choices:
-                return None, ("unclassified", "the gateway returned no choices", attempt)
+                return None, ("unclassified", "the gateway returned no choices", attempt, errors)
             return (choices[0].get("message") or {}).get("content", ""), None
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode(errors="replace")[:400]
@@ -432,24 +434,32 @@ def _generate(session, permit, model: str, question: str, passages: list, budget
                            "matched": kind["matched"], "retryable": kind["retryable"]})
             retry_after = exc.headers.get("Retry-After") if exc.headers else None
             if not kind["retryable"]:
-                return None, (kind["reason"], kind, attempt)
+                return None, (kind["reason"], kind, attempt, errors)
             if attempt >= budget_module.MAX_ATTEMPTS:
-                return None, (kind["reason"], kind, attempt)
+                return None, (kind["reason"], kind, attempt, errors)
             wait = _backoff(attempt, retry_after)
             if wait >= budget.remaining() - budget.reserve:
                 # The wait itself would eat the delivery reserve, so waiting is the wrong answer.
-                return None, (kind["reason"], kind, attempt)
+                return None, (kind["reason"], kind, attempt, errors)
             time.sleep(wait)
         except Exception as exc:  # noqa: BLE001 - a transport failure is a classification too
             kind = budget_module.classify(type(exc).__name__)
             errors.append({"attempt": attempt, "status": 0, "reason": kind["reason"],
                            "matched": kind["matched"], "retryable": kind["retryable"]})
             if not kind["retryable"] or attempt >= budget_module.MAX_ATTEMPTS:
-                return None, (kind["reason"], kind, attempt)
+                return None, (kind["reason"], kind, attempt, errors)
             time.sleep(_backoff(attempt, None))
 
-    return None, (errors[-1]["reason"] if errors else "timeout",
-                  errors[-1] if errors else {"reason": "timeout", "retryable": True}, attempt)
+    # **Three values, and the last classification is never discarded.** The first version returned a
+    # two-tuple here while the caller unpacked three, and it fell back to a bare `unclassified` when
+    # the loop broke before recording anything — so a provider throttle could still be recorded as an
+    # unrecognised failure, which is the defect the retry fix was meant to remove.
+    if errors:
+        last = dict(errors[-1])
+        return None, (last["reason"], last, attempt, errors)
+    # No attempt was made at all: the deadline left no room. That is a timeout, and saying so is more
+    # honest than `unclassified`, which reads as a failure nobody understands.
+    return None, ("timeout", {"reason": "timeout", "matched": "", "retryable": True}, attempt, errors)
 
 
 def _degrade_detail(reason: str) -> str:
