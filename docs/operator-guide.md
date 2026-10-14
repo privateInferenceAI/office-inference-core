@@ -31,7 +31,7 @@ Where a stage can destroy something, it says so before the command, not after.
 | **An AWS account** with Bedrock model access | The frontier lane calls Amazon Bedrock. Four models: three Nova and one DeepSeek in the reference deployment | The manual's section 3 lists them |
 | **The repository** at `/opt/oi-core` | The path is load-bearing: the systemd unit files hard-code it and the compose file resolves mounts relative to it | `ls /opt/oi-core` |
 | **A free hour** | The first ingestion of a real corpus takes minutes, and the model downloads take longer | — |
-| **A subject the manifest declares** | A session names a subject, and a made-up address is refused rather than defaulted. `rendered/access.json` lists the declared ones, and Stage 13b is where you use it | `oi --profile tools run --rm session mint --dev --subject <yours> --role viewer` |
+| **A subject the manifest declares** | A session names a subject, and a made-up address is refused rather than defaulted. `rendered/access.json` lists the declared ones, and Stage 13h is where you use it | `oi --profile tools run --rm session mint --dev --subject <yours> --role viewer` |
 
 **If the box is small, stop and resize it.** This project has a rule about that, in `AGENTS.md`: ask what a
 competent production team would deploy, and let that decide. A four-vCPU box will work for the fixtures and
@@ -648,7 +648,7 @@ rather than repaired, because re-embedding is a decision rather than a repair.
 
 **There is no ask endpoint.** The retrieval path is a function, `search()` in
 `services/retrieval/retriever.py`, and the API that would expose it — sessions, caller identity, streaming —
-is the assistant API, built in C3 and walked through at Stage 13b. What remains here is the probe that runs one question through the whole path, and it is how you answer
+is the assistant API, built in C3 and walked through at Stage 13h. What remains here is the probe that runs one question through the whole path, and it is how you answer
 "what does the system return for this" today.
 
 ```
@@ -1647,7 +1647,7 @@ stage 7c explains why the checks cannot. The suite proves the controls around th
 
 ---
 
-# Stage 13b: the assistant API, which is the first thing a client actually touches
+# Stage 13h: the assistant API, which is the first thing a client actually touches
 
 **Goal:** go from "the pieces work" to "a client application can ask a question and get a cited, permitted,
 redacted answer", and know what happens when the model will not answer.
@@ -1656,7 +1656,7 @@ Everything before this stage exercised components. Retrieval was a function, the
 gateway was a curl. **C3 puts one interface in front of all of it**, and after this stage the way to ask a
 question is `POST /ask` rather than a probe.
 
-## 13b.1. Why there is an API at all, and why it has no port
+## 13h.1. Why there is an API at all, and why it has no port
 
 Every capability the system has is reachable through this one interface, and it has no user interface of its
 own. **The port is unpublished on purpose.** A phase that builds an API should not also publish a debug port,
@@ -1678,7 +1678,7 @@ run() { docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
   -v /opt/oi-core:/w -w /w --env-file rendered/env "$@"; }
 ask() { run --entrypoint python oi-core/session:local /w/tests/fixtures/ask_client.py "$@"; }
 ```
-## 13b.2. A session, which is what a request carries instead of a password
+## 13h.2. A session, which is what a request carries instead of a password
 
 The caller does not hold a model credential and does not name a role. It holds a **session token**, which
 resolves to a row holding the subject, the role and the document roots. The API holds one signing key and mints
@@ -1695,7 +1695,7 @@ identity. The generator's message lists the declared subjects, which is where to
 **Checkpoint.** The command prints a token and `roots ['company']` for a staff subject. A subject you invented
 is refused, and that refusal is correct.
 
-## 13b.3. Ask a question, and read the answer
+## 13h.3. Ask a question, and read the answer
 
     ask --question "What is the mileage rate for reimbursement?"
 
@@ -1711,7 +1711,7 @@ Five fields matter more than the rest, and two of them exist to stop a lie:
 
 **Checkpoint.** A 200 with six citations, `lane: frontier`, `escalated: false`, and an empty `notice`.
 
-## 13b.4. The three ways a request can be refused, and they are different
+## 13h.4. The three ways a request can be refused, and they are different
 
 | What you did | What comes back | Why it is not the same as the others |
 |---|---|---|
@@ -1726,7 +1726,7 @@ Check the second one in the record rather than in the response, because that is 
 **Checkpoint.** The forged-role request returns a 403 whose wording says the permission was denied **or the
 resource might not exist**, and `session refusals` shows `claimed_role='executive' session_role='viewer'`.
 
-## 13b.5. Streaming, and the redaction that has to come with it
+## 13h.5. Streaming, and the redaction that has to come with it
 
     ask --question "What is the mileage rate?" --stream
 
@@ -1746,7 +1746,7 @@ system meant to hand over the retrieved passages.
 **Checkpoint.** `stream_probe` reports four rights, including `REDACTED` with the canary absent from every
 frame. **Run it alone** — it is load-sensitive and will fail spuriously if other probes are running.
 
-## 13b.6. When the model will not answer, which is the part that was hard to build
+## 13h.6. When the model will not answer, which is the part that was hard to build
 
 Three thresholds on one deadline anchored at the moment the client asked: first token 1.5s, stall 5s, total 30s,
 with 1.2s held back so a degraded answer still fits. Retries happen **only before the first token**, because a
@@ -1768,7 +1768,7 @@ Proving this needs a real failure, and the honest way to produce one is a real p
 and all three thresholds named. The audit row agrees. **`reason: unclassified` with `attempts: 2` means the
 retry path failed to authenticate**, which is a defect rather than a throttle.
 
-## 13b.7. Routing, and the boundary it keeps
+## 13h.7. Routing, and the boundary it keeps
 
 Two questions with one answer each: **which model may see this**, and **which model should**. They are decided
 in that order, and the order is the design.
@@ -1793,7 +1793,7 @@ and there is nothing in the path that could form one.
 
 Each returns `escalated: true` naming **its own** trigger, and a `notice` telling the user what happened.
 
-## 13b.8. The one-way boundary, proved rather than asserted
+## 13h.8. The one-way boundary, proved rather than asserted
 
 The gate runs before any trigger, and it decides whether content may reach a remote model at all. **A
 deployment that declares no permitted classes sends nothing off-box**, and a deployment that declares some
@@ -1806,7 +1806,7 @@ cloud deployment there is no local lane, so it is refused outright and the refus
 **not** escalated, and the response says why. The row in the chain carries `escalation_requested: true` beside
 `lane: local`, which is the pair that proves what was asked for was not what ran.
 
-## 13b.9. The interface test, which is the one to run after any change
+## 13h.9. The interface test, which is the one to run after any change
 
     run --entrypoint python oi-core/session:local /w/tests/fixtures/interface_probe.py
 
@@ -1823,7 +1823,7 @@ this fails**, which is the point of it.
 
 **Checkpoint.** `PASSED: 7 right(s) held against the documented interface`.
 
-## 13b.10. Changing which model answers, which takes two restarts
+## 13h.10. Changing which model answers, which takes two restarts
 
     # edit models.analyst in the manifest
     python3 scripts/validate_manifests.py
@@ -1844,17 +1844,17 @@ Confirm it from the provider's side rather than from ours:
 **Checkpoint.** The spend log names the new model, and the answer's `resolved_model` agrees with it. **A swap
 before the golden questions exist is unmeasured for quality** — that is C8's work, and this checkpoint proves the
 mechanism rather than the answer.
-## 13b.11. What C3 added, in the order it matters
+## 13h.11. What C3 added, in the order it matters
 
 | What | Why it exists | Where it is proved |
 |---|---|---|
-| **One interface for every capability** | A client application talks to this and nothing else. No published port: the phase that builds an API does not also publish a debug port | 13b.1 |
-| **Sessions instead of credentials** | The caller holds a token that resolves to a subject, a role and a set of roots. The API holds one signing key and mints a short-lived statement per model call | 13b.2 |
-| **A refusal that is recorded** | A role supplied in the request body is refused **and written to the chain before the error returns.** That ordering is what makes it a control rather than a message | 13b.4 |
-| **Streaming, with redaction before the frame** | A value can reach a browser in a token before anything sees the finished answer, so the streamer holds a window back, redacts it, and emits only what is settled | 13b.5 |
-| **A degraded answer instead of an error** | When the model will not answer, the client gets the retrieved passages and a typed reason at HTTP 200. Retrieval already did the expensive part | 13b.6 |
-| **A data boundary that guards every remote request** | The gate runs before any trigger, and a class the manifest does not permit is refused rather than sent | 13b.8 |
-| **Two escalation triggers, both mechanical** | A task list and a request field. Nothing assesses difficulty, because a question the cheap tier answers badly must not escalate on its own judgement | 13b.7 |
+| **One interface for every capability** | A client application talks to this and nothing else. No published port: the phase that builds an API does not also publish a debug port | 13h.1 |
+| **Sessions instead of credentials** | The caller holds a token that resolves to a subject, a role and a set of roots. The API holds one signing key and mints a short-lived statement per model call | 13h.2 |
+| **A refusal that is recorded** | A role supplied in the request body is refused **and written to the chain before the error returns.** That ordering is what makes it a control rather than a message | 13h.4 |
+| **Streaming, with redaction before the frame** | A value can reach a browser in a token before anything sees the finished answer, so the streamer holds a window back, redacts it, and emits only what is settled | 13h.5 |
+| **A degraded answer instead of an error** | When the model will not answer, the client gets the retrieved passages and a typed reason at HTTP 200. Retrieval already did the expensive part | 13h.6 |
+| **A data boundary that guards every remote request** | The gate runs before any trigger, and a class the manifest does not permit is refused rather than sent | 13h.8 |
+| **Two escalation triggers, both mechanical** | A task list and a request field. Nothing assesses difficulty, because a question the cheap tier answers badly must not escalate on its own judgement | 13h.7 |
 
 **One thing C3 did not finish, and you should know before promising it.** The request-side redaction module exists
 and is proved by its own acceptance probe, and **the API does not call it yet.** The stream-side redaction is in
