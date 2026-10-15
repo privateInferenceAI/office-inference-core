@@ -34,3 +34,6 @@ __pycache__/
 # those are the parts a reader needs.
 fixtures/corpus/*.htm
 fixtures/corpus/*.pdf
+
+# Harvested corpora live outside the repository. They are tens of megabytes of third-party documents,
+# and what belongs in here is the script that builds one and the manifest that says what went in.
