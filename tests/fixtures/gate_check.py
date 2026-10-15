@@ -57,7 +57,7 @@ reg = access.load('/w/rendered/access.json')
 store = sm.PostgresStore(sm.database_url())
 session = sm.mint(reg, store, 'probe-staff@officeinference.com', next(iter(sorted(reg.roles))), dev=True,
                   deployment_id='gate-check')
-body = {'session': session.session_id, 'question': 'What is the mileage rate?'}
+body = {'session': session.credential, 'question': 'What is the mileage rate?'}
 
 codes = {}
 for label, url in (('/ask', TARGET + '/ask'), ('/ask/stream', TARGET + '/ask/stream')):

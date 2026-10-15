@@ -141,7 +141,7 @@ def main() -> int:
 
     # ------------------------------------------------------------------ INTACT first
     # Ordered before the forced failure so that a broken budget is caught before anything is provoked.
-    status, body, elapsed = ask(session.session_id, question)
+    status, body, elapsed = ask(session.credential, question)
     intact = status == 200 and body.get("kind") != "degraded" and body.get("citations")
     ledger.record("INTACT", bool(intact),
                   "[%s] %.2fs, kind=%r, %d citation(s)"
@@ -169,7 +169,7 @@ def main() -> int:
             if restart.returncode != 0:
                 print(" " * 10 + "the gateway would not restart: " + restart.stderr.strip()[:120])
             time.sleep(int(os.environ.get("OI_GATEWAY_RESTART_WAIT", "16")))
-            status, body, elapsed = ask(session.session_id, question)
+            status, body, elapsed = ask(session.credential, question)
         finally:
             sql('update "LiteLLM_TeamTable" set spend = 0 where team_id = %s', (args.model_role,))
             compose("restart", "litellm")

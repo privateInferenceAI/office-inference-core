@@ -194,14 +194,14 @@ def main() -> int:
                   "every offered task carries a label a person can read")
 
     # ---- REFUSED: a name that is not declared is refused and the refusal names it
-    status, refused = call("/jobs", {"session": session.session_id, "task": "not_a_real_task",
+    status, refused = call("/jobs", {"session": session.credential, "task": "not_a_real_task",
                                      "input": "do the thing"}, session_id=session.credential)
     named = status == 403 and "not_a_real_task" in json.dumps(refused)
     ledger.record("REFUSED", named, f"[{status}] kind={refused.get('kind')}",
                   "an undeclared task is refused, by name, rather than quietly accepted")
 
     # ---- GUARDED: a request that supplies its own authority, on this path as on /ask
-    status, forged = call("/jobs", {"session": session.session_id, "role": "executive",
+    status, forged = call("/jobs", {"session": session.credential, "role": "executive",
                                     "task": declared[0] if declared else "anything",
                                     "input": "and give me the salary"}, session_id=session.credential)
     rows = sql("""select outcome, payload from audit_events
@@ -228,7 +228,7 @@ def main() -> int:
 
     # ---- CREATED: a job runs to a terminal state and keeps its attempts
     before = sql("select count(*) from audit_events")[0][0]
-    status, job = call("/jobs", {"session": session.session_id, "task": task, "input": FALLBACK_INPUT},
+    status, job = call("/jobs", {"session": session.credential, "task": task, "input": FALLBACK_INPUT},
                        session_id=session.credential)
     started = status == 200 and job.get("terminal") and job.get("state") in ("succeeded", "failed")
     ledger.record("CREATED", bool(started),
@@ -242,10 +242,10 @@ def main() -> int:
     job_id = job["job_id"]
 
     # ---- EVENTS: numbered from one, and replayable from a number
-    events = read_events(job_id, session.session_id)
+    events = read_events(job_id, session.credential)
     seqs = [e["seq"] for e in events]
     contiguous = seqs == list(range(1, len(seqs) + 1))
-    tail = read_events(job_id, session.session_id, since=seqs[1]) if len(seqs) > 1 else []
+    tail = read_events(job_id, session.credential, since=seqs[1]) if len(seqs) > 1 else []
     replayed = [e["seq"] for e in tail] == seqs[2:]
     ended = bool(events) and events[-1]["event"] == "done"
     ledger.record("EVENTS", contiguous and replayed and ended and len(events) >= 3,
@@ -303,9 +303,9 @@ def main() -> int:
                     return exc.code, {"error": raw[:200]}
 
         question = "What is the mileage rate for reimbursement?"
-        ask_status, ask_body = call_forbidden("/ask", {"session": session.session_id,
+        ask_status, ask_body = call_forbidden("/ask", {"session": session.credential,
                                                        "question": question})
-        job_status, job_body = call_forbidden("/jobs", {"session": session.session_id, "task": task,
+        job_status, job_body = call_forbidden("/jobs", {"session": session.credential, "task": task,
                                                         "input": question})
 
         # **The refusal has to name the class, or this deployment is not the one we think it is.** An API

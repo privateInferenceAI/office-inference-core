@@ -75,8 +75,8 @@ def main() -> int:
     fine; what was broken was exactly what the probe exists to find. A confirmation step that fails on the
     defect under test hides the test.
     """
-    body = json.dumps({"session": session.session_id, "question": "What is the mileage rate?"}).encode()
-    job_body = json.dumps({"session": session.session_id, "task": "compare",
+    body = json.dumps({"session": session.credential, "question": "What is the mileage rate?"}).encode()
+    job_body = json.dumps({"session": session.credential, "task": "compare",
                            "input": "What is the mileage rate?"}).encode()
 
     def ask(path: str, payload: bytes):

@@ -121,7 +121,7 @@ def main() -> int:
     print('asking the API %d time(s) while the pressure holds' % args.asks)
     seen = []
     for _ in range(args.asks):
-        status, body = ask(session.session_id, args.question)
+        status, body = ask(session.credential, args.question)
         seen.append((status, body.get('kind'), body.get('reason'), body.get('attempts'),
                      body.get('threshold')))
 

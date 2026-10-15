@@ -125,7 +125,7 @@ def main() -> int:
     session = session_module.mint(registry, store, args.subject, role, dev=True, deployment_id="probe")
 
     # ------------------------------------------------------------------ END-TO-END, which also proves the citations
-    result = stream(session.session_id, "What is the mileage rate for reimbursement?")
+    result = stream(session.credential, "What is the mileage rate for reimbursement?")
     started = next((d for d in result["deltas"] if "citations" in d), {})
     answer = "".join(d.get("text", "") for d in result["deltas"])
     cites = started.get("citations") or []
@@ -136,7 +136,7 @@ def main() -> int:
 
     # ------------------------------------------------------------------ TTFT
     long_q = "Summarise what the fee schedule says about travel and expenses, in detail."
-    result = stream(session.session_id, long_q)
+    result = stream(session.credential, long_q)
     first = next((d for d in result["deltas"] if d.get("text")), None)
     done = next((d for d in result["deltas"] if "total_ms" in d), {})
     # **`ttft_ms` rather than `first_token_ms`, and the rename is the point.** The first version of this
@@ -161,7 +161,7 @@ def main() -> int:
                   "one frame containing the whole answer means something upstream is buffering")
 
     # ------------------------------------------------------------------ REDACTED
-    result = stream(session.session_id, "What is the primary contact reference for the Acme engagement?")
+    result = stream(session.credential, "What is the primary contact reference for the Acme engagement?")
     text = result["text"]
     present = [c for c in CANARIES if c in text]
     # The canary has to be in the INDEX for this to mean anything, so the passage is checked for first. A

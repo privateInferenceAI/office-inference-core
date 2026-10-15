@@ -205,8 +205,12 @@ def main() -> int:
     status, forged = post("/ask", {"session": session.credential, "role": "executive",
                                    "question": "What is the mileage rate for reimbursement?"})
     kind = forged.get("kind")
-    rows = sql("select count(*) from audit_events where payload->>'session_id' = %s "
-               "and outcome = 'denied'", (session.session_id,))
+    # **Found by the request id, not by the session id in the payload.** The payload used to name the session,
+    # and that name was the credential, so migration 019 stopped writing it and the activity view strips any
+    # key that looks like one. The request id is the identifier that exists for tying an answer to its row.
+    request_id = forged.get("request_id") or ""
+    rows = sql("select count(*) from audit_events where request_id = %s and outcome = 'denied'",
+               (request_id,))
     count = str(rows[0][0]) if rows else "0"
     ledger.record("FORGED", status == 403 and kind == "refused_authority_claim" and count.isdigit()
                                 and int(count) >= 1,

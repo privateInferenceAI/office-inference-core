@@ -136,7 +136,7 @@ def main() -> int:
 
     # ANSWER and NO-JUDGE from one request: the manual says a plain question answers, and that it escalates
     # nothing. A trigger that fired on everything would show here as escalated true.
-    status, body = ask(session.session_id)
+    status, body = ask(session.credential)
     answered = status == 200 and not body.get("kind") and body.get("citations")
     ledger.record("ANSWER", bool(answered),
                   "[%s] %d citation(s), lane=%r" % (status, len(body.get("citations") or []), body.get("lane")),
@@ -147,8 +147,8 @@ def main() -> int:
                   "a plain question escalates nothing and tells the user nothing")
 
     # TRIGGERS: each names itself, and the record separates what was asked for from what ran.
-    _, agentic = ask(session.session_id, {"task": "reconcile"})
-    _, asked = ask(session.session_id, {"stronger": True})
+    _, agentic = ask(session.credential, {"task": "reconcile"})
+    _, asked = ask(session.credential, {"stronger": True})
     named = agentic.get("trigger") == "agentic_task" and asked.get("trigger") == "user_requested_stronger"
     ledger.record("TRIGGERS", bool(named),
                   "agentic->%r stronger->%r" % (agentic.get("trigger"), asked.get("trigger")),
@@ -164,14 +164,14 @@ def main() -> int:
 
     # TOLD: this deployment has no local model, so a refused escalation must say so rather than promise an
     # answer that cannot be produced.
-    status, refused = ask(session.session_id, {"stronger": True})
+    status, refused = ask(session.credential, {"stronger": True})
     told = bool(refused.get("notice")) or refused.get("kind") == "no_permitted_lane"
     ledger.record("TOLD", bool(told),
                   "notice=%r kind=%r" % (bool(refused.get("notice")), refused.get("kind")),
                   "an escalation the gate refuses is announced rather than silently ignored")
 
     # STREAM: a first token before the last, and a total on the client clock.
-    frames, first_delta, done = stream(session.session_id)
+    frames, first_delta, done = stream(session.credential)
     streamed = frames > 3 and first_delta is not None and (done.get("total_ms") or 0) > 0
     ledger.record("STREAM", bool(streamed),
                   "%d frame(s), first delta at %sms, total %sms"

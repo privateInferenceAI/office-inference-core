@@ -43,7 +43,7 @@ def mint(subject: str, role: str) -> str:
     store = session_module.PostgresStore(database_url())
     try:
         session = session_module.mint(registry, store, subject, role, dev=True, deployment_id='ask-client')
-        return session.session_id
+        return session.credential
     finally:
         store.close()
 
