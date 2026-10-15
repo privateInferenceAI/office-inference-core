@@ -381,11 +381,31 @@ deployment declares two roots. Indexed, unreachable by every role, and nothing r
 | Ingest, first 1,000 | 1,000 new of 1,026 seen | 14 m 21 s | 70 documents/min |
 | Ingest, the remaining 9,000 | 9,001 new | about 2 h | 72 documents/min |
 
-**What the arithmetic says about where the time goes.** The embedding service measures at roughly 33 chunks per
-second and caps a request at 32 texts, so ten thousand documents are minutes of embedding. The 0.85 seconds per
-document is **per-file overhead**: a parse round trip, the chunk, then a write to the vector store and one to
-Postgres. **A bigger corpus is not an embedding problem, it is a round-trips-per-file problem**, and the way to
-make this faster is to parse and embed in parallel across files rather than to buy a GPU.
+**What the arithmetic says about where the time goes, and a number I got wrong first.** I measured the
+embedding service at 33 chunks per second, concluded that ten thousand documents were minutes of embedding, and
+wrote that here. **It was wrong, and the ingest is what proved it.** That measurement used hundred-character
+test strings; the chunks this corpus actually produces are around two thousand characters, and embedding cost
+scales with length. Measured again at the real size, on the same box and while the ingest was running:
+
+| Chunk size | Chunks per second | Thousand tokens per second |
+|---|---|---|
+| 200 characters | 5.5 | 0.27 |
+| 2,000 characters | **2.7** | 1.33 |
+
+**The embedding service saturates the machine.** During the ingest it sits at 1,574 percent CPU, which is
+fifteen of the sixteen cores, while every other container is under 14 percent. It is the largest single
+consumer by a wide margin.
+
+**And it is still not the whole story.** End to end the worker achieves about 0.8 chunks per second, against the
+2.7 the service manages on its own, so **roughly two thirds of the critical path is per-file work**: the parse
+round trip, then a write to the vector store and one to Postgres. Both statements are true, and the honest
+summary is that a bigger corpus is bounded by the embedding service and spends most of its wall clock in
+per-file overhead. Parallelising the per-file path is the speed-up; the embedding service is the wall you hit
+afterwards.
+
+**A warning about benchmarks of this service.** A rate measured on short strings does not describe this load,
+and the error is in the flattering direction. If you measure it, measure it at the chunk size you will actually
+send.
 
 **Two operational notes.** Set `INGEST_EMBED_BATCH` no higher than the service's advertised limit of 32; a
 batch of 64 answers `422 batch size 64 > maximum allowed batch size 32`, and a burst of 32 concurrent requests

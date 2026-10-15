@@ -4251,10 +4251,13 @@ choosing a corpus size will look. The short version:
 | Ingest, first 1,000 | 1,000 new of 1,026 seen | 14 m 21 s | 70 documents/min |
 | Ingest, the remaining 9,000 | 9,001 new | about 2 h | 72 documents/min |
 
-**The cost is not where it looks.** The embedding service measures at 33 chunks/sec with a request cap of 32, so
-this corpus is minutes of embedding. The 0.85 s per document is per-file overhead: a parse round trip, the
-chunk, and two writes. **A thousand documents is not an embedding problem, it is a round-trips-per-file
-problem.**
+**The cost is not where I first said it was.** The first measurement of the embedding service used
+hundred-character strings and reported 33 chunks/sec, which led to a line in this runbook claiming the corpus
+was minutes of embedding and that the cost was all per-file overhead. **The ingest disproved it.** At the
+two-thousand-character chunks the corpus actually produces, the same service does about **2.7 chunks/sec**, and
+it runs at 1,574 percent CPU during an ingest, saturating fifteen of the sixteen cores. End to end the worker
+manages about 0.8 chunks/sec, so per-file work is still roughly two thirds of the critical path. Both are true:
+**embedding bounds the job, and per-file overhead spends most of its wall clock.**
 
 **And retrieval was checked rather than assumed.** With 1,400 documents indexed, *"What is recorded about the
 boiler at Lake Kayla?"* returned `company/vol-maintenance-00000.md`, the document that contains it. The
