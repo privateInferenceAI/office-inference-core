@@ -10,7 +10,12 @@
 FROM python:3.12-slim
 
 WORKDIR /app
-RUN pip install --no-cache-dir "psycopg[binary]==3.2.*"
+# **Two Postgres drivers, and the second one is for the probes rather than for the tool.** The audit tool owns
+# the chain and uses psycopg 3; the retrieval half uses psycopg2. `access_probe` reaches into both — it reads the
+# ACL contract through the retriever and reads refusal rows straight from the table, because a refusal that
+# reported its own success would prove nothing. Without psycopg2 that probe dies on an import, and the runbook
+# documents it as running under this image's entrypoint.
+RUN pip install --no-cache-dir "psycopg[binary]==3.2.*" "psycopg2-binary==2.9.*"
 
 COPY services/session/session.py /app/session.py
 COPY services/session/cli.py /app/cli.py
