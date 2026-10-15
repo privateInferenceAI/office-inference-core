@@ -54,6 +54,7 @@ sys.path.insert(0, "/app/services/egress")
 import access as access_module  # noqa: E402
 import assertion  # noqa: E402
 import citations  # noqa: E402
+import documents as documents_module  # noqa: E402
 import redaction  # noqa: E402
 import ingest  # noqa: E402
 import retriever  # noqa: E402
@@ -572,6 +573,49 @@ async def activity(request: Request):
                                                       "request")},
            "scope_actors": page.scope.get("actors", [])})
     return JSONResponse(page.to_dict(), status_code=200)
+
+
+@app.get("/documents/{doc_id:path}", responses={
+    200: {"model": contract.Document,
+          "description": "A document the answer cited, **as the system indexed it** rather than as the file "
+                         "looks on disk: the text the model actually answered from, with its pages, already "
+                         "redacted. This is what makes a citation checkable rather than something to believe."},
+    401: {"model": contract.Refusal, "description": "no session"},
+    404: {"model": contract.Refusal,
+          "description": "**No such document, or none this session may read, and the two are one answer.** "
+                         "Telling a caller that a document exists but is forbidden tells them it exists, "
+                         "which is the same argument the session refusal makes and the same answer a job "
+                         "belonging to somebody else gets."},
+})
+async def document(request: Request, doc_id: str):
+    """One document, for a person checking the claim an answer made.
+
+    **Why this exists.** The Ask screen has shown a chip per source since C4 and the chips were spans: a person
+    could see that an answer rested on the travel policy and could not read the travel policy. A citation
+    nobody can open asks to be believed, and this product's claim is that it does not.
+
+    **The path is a path parameter, not a query value.** A document id is `company/travel-expenses-policy.md`
+    and it has slashes in it, so the route takes the rest of the path rather than a segment.
+    """
+    session, refusal = _session_for(request)
+    if refusal:
+        return refusal
+
+    found = documents_module.read(session, database_url=documents_module.database_url(), doc_id=doc_id)
+    if found is None:
+        return JSONResponse(
+            {"error": "Permission denied on this resource (or it might not exist).",
+             "kind": "not_found"}, status_code=404)
+
+    # **Reading a document is recorded, like reading the record is.** The question an auditor asks is who
+    # looked at what, and a document view that left no trace would be an action a viewer could take with
+    # nobody able to see it afterwards.
+    audit("access", session.subject, session.role, "ok",
+          {"stage": "document_read", "doc_id": doc_id, "acl": found.get("acl", ""),
+           "chunks": len(found.get("chunks") or []), "truncated": bool(found.get("truncated")),
+           "redactions": found.get("redactions") or {}},
+          data_class="internal", egress_allowed=False)
+    return JSONResponse(found, status_code=200)
 
 
 @app.get("/tasks", responses={

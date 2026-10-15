@@ -57,6 +57,10 @@ EXPECTED_PATHS = {
     "/jobs/{job_id}",
     "/jobs/{job_id}/events",
     "/jobs/{job_id}/{action}",
+    # **Reading the document behind a citation.** The chips on the Ask screen name the documents an answer
+    # came from, and until this path existed they were spans: a person could see that an answer rested on the
+    # travel policy and could not read the travel policy. The id carries slashes, hence the path parameter.
+    "/documents/{doc_id}",
 }
 
 # **The paths whose absence the checker must not tolerate.** A client that cannot start a job has no Do
@@ -64,7 +68,7 @@ EXPECTED_PATHS = {
 # are separated from the full set so that a future route can be added without weakening the check on the
 # ones that already exist.
 REQUIRED_PATHS = {"/health", "/ask", "/ask/stream", "/tasks", "/activity", "/jobs", "/jobs/{job_id}",
-                  "/jobs/{job_id}/events"}
+                  "/jobs/{job_id}/events", "/documents/{doc_id}"}
 
 # **The fields the client app branches on.** This is the list that keeps the two repositories honest:
 # `kind` decides whether a payload is an answer or a degradation, `lane` is what the residency

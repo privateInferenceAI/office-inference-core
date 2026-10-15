@@ -337,6 +337,36 @@ class Task(BaseModel):
 # --------------------------------------------------------------------------- /activity
 
 
+class DocumentChunk(BaseModel):
+    """One indexed chunk of a document, with the page it came from.
+
+    **The pages are why this is a list and not one string.** The citation a person clicked names a page, and a
+    viewer that returned only the assembled text could not say which part the answer used.
+    """
+
+    chunk_id: str
+    page_start: int
+    page_end: int
+    kind: str = Field(description="prose, table or figure, as the chunker classified it")
+    text: str = Field(description="**already redacted.** A reserved identifier does not reach a browser on "
+                                  "this path either")
+
+
+class Document(BaseModel):
+    """A document the answer cited, as the system indexed it rather than as the file looks on disk."""
+
+    doc_id: str
+    acl: str = Field(description="the access label it came under; the session's roots include it")
+    page_start: int
+    page_end: int
+    chunk_count: int = Field(description="how many chunks the document has in total")
+    chunks: list[DocumentChunk]
+    truncated: bool = Field(description="**reported rather than silent.** True when the document has more "
+                                        "chunks than this response carries")
+    redactions: dict[str, int] = Field(default_factory=dict)
+    unverified_card_shapes: int = 0
+
+
 class ActivityEvent(BaseModel):
     """One row of the chain, as a screen reads it.
 
