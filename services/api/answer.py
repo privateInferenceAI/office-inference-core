@@ -137,17 +137,18 @@ def check_boundary(*, manifest: dict, data_class: str, task: str, model_name: st
               {"stage": "routing", "reason": decision.reason, "lane": decision.lane,
                "data_class": data_class, "escalation_requested": decision.escalation_requested,
                "session_id": session.session_id, "endpoint": endpoint},
-              data_class=data_class, egress_allowed=False)
+              data_class=data_class, egress_allowed=False, request_id=request_id)
         raise Refused(403, {
             "error": "Permission denied on this resource (or it might not exist). This request needs a "
                      "lane this deployment does not permit and has no local model to answer with.",
-            "kind": "no_permitted_lane", "reason": decision.reason, "notice": decision.notice},
+            "kind": "no_permitted_lane", "reason": decision.reason, "notice": decision.notice,
+            "request_id": request_id},
             "no_permitted_lane")
     return decision
 
 
 def prepare(*, token: str, question: str, body: dict, ctx: Context, resolve, model_for, role_lane,
-            frontier_model_for, local_lane_available, audit, endpoint: str) -> tuple:
+            frontier_model_for, local_lane_available, audit, endpoint: str, request_id: str = "") -> tuple:
     """Steps 1 to 4: resolve the session, refuse a supplied authority, retrieve, and route.
 
     Returns `(session, permit, model, result, decision, data_class)`. Raises `Refused` with the status and
@@ -175,12 +176,17 @@ def prepare(*, token: str, question: str, body: dict, ctx: Context, resolve, mod
             audit("access", session.subject, str(body.get(supplied)), "denied",
                   {"supplied_field": supplied, "session_role": session.role,
                    "session_id": session.session_id,
-                   "refusal": "a request may not supply its own authority", "endpoint": endpoint})
+                   "refusal": "a request may not supply its own authority", "endpoint": endpoint},
+                  request_id=request_id)
             # AIP-211: this says the permission was denied OR the resource might not exist. A 404 instead
             # of a 403 is worse for the operator and no better for secrecy.
             raise Refused(403, {
                 "error": "Permission denied on this resource (or it might not exist). A role comes from "
                          "an authenticated session and never from a request field.",
+                # **The same id the response carries, so the refusal can be found afterwards.** The handler
+                # appends a request id to what it returns; without it here the row and the response were two
+                # statements nothing could compare, which is what the C3 FORGED check measures.
+                "request_id": request_id,
                 "kind": "refused_authority_claim"}, "refused_authority_claim")
 
     permit = session.permit()

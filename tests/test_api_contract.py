@@ -258,3 +258,30 @@ def test_the_answer_and_its_row_share_one_identifier():
     assert "request_id=request_id" in pipeline, "the answer does not record the id it carries"
     assert '"request_id": request_id' in pipeline or 'payload["request_id"]' in pipeline, (
         "the answer does not carry the id it records")
+
+
+def test_a_refusal_carries_the_id_of_the_row_it_wrote():
+    """**The FORGED check measures this**, and it failed because the two halves were disconnected.
+
+    The handler appends a request id to what it returns, so a client can name the refusal. The row written
+    inside the pipeline did not have it, so the response and the record were two statements nothing could
+    compare — the same shape as the request id never reaching the audit tool at all, one layer down.
+
+    This reads both call sites rather than running one, because a refusal is cheap to reason about and expensive
+    to arrange: the assertion is that the id is passed in and that every refusal path uses it.
+    """
+    pipeline = PIPELINE.read_text()
+    app_source = APP.read_text()
+
+    assert "request_id: str = \"\"" in pipeline, "prepare() does not accept a request id"
+    assert 'audit=audit, endpoint="/ask", request_id=request_id' in app_source, (
+        "the /ask handler mints a request id and does not pass it to the pipeline, so a refusal's row cannot "
+        "be tied to the refusal")
+
+    # Every refusal the pipeline raises names it: the authority claim and the no-permitted-lane one.
+    refusals = pipeline.count('"request_id": request_id')
+    assert refusals >= 2, f"only {refusals} refusal path(s) name the request id, expected at least 2"
+
+    # And both refusals put it on a row.
+    assert pipeline.count("request_id=request_id") >= 3, (
+        "a refusal records its class but not the id, so the row cannot be found from the response")

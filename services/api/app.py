@@ -318,7 +318,7 @@ async def ask(request: Request):
             token=token, question=(body.get("question") or "").strip(), body=body,
             ctx=STATE["ctx"], resolve=_resolve, model_for=model_for, role_lane=role_lane,
             frontier_model_for=frontier_model_for, local_lane_available=local_lane_available,
-            audit=audit, endpoint="/ask")
+            audit=audit, endpoint="/ask", request_id=request_id)
     except answer_module.Refused as refused:
         return JSONResponse({**refused.payload, "request_id": request_id}, status_code=refused.status)
 
