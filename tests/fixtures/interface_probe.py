@@ -12,6 +12,7 @@ reader to expect. If the manual and the service disagree, this fails.
     TRIGGERS    the two triggers each escalate and name themselves   a trigger that fires silently
     TOLD        an escalation the gate refuses is announced          a silent downgrade
     FACTS       the row carries asked and answered separately        the two conflated into one field
+    LANE-AGREE  the lane shown and the lane recorded are one fact     a claim the record contradicts
     DEGRADED    a model failure yields passages, not an error        a hang, or a 500 with no answer
     STREAM      the stream carries a first token before the last     a response that arrives whole
 
@@ -193,6 +194,29 @@ def main() -> int:
     ledger.record("FACTS", bool(separated),
                   "%d row(s), asked true and false both present, every row names a lane" % len(payloads),
                   "the row carries escalation_requested and lane as two facts, never one")
+
+    # LANE-AGREE: what the answer says about its lane and what the record says are one fact, not two.
+    #
+    # **This is the check the phase's own plan names and it did not exist.** FACTS proved that rows carry a
+    # lane; it never compared one to the answer it belongs to, so a response that claimed `local` while the
+    # call went to a provider would have passed every right here. The answer's `request_id` is what makes the
+    # comparison possible, which is why the id had to be wired through before this could be written.
+    _, escalated = ask(session.credential, {"stronger": True})
+    claimed = escalated.get("lane") or ""
+    answer_id = escalated.get("request_id") or ""
+    row = sql("select payload, egress_allowed from audit_events where request_id = %s and event_type = 'model_call' "
+              "order by id desc limit 1", (answer_id,))
+    recorded = ((row[0][0] or {}).get("lane") if row else None) or ""
+    egress = row[0][1] if row else None
+    # Three conditions, because agreement alone is satisfiable by two matching lies: the lanes must match, the
+    # lane must be named at all, and the egress verdict must be the one that lane implies. A frontier call that
+    # recorded no egress would be a permitted departure with nothing saying so.
+    agrees = bool(claimed) and claimed == recorded
+    verdict_matches = (egress is True) if claimed == "frontier" else (egress is not True)
+    ledger.record("LANE-AGREE", bool(agrees and verdict_matches),
+                  "answer lane=%r, row lane=%r, egress_allowed=%r for request %s"
+                  % (claimed, recorded, egress, answer_id[:12]),
+                  "the lane a client is shown and the lane the record keeps are one fact")
 
     # TOLD: this deployment has no local model, so a refused escalation must say so rather than promise an
     # answer that cannot be produced.
