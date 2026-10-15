@@ -38,5 +38,14 @@ fi
 IMAGE="${OI_PROBE_IMAGE:-oi-core/session:local}"
 
 cd "$ROOT"
+
+# **The probe itself has to be inside the container, and the first version was not.** It named the host path
+# `/opt/oi-core/tests/fixtures/access_probe.py`, which the container cannot see: the service mounts `rendered`,
+# `db/migrations` and the audit tool, and nothing else. Mounting the fixtures read-only at `/probes` is one
+# line here rather than a paragraph in every document that runs a probe.
+RELATIVE="${PROBE_PATH#"$ROOT"/}"
+
 exec docker compose -f "$COMPOSE" --env-file "$ENV_FILE" --profile tools run --rm \
-  --no-deps --entrypoint python session "$PROBE_PATH" "$@"
+  --no-deps --entrypoint python \
+  -v "$ROOT/tests/fixtures:/probes:ro" \
+  session "/probes/$(basename "$RELATIVE")" "$@"
