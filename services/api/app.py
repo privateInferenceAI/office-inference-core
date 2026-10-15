@@ -79,6 +79,11 @@ import answer as answer_module  # noqa: E402
 # watched, stopped, and read afterwards, and the state machine that keeps that honest is in this module.
 import jobs as jobs_module  # noqa: E402
 
+# **Reading the chain over the API, scoped to the session.** The one capability that could quietly widen
+# access to everything the deployment has ever done, so its rule lives on its own with the argument written
+# down rather than being a where-clause inside a handler.
+import activity as activity_module  # noqa: E402
+
 GATEWAY_URL = os.environ.get("OI_GATEWAY_URL", "http://litellm:4000")
 DEPLOYMENT_ID = os.environ.get("DEPLOYMENT_ID", "unknown")
 AUDIT_TOOL = os.environ.get("AUDIT_TOOL", "/app/audit.py")
@@ -452,6 +457,52 @@ def _step_once(job, attempt):
         audit=audit, resolved_model=resolved_model, request_id=job.job_id)
     return jobs_module.StepOutcome(ok=True, name="answer", lane=decided.lane, model=model,
                                    result=decided.payload, notice=decided.notice or "")
+
+
+@app.get("/activity", responses={
+    200: {"model": contract.ActivityPage,
+          "description": "One page of the audit chain, newest first, **scoped to what this session may see**. "
+                         "The scope is applied inside the query rather than after it, and the response says "
+                         "which actors it covered so a screen cannot show a subset as though it were the "
+                         "whole record."},
+    400: {"model": contract.Refusal,
+          "description": "a limit above the cap, a limit that is not a number, or a filter value this "
+                         "deployment does not use. **Refused rather than trimmed**: a caller that asked for "
+                         "five thousand rows and silently received five hundred has been lied to about what "
+                         "it read"},
+    401: {"model": contract.Refusal, "description": "no session"},
+})
+async def activity(request: Request):
+    """The record, readable without a shell on the box.
+
+    **Why this endpoint exists at all.** The chain is the product's central claim, and until now the only way
+    to read it was the audit CLI. That is an operator tool behind an SSH session, and the client app talks to
+    this service over HTTP and nothing else. Activity is the screen that makes the product auditable to a
+    client, and it had no endpoint.
+    """
+    session, refusal = _session_for(request)
+    if refusal:
+        return refusal
+
+    query = request.query_params
+    try:
+        page = activity_module.read(
+            session, database_url=activity_module.database_url(),
+            limit=query.get("limit") or activity_module.DEFAULT_LIMIT,
+            since=query.get("since"), type=query.get("type"), actor=query.get("actor"),
+            outcome=query.get("outcome"), job=query.get("job"), request=query.get("request"))
+    except activity_module.ActivityError as exc:
+        return JSONResponse({"error": str(exc), "kind": "bad_request"}, status_code=400)
+
+    # **Reading the record is itself recorded.** An auditor asking who looked at the chain is asking a
+    # question this deployment should be able to answer, and a read that leaves no trace is the one action in
+    # the system that a viewer could take without anybody being able to see it afterwards.
+    audit("access", session.subject, session.role, "ok",
+          {"stage": "activity_read", "returned": len(page.events), "filters": {
+              k: v for k, v in query.items() if k in ("limit", "since", "type", "actor", "outcome", "job",
+                                                      "request")},
+           "scope_actors": page.scope.get("actors", []), "session_id": session.session_id})
+    return JSONResponse(page.to_dict(), status_code=200)
 
 
 @app.get("/tasks", responses={

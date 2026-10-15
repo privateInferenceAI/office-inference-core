@@ -50,6 +50,9 @@ EXPECTED_PATHS = {
     # Jobs: work with an identity and a history, which is what the Do screen is built on. The events path
     # is the replayable one, so a client that closed the tab catches up instead of losing what happened.
     "/tasks",
+    # The audit chain, readable over the API and scoped to the session. Without it there is no Activity
+    # screen: the only other reader is a CLI behind an SSH session.
+    "/activity",
     "/jobs",
     "/jobs/{job_id}",
     "/jobs/{job_id}/events",
@@ -60,7 +63,7 @@ EXPECTED_PATHS = {
 # screen, and one that cannot replay events cannot tell a user what happened while they were away. These
 # are separated from the full set so that a future route can be added without weakening the check on the
 # ones that already exist.
-REQUIRED_PATHS = {"/health", "/ask", "/ask/stream", "/tasks", "/jobs", "/jobs/{job_id}",
+REQUIRED_PATHS = {"/health", "/ask", "/ask/stream", "/tasks", "/activity", "/jobs", "/jobs/{job_id}",
                   "/jobs/{job_id}/events"}
 
 # **The fields the client app branches on.** This is the list that keeps the two repositories honest:

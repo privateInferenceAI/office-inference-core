@@ -1,6 +1,227 @@
 {
   "components": {
     "schemas": {
+      "ActivityEvent": {
+        "description": "One row of the chain, as a screen reads it.\n\n**`payload` is the field a person actually learns from**: the request, the model, the documents read, the\nnumbers. It arrives in whatever form the deployment's content mode decided on, which may be a hash rather\nthan text, and this endpoint reads what was stored rather than deciding for itself.",
+        "properties": {
+          "actor": {
+            "title": "Actor",
+            "type": "string"
+          },
+          "actor_role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor Role"
+          },
+          "at": {
+            "description": "when it happened, ISO 8601",
+            "title": "At",
+            "type": "string"
+          },
+          "chain_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chain Version"
+          },
+          "data_class": {
+            "title": "Data Class",
+            "type": "string"
+          },
+          "egress_allowed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "whether content was permitted to leave. Null on rows written before the column existed",
+            "title": "Egress Allowed"
+          },
+          "failure_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Kind"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "outcome": {
+            "enum": [
+              "ok",
+              "denied",
+              "error",
+              "pending"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "what the deployment's content mode allows this row to keep",
+            "title": "Payload"
+          },
+          "payload_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payload Bytes"
+          },
+          "payload_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payload Sha256"
+          },
+          "redactions": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Redactions"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "**the id the answer carried.** This is how a screen ties what it displayed to the row that records it, and how a test can check that the two agree",
+            "title": "Request Id"
+          },
+          "tool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool"
+          },
+          "type": {
+            "enum": [
+              "model_call",
+              "tool_call",
+              "approval",
+              "access",
+              "config_change",
+              "login"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "at",
+          "type",
+          "actor",
+          "data_class",
+          "outcome"
+        ],
+        "title": "ActivityEvent",
+        "type": "object"
+      },
+      "ActivityPage": {
+        "description": "One page of the chain, and what it covered.\n\n**`scope` is not decoration.** A screen that shows a subset of the record without saying so looks like the\nwhole record, and \"the record is complete\" is the claim at stake. So the response names the actors it\ncovered, and a client says so when the list is shorter than the deployment.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/ActivityEvent"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "next_since": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "pass this as `since` for the next page. Absent when the end was reached",
+            "title": "Next Since"
+          },
+          "scope": {
+            "additionalProperties": true,
+            "description": "which actors this page covered, and the limit that was applied",
+            "title": "Scope",
+            "type": "object"
+          }
+        },
+        "required": [
+          "events",
+          "count",
+          "scope"
+        ],
+        "title": "ActivityPage",
+        "type": "object"
+      },
       "Answer": {
         "description": "The answer to a question, with what it was built from and what it cost.\n\n**`kind` is declared on both this and `Degraded`, and that is a decision rather than symmetry.** The\ntwo share the 200 status and look alike otherwise, so a client has to be able to tell them apart\nwithout guessing from which fields are present. The service sets `kind` on a degraded payload and\ndoes not set it here, so the default is what a runtime payload will not carry: a client should\nbranch on `kind == \"degraded\"` being absent-or-not, and a generated client built from this schema\ngets a discriminator it can switch on either way.",
         "properties": {
@@ -922,6 +1143,45 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/activity": {
+      "get": {
+        "description": "The record, readable without a shell on the box.\n\n**Why this endpoint exists at all.** The chain is the product's central claim, and until now the only way\nto read it was the audit CLI. That is an operator tool behind an SSH session, and the client app talks to\nthis service over HTTP and nothing else. Activity is the screen that makes the product auditable to a\nclient, and it had no endpoint.",
+        "operationId": "activity_activity_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityPage"
+                }
+              }
+            },
+            "description": "One page of the audit chain, newest first, **scoped to what this session may see**. The scope is applied inside the query rather than after it, and the response says which actors it covered so a screen cannot show a subset as though it were the whole record."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "a limit above the cap, a limit that is not a number, or a filter value this deployment does not use. **Refused rather than trimmed**: a caller that asked for five thousand rows and silently received five hundred has been lied to about what it read"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "no session"
+          }
+        },
+        "summary": "Activity"
+      }
+    },
     "/ask": {
       "post": {
         "description": "A question in, a cited answer out.\n\n**The pipeline is in `answer.py` and this is a caller of it.** That is deliberate rather than tidy:\nthis endpoint, the streaming one, and a job all answer questions, and C3 shipped two defects whose\nshape was two implementations of one thing. One implementation is how that stops.",

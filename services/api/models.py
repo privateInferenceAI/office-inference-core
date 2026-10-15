@@ -323,3 +323,54 @@ class Task(BaseModel):
     tier: str = Field(default="", description="the model role that handles it, from the manifest")
     touches: list[str] = Field(default_factory=list)
     needs_approval: bool = False
+
+
+# --------------------------------------------------------------------------- /activity
+
+
+class ActivityEvent(BaseModel):
+    """One row of the chain, as a screen reads it.
+
+    **`payload` is the field a person actually learns from**: the request, the model, the documents read, the
+    numbers. It arrives in whatever form the deployment's content mode decided on, which may be a hash rather
+    than text, and this endpoint reads what was stored rather than deciding for itself.
+    """
+
+    id: int
+    at: str = Field(description="when it happened, ISO 8601")
+    type: Literal["model_call", "tool_call", "approval", "access", "config_change", "login"]
+    actor: str
+    actor_role: Optional[str] = None
+    data_class: str
+    outcome: Literal["ok", "denied", "error", "pending"]
+    tool: Optional[str] = None
+    model: Optional[str] = None
+    request_id: Optional[str] = Field(
+        default=None,
+        description="**the id the answer carried.** This is how a screen ties what it displayed to the row "
+                    "that records it, and how a test can check that the two agree")
+    egress_allowed: Optional[bool] = Field(
+        default=None, description="whether content was permitted to leave. Null on rows written before the "
+                                  "column existed")
+    redactions: Optional[dict] = None
+    failure_kind: Optional[str] = None
+    chain_version: Optional[int] = None
+    payload_sha256: Optional[str] = None
+    payload_bytes: Optional[int] = None
+    payload: Optional[dict] = Field(
+        default=None, description="what the deployment's content mode allows this row to keep")
+
+
+class ActivityPage(BaseModel):
+    """One page of the chain, and what it covered.
+
+    **`scope` is not decoration.** A screen that shows a subset of the record without saying so looks like the
+    whole record, and "the record is complete" is the claim at stake. So the response names the actors it
+    covered, and a client says so when the list is shorter than the deployment.
+    """
+
+    events: list[ActivityEvent]
+    count: int
+    scope: dict = Field(description="which actors this page covered, and the limit that was applied")
+    next_since: Optional[int] = Field(
+        default=None, description="pass this as `since` for the next page. Absent when the end was reached")
