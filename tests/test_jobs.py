@@ -28,8 +28,11 @@ import routing  # noqa: E402
 
 
 def make_job(**kw) -> jobs.Job:
+    # **`credential_sha256`, not a session id.** A job holds a hash so it can resolve the session it runs under
+    # without the row being a working identity. The first version stored the credential here, which made every
+    # job row an impersonation waiting to be read.
     base = dict(deployment_id="oi-test", subject="probe@example.com", actor_role="viewer",
-                roots={"company"}, session_id="sess-1", task="reconcile", input="reconcile these")
+                roots={"company"}, credential_sha256="a" * 64, task="reconcile", input="reconcile these")
     base.update(kw)
     return jobs.new_job(**base)
 

@@ -415,23 +415,32 @@ def _step_once(job, attempt):
     machine, the event log, the budgets and the interface do not change.
     """
     try:
-        session = _resolve(job.session_id)
+        session = session_module.resolve_credential_hash(STATE["store"], job.credential_sha256)
     except session_module.SessionError as exc:
         # The session the job was created under has expired or been revoked. Terminal rather than
         # retryable: waiting does not bring a credential back.
         return jobs_module.StepOutcome(ok=False, failure_kind="no_session", failure_detail=str(exc),
                                        retryable=False)
 
-    body = {"session": job.session_id, "question": job.input, "task": job.task,
-            # **The class the job was created under, not today's manifest.** A job outlives the request that
-            # started it, and re-reading the manifest at execution time meant work created while a class was
-            # permitted would run under a manifest that forbids it. The boundary probe found exactly that on
-            # this path: /ask refused with a 403 and /jobs answered with a 200. Stating the class cannot
-            # widen anything, because the gate compares it against the same allowlist.
-            "data_class": job.data_class}
+    # **The pipeline is called with the session already resolved**, because a job holds a hash rather than
+    # something it could present. `_resolve` would be the natural call and it takes a credential, which a job
+    # deliberately does not have.
+    body = {
+        "question": job.input,
+        "task": job.task,
+        "resolved_session": session,
+        # **The class the job was created under, not today's manifest.** A job outlives the request that
+        # started it, and re-reading the manifest at execution time meant work created while a class was
+        # permitted would run under a manifest that forbids it. The boundary probe found exactly that on this
+        # path: /ask refused with a 403 and /jobs answered with a 200. Stating the class cannot widen
+        # anything, because the gate compares it against the same allowlist.
+        "data_class": job.data_class,
+    }
     try:
         _sess, permit, model, result, decision, data_class = answer_module.prepare(
-            token=job.session_id, question=job.input, body=body, ctx=STATE["ctx"], resolve=_resolve,
+            token="", question=job.input, body=body, ctx=STATE["ctx"],
+            # A session already resolved, so the pipeline does not try to resolve a credential it was not given.
+            resolve=lambda _token: body.get("resolved_session") or session,
             model_for=model_for, role_lane=role_lane, frontier_model_for=frontier_model_for,
             local_lane_available=local_lane_available, audit=audit, endpoint=f"/jobs/{job.job_id}")
     except answer_module.Refused as refused:
@@ -605,8 +614,10 @@ async def create_job(request: Request):
 
     job = jobs_module.new_job(
         deployment_id=DEPLOYMENT_ID, subject=session.subject, actor_role=session.role,
-        roots=session.permit().roots, session_id=session.session_id, task=task, input=text,
-        data_class=data_class)
+        roots=session.permit().roots,
+        # **The hash, not the credential.** The job needs to run after this request ends, and the first version
+        # solved that by keeping the credential in the row, which made a job row a working identity.
+        credential_sha256=session.credential_sha256, task=task, input=text, data_class=data_class)
     store = STATE["jobs"]
     store.put(job)
     jobs_module.run(job, store, _step_once, audit=audit)

@@ -275,3 +275,49 @@ def test_every_column_the_read_selects_exists_on_the_table():
     assert not unknown, (
         f"the read selects {sorted(unknown)}, which audit_events does not have. Its columns are "
         f"{sorted(known)}. This failed on a live deployment as a 500 before it was a test")
+
+
+# --------------------------------------------------------------------------- what a payload may not carry
+#
+# **Found by the C4 panel's cold reader**, who opened an audit row in the app and asked whether the value in its
+# payload was a credential. It was: the session identifier WAS the credential, so every row that named its
+# session named something that authenticated, and the Activity screen widens with permission. `mint` now
+# separates the two, and this holds the second half of the fix: the view strips credential-shaped keys whatever
+# the writer put in them.
+
+
+def test_a_credential_shaped_key_is_stripped_from_a_payload():
+    for key in ("token", "session", "credential", "credential_sha256", "Secret", "PASSWORD", "api_key"):
+        stripped = activity._without_credentials({key: "hunter2", "kept": "safe"})
+        assert key.lower() not in {k.lower() for k in stripped}, f"{key} was not stripped"
+        assert stripped.get("kept") == "safe", "the guard removed something it should have kept"
+
+
+def test_the_stripping_is_recursive():
+    """A credential does not have to be at the top. A nested one is the same disclosure one level down."""
+    stripped = activity._without_credentials({"outer": {"token": "hunter2", "kept": 1}, "list": [{"secret": "x"}]})
+    assert "token" not in stripped["outer"]
+    assert stripped["outer"]["kept"] == 1
+    assert "secret" not in stripped["list"][0]
+
+
+def test_an_ordinary_payload_survives_intact():
+    """The guard must not eat the fields a screen renders, or it becomes the next defect."""
+    payload = {"stage": "ask", "model": "analyst", "passages": 6, "session_id": "an-identifier",
+               "nested": {"lane": "frontier"}}
+    assert activity._without_credentials(payload) == payload
+
+
+def test_the_read_actually_applies_the_guard():
+    """**A helper nothing calls is not a control.** The tests above check `_without_credentials` in isolation,
+    and removing its call from `read` left every one of them passing — so this asserts the call itself. It is
+    the same shape as the defect this whole file is about: the value existed, the place for it existed, and
+    nothing connected them.
+    """
+    import re
+
+    source = (ROOT / "services" / "api" / "activity.py").read_text()
+    body = source[source.index("def read("):]
+    assert "_without_credentials(payload)" in body, (
+        "read() builds its events without stripping credential-shaped keys, so a payload that carries one "
+        "reaches a screen that widens with permission")

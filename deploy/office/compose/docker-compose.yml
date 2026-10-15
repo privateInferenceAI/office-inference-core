@@ -517,9 +517,11 @@ services:
     restart: unless-stopped
     environment:
       APP_PORT: "8080"
-      # **Including the `/api` prefix, because that is the API's base and the app calls it relatively.** One
-      # rule for the dev server, the workbench and a deployment, rather than three that agree by accident.
-      OI_API_URL: http://api:8088/api
+      # **The API's root, not `/api`.** The app calls a relative `/api/ask` and the API serves `/ask`, so the
+      # proxy inside this image removes the prefix. Naming it `/api` here made every call a 404 in the source
+      # while the deployed image — built from a commit that stripped the prefix — kept working. The C4 panel's
+      # fidelity checker found it by running the current file in a throwaway container.
+      OI_API_URL: http://api:8088
     # **No published port.** A client reaches the app through whatever the deployment puts in front, the same
     # way it reaches the API. Publishing one here would be the debug port this project has already paid for.
     depends_on:

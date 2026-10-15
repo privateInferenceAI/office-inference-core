@@ -147,6 +147,33 @@ def _grants_from_sessions(deployment_id: str, database_url: str) -> Optional[dic
     return grants
 
 
+# **Names a payload must never carry out of this endpoint.** The defect that produced this list: the session
+# identifier WAS the credential, so every payload that recorded which session acted handed a reader something
+# that authenticated. `mint` now separates the two and migration 019 revokes the sessions that predate it, so a
+# `session_id` in a payload is no longer dangerous. This guard is not redundant: it is what stops the next
+# credential-shaped field from reaching a screen that widens with permission, and it is cheap.
+#
+# The rows themselves are append-only and hash-linked, so the ones already written keep their values. **That
+# exposure is recorded rather than rewritten**, because rewriting the chain would break the verification the
+# whole record rests on, and a record that can be edited to hide something is not evidence.
+FORBIDDEN_PAYLOAD_KEYS = ("token", "session", "credential", "credential_sha256", "secret", "password",
+                          "api_key", "authorization", "assertion")
+
+
+def _without_credentials(value):
+    """The payload with any credential-shaped key removed, at any depth.
+
+    Recursive because a credential does not have to be at the top: a nested `{"session": {"token": …}}` is the
+    same disclosure one level down.
+    """
+    if isinstance(value, dict):
+        return {k: _without_credentials(v) for k, v in value.items()
+                if k.lower() not in FORBIDDEN_PAYLOAD_KEYS}
+    if isinstance(value, list):
+        return [_without_credentials(v) for v in value]
+    return value
+
+
 def _where(session, actors: set[str], filters: dict) -> tuple[str, list]:
     """The SQL predicate and its parameters, built once so every filter is applied in one place."""
     clauses = ["deployment_id = %s"]
@@ -224,6 +251,7 @@ def read(session, *, database_url: str, limit: int = DEFAULT_LIMIT, **filters) -
                 payload = json.loads(payload)
             except json.JSONDecodeError:
                 payload = {"unreadable": True}
+        payload = _without_credentials(payload)
         events.append({
             "id": row["id"],
             "at": row["ts_iso"],

@@ -38,7 +38,7 @@ import secrets
 import subprocess
 import sys
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -107,6 +107,15 @@ class Session:
     expires_at: datetime
     actor_name: str = ""
     source: str = "development"
+    # **The SHA-256 of the credential, never the credential.** The caller holds the value; this record holds
+    # something that can check it and cannot be used as it. The session id is not a secret and is recorded and
+    # printed freely, which is only safe because these are two different things.
+    credential_sha256: str = ""
+    # **The plain credential, on the object that minted it, and nowhere else.** `compare=False` and
+    # `repr=False` are both load-bearing: it must not make two sessions unequal, and it must not appear when
+    # something prints a session for a log. A field that shows up in a repr is a field that reaches a log, and
+    # reaching a log is exactly how this defect was found.
+    credential: str = field(default="", compare=False, repr=False)
 
     def expired(self, now: datetime | None = None) -> bool:
         return (now or datetime.now(timezone.utc)) >= self.expires_at
@@ -131,13 +140,22 @@ class MemoryStore:
         self.rows: dict[str, Session] = {}
 
     def put(self, session: Session) -> None:
+        # Keyed by the session id, because a memory store has no reason to hide anything and a test that wants
+        # to look a session up by id should be able to. The credential is not in the key and cannot be.
         self.rows[session.session_id] = session
 
-    def get(self, session_id: str) -> Session | None:
-        session = self.rows.get(session_id)
-        if session is None or session.expired():
+    def get(self, credential_sha256: str) -> Session | None:
+        """The session a credential belongs to, by the hash of the credential.
+
+        **The same contract as the Postgres store, and it has to be.** Two stores that resolve sessions
+        differently is how a test passes against one and a deployment fails on the other.
+        """
+        if not credential_sha256:
             return None
-        return session
+        for session in self.rows.values():
+            if session.credential_sha256 == credential_sha256 and not session.expired():
+                return session
+        return None
 
     def revoke(self, session_id: str) -> bool:
         return self.rows.pop(session_id, None) is not None
@@ -192,29 +210,39 @@ class PostgresStore:
             cur.execute(
                 """
                 insert into sessions (session_id, subject, actor_name, role, access_roots, groups,
-                                      deployment_id, expires_at, source)
-                values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                      deployment_id, expires_at, source, credential_sha256)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (session.session_id, session.subject, session.actor_name or None, session.role,
                  json.dumps(sorted(session.roots)), json.dumps(list(session.groups)),
-                 session.deployment_id, session.expires_at, session.source))
+                 session.deployment_id, session.expires_at, session.source,
+                 # **The hash, and there is no parameter here that could hold the value.** A caller cannot
+                 # persist a credential through this function even by mistake.
+                 session.credential_sha256 or None))
 
-    def get(self, session_id: str) -> Session | None:
+    def get(self, credential_sha256: str) -> Session | None:
+        """The session a credential belongs to, by the hash of the credential.
+
+        **The parameter is a hash and the query says so.** There is no lookup by identifier here on purpose: an
+        identifier that resolves a session is a credential, and that equivalence is the defect this replaced.
+        """
+        if not credential_sha256:
+            return None
         with self.conn.cursor() as cur:
             cur.execute(
                 """
                 select session_id, subject, coalesce(actor_name, ''), role, access_roots, groups,
-                       deployment_id, expires_at, source
+                       deployment_id, expires_at, source, coalesce(credential_sha256, '')
                   from sessions
-                 where session_id = %s and revoked_at is null and expires_at > now()
-                """, (session_id,))
+                 where credential_sha256 = %s and revoked_at is null and expires_at > now()
+                """, (credential_sha256,))
             row = cur.fetchone()
         if row is None:
             return None
         return Session(
             session_id=row[0], subject=row[1], actor_name=row[2], role=row[3],
             roots=frozenset(row[4] or []), groups=tuple(row[5] or []),
-            deployment_id=row[6], expires_at=row[7], source=row[8])
+            deployment_id=row[6], expires_at=row[7], source=row[8], credential_sha256=row[9])
 
     def revoke(self, session_id: str) -> bool:
         with self.conn.cursor() as cur:
@@ -258,6 +286,19 @@ def open_store(database_url: str | None = None) -> MemoryStore | PostgresStore:
 # --------------------------------------------------------------------------- establishment
 
 
+def credential_hash(credential: str) -> str:
+    """What the record keeps of a credential: a hash, and nothing that can be presented.
+
+    **A plain SHA-256, and its weakness is stated rather than hidden.** A session credential is 256 bits of
+    randomness from `secrets.token_urlsafe(32)`, so there is no dictionary to attack and no need for a slow
+    password hash: the thing being defended against is a database read, not a guessing attack. If a credential
+    ever becomes something a person chooses, this has to become Argon2 or scrypt in the same commit.
+    """
+    import hashlib
+
+    return hashlib.sha256(credential.encode()).hexdigest()
+
+
 def mint(registry: access.Registry, store, subject: str, role: str, *, ttl_hours: int = 8,
          deployment_id: str = "", dev: bool = False, actor_name: str = "") -> Session:
     """Establish a session, and refuse one this deployment did not grant.
@@ -265,6 +306,11 @@ def mint(registry: access.Registry, store, subject: str, role: str, *, ttl_hours
     **The guard comes first, before the registry is read and before the store is touched.** A refusal must not
     leave a half-written row behind, and the order is the cheap way to be sure of it rather than an intention
     to be careful.
+
+    **The credential is generated here and never stored.** `mint` used to generate one random value and use it
+    as both the identifier and the credential, so every place that recorded which session did something
+    recorded something that authenticated. The caller reads the plain value from `session.credential` exactly
+    once, and the row keeps only its hash.
     """
     if not dev:
         raise SessionError(
@@ -284,7 +330,9 @@ def mint(registry: access.Registry, store, subject: str, role: str, *, ttl_hours
     # Both happen here rather than at the first request, because a session that cannot resolve anything is
     # not a session.
     permit = access.resolve(registry, subject, role)
+    credential = secrets.token_urlsafe(32)
     session = Session(
+        # The identifier, which is not a secret: it is recorded and shown on the Activity screen on purpose.
         session_id=secrets.token_urlsafe(32),
         subject=subject,
         actor_name=actor_name or (registry.users[subject].display() if subject in registry.users else ""),
@@ -294,8 +342,31 @@ def mint(registry: access.Registry, store, subject: str, role: str, *, ttl_hours
         deployment_id=deployment_id or "unknown",
         expires_at=datetime.now(timezone.utc) + timedelta(hours=ttl_hours),
         source="development",
+        credential_sha256=credential_hash(credential),
     )
     store.put(session)
+    # A fresh object with the credential on it, because the dataclass is frozen: a session that is established
+    # is a fact, and mutating one is how a record stops describing what happened.
+    return replace(session, credential=credential)
+
+
+def resolve_credential_hash(store, credential_sha256: str) -> Session:
+    """The session a stored hash belongs to, or a refusal.
+
+    **For a job, which holds a hash rather than a credential.** A job has to run after the request that created
+    it has ended, and the first version solved that by keeping the credential in the row. This resolves the same
+    way `resolve_token` does, from a value that cannot be presented anywhere, and a job whose session has
+    expired or been revoked is refused with the one answer the refusal path already gives.
+    """
+    if not credential_sha256:
+        raise SessionError(
+            "this job does not name a session it may run under. It was created before the credential stopped "
+            "being stored, so there is nothing to resolve.")
+    session = store.get(credential_sha256)
+    if session is None:
+        raise SessionError(
+            "the session this job was created under is not live. It expired, or it was revoked, or it was "
+            "minted before the credential stopped being stored; the three are one answer on purpose.")
     return session
 
 

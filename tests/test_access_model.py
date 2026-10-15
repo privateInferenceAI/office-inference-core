@@ -242,7 +242,14 @@ def test_a_minted_session_snapshots_its_roots():
     session = session_module.mint(declared(), store, "dana@client.example", "viewer", dev=True)
     assert session.roots == frozenset({"company"})
     assert session.groups == ("staff",)
-    assert store.get(session.session_id) is not None
+    # **Resolved by the credential's hash, and the id deliberately does not resolve.** The first version of
+    # this test looked the session up by `session_id`, which worked because the id WAS the credential. That
+    # equivalence is what put a live token into every audit row, so the assertion is inverted: the credential
+    # finds the session, and the identifier that gets recorded and printed finds nothing.
+    assert store.get(session.credential_sha256) is not None
+    assert store.get(session.session_id) is None, (
+        "the session id resolves a session, which makes it a credential and makes every record that names it "
+        "a disclosure")
 
 
 def test_an_expired_session_does_not_resolve():
@@ -425,3 +432,59 @@ def test_the_rendered_registry_never_carries_a_model_field():
         assert "model" not in json.dumps(document)
         assert set(document) == {"registry_version", "declared", "deployment_id", "roles", "groups",
                                  "users", "roots"}
+
+
+# --------------------------------------------------------------------------- the credential is not the record
+#
+# **Found by the C4 panel's cold reader**, who opened an audit row in the app and asked whether the value in its
+# payload was a credential. It was. `mint` generated one random string and used it as both the session
+# identifier and the credential handed to the caller, so every place that recorded "which session did this"
+# recorded something that authenticated. The audit screen widens with permission, so one person's live
+# credential was readable on another person's page, and the rows are append-only.
+#
+# These tests hold the separation, because it is the kind that erodes: the next person who wants to look a
+# session up by id, or to log one for traceability, reintroduces it in a line.
+
+
+def test_the_credential_is_not_the_session_id():
+    """Two different values, and neither can stand in for the other."""
+    store = session_module.MemoryStore()
+    session = session_module.mint(declared(), store, "dana@client.example", "viewer", dev=True)
+    assert session.credential, "no credential was produced, so a caller could not authenticate"
+    assert session.credential != session.session_id, (
+        "the credential and the session id are the same value, which is what made every record that names the "
+        "session a disclosure")
+
+
+def test_the_store_keeps_a_hash_and_not_the_credential():
+    """A database read must not yield anything presentable."""
+    store = session_module.MemoryStore()
+    session = session_module.mint(declared(), store, "dana@client.example", "viewer", dev=True)
+    row = store.rows[session.session_id]
+    assert row.credential_sha256 == session_module.credential_hash(session.credential)
+    assert not hasattr(row, "session_id") or row.session_id != session.credential
+    # Nothing on the stored record contains the credential, which is the property a dump depends on.
+    assert session.credential not in repr(row), "the credential appears in the stored record's repr"
+
+
+def test_a_session_id_cannot_be_presented_as_a_credential():
+    """The identifier is recorded and printed freely, so it must authenticate nothing."""
+    store = session_module.MemoryStore()
+    session = session_module.mint(declared(), store, "dana@client.example", "viewer", dev=True)
+    with pytest.raises(session_module.SessionError):
+        session_module.resolve_token(store, session.session_id)
+
+
+def test_the_stored_hash_resolves_the_session():
+    """What a job uses: a value that cannot be presented anywhere still names its session."""
+    store = session_module.MemoryStore()
+    session = session_module.mint(declared(), store, "dana@client.example", "viewer", dev=True)
+    resolved = session_module.resolve_credential_hash(store, session.credential_sha256)
+    assert resolved.session_id == session.session_id
+
+
+def test_the_repr_of_a_session_carries_no_credential():
+    """A field that shows up in a repr is a field that reaches a log, and reaching a log is how this was found."""
+    store = session_module.MemoryStore()
+    session = session_module.mint(declared(), store, "dana@client.example", "viewer", dev=True)
+    assert session.credential not in repr(session)

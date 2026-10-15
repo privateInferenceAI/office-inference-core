@@ -146,7 +146,9 @@ class Job:
     subject: str
     actor_role: str
     roots: frozenset[str]
-    session_id: str
+    # **A hash, not a credential.** The job resolves the session by this when it runs. Holding the credential
+    # here is what made every job row a working identity, which migration 020 records.
+    credential_sha256: str
     task: str
     input: str
     data_class: str = "internal"
@@ -288,9 +290,9 @@ class PostgresStore:
         with self.conn.cursor() as cur:
             cur.execute(
                 """
-                insert into jobs (job_id, deployment_id, subject, actor_role, access_roots, session_id,
-                                  task, input, state, outcome_reason, time_budget_s, attempt_budget,
-                                  created_at, started_at, finished_at, data_class)
+                insert into jobs (job_id, deployment_id, subject, actor_role, access_roots,
+                                  credential_sha256, task, input, state, outcome_reason, time_budget_s,
+                                  attempt_budget, created_at, started_at, finished_at, data_class)
                 values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, to_timestamp(%s), %s, %s, %s)
                 on conflict (job_id) do update set
                   state = excluded.state,
@@ -299,7 +301,7 @@ class PostgresStore:
                   finished_at = excluded.finished_at
                 """,
                 (job.job_id, job.deployment_id, job.subject, job.actor_role,
-                 json.dumps(sorted(job.roots)), job.session_id or None, job.task, job.input, job.state,
+                 json.dumps(sorted(job.roots)), job.credential_sha256 or None, job.task, job.input, job.state,
                  job.outcome_reason or None, job.time_budget_s, job.attempt_budget, job.created_at,
                  _ts(job.started_at), _ts(job.finished_at), job.data_class))
             for step in job.steps:
@@ -322,7 +324,7 @@ class PostgresStore:
         with self.conn.cursor() as cur:
             cur.execute(
                 """
-                select job_id, deployment_id, subject, actor_role, access_roots, coalesce(session_id, ''),
+                select job_id, deployment_id, subject, actor_role, access_roots, coalesce(credential_sha256, ''),
                        task, input, state, coalesce(outcome_reason, ''), time_budget_s, attempt_budget,
                        extract(epoch from created_at), extract(epoch from started_at),
                        extract(epoch from finished_at), data_class
@@ -342,7 +344,7 @@ class PostgresStore:
                           failure_kind=r[4], failure_detail=r[5], retryable=r[6], lane=r[7],
                           model=r[8], duration_ms=r[9]) for r in cur.fetchall()]
         return Job(job_id=row[0], deployment_id=row[1], subject=row[2], actor_role=row[3],
-                   roots=frozenset(row[4] or []), session_id=row[5], task=row[6], input=row[7],
+                   roots=frozenset(row[4] or []), credential_sha256=row[5], task=row[6], input=row[7],
                    state=row[8], outcome_reason=row[9], time_budget_s=row[10],
                    attempt_budget=row[11], created_at=float(row[12]),
                    started_at=float(row[13]) if row[13] is not None else None,
@@ -420,7 +422,7 @@ def open_store(url: str | None = None, migrations_dir: str | Path | None = None)
 # --------------------------------------------------------------------------- transitions
 
 
-def new_job(*, deployment_id: str, subject: str, actor_role: str, roots, session_id: str, task: str,
+def new_job(*, deployment_id: str, subject: str, actor_role: str, roots, credential_sha256: str, task: str,
             input: str, data_class: str = "internal", time_budget_s: int = DEFAULT_TIME_BUDGET_S,
             attempt_budget: int = DEFAULT_ATTEMPT_BUDGET) -> Job:
     """A job in `queued`, with its permission snapshotted rather than referenced."""
@@ -430,7 +432,8 @@ def new_job(*, deployment_id: str, subject: str, actor_role: str, roots, session
         raise JobError("an attempt budget must be between 1 and 50")
     return Job(
         job_id=uuid.uuid4().hex, deployment_id=deployment_id, subject=subject, actor_role=actor_role,
-        roots=frozenset(roots), session_id=session_id, task=task, input=input, data_class=data_class,
+        roots=frozenset(roots), credential_sha256=credential_sha256, task=task, input=input,
+        data_class=data_class,
         time_budget_s=time_budget_s, attempt_budget=attempt_budget)
 
 
@@ -499,7 +502,7 @@ def run(job: Job, store, attempt_once: Callable[[Job, int], StepOutcome], *,
         if audit:
             audit("tool_call", job.subject, job.actor_role, "ok",
                   {"stage": "job", "job_id": job.job_id, "task": job.task, "state": RUNNING,
-                   "session_id": job.session_id, "attempts": 0}, tool=job.task)
+                   "job_id": job.job_id, "attempts": 0}, tool=job.task)
 
     while True:
         # Re-read before every attempt. A cancel arrives through a different connection, so the copy in
@@ -519,7 +522,7 @@ def run(job: Job, store, attempt_once: Callable[[Job, int], StepOutcome], *,
                 audit("tool_call", job.subject, job.actor_role, "error",
                       {"stage": "job", "job_id": job.job_id, "task": job.task, "state": FAILED,
                        "reason": "attempts_exhausted", "attempts": job.attempts,
-                       "session_id": job.session_id}, tool=job.task)
+                       "job_id": job.job_id}, tool=job.task)
             return job
 
         if (time.monotonic() - started) > job.time_budget_s:
@@ -531,7 +534,7 @@ def run(job: Job, store, attempt_once: Callable[[Job, int], StepOutcome], *,
                 audit("tool_call", job.subject, job.actor_role, "error",
                       {"stage": "job", "job_id": job.job_id, "task": job.task, "state": FAILED,
                        "reason": "time_budget_exhausted", "attempts": job.attempts,
-                       "session_id": job.session_id}, tool=job.task)
+                       "job_id": job.job_id}, tool=job.task)
             return job
 
         attempt = len(job.steps) + 1
@@ -584,12 +587,12 @@ def run(job: Job, store, attempt_once: Callable[[Job, int], StepOutcome], *,
                 audit("tool_call", job.subject, job.actor_role, "ok",
                       {"stage": "job", "job_id": job.job_id, "task": job.task, "attempt": attempt,
                        "state": SUCCEEDED, "attempts": job.attempts, "lane": step.lane,
-                       "duration_ms": step.duration_ms, "session_id": job.session_id},
+                       "duration_ms": step.duration_ms, "job_id": job.job_id},
                       tool=job.task, model=step.model or None, data_class=job.data_class,
                       egress_allowed=(step.lane == "frontier"))
                 audit("tool_call", job.subject, job.actor_role, "ok",
                       {"stage": "job", "job_id": job.job_id, "task": job.task, "state": SUCCEEDED,
-                       "attempts": job.attempts, "lane": step.lane, "session_id": job.session_id},
+                       "attempts": job.attempts, "lane": step.lane, "job_id": job.job_id},
                       tool=job.task, model=step.model or None,
                       data_class=job.data_class, egress_allowed=(step.lane == "frontier"))
             return job
@@ -608,7 +611,7 @@ def run(job: Job, store, attempt_once: Callable[[Job, int], StepOutcome], *,
             audit("tool_call", job.subject, job.actor_role, "error",
                   {"stage": "job", "job_id": job.job_id, "task": job.task, "attempt": attempt,
                    "state": RUNNING, "failure_kind": step.failure_kind,
-                   "retryable": step.retryable, "session_id": job.session_id},
+                   "retryable": step.retryable, "job_id": job.job_id},
                   tool=job.task, model=step.model or None, data_class=job.data_class)
 
         if not outcome.retryable:
@@ -624,7 +627,7 @@ def run(job: Job, store, attempt_once: Callable[[Job, int], StepOutcome], *,
                 audit("tool_call", job.subject, job.actor_role, "error",
                       {"stage": "job", "job_id": job.job_id, "task": job.task, "state": FAILED,
                        "reason": step.failure_kind, "attempts": job.attempts,
-                       "session_id": job.session_id}, tool=job.task, data_class=job.data_class)
+                       "job_id": job.job_id}, tool=job.task, data_class=job.data_class)
             return job
 
         store.append(job.job_id, EV_PROGRESS,
