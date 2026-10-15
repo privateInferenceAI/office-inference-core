@@ -374,7 +374,11 @@ def resolve_token(store, token: str) -> Session:
     """A token becomes a session, or a refusal that says which of the reasons it was."""
     if not token or not token.strip():
         raise SessionError("no session token was presented, so there is no identity to act as")
-    session = store.get(token.strip())
+    # **The presented value is hashed, and the hash is what is looked up.** The alternative — treating the
+    # identifier as the credential — is what put a live session token into every audit row that named its
+    # session, which the C4 panel's cold reader found by opening one. This line is the whole fix on this path,
+    # and the first attempt to make it did not match the text it was replacing and said nothing.
+    session = store.get(credential_hash(token.strip()))
     if session is None:
         raise SessionError(
             "the session token resolves to no live session. It was never issued, it expired, or it was "

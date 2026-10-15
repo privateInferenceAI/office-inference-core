@@ -488,3 +488,19 @@ def test_the_repr_of_a_session_carries_no_credential():
     store = session_module.MemoryStore()
     session = session_module.mint(declared(), store, "dana@client.example", "viewer", dev=True)
     assert session.credential not in repr(session)
+
+
+def test_the_token_resolver_hashes_what_it_is_given():
+    """**The check that would have caught this in the source rather than on a deployment.**
+
+    The fix reached every path except the one that resolves a presented credential, because the edit that was
+    meant to change it did not match the text it was replacing and reported nothing. What found it was a fresh
+    token authenticating as nothing against a live service. A test that reads the line is cheaper than that.
+    """
+    import inspect
+
+    source = inspect.getsource(session_module.resolve_token)
+    assert "credential_hash(token" in source, (
+        "resolve_token looks the presented value up directly, so a credential does not resolve and the "
+        "identifier does")
+    assert "store.get(token" not in source
