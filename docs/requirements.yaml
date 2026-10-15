@@ -1141,6 +1141,39 @@ items:
       exist for them. The reference instance's screen size was measured rather than assumed: the runbook records
       1366x768 against the actual host.
 
+  - id: SEC-CRED-001
+    title: A session credential is never stored, never logged, and never rendered
+    tier: [cloud, hosted, office]
+    phase: C4
+    verify: the credential is a different value from the session identifier; the store holds only its SHA-256; presenting the identifier resolves nothing; a credential-shaped key is stripped from an activity payload at any depth; a job resolves its session by the hash and fails honestly when the session is gone
+    status: verified
+    note: >-
+      **Found by the C4 panel's cold reader, not by a test**, which is the part worth remembering. The reader
+      opened an audit row in the app, saw a value in the payload, and asked whether it was a credential. It was:
+      the session identifier WAS the credential, because `mint` generated one random string and used it as both.
+      Confirmed by taking an id out of a row and authenticating with it: HTTP 200. Because the Activity screen
+      widens with permission, **one person's live credential was readable on another person's page**, and the
+      rows are append-only and hash-linked so it could not be taken back. Migrations 019 and 020 separate the
+      two, store only a hash, revoke the sessions whose credentials are already in the chain, and truncate the
+      job rows that held one. The exposure is recorded in docs/review-log.md rather than rewritten, because a
+      record that can be edited to hide something is not evidence. The activity view also strips
+      credential-shaped keys at any depth, with a test that asserts the view applies it — because the helper's
+      own tests passed while the call was removed.
+  - id: UI-HONEST-001
+    title: What the screen says about an answer matches what the answer did
+    tier: [cloud, hosted, office]
+    phase: C4
+    verify: the receipt counts the documents the answer cited rather than the passages retrieval returned; an answer that declines says the documents do not cover the question even when it cites the passages it rejected; the source list is the cited set; no markup source syntax reaches the screen; a state that could not be read is not reported as an empty one
+    status: verified
+    note: >-
+      Also the cold reader's work, and all of it was invisible to a test of the payload because every payload was
+      correct. The receipt printed `citations.length`, which is what retrieval found — six, whatever the
+      question — so "Answered from 6 documents on this machine" appeared under "I cannot answer the question
+      based on the given passages". The line manual 13i calls the point of the product was describing the
+      search. Markdown reached the screen on the streaming path and not the JSON one. An expired session made
+      the shell claim the deployment declares no tasks while the same header said all systems ready, so the
+      shell has three states now: known, empty, and unreadable.
+
   - id: NEVER-KB-001
     title: No managed knowledge base
     tier: [cloud, hosted]

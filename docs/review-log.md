@@ -546,3 +546,82 @@ itself the finding.
 - `docs/runbook.md` phase C4, with the probe outputs pasted from real runs
 - a corpus of 26 documents the deployment actually answers from, not the six benchmark files that were there
 
+
+## Round 1, what each reviewer reported
+
+**The executor failed to finish and left no report.** Re-run after the fixes below, because a panel of two is not
+the panel this phase is supposed to have.
+
+**The cold reader returned `NO` with thirteen comprehension failures.** It used the app as its own instructions
+allow and never opened a source file, which is the point of the role. The two that mattered most:
+
+- **The receipt contradicted the answer above it.** "Answered from 6 documents on this machine" printed under
+  "I cannot answer the question based on the given passages". The count was the retrieved set, which is six
+  whatever the question. The line manual 13i calls the point of the product was describing the search.
+- **The session token was printed in the audit payload**, and the reader asked whether it was a credential. It
+  was. That is the finding of the phase and it has its own section below.
+
+The rest were real and are fixed: sources listed the retrieved set with duplicates while the receipt claimed the
+cited set; the access label was hover-only on a product whose front desk has a tablet; markdown asterisks reached
+the screen on the streaming path and not the JSON one; an expired session made the shell claim the deployment
+declares no tasks while the header said all systems ready; all four tasks asked for "the two versions of the
+travel policy"; the signed-in person was labelled "Operator"; and a machine token appeared after every
+unbacked sentence.
+
+**The fidelity checker returned `NO` with six wrong claims**, all documentation except one. It also caught the
+deployment itself: the api image was a commit stale, which nothing else had noticed because every test ran
+against the source.
+
+### The finding that decided the round, and it was a live credential in a read-only record
+
+**A session token was readable in the audit payload, and one person's token was readable on another person's
+page.** Confirmed rather than assumed: a session id taken from a row authenticated as that session, HTTP 200.
+
+The cause was a conflation. `mint` generated one random string and used it as both the session identifier and
+the credential, so every place that recorded which session did something recorded something that authenticated.
+Two columns held it in plain: `sessions.session_id`, the lookup key, and `jobs.session_id`, the credential the
+caller presented, kept so a job could run after its request ended.
+
+**The rows were not rewritten.** They are append-only and hash-linked, and a record that can be edited to hide
+something is not evidence. The exposure is recorded here instead. Migrations 019 and 020 separate the two, store
+only a SHA-256, revoke the sessions whose credentials are already in the chain, and truncate the job rows that
+held one.
+
+**Two things this says about the panel that found it.** A reviewer whose instructions were to read the manual
+and use the app, and who was told not to open the source, found a credential disclosure that 715 passing tests
+and three probes did not. And it found it by asking a question — "is this value a credential?" — rather than by
+knowing where to look.
+
+## What the round cost, three times over
+
+**Three edits of mine did not match the text they were replacing, and each one reported nothing.** A
+replacement that finds nothing looks exactly like a replacement that worked. The third was
+`resolve_token`, whose hashing I had written, committed, pushed, and rebuilt an image for while the line still
+resolved the raw token. What found it was a fresh token authenticating as nothing against the live service,
+which read as the security fix being broken rather than as an edit that missed. `docs/runbook.md` already warns
+about this shape; it had not been applied to editing.
+
+The guard is a test that reads the line, and a habit of reading a file back after a scripted change rather than
+trusting the call.
+
+**And one NameError on the refusal path.** `check_boundary` was given a `request_id` parameter and its body used
+the name; the test written for it asserted the string appeared in the source, and it appeared in `prepare`,
+which passed it to nothing. The boundary probe found it by reporting that the service was not enforcing the
+class it had been given, which looked like a setup problem. The replacement calls the function instead of
+reading it.
+
+## State at the close of round 1
+
+    727 passed, 2 skipped                       (was 715)
+    job_probe 7/7 + 1 skipped, 8/8 with the gate runner
+    activity_probe 8/8
+    api_probe 7/7
+    gate_check 0 (refused on both endpoints) and gate_check --jobs 8/8
+    a session id from an audit row: HTTP 401
+    a credential minted after the fix: HTTP 200
+    app: 200 for / and for /api/health, 57 app tests, 12 integration, 10 browser
+    contract check: OK, 9 paths
+
+**What round 1 did not prove.** An undeclared subject refused at mint time, the `degraded` and `no_source`
+screens, Pause, Resume and Cancel on a running job, and a task refused for having no permitted lane. The cold
+reader named all four as untested and made no claim about them, which is the right way to leave a gap.
