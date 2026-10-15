@@ -903,3 +903,69 @@ rather than assumed.
     job_probe 7/7 + 1 skipped         interface_probe 8/8  stream_probe 4/4
     contract: 10 paths, 22 models, matching
     app: 65 unit and component, 12 integration live, 10 browser
+
+---
+
+# C4, closing — the ingest, measured, and what it cost to find out
+
+**Not a panel round. A question the owner asked**: how long does a large corpus take, can it be made faster,
+and is a second machine or a GPU needed. It ended with a 1.75x speed-up from a code change, a decision not to
+buy hardware, and two defects — one of which I caused.
+
+## The measurements, in the order they were taken
+
+**The corpus.** 10,000 generated documents alongside the 26 coverage fixtures. Generation: 21.8 seconds for
+40 MB. Ingestion of the first 1,000: 14m21s. The rest, serially: about 2h48m for the whole 10,026.
+
+**The split, from the instrumented worker.** Parsing 44 to 47 percent, embedding 50 to 53, writing 2. And the
+parser container at **one core of sixteen** — which is what turned the problem from capacity into structure.
+
+**The change.** Documents are prepared across a pool of four and written on the main thread. Writes are two
+percent of the clock and are what touches shared state, so serialising them is free and keeps the manifest out
+of a race.
+
+**The result.** 2h48m to **1h36m**. Parsing fell from 44 percent of the clock to 6 without getting faster: it
+now runs on the fifteen cores that were idle while the worker waited on the embedding service. Embedding is
+93 percent, at roughly 1,430 ms per chunk against the 490 ms the service manages at a batch of eight.
+
+**No degradation.** Per-document time across ten buckets: 2,947 ms to 3,147 ms, a drift of 1.07x. The rate
+swinging between 68 and 138 documents per minute is the chunk count varying between documents. **A
+300-document sample would have shown neither the flat curve nor the source of the swings**, which is why the
+owner's insistence on a full run was right and my first instinct to sample was wrong.
+
+## The two defects
+
+**One I caused.** A measurement run pointed at 300 sample documents reconciled away the other 9,700, because
+the worker removes every document the manifest knows about whose file is not under the root it is walking. The
+vectors survived only because that run happened to use a separate collection — luck, not design. The repair
+was a re-ingest rather than a hand-written rebuild, on the grounds that a second implementation of what the
+manifest should say is the defect this codebase rejects everywhere else. The worker now refuses to remove
+anything when the root is not its own.
+
+**One that was latent and concurrency made reachable.** `embed_texts` tries several endpoints and wraps its
+last failure in a `RuntimeError`, and `is_transient` classified by exception type. So a `429 Too Many Requests`
+inside a wrapper was read as a permanent fault of the document. A concurrent run provoked 56 of them and
+**dead-lettered four healthy documents**. The wrapper chains its cause now and the classifier walks the chain.
+Worth recording for the ordering as much as the fix: the speed-up arrived with a fault only a busy machine
+could show.
+
+## The decision
+
+**No GPU, no second machine.** Ten thousand documents in an hour and a half means a corpus ten times that size
+finishes inside a working night on the box already deployed. The owner's words were that large groups will be
+done overnight anyway, which is the right frame: this is a batch job, and a batch job that finishes before
+morning needs no hardware. Recorded in the operator guide so it is not reopened without new numbers.
+
+**What nobody has built, and what it is worth.** Batching embeddings across documents. Per-document requests
+carry one or two chunks and run at a third of the service's batch-of-eight efficiency, so the measurement says
+roughly 3x is available on the 93 percent. It is not needed for the decision above, and it is the obvious next
+lever if a client's onboarding ever becomes interactive rather than overnight.
+
+## State at the close
+
+    13,307 chunks · 10,025 documents · 0 documents carrying a failure
+    a cycle that changes nothing: seen 10,026, skipped 10,026, failed 0
+    api_probe 8/8   access_probe 4/4   activity_probe 8/8
+    job_probe 7/7 + 1 skipped          interface_probe 8/8   stream_probe 4/4
+    gate_check exit 0                  gate_check --jobs exit 0
+    contract: 10 paths, matching       744 tests

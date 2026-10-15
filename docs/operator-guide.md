@@ -416,6 +416,43 @@ embedding service.
 and the error is in the flattering direction. If you measure it, measure it at the chunk size you will actually
 send.
 
+**The fix was concurrency, not a faster machine, and it was measured.** The worker prepared one document at a
+time, so while it waited on the parser the embedder was idle and the other way round. Neither service was
+saturated: the parser used **about one core of sixteen**, and the box had fifteen idle throughout. The cost was
+never capacity.
+
+Documents are now prepared across a pool of `INGEST_CONCURRENCY` — four by default — and written on the main
+thread in a single stream. Writes are two percent of the clock and are the part that touches shared state, so
+serialising them costs nothing and keeps the manifest's bookkeeping out of a race. A failure stays attached to
+its own document: each document's work is its own unit, so one bad file dead-letters itself and not its
+neighbours.
+
+**The full 10,026-document corpus, measured twice on the same box:**
+
+| | One at a time | Four at a time |
+|---|---|---|
+| Wall clock | 2 h 48 m | **1 h 36 m** |
+| Rate | ~59 documents/min | ~104 documents/min |
+| parse | 44% of the clock | **6%** |
+| embed | 53% | **93%** |
+
+**Parsing did not get faster; it stopped being on the critical path.** It now runs on cores that were idle
+while the worker waited on the embedding service. **Embedding is the remaining bottleneck at 93 percent**, and
+per chunk it runs at roughly 1,430 ms against the 490 ms the service manages at a batch of eight, because a
+per-document request carries one or two chunks. Batching across documents is the next lever and nobody has
+built it.
+
+**And there is no degradation to worry about.** Across ten buckets of a full run, per-document time went from
+2,947 ms to 3,147 ms, a drift of **1.07x**. What looks like a run slowing down is the chunk count varying
+between documents — buckets averaging one chunk take about 1,400 ms and buckets averaging two take about
+3,100 ms. The rate moves between 68 and 138 documents/min for that reason and not because the index is
+growing. **A short sample cannot tell you this**, which is why the full run was the right call.
+
+**For scale, overnight is enough.** Ten thousand documents in an hour and a half means a corpus ten times that
+size finishes inside a working night, on the box that is already deployed, with no second machine and no GPU.
+That was the decision taken, and it is recorded here so the next person does not reopen it without new
+numbers.
+
 **Two operational notes.** Set `INGEST_EMBED_BATCH` no higher than the service's advertised limit of 32; a
 batch of 64 answers `422 batch size 64 > maximum allowed batch size 32`, and a burst of 32 concurrent requests
 answers `429 Model is overloaded`, so the worker's default of 16 is the right side of both.
