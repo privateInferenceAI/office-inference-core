@@ -201,6 +201,18 @@ def audit(event: str, actor: str, actor_role: str, outcome: str, payload: dict, 
         command += ["--redactions", json.dumps(extra["redactions"], sort_keys=True)]
     if extra.get("unverified_card_shapes"):
         command += ["--unverified-card-shapes", str(extra["unverified_card_shapes"])]
+    # **The request id, which the tool has a flag for and this never passed.**
+    #
+    # The API has minted a request id per call since the answer started carrying one, and it passed it to
+    # this function on every model call. This function then did not put it on the command, so the column
+    # stayed empty and the answer's id could not find its own row. The interface's lane claim and the
+    # record's entry are two statements about one event, and the identifier is the only thing that lets
+    # anything compare them. A blank column means nothing can.
+    #
+    # Found by the activity probe, whose BYREQUEST right posts an answer and then looks up the row by the id
+    # that answer carried. It reported zero rows, which looks exactly like "the row was never written".
+    if extra.get("request_id"):
+        command += ["--request-id", str(extra["request_id"])]
     if extra.get("prompt"):
         command += ["--prompt", extra["prompt"]]
     env = dict(os.environ)

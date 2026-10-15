@@ -210,3 +210,51 @@ def test_the_generator_script_reaches_the_same_schema(api_app):
     from_script = fetch_openapi.generate_offline()
     assert set(from_script["paths"]) == set(api_app.openapi()["paths"])
     assert "Answer" in from_script["components"]["schemas"]
+
+
+# --------------------------------------------------------------------------- the audit columns the API sets
+#
+# **Why this is here.** The API mints a request id per call and passes it to `audit()`, and `audit()` did not
+# put it on the audit tool's command line. The column stayed empty, so the id an answer carries could not find
+# the row that recorded it. Every test passed. The activity probe found it on the box, by posting an answer
+# and then looking up the row by the id that answer carried — and it reported zero rows, which looks exactly
+# like "the row was never written".
+#
+# The general shape is the C3 lesson again: the flag existed, the value existed, and nothing connected them.
+# So this asserts the connection for every column the API is given a value for, rather than for the one that
+# was broken.
+
+
+def test_every_audit_column_the_api_is_handed_reaches_the_tool():
+    """A value that goes into `audit()`'s keyword arguments has to reach the command line.
+
+    The mapping is read from the source: for each `extra.get("<name>")` the function checks, there must be a
+    `--<name-with-dashes>` on the command. That is the property that failed, stated generally enough that the
+    next column added inherits it.
+    """
+    import re
+
+    source = APP.read_text()
+    start = source.index("def audit(event: str")
+    body = source[start:source.index("\ndef ", start + 10)]
+    checked = set(re.findall(r'extra\.get\("([a-z_]+)"\)', body))
+    passed = set(re.findall(r'"--([a-z-]+)"', body))
+    # Underscores on the Python side, dashes on the command line.
+    as_flags = {name.replace("_", "-") for name in checked}
+    missing = as_flags - passed
+    assert not missing, (
+        f"audit() reads {sorted(missing)} and never passes the flag for it, so the column stays empty while "
+        "the value is computed and thrown away. This is the defect that left request_id blank on every row")
+    assert "request-id" in passed, "the request id specifically is not passed to the tool"
+
+
+def test_the_answer_and_its_row_share_one_identifier():
+    """The id in the response and the id in the record are the same value, produced once.
+
+    The lane claim and the record's entry are two statements about one event, and the identifier is the only
+    thing that lets anything compare them. A test can only assert the agreement if both sides carry it.
+    """
+    pipeline = PIPELINE.read_text()
+    assert "request_id=request_id" in pipeline, "the answer does not record the id it carries"
+    assert '"request_id": request_id' in pipeline or 'payload["request_id"]' in pipeline, (
+        "the answer does not carry the id it records")
