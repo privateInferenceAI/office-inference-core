@@ -41,11 +41,16 @@ cd "$ROOT"
 
 # **The probe itself has to be inside the container, and the first version was not.** It named the host path
 # `/opt/oi-core/tests/fixtures/access_probe.py`, which the container cannot see: the service mounts `rendered`,
-# `db/migrations` and the audit tool, and nothing else. Mounting the fixtures read-only at `/probes` is one
-# line here rather than a paragraph in every document that runs a probe.
+# `db/migrations` and the audit tool, and nothing else.
+#
+# **The whole checkout goes in at `/w`, read-only, because that is the path the probes already look for.** They
+# insert `/w/services/retrieval` and `/w/services/ingestion` into `sys.path` before importing, so a runner that
+# mounted only the fixtures answered `ModuleNotFoundError: No module named 'access'`. Mounting the repository the
+# probes were written against costs one line and means the fixtures do not have to be changed to suit the
+# runner, which is the wrong direction for a change to travel.
 RELATIVE="${PROBE_PATH#"$ROOT"/}"
 
 exec docker compose -f "$COMPOSE" --env-file "$ENV_FILE" --profile tools run --rm \
   --no-deps --entrypoint python \
-  -v "$ROOT/tests/fixtures:/probes:ro" \
-  session "/probes/$(basename "$RELATIVE")" "$@"
+  -v "$ROOT:/w:ro" \
+  session "/w/$RELATIVE" "$@"
