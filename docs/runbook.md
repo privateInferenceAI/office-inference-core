@@ -4239,6 +4239,29 @@ company/pii-new-starter.md -> redactions {'card': 1, 'ssn': 1}, no raw shape in 
 quoted is present in the text the read returns, checks no identifier shape comes back, and checks the two
 refusals match.
 
+### 5.1h The corpus at scale, and what a bigger one costs
+
+**Twenty-six documents prove the pipeline and cannot test retrieval.** C4 closed with the deployment carrying
+**10,026 documents**, and the numbers are in the operator guide's stage 4a because that is where an operator
+choosing a corpus size will look. The short version:
+
+| Step | Corpus | Time | Rate |
+|---|---|---|---|
+| Generate | 10,000 documents, 40 MB | 21.8 s | 460 documents/sec |
+| Ingest, first 1,000 | 1,000 new of 1,026 seen | 14 m 21 s | 70 documents/min |
+| Ingest, the remaining 9,000 | 9,001 new | about 2 h | 72 documents/min |
+
+**The cost is not where it looks.** The embedding service measures at 33 chunks/sec with a request cap of 32, so
+this corpus is minutes of embedding. The 0.85 s per document is per-file overhead: a parse round trip, the
+chunk, and two writes. **A thousand documents is not an embedding problem, it is a round-trips-per-file
+problem.**
+
+**And retrieval was checked rather than assumed.** With 1,400 documents indexed, *"What is recorded about the
+boiler at Lake Kayla?"* returned `company/vol-maintenance-00000.md`, the document that contains it. The
+mileage question still returns the authored travel policy and the figure `0.67`. Adding a thousand documents
+did not move the fixture answers, which is what the volume generator is designed for: no travel policy and no
+second document carrying reserved identifiers.
+
 ### 5.2 The task registry, so the interface can show what this deployment can do
 
 **Goal.** The tasks a client can start come from their manifest rather than from our source code.
