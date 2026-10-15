@@ -353,7 +353,9 @@ class ActivityEvent(BaseModel):
         default=None, description="whether content was permitted to leave. Null on rows written before the "
                                   "column existed")
     redactions: Optional[dict] = None
-    failure_kind: Optional[str] = None
+    unverified_card_shapes: Optional[int] = Field(
+        default=None, description="card-shaped strings the redactor could not verify. Not proof of a leak, and "
+                                  "the only signal a pattern may have been missed")
     chain_version: Optional[int] = None
     payload_sha256: Optional[str] = None
     payload_bytes: Optional[int] = None

@@ -51,17 +51,6 @@
             "description": "whether content was permitted to leave. Null on rows written before the column existed",
             "title": "Egress Allowed"
           },
-          "failure_kind": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Failure Kind"
-          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -168,6 +157,18 @@
             ],
             "title": "Type",
             "type": "string"
+          },
+          "unverified_card_shapes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "card-shaped strings the redactor could not verify. Not proof of a leak, and the only signal a pattern may have been missed",
+            "title": "Unverified Card Shapes"
           }
         },
         "required": [

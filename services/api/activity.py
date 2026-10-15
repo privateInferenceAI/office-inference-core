@@ -36,6 +36,18 @@ from typing import Optional
 # **The cap, and it refuses rather than trims.** A caller that asks for five thousand rows and silently
 # receives five hundred has been lied to about what it read, and the count it renders will be wrong. Refusing
 # is the honest answer, and the caller can page with `since`.
+# **The columns this read selects, named once.** A SQL string is not imported, not typed, and not executed by
+# the unit suite, so a column that does not exist is found on a live deployment as a 500. The list is here so
+# `tests/test_activity.py` can check every name against the migrations before that happens. The first version
+# selected `failure_kind`, which is a column on `ingest_manifest` rather than on the audit table, and the probe
+# found it on the box.
+READ_COLUMNS = (
+    "id", "ts_iso", "event_type", "actor", "actor_role", "data_class", "outcome", "tool", "model",
+    "request_id", "payload_sha256", "payload_bytes", "payload", "egress_allowed", "redactions",
+    "unverified_card_shapes", "chain_version",
+)
+READ_SQL = "select " + ", ".join(READ_COLUMNS) + " from audit_events"
+
 MAX_LIMIT = 500
 DEFAULT_LIMIT = 50
 # A ceiling on the response, because every row carries its payload. One row is a few hundred bytes of JSON
@@ -197,16 +209,7 @@ def read(session, *, database_url: str, limit: int = DEFAULT_LIMIT, **filters) -
     import psycopg
 
     with psycopg.connect(database_url) as conn, conn.cursor() as cur:
-        cur.execute(
-            f"""
-            select id, ts_iso, event_type, actor, actor_role, data_class, outcome, tool, model,
-                   request_id, payload_sha256, payload_bytes, payload, egress_allowed, redactions,
-                   chain_version, failure_kind
-              from audit_events
-             where {where}
-             order by id desc
-             limit %s
-            """, params + [limit])
+        cur.execute(f"{READ_SQL} where {where} order by id desc limit %s", params + [limit])
         columns = [c.name for c in cur.description]
         rows = [dict(zip(columns, row)) for row in cur.fetchall()]
 
@@ -234,7 +237,11 @@ def read(session, *, database_url: str, limit: int = DEFAULT_LIMIT, **filters) -
             "request_id": row["request_id"],
             "egress_allowed": row["egress_allowed"],
             "redactions": row["redactions"] if not isinstance(row["redactions"], str) else json.loads(row["redactions"]),
-            "failure_kind": row["failure_kind"],
+            # **Card-shaped strings the redactor could not verify.** A number that looks like a card and failed
+            # its checksum is not proof of anything, and it is the only signal this deployment has that a
+            # pattern may have been missed. It belongs on the screen rather than only in the row, because a
+            # client reading their own record is the last chance to notice.
+            "unverified_card_shapes": row["unverified_card_shapes"],
             "chain_version": row["chain_version"],
             "payload_sha256": row["payload_sha256"],
             "payload_bytes": row["payload_bytes"],

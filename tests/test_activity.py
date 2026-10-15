@@ -219,3 +219,59 @@ def test_paging_is_offered_only_when_the_page_was_full():
     page, _ = read_with_fake_db(limit=50)
     assert page.next_since is None, "an empty page should not offer a next one"
     assert page.to_dict()["count"] == 0
+
+
+# --------------------------------------------------------------------------- the query against the schema
+#
+# **Why this exists.** The first version of the read selected `failure_kind` from `audit_events`. That column
+# is on `ingest_manifest`, not on the audit table, so the endpoint answered 500 on a live deployment and the
+# probe found it there — a round trip to a box, and a worse experience for whoever ran it first.
+#
+# A column name in a SQL string is the kind of thing nothing checks. It is not imported, not typed, and not
+# executed by this suite. So this reads the columns out of the migrations and holds the query against them.
+
+
+def audit_columns() -> set[str]:
+    """Every column the migrations give `audit_events`, read from the SQL rather than from a list here."""
+    import re
+
+    columns = set()
+    for path in sorted((ROOT / "db" / "migrations").glob("*.sql")):
+        sql = path.read_text()
+        for body in re.findall(r"create table if not exists audit_events\s*\((.*?)\n\);", sql, re.S | re.I):
+            for line in body.splitlines():
+                line = line.strip()
+                if not line or line.startswith("--") or line.startswith("check"):
+                    continue
+                match = re.match(r"([a-z_][a-z0-9_]*)\s+[a-z]", line)
+                if match and match.group(1) not in ("unique", "primary", "foreign", "constraint"):
+                    columns.add(match.group(1))
+        for column in re.findall(r"alter table audit_events\s+add column (?:if not exists )?([a-z_]+)", sql,
+                                 re.I):
+            columns.add(column)
+    return columns
+
+
+def test_the_migrations_actually_describe_the_table():
+    """A regex that silently matched nothing would make the test below vacuous."""
+    columns = audit_columns()
+    assert {"id", "ts_iso", "event_type", "actor", "outcome", "payload"} <= columns, sorted(columns)
+    assert len(columns) >= 20, f"only found {len(columns)} columns; is the pattern right?"
+
+
+def test_every_column_the_read_selects_exists_on_the_table():
+    """**The defect this test was written for.** A column that does not exist is a 500 on a live deployment."""
+    import re
+
+    # Read the module's own tuple rather than parsing a SQL string: a name that is in the list is exactly what
+    # the query selects, and a regex over the file found every other `select` in it the first time.
+    sys.path.insert(0, str(ROOT / "services" / "api"))
+    import activity as activity_module
+
+    selected = set(activity_module.READ_COLUMNS)
+    assert "from audit_events" in activity_module.READ_SQL, "the read does not come from the audit table"
+    known = audit_columns()
+    unknown = {c for c in selected if c not in known}
+    assert not unknown, (
+        f"the read selects {sorted(unknown)}, which audit_events does not have. Its columns are "
+        f"{sorted(known)}. This failed on a live deployment as a 500 before it was a test")
