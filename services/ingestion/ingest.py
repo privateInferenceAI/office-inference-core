@@ -79,12 +79,26 @@ def is_transient(exc: BaseException) -> bool:
     permanently unreadable corpus that no retry will fix and no log explains, because the entry says the
     document failed rather than that the service did.
 
-    Transient means a gateway error, a timeout, a refused or dropped connection. Everything else is treated
-    as a property of the document, because guessing the other way would retry a corrupt file forever.
+    Transient means a gateway error, a timeout, a refused or dropped connection, **or an overload
+    rejection**. Everything else is treated as a property of the document, because guessing the other way
+    would retry a corrupt file forever.
+
+    **The whole chain is examined, not just the outermost exception, and that is a fix rather than
+    thoroughness.** A service call that tries several endpoints wraps its last failure in a `RuntimeError`
+    with the status in the message, and the classifier could not see it: a `429 Too Many Requests` from the
+    embedding service was read as a permanent fault of the document, and a concurrent run dead-lettered four
+    healthy documents because its own load provoked the rejection. A wrapper that hides the type it is
+    describing turns a retry into a permanent loss.
     """
-    if isinstance(exc, urllib.error.HTTPError):
-        return exc.code in RETRY_STATUSES
-    return isinstance(exc, (urllib.error.URLError, TimeoutError, ConnectionError, OSError))
+    seen = 0
+    while exc is not None and seen < 10:
+        if isinstance(exc, urllib.error.HTTPError):
+            return exc.code in RETRY_STATUSES
+        if isinstance(exc, (urllib.error.URLError, TimeoutError, ConnectionError, OSError)):
+            return True
+        exc = exc.__cause__ or exc.__context__
+        seen += 1
+    return False
 
 # Where the last cycle's result is written, for the healthcheck to read. A worker with no listening socket
 # cannot be asked whether it is well, so it records the answer instead.
@@ -472,7 +486,12 @@ def embed_texts(services: Services, texts: list[str]) -> list[list[float]]:
         except urllib.error.HTTPError as exc:
             last_error = exc
             continue
-    raise RuntimeError(f"no embedding endpoint answered. Last error: {last_error}")
+    # **The cause is attached, and that is not decoration.** `is_transient` classifies a failure by looking
+    # for a status code, and a plain `RuntimeError` carrying "HTTP Error 429" in its text is invisible to it:
+    # the 429 was being read as a permanent fault of the *document*, so four healthy documents were
+    # dead-lettered during a concurrent run that provoked the embedding service's load shedding. Chaining
+    # keeps both the message a person reads and the type the classifier needs.
+    raise RuntimeError(f"no embedding endpoint answered. Last error: {last_error}") from last_error
 
 
 def _get_vector_size(services: Services) -> int:

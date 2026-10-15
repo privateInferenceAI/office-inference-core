@@ -1066,3 +1066,60 @@ def test_a_failure_under_concurrency_is_attributed_to_its_own_document(monkeypat
         record = manifest.get(name)
         assert record is not None, f"{name} was not recorded"
         assert not (record.get("failure_count") or 0), f"{name} carries a failure it did not cause"
+
+
+# --------------------------------------------------------------------------- a wrapper must not hide a retry
+
+def test_an_overload_rejection_wrapped_in_a_runtime_error_is_still_transient():
+    """**The defect a concurrent run exposed, and it dead-lettered healthy documents.**
+
+    `embed_texts` tries several endpoints and, when all of them fail, raises a `RuntimeError` carrying the
+    last error in its message. `is_transient` classified by looking at the exception's *type*, saw a plain
+    `RuntimeError`, and called it a permanent fault of the document. So a `429 Too Many Requests` — the
+    embedding service shedding load, which is what it does when a box is busy — was recorded against the
+    file. Four documents were dead-lettered that way during a run whose own concurrency provoked the
+    rejection, and they had nothing wrong with them at all.
+
+    A wrapper that hides the type it is describing turns a retry into a permanent loss.
+    """
+    import urllib.error
+
+    inner = urllib.error.HTTPError("http://embeddings:80/embed", 429, "Too Many Requests", {}, None)
+    try:
+        try:
+            raise inner
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError(f"no embedding endpoint answered. Last error: {exc}") from exc
+    except RuntimeError as wrapped:
+        assert ingest.is_transient(wrapped), (
+            "a wrapped 429 is still a load rejection, and reading it as permanent dead-letters a document "
+            "that has nothing wrong with it")
+
+    # An implicit context counts too, because `raise ... from` is not the only way a cause is attached.
+    try:
+        try:
+            raise inner
+        except urllib.error.HTTPError:
+            raise RuntimeError("wrapped without an explicit cause")
+    except RuntimeError as chained:
+        assert ingest.is_transient(chained), "the implicit context was not followed"
+
+
+def test_a_genuine_document_fault_is_still_permanent():
+    """The other direction, because a classifier that says yes to everything retries a corrupt file forever."""
+    assert not ingest.is_transient(RuntimeError("the parser returned a document with no retrievable text"))
+    assert not ingest.is_transient(ValueError("not a document"))
+
+
+def test_a_wrapped_404_is_not_retried():
+    """Only the statuses worth retrying. A missing endpoint is a configuration fault, not a busy one."""
+    import urllib.error
+
+    inner = urllib.error.HTTPError("http://parser:5001/parse", 404, "Not Found", {}, None)
+    try:
+        try:
+            raise inner
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError(f"wrapped: {exc}") from exc
+    except RuntimeError as wrapped:
+        assert not ingest.is_transient(wrapped)
