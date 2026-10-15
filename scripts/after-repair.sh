@@ -24,9 +24,16 @@ else
   exit 1
 fi
 docker compose -f "$COMPOSE" --env-file "$ENVF" build ingestion 2>&1 | tail -1
-docker compose -f "$COMPOSE" --env-file "$ENVF" up -d ingestion 2>&1 | tail -1
-sleep 8
-docker exec ingestion grep -c PhaseTimings /app/ingest.py | sed 's/^/  PhaseTimings present: /'
+
+# **The worker is stopped for the measurement, and that is not tidiness.** It runs a cycle every fifteen
+# minutes, so leaving it up means two runs against one manifest: the timings interleave, and whichever
+# finishes second decides what the index holds. The one-off below uses the same image, the same environment
+# and the same mounts, so it measures the real thing with nothing else touching it.
+docker compose -f "$COMPOSE" --env-file "$ENVF" stop ingestion 2>&1 | tail -1
+
+echo "  instrumented code present:"
+docker compose -f "$COMPOSE" --env-file "$ENVF" run --rm --no-deps --entrypoint grep ingestion \
+  -c PhaseTimings /app/ingest.py
 
 echo
 echo "=== 2. what the repair left ==="
@@ -61,9 +68,15 @@ $DB -A -t -c "
            order by md5(relpath) limit $N) t
    group by 1 order by 2 desc limit 6" | sed 's/^/    /'
 
-docker exec ingestion sh -c "python3 /app/ingest.py > /tmp/decomp.log 2>&1" || true
-docker exec ingestion grep -E "^(seen|chunks written|where the time went|  per document)" /tmp/decomp.log \
-  || docker exec ingestion tail -20 /tmp/decomp.log
+docker compose -f "$COMPOSE" --env-file "$ENVF" run --rm --no-deps --entrypoint python ingestion \
+  /app/ingest.py --documents /documents 2>&1 | tee /tmp/decomp.log \
+  | grep -E "^(seen |chunks written|where the time went|  per document|  failed)" || true
 
 echo
-echo "  (the remaining documents were skipped, which is what makes this a sample rather than a rebuild)"
+echo "  (the other documents were skipped, which is what makes this a sample rather than a rebuild)"
+
+echo
+echo "=== 4. the worker back up ==="
+docker compose -f "$COMPOSE" --env-file "$ENVF" up -d ingestion 2>&1 | tail -1
+sleep 8
+docker inspect ingestion --format '  ingestion: {{.State.Status}}, restarts={{.RestartCount}}'
