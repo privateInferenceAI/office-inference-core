@@ -831,3 +831,75 @@ recording because it is the first time in this phase that a check caught somethi
 **The one thing this phase never saw, stated once more so it is not mistaken for coverage:** the `degraded` and
 `no_source` shapes have never been produced by this deployment. Their rendering has component tests; their
 trigger has nothing. The manual says so in the section that lists them.
+
+---
+
+# C4, closing turn — the citation that could not be opened
+
+**Not a panel round. Work asked for directly**, and it found the same class of defect the panels kept finding:
+something documented, in place, and one step short of true.
+
+### The finding: the product's central claim stopped at the last step
+
+**The Ask screen has shown a chip per source since C4 and the chips were spans.** A person could see that an
+answer rested on the travel policy and could not read the travel policy. There was even a comment in the code
+explaining that opening the source was a real feature for a later phase, which was true and was also the reason
+the product asked to be believed at the one moment it had promised not to.
+
+`GET /documents/{doc_id}` closes it. Three properties had to be deliberate, and the first is the one that would
+have gone unnoticed:
+
+| Property | How | What it rules out |
+|---|---|---|
+| the label filters **in the query** | `chunk_index.acl` is in the where clause | the third path to content where a missing filter hides. Every test against a permitted document passes either way |
+| every chunk is redacted on the way out | the function that redacts an answer | treating "they may read the file" as a reason to put an SSN on a shared screen |
+| a forbidden document is **not found** | `404`, identical to a missing one | using the endpoint to learn that a document exists |
+
+**Proven on the deployment, not asserted:** a company session reading an executive document gets `404` with the
+same body as a document that does not exist; the document holding reserved values comes back with
+`{'card': 1, 'ssn': 1}` redacted and no raw shape in any chunk; and the figure the answer quoted, `0.67`, is in
+the text the read returns, which is the assertion that makes the citation evidence rather than decoration.
+
+### The defect found while building it, and it is the phase's recurring shape
+
+**The panel was transparent.** The first screenshot showed the page header painted over it and looked like a
+stacking-order bug. Measuring before fixing said otherwise: `document.elementFromPoint` at the collision
+returned the panel's own head, with no trapping ancestor anywhere up the tree, so the DOM order was right.
+
+`background: var(--surface)` and there is no `--surface` in that stylesheet. **An undefined custom property is
+not an error**: the declaration is dropped, the element has no background, and the header was showing through
+the dialog rather than over it. A second typo, `--fs-body` for `--fs-base`, fell back to the inherited size and
+looked fine.
+
+**This is the same shape as a scripted edit that matches nothing**, which cost this phase three silent failures:
+the code says one thing, the result is another, and nothing tells you. So the fix came with the four-line check
+that would have caught it — every `var(--x)` in the stylesheet must be defined — and it was proved to fail by
+putting the typo back. 27 defined, 29 used, now 27 and 27.
+
+### Also in this turn
+
+**The corpus generator was never missing.** It is `fixtures/generate_corpus.py`, declared in
+`requirements-dev.txt`, deterministic from a fixed seed, and a fresh run produces **26 files byte-identical to
+the deployment's**. The earlier claim that it could not be found was wrong: it was searched for under `scripts/`
+and by corpus filename, and it lives in `fixtures/` and is named after what it does. The registry's rule about
+reading files back applies to searching for them too.
+
+**Both repositories were audited for anything dangling**, which found two things in the app repository and both
+were mine: `app/tsconfig.tsbuildinfo` was **tracked** — a build cache rewritten on every typecheck, making every
+diff noisy — and an empty `node_modules/.vite/vitest` tree sat at the repository root from a command run in the
+wrong directory. Both were invisible to `git status`, one because it was ignored and one because it was
+committed, which is the argument for auditing what is tracked and ignored rather than what is dirty.
+
+**And the operator guide's C4 stage was numbered unlike anything else in the document.** Bare `## 1.`, `## 2.`,
+`## 3.` appear nowhere else; the guide uses `## Na.` for stages 4 to 15 and `## Nx.N.` for the two stages
+inserted into a sequence, 13h and 14b. Stage 13i uses `## 13i.N.` now, matching its neighbours, and the runbook
+had two unnumbered subsections that are numbered too. The manual was already consistent, which was checked
+rather than assumed.
+
+## State at the close
+
+    730 passed, 2 skipped
+    api_probe 8/8 (DOCUMENT added)     access_probe 4/4     activity_probe 8/8
+    job_probe 7/7 + 1 skipped         interface_probe 8/8  stream_probe 4/4
+    contract: 10 paths, 22 models, matching
+    app: 65 unit and component, 12 integration live, 10 browser

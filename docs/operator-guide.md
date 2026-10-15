@@ -2050,7 +2050,42 @@ fired — is sought over four attempts, and if the model never echoes, the failu
 pretending the redactor is broken. The redactor's own correctness is proved by twenty-four unit tests with fixed
 inputs, because **a check whose subject is a model's choice measures the model**.
 
-## 13i.6. If it breaks, and what each symptom means
+## 13i.6. Open a citation, because that is where the product stops asking to be believed
+
+Ask a question and click a source chip. **The chip has been a span since C4 and it is a button now**, and the
+difference is the whole claim: a citation you cannot open asks a person to trust the answer, and this product's
+position is that it does not have to.
+
+**What you get is the text the model answered from**, not the file as it sits on disk. That is deliberate: a
+PDF's layout, a spreadsheet's rendering and an OCR'd page are not what the model read, and showing a person
+something subtly different from the evidence would be worse than showing nothing.
+
+**Checkpoint, and it is the one worth doing by hand.** Ask the mileage question, open the first chip, and find
+`0.67 per mile` in the document. If the figure the answer gave is not in the passage the chip opens, the
+citation is decoration.
+
+Three things to look for while it is open:
+
+- **The part the answer used is marked**, so you are not reading a page looking for a sentence.
+- **If the document has more chunks than one response carries, the panel says so.** A view that quietly showed
+  the first two hundred chunks would read as the whole document.
+- **A document holding a reserved identifier reports the removal and shows the marker**, because the redactor
+  runs on this path too. `company/pii-new-starter.md` is the file to try.
+
+**And check the refusal, which is the security-relevant half.** Open a chip, then request an executive document
+from a company session:
+
+```
+docker run --rm --network ai-net curlimages/curl -sS -o /dev/null -w '%{http_code}\n' \
+  -H "X-OI-Session: <a company-scoped token>" \
+  http://api:8088/documents/executive/executive-compensation.md
+```
+
+**It answers `404`, the same as a document that does not exist, and that is the point.** A `403` would tell a
+caller the document exists. The probe asserts the two are indistinguishable rather than checking each on its
+own, because two separate assertions both pass while the responses differ.
+
+## 13i.7. If it breaks, and what each symptom means
 
 - **The page loads and everything says the service is unreachable.** The proxy is not forwarding. The app must
   be on `ai-net` and `OI_API_URL` must name the API's base *including* `/api`. Getting that wrong is a 404 that a
@@ -2065,7 +2100,7 @@ inputs, because **a check whose subject is a model's choice measures the model**
   declared root is indexed and unreachable**, and nothing reports it. That is the easiest way to lose an
   afternoon.
 
-## 13i.7. What C4 added, in the order it matters
+## 13i.8. What C4 added, in the order it matters
 
 | What | Why it exists | Where it is proved |
 |---|---|---|

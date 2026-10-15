@@ -4177,6 +4177,68 @@ corpus removed the source of a question two tests were built on, and both redact
 its real assertion inside an `if`, and the other accepted "No document was cited" as a valid outcome. A test
 whose subject can vanish measures nothing, and it reports green while doing it.
 
+### 5.1g The document read, so a citation leads somewhere
+
+**Why.** The Ask screen has shown a chip per source since 5.1 and the chips were spans. A person could see that
+an answer rested on the travel policy and could not read the travel policy, so the product stopped one step
+short of the thing it claims: an answer that carries its evidence.
+
+**Where the text comes from.** `chunk_index`, which the ingestion worker writes alongside the vector store. The
+document as **indexed**, not as the file looks on disk: a PDF's layout, a spreadsheet's rendering and an OCR'd
+page are not what the model read, and showing something subtly different from the evidence is worse than
+showing nothing.
+
+Three properties, and each is asserted rather than intended:
+
+| Property | How it is done | What it rules out |
+|---|---|---|
+| **The label filters in the query** | `chunk_index.acl` is in the where clause | a third path to content where a missing filter hides. Every test written against a permitted document passes either way |
+| **Every chunk is redacted on the way out** | the same function that redacts an answer | "they may read the file" being treated as a reason to put an SSN on a shared screen |
+| **A forbidden document is not found** | `404` with the same wording as a missing one | using this endpoint to learn that a document exists |
+
+**Run it.**
+
+```
+# as the app does it: open the first source chip, or by hand
+docker run --rm --network ai-net curlimages/curl -sS \
+  -H "X-OI-Session: <a company token>" \
+  http://api:8088/documents/company/travel-expenses-policy.md
+```
+
+**Expected.** `doc_id`, `acl`, the page extent, the chunks with their pages, `truncated`, and the redaction
+counts. The output below is from the deployment:
+
+```
+doc_id:     company/travel-expenses-policy.md
+acl:        company
+pages:      1 to 1
+chunks:     1 of 1   truncated: False
+redactions: {}
+first 160 chars: Applies to all employees. Effective 1 January 2026. Supersedes the 2024 revision.
+                 Mileage is reimbursed at 0.67 per mile for travel in an employee's own vehi…
+```
+
+**And the two refusals, which must be identical:**
+
+```
+company session -> executive/executive-compensation.md   HTTP 404
+company session -> company/no-such-document.md           HTTP 404
+```
+
+**Both are 404 and the probe asserts they are indistinguishable**, rather than asserting each one on its own.
+Two separate assertions both pass while the responses differ, which is how a 403 for the real document would
+survive a test suite.
+
+**The redaction on this path, on the document that carries reserved values:**
+
+```
+company/pii-new-starter.md -> redactions {'card': 1, 'ssn': 1}, no raw shape in any chunk
+```
+
+**Rights.** `api_probe.py` DOCUMENT, which fetches the document a citation names, checks the figure the answer
+quoted is present in the text the read returns, checks no identifier shape comes back, and checks the two
+refusals match.
+
 ### 5.2 The task registry, so the interface can show what this deployment can do
 
 **Goal.** The tasks a client can start come from their manifest rather than from our source code.

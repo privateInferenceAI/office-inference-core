@@ -522,6 +522,104 @@
         "title": "Degraded",
         "type": "object"
       },
+      "Document": {
+        "description": "A document the answer cited, as the system indexed it rather than as the file looks on disk.",
+        "properties": {
+          "acl": {
+            "description": "the access label it came under; the session's roots include it",
+            "title": "Acl",
+            "type": "string"
+          },
+          "chunk_count": {
+            "description": "how many chunks the document has in total",
+            "title": "Chunk Count",
+            "type": "integer"
+          },
+          "chunks": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentChunk"
+            },
+            "title": "Chunks",
+            "type": "array"
+          },
+          "doc_id": {
+            "title": "Doc Id",
+            "type": "string"
+          },
+          "page_end": {
+            "title": "Page End",
+            "type": "integer"
+          },
+          "page_start": {
+            "title": "Page Start",
+            "type": "integer"
+          },
+          "redactions": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Redactions",
+            "type": "object"
+          },
+          "truncated": {
+            "description": "**reported rather than silent.** True when the document has more chunks than this response carries",
+            "title": "Truncated",
+            "type": "boolean"
+          },
+          "unverified_card_shapes": {
+            "default": 0,
+            "title": "Unverified Card Shapes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "doc_id",
+          "acl",
+          "page_start",
+          "page_end",
+          "chunk_count",
+          "chunks",
+          "truncated"
+        ],
+        "title": "Document",
+        "type": "object"
+      },
+      "DocumentChunk": {
+        "description": "One indexed chunk of a document, with the page it came from.\n\n**The pages are why this is a list and not one string.** The citation a person clicked names a page, and a\nviewer that returned only the assembled text could not say which part the answer used.",
+        "properties": {
+          "chunk_id": {
+            "title": "Chunk Id",
+            "type": "string"
+          },
+          "kind": {
+            "description": "prose, table or figure, as the chunker classified it",
+            "title": "Kind",
+            "type": "string"
+          },
+          "page_end": {
+            "title": "Page End",
+            "type": "integer"
+          },
+          "page_start": {
+            "title": "Page Start",
+            "type": "integer"
+          },
+          "text": {
+            "description": "**already redacted.** A reserved identifier does not reach a browser on this path either",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "chunk_id",
+          "page_start",
+          "page_end",
+          "kind",
+          "text"
+        ],
+        "title": "DocumentChunk",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1400,6 +1498,66 @@
           }
         },
         "summary": "Ask Stream"
+      }
+    },
+    "/documents/{doc_id}": {
+      "get": {
+        "description": "One document, for a person checking the claim an answer made.\n\n**Why this exists.** The Ask screen has shown a chip per source since C4 and the chips were spans: a person\ncould see that an answer rested on the travel policy and could not read the travel policy. A citation\nnobody can open asks to be believed, and this product's claim is that it does not.\n\n**The path is a path parameter, not a query value.** A document id is `company/travel-expenses-policy.md`\nand it has slashes in it, so the route takes the rest of the path rather than a segment.",
+        "operationId": "document_documents__doc_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "doc_id",
+            "required": true,
+            "schema": {
+              "title": "Doc Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "A document the answer cited, **as the system indexed it** rather than as the file looks on disk: the text the model actually answered from, with its pages, already redacted. This is what makes a citation checkable rather than something to believe."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "no session"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "**No such document, or none this session may read, and the two are one answer.** Telling a caller that a document exists but is forbidden tells them it exists, which is the same argument the session refusal makes and the same answer a job belonging to somebody else gets."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Document"
       }
     },
     "/health": {

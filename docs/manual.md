@@ -4156,7 +4156,7 @@ displayed a fixed sentence here would be decoration, and decoration is what this
 
 | Field | What a person sees |
 |---|---|
-| `citations` | a chip per source, with the document, its access label and the page |
+| `citations` | a chip per source, with the document, its access label and the page. **The chip opens the document** at the page the answer used |
 | `redactions` | *"Something was removed before you saw it: 1 × SSN"* — only when a value was replaced |
 | `unsupported` | the sentences no retrieved passage backs, listed rather than dropped |
 | `notice` | what happened to the routing, when there is something to tell |
@@ -4175,6 +4175,23 @@ call to fail after the budget is spent, and the executor could not provoke one w
 is verified and the live trigger is not.** The shapes are correct when they arrive; nothing here proves they
 arrive. A deployment with a retrieval threshold, or a provider that fails, is where those two get exercised, and
 until then this page says "handled" rather than "seen".
+
+**A source chip opens the document, and that is a different claim from showing it.** A chip that named a
+document and could not be opened asked a person to believe the answer. Clicking one fetches
+`GET /documents/{doc_id}` and shows the text **as the system indexed it** rather than as the file looks on
+disk: the passage the model actually answered from, with its pages, and the part the answer used marked.
+
+Three things the panel says that a viewer would otherwise have to assume. Which permission the document came
+under. **Whether the response was truncated**, because a view that quietly showed part of a document would read
+as the whole thing. And whether anything was removed on the way out, by the same redactor that handles an
+answer, because a document is not exempt from the control that applies to everything else that reaches a
+browser.
+
+**A document outside your roots is not found rather than forbidden.** Both answer `404` with one wording, so a
+caller cannot use this endpoint to learn that a document exists. That is the same argument the session refusal
+makes, and the probe asserts the two refusals are indistinguishable rather than asserting each one separately.
+
+Reading a document leaves a row, the way reading the record does.
 
 **A degraded answer is not an error screen.** When the model will not answer, the response is the retrieved
 passages with a typed reason, at HTTP 200. Retrieval already did the expensive part and the client is entitled
