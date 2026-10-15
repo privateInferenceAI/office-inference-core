@@ -15,6 +15,8 @@ calls layer 3 and has paid for twice.
     | NO-SESS | call with no session token                     | an unauthenticated answer            |
     | BUDGET  | exhaust the role's team ceiling, then ask      | a budget the API reports as an answer|
     | ADMIN   | list teams with the master key                 | the lockout the hook must avoid      |
+    | DOCUMENT| open the document a citation names             | a citation that cannot be opened, or |
+    |         | and check an executive one is not found        | a second path that leaks or over-shares |
 
 Run from the deployment root on the box:
 
@@ -32,6 +34,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -71,6 +74,22 @@ def get(path: str, timeout: int = 30):
             return e.code, {}
     except Exception as e:  # noqa: BLE001
         return 0, {"error": str(e)}
+
+
+def get_as(session_id: str, path: str, timeout: int = 60):
+    """A GET with a session, for the paths the client app calls. Separate from `get`, which is deliberately
+    unauthenticated and is what the ADMIN right is about."""
+    request = urllib.request.Request(API + path, method="GET", headers={"X-OI-Session": session_id})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.status, json.loads(response.read() or b"{}")
+    except urllib.error.HTTPError as exc:
+        try:
+            return exc.code, json.loads(exc.read() or b"{}")
+        except Exception:  # noqa: BLE001
+            return exc.code, {}
+    except Exception as exc:  # noqa: BLE001
+        return 0, {"error": str(exc)}
 
 
 def post(path: str, body: dict, timeout: int = 180):
@@ -254,6 +273,44 @@ def main() -> int:
     status, listing = gateway("/team/list")
     ledger.record("ADMIN", status == 200, "[%s] %s" % (status, listing[:80]),
                   "enabling the identity hook would lock the deployment out of its own administration")
+
+    # ------------------------------------------------------------------ DOCUMENT
+    #
+    # **The citation has to lead somewhere.** The Ask screen shows a chip per source, and until this path
+    # existed the chips were spans: a person could see that an answer rested on the travel policy and could not
+    # read the travel policy. Three things are checked here and the first is the one that matters, because the
+    # other two are about a document this session is allowed to see and the first is about one it is not.
+    answer_status, answer_body = post("/ask", {"session": session.credential,
+                                               "question": "What is the mileage rate for reimbursement?"})
+    citations = answer_body.get("citations") or []
+    cited_doc = citations[0].get("doc_id") if citations else ""
+    document_status, document = (get_as(session.credential, "/documents/" + cited_doc)
+                              if cited_doc else (0, {}))
+
+    # The text the answer was built from has to be the text the document read returns. A citation that opens
+    # something other than what the answer used is worse than one that opens nothing.
+    chunks = document.get("chunks") or []
+    fetched = " ".join(c.get("text") or "" for c in chunks)
+    answered = answer_body.get("answer") or ""
+    # The distinctive figure rather than a substring of the prose: the corpus holds the policy in four
+    # formats and the answer may quote any of them.
+    same_text = bool(chunks) and any(token in fetched for token in ("0.67", "65.00", "1 January 2026"))
+    # Every chunk that leaves is redacted, so a reserved identifier must not appear in a document view either.
+    leaked = bool(re.search(r"\b\d{3}-\d{2}-\d{2}-\d{4}\b", fetched))
+
+    # **An executive document from a company session is not found rather than forbidden.** Saying "forbidden"
+    # for a document that exists tells the caller it exists, which is the same argument the session refusal
+    # makes. Both refusals must look identical, so a caller cannot tell the two apart.
+    forbidden_status, _ = get_as(session.credential, "/documents/executive/executive-compensation.md")
+    missing_status, _ = get_as(session.credential, "/documents/company/no-such-document.md")
+    indistinguishable = forbidden_status == missing_status == 404
+
+    ledger.record("DOCUMENT", bool(document_status == 200 and same_text and not leaked
+                                   and indistinguishable),
+                  "cited %r -> [%s] %d chunk(s), figure present=%s, identifier leaked=%s; "
+                  "an executive document and a missing one both answered %s"
+                  % (cited_doc, document_status, len(chunks), same_text, leaked, forbidden_status),
+                  "a citation that cannot be opened, opens the wrong text, or leaks through the second path")
 
     store.close()
     print()
