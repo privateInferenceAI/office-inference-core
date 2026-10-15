@@ -45,8 +45,8 @@ copying is a separate, deliberate step.
 Add `--seed N` to change the invented names and figures; the default seed is fixed so two runs produce
 the same corpus, which is what makes a measurement taken against it repeatable.
 
-**For scale, add `--volume N`.** It writes N more documents under `volume/`, on the ordinary topics of a
-facilities company, alongside the twenty-six that cover formats and failures. The two sets are separate on
+**For scale, add `--volume N`.** It writes N more documents into `company/` and `executive/`, named `vol-*`,
+on the ordinary topics of a facilities company, alongside the twenty-six that cover formats and failures. The two sets are separate on
 purpose: the coverage set is what the manual's worked example and two acceptance probes depend on, and a
 document that competes with them would break a test rather than exercise one.
 
@@ -685,28 +685,38 @@ def write_volume(target: Path, lines: list[str], seed: int, count: int) -> dict:
     **Markdown rather than a mix of formats, and that is the point of separating it from the coverage set.** The
     cost of ingesting a thousand documents is dominated by parsing and embedding, and a thousand PDFs would
     measure the PDF parser rather than retrieval. Format coverage is already proved by the twenty-six.
+
+    **They go directly under `company/` and `executive/`, and the first version did not.** It wrote them to
+    `volume/company/` and `volume/executive/`, which reads like tidier organisation and is a trap: **the access
+    label is the first path component**, so every one of the thousand would have carried the label `volume`
+    while the deployment declares two roots, `company` and `executive`. The whole scale set would have been
+    indexed and unreachable by every role, with nothing reporting it. The manual documents that trap for an
+    operator adding a folder; this is the same trap for the script that writes one.
     """
     from faker import Faker
 
     faker = Faker()
     faker.seed_instance(seed + 1)
     written: dict[str, list[str]] = {}
-    root_dir = target / "volume"
 
     for i in range(count):
         topic = VOLUME_TOPICS[i % len(VOLUME_TOPICS)]
         root = VOLUME_ROOTS[i % len(VOLUME_ROOTS)]
-        title, body = volume_document(topic, i, faker)
-        directory = root_dir / root
+        _title, body = volume_document(topic, i, faker)
+        directory = target / root
         directory.mkdir(parents=True, exist_ok=True)
-        name = f"{topic[0]}-{i:05d}.md"
+        # The `vol-` prefix is how a person tells the scale set from the coverage set in a directory listing,
+        # and how a later run can find and replace it without touching the authored files.
+        name = f"vol-{topic[0]}-{i:05d}.md"
         (directory / name).write_text(body)
-        written.setdefault(f"volume/{root}", []).append(name)
+        written.setdefault(root, []).append(name)
 
     note(lines, "## The volume set")
     note(lines, "")
-    note(lines, f"- **{count} documents** under `volume/company/` and `volume/executive/`, on "
-                f"{len(VOLUME_TOPICS)} recurring topics.")
+    note(lines, f"- **{count} documents** under `company/` and `executive/`, named `vol-*`, on "
+                f"{len(VOLUME_TOPICS)} recurring topics. **Not a `volume/` subdirectory**: the access label "
+                f"is the first path component, so a third top-level folder is a label no role holds and the "
+                f"whole set would be unreachable.")
     note(lines, "- **Markdown only.** Parsing and embedding dominate the cost at this size, and a thousand PDFs "
                 "would measure the PDF parser rather than retrieval. Format coverage is the twenty-six above.")
     note(lines, "- **Nothing here competes with the fixtures**: no travel or mileage policy, and no second "

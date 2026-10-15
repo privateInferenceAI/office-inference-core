@@ -351,6 +351,51 @@ writing Meridian Facilities Group's corpus to /tmp/client-corpus
 Read `/tmp/client-corpus/PLACEMENT.md` before you copy anything. It names each document's purpose and
 which root it belongs under.
 
+**Documents by the thousand, when the question is retrieval rather than formats.** This is still part of 4a, and it is a paragraph rather than a heading because **the guide has no third heading level anywhere** — twenty-three stages and eighty-one subsections, two levels. A single H3 introduced for one topic is how a document acquires a structure nobody can predict, which is the same defect as a stage numbered unlike its neighbours.
+
+**Twenty-six documents prove the pipeline and cannot test retrieval.** A hundred questions against a corpus
+that small are answered by finding one of a handful of plausible documents. Add `--volume N` for the other
+question: *does it find the right document when there are thousands?*
+
+```
+python3 fixtures/generate_corpus.py --out /tmp/big --volume 10000
+```
+
+It writes N more documents **into `company/` and `executive/`**, named `vol-*`, on twenty ordinary topics of a
+facilities company — boilers and fire alarm panels, waste transfer notes, access control changes. The sentences
+are written and the topics carry vocabulary, because the first version filled paragraphs from `Faker.paragraph()`
+and produced "Energy both office. Degree street cold." A corpus like that exercises the plumbing and gives
+retrieval nothing to find.
+
+**They go in the real roots, and that is not tidiness.** The first version wrote them to `volume/company/` and
+`volume/executive/`, which reads like better organisation and would have been a silent disaster: **the access
+label is the first path component**, so all ten thousand would have carried the label `volume` while this
+deployment declares two roots. Indexed, unreachable by every role, and nothing reporting it. It is the same trap
+4b describes for an operator adding a folder, arriving through the script instead.
+
+**Measured, on the m7i.4xlarge deployment, 2026-10-15:**
+
+| Step | Corpus | Time | Rate |
+|---|---|---|---|
+| Generate | 10,000 documents, 40 MB | 21.8 s | 460 documents/sec |
+| Ingest, first 1,000 | 1,000 new of 1,026 seen | 14 m 21 s | 70 documents/min |
+| Ingest, the remaining 9,000 | 9,001 new | about 2 h | 72 documents/min |
+
+**What the arithmetic says about where the time goes.** The embedding service measures at roughly 33 chunks per
+second and caps a request at 32 texts, so ten thousand documents are minutes of embedding. The 0.85 seconds per
+document is **per-file overhead**: a parse round trip, the chunk, then a write to the vector store and one to
+Postgres. **A bigger corpus is not an embedding problem, it is a round-trips-per-file problem**, and the way to
+make this faster is to parse and embed in parallel across files rather than to buy a GPU.
+
+**Two operational notes.** Set `INGEST_EMBED_BATCH` no higher than the service's advertised limit of 32; a
+batch of 64 answers `422 batch size 64 > maximum allowed batch size 32`, and a burst of 32 concurrent requests
+answers `429 Model is overloaded`, so the worker's default of 16 is the right side of both.
+
+**And an ingest takes as long as it takes: do not wrap it in a `timeout`.** One run of this corpus was killed
+at fifty minutes by a `timeout 3000` around the command, forty per cent of the way in. The worker is
+incremental, so the next run resumed rather than restarted and nothing was lost, but the only reason that is
+true is the content-hash manifest. Run it detached and poll the row count.
+
 **Real or fetched**, for documents whose awkwardness you did not choose. The fixture corpus already in the
 repository is four filings from SEC EDGAR and the IRS, and `fixtures/corpus/manifest.yaml` records where
 each came from with the licence read at the source. **If you add anything, add its licence the same way.**
