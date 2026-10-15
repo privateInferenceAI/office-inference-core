@@ -626,8 +626,64 @@ def discover(documents_root: Path) -> list[Document]:
     return found
 
 
+@dataclass
+class PhaseTimings:
+    """Where one document's time went, in milliseconds, by phase.
+
+    **Why this exists.** Two attempts to say what a slow ingest is waiting on have been wrong, both times
+    because the measurement was taken while the ingest was running and therefore measured a queue rather
+    than a cost. The worker recorded nothing per phase, so there was no way to answer the question from a
+    real run at all: only the end-to-end rate was visible.
+
+    **Four phases, and they are the ones a decision turns on.** `parse_ms` is the parser round trip, which
+    for a scanned PDF or an OCR page is where a corpus's time goes. `chunk_ms` is local CPU and should be
+    near zero, and is here to prove that rather than assume it. `embed_ms` is the embedding service, which
+    is the phase a GPU would remove. `write_ms` is the vector store and the lexical table, which is the
+    phase that parallelising across documents would overlap.
+
+    **Recorded always, printed in the cycle summary, and never persisted.** The manifest's job is to say
+    what has been ingested and whether it worked; timing is a property of the machine and the moment, and a
+    column that changed every run would make the manifest useless for the diff it exists to make.
+    """
+
+    parse_ms: float = 0.0
+    chunk_ms: float = 0.0
+    embed_ms: float = 0.0
+    write_ms: float = 0.0
+
+    @property
+    def total_ms(self) -> float:
+        return self.parse_ms + self.chunk_ms + self.embed_ms + self.write_ms
+
+    def add(self, other: "PhaseTimings") -> None:
+        self.parse_ms += other.parse_ms
+        self.chunk_ms += other.chunk_ms
+        self.embed_ms += other.embed_ms
+        self.write_ms += other.write_ms
+
+    def shares(self) -> dict[str, float]:
+        """Each phase as a fraction of the total, for a summary line. Empty when nothing was timed."""
+        total = self.total_ms
+        if total <= 0:
+            return {}
+        return {name: getattr(self, name) / total
+                for name in ("parse_ms", "chunk_ms", "embed_ms", "write_ms")}
+
+
+# The phases, in the order a document goes through them, with the name a summary line uses.
+PHASES = (("parse_ms", "parse"), ("chunk_ms", "chunk"), ("embed_ms", "embed"), ("write_ms", "write"))
+
+
+def timings_line(label: str, t: PhaseTimings, chunks: int) -> str:
+    """One document's split, in a form a person can read next to the line that says what it is doing."""
+    return (f"    {label}: parse {t.parse_ms:.0f}ms, chunk {t.chunk_ms:.0f}ms, "
+            f"embed {t.embed_ms:.0f}ms, write {t.write_ms:.0f}ms  -> total {t.total_ms:.0f}ms "
+            f"for {chunks} chunk(s)")
+
+
 def ingest_document(services: Services, document: Document, content_sha256: str,
-                    page_count: int | None = None) -> tuple[list[dict], int]:
+                    page_count: int | None = None,
+                    timings: "PhaseTimings | None" = None) -> tuple[list[dict], int]:
     """One document into points, and the number of pages the parser saw.
 
     The chunk ids come from `chunker`, which derives them from the document id, the content hash, the
@@ -635,10 +691,18 @@ def ingest_document(services: Services, document: Document, content_sha256: str,
     produces new ones, and a changed chunker produces new ones again. That is what makes a re-run an
     update rather than a duplication.
     """
+    # **Timed here rather than around the call site**, because two of the four phases are inside this
+    # function and splitting the measurement across two places is how the two halves drift.
+    _t0 = time.monotonic()
     parsed_result = parse_document(services, document.path, document.relpath)
+    _t1 = time.monotonic()
     parsed = parsed_result["document"]
     chunks = chunker.chunk_document(parsed, doc_id=document.relpath, source_sha256=content_sha256)
+    _t2 = time.monotonic()
     pages = len(parsed.get("pages") or {}) or None
+    if timings is not None:
+        timings.parse_ms += (_t1 - _t0) * 1000
+        timings.chunk_ms += (_t2 - _t1) * 1000
 
     # Per chunk rather than per document. A chunk that overlaps a page OCR read carries text that was
     # recognised from an image, and one that does not, does not. The document-level answer was a single
@@ -670,6 +734,7 @@ def ingest_document(services: Services, document: Document, content_sha256: str,
     # difference has to survive.
 
     points: list[dict] = []
+    _embed_started = time.monotonic()
     for start in range(0, len(chunks), EMBED_BATCH):
         batch = chunks[start:start + EMBED_BATCH]
         vectors = embed_texts(services, [chunk.text for chunk in batch])
@@ -700,6 +765,8 @@ def ingest_document(services: Services, document: Document, content_sha256: str,
             # in the runbook as a bound rather than presented as the designed check.
             payload["parse_score"] = confidence_score
             points.append({"id": chunk.chunk_id, "vector": vector, "payload": payload})
+    if timings is not None:
+        timings.embed_ms += (time.monotonic() - _embed_started) * 1000
     return points, pages
 
 
@@ -1103,6 +1170,11 @@ class CycleResult:
     aborted: str | None = None
     # Near-duplicate pairs found this cycle, for the summary. Recorded rather than acted on.
     duplicates: list[tuple[str, str, float]] = field(default_factory=list)
+    # **Where the cycle's time went, summed over the documents it ingested.** Not persisted: timing is a
+    # property of the machine and the moment, and a manifest column that changed every run would defeat the
+    # diff the manifest exists to make.
+    timings: "PhaseTimings" = field(default_factory=PhaseTimings)
+    timed_documents: int = 0
 
     def as_counts(self) -> dict:
         return {"seen": self.seen, "new": self.new, "changed": self.changed, "skipped": self.skipped,
@@ -1207,8 +1279,10 @@ def ingest_cycle(services: Services, documents_root: Path, manifest: Manifest,
             continue
 
         print(f"  ingesting {document.relpath}  ({kind}, {size} bytes)")
+        timings = PhaseTimings()
         try:
-            points, pages = ingest_document(services, document, content_sha256)
+            points, pages = ingest_document(services, document, content_sha256, timings=timings)
+            _write_started = time.monotonic()
             if record:
                 delete_document(services, document.relpath)
             upsert_points(services, points)
@@ -1218,6 +1292,14 @@ def ingest_cycle(services: Services, documents_root: Path, manifest: Manifest,
             # vector point matches and that the fusion would then rank.
             manifest.remove_chunks(document.relpath)
             index_for_lexical(manifest, points)
+            # **The write phase ends here, and the boundary is a choice.** It covers the vector store and
+            # both lexical writes, because a document is not ingested until all three have landed. The
+            # near-duplicate scan below is a read whose cost belongs to the corpus rather than to this
+            # document, so it is deliberately outside the phase.
+            timings.write_ms += (time.monotonic() - _write_started) * 1000
+            result.timings.add(timings)
+            result.timed_documents += 1
+            print(timings_line("timing", timings, len(points)))
 
             # Near-duplicates, asked after the rows are written because the comparison reads them. A pair is
             # recorded and never acted on: two documents a client put in the same folder may be two documents,
@@ -1513,6 +1595,11 @@ def main(argv: list[str] | None = None) -> int:
                           "chunks_written": result.chunks_written,
                           "chunks_removed": result.chunks_removed,
                           "documents_removed": result.documents_removed,
+                          "timings_ms": {"parse": round(result.timings.parse_ms),
+                                         "chunk": round(result.timings.chunk_ms),
+                                         "embed": round(result.timings.embed_ms),
+                                         "write": round(result.timings.write_ms)},
+                          "timed_documents": result.timed_documents,
                           "failures": result.failures}, indent=2))
     else:
         print()
@@ -1520,6 +1607,21 @@ def main(argv: list[str] | None = None) -> int:
               f"skipped {result.skipped}, failed {result.failed}")
         print(f"chunks written {result.chunks_written}, chunks removed {result.chunks_removed}, "
               f"documents removed {result.documents_removed}")
+        # **The line that answers "why is this slow".** Percentages of the time the cycle actually spent
+        # ingesting, over the documents it ingested. Absent when nothing was ingested, rather than a row of
+        # zeroes that reads like a fast run.
+        if result.timed_documents:
+            shares = result.timings.shares()
+            split = ", ".join(f"{label} {shares.get(field, 0) * 100:.0f}%"
+                              for field, label in PHASES)
+            print(f"where the time went, over {result.timed_documents} document(s): {split}")
+            n = result.timed_documents
+            mean = PhaseTimings(parse_ms=result.timings.parse_ms / n,
+                                chunk_ms=result.timings.chunk_ms / n,
+                                embed_ms=result.timings.embed_ms / n,
+                                write_ms=result.timings.write_ms / n)
+            mean_chunks = max(1, round(result.chunks_written / max(1, n)))
+            print(timings_line("  per document, mean", mean, mean_chunks))
         if result.duplicates:
             print(f"near-duplicate pairs flagged for review: {len(result.duplicates)}")
         for failure in result.failures:
