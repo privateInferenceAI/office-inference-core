@@ -116,12 +116,15 @@ def cmd_mint(args) -> int:
 
     if args.json:
         print(json.dumps({
-            "token": session.session_id, "subject": session.subject, "role": session.role,
+            # **The credential, not the identifier.** They were the same value until migration 019, which is
+            # why printing the id used to work and now resolves nothing: the id is not a secret and does not
+            # authenticate, so a caller needs the credential this command generated.
+            "token": session.credential, "subject": session.subject, "role": session.role,
             "roots": sorted(session.roots), "groups": list(session.groups),
             "expires_at": session.expires_at.isoformat(),
         }, indent=2))
     else:
-        print(f"token      {session.session_id}")
+        print(f"token      {session.credential}")
         print(f"subject    {session.subject}")
         print(f"role       {session.role}")
         print(f"roots      {sorted(session.roots)}")
