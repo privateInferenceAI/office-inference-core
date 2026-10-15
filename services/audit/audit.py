@@ -234,6 +234,12 @@ def cmd_record(args) -> int:
 
     # The hashes are recorded whatever the mode. That is the point of having them: the record can
     # prove what was said without keeping it.
+    if args.prompt == "-":
+        if args.payload == "-":
+            raise SystemExit(
+                "--prompt - and --payload - both want stdin. Redirect one of them from a file instead: a "
+                "record that silently took the wrong stream would put the payload where the prompt belongs.")
+        args.prompt = sys.stdin.read()
     prompt_sha = sha256_hex(args.prompt) if args.prompt else None
     completion_sha = sha256_hex(args.completion) if args.completion else None
     if mode != "hash":
@@ -867,7 +873,11 @@ def main() -> int:
     record.add_argument("--egress-allowed", choices=["true", "false"],
                         help="whether the data-class gate permitted this request to leave")
     record.add_argument("--prompt", help="the prompt as sent. Its hash is always recorded; the text "
-                                          "is stored only if the content mode allows it")
+                                          "is stored only if the content mode allows it. **Pass `-` to read it "
+                                          "from stdin**, which is not a convenience: a prompt on the command "
+                                          "line is bounded by ARG_MAX, and a question past roughly 128 KB made "
+                                          "the write fail with `Argument list too long` — so the request that "
+                                          "most needed a record was the one that could not have one.")
     record.add_argument("--completion", help="the completion as returned, under the same rule")
     record.add_argument("--store-payload", action="store_true",
                         help="keep the payload itself, not just its hash. A policy decision.")

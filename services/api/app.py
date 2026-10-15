@@ -93,6 +93,30 @@ KEY_PATH = os.environ.get("OI_ASSERTION_KEY", "/app/rendered/assertion.key")
 # manifest's `models` block, so a deployment changes the model by changing the manifest and re-rendering.
 # **This is the seam `INF-ROLE-001` is proved through**: the answer to "which model answered" comes from here
 # and nowhere else.
+# **A ceiling on the question, because the alternative was a bare 500.** There was no limit, so a 204 KB paste
+# reached the audit writer and the write failed, which surfaced to the person as `Internal Server Error` with no
+# explanation. An input limit is not a limitation to apologise for: every request has one, and stating it turns
+# an unexplained failure into a sentence somebody can act on. 32,000 characters is roughly 8,000 tokens, which
+# leaves room in a 32k-token window for the retrieved passages that share it.
+MAX_QUESTION_CHARS = int(os.environ.get("OI_MAX_QUESTION_CHARS", "32000"))
+
+
+def question_too_long(question: str):
+    """The refusal for a question past the ceiling, or None.
+
+    Returns the payload rather than raising so both handlers and the job path can use one wording, which is the
+    same reason the answer pipeline is shared: two implementations of one refusal is how they drift apart.
+    """
+    if len(question) <= MAX_QUESTION_CHARS:
+        return None
+    return {
+        "error": f"the question is {len(question):,} characters and this deployment accepts "
+                 f"{MAX_QUESTION_CHARS:,}. Send the part you need answered, or point at the document instead "
+                 f"of pasting it.",
+        "kind": "question_too_long",
+    }
+
+
 DEFAULT_MODEL_ROLE = os.environ.get("OI_DEFAULT_MODEL_ROLE", "analyst")
 
 # How many passages the answer is built from.
@@ -213,14 +237,27 @@ def audit(event: str, actor: str, actor_role: str, outcome: str, payload: dict, 
     # that answer carried. It reported zero rows, which looks exactly like "the row was never written".
     if extra.get("request_id"):
         command += ["--request-id", str(extra["request_id"])]
+    # **The prompt goes on stdin, not on the command line.** A command line is bounded by ARG_MAX, and a
+    # question past roughly 128 KB made this write fail with `Argument list too long` — so the request that
+    # most needed a record was the one that could not have one, and the failure surfaced as a bare HTTP 500
+    # rather than as anything a person could read. The payload stays an argument because it is a few hundred
+    # bytes of metadata by design; if it ever grows, it has the same treatment waiting for it.
+    stdin_text = None
     if extra.get("prompt"):
-        command += ["--prompt", extra["prompt"]]
+        command += ["--prompt", "-"]
+        stdin_text = extra["prompt"]
     env = dict(os.environ)
     env["DATABASE_URL"] = session_module.database_url()
-    result = subprocess.run(command, capture_output=True, text=True, env=env, timeout=60)
+    result = subprocess.run(command, capture_output=True, text=True, env=env, timeout=60,
+                            input=stdin_text)
     if result.returncode != 0:
-        # Loud, because a request whose record is missing is a request the deployment cannot account for.
-        print(f"the audit write failed: {result.stderr.strip()[:300]}", file=sys.stderr)
+        # **Raised, not printed.** The first version wrote this to stderr and let the request continue, so a
+        # deployment could answer a question it had no record of — which contradicts the one claim the whole
+        # product rests on. A caller now gets an error it can see, and the deployment is visibly broken rather
+        # than quietly unaccountable.
+        raise RuntimeError(
+            "the audit record could not be written, so this request was not answered: "
+            + result.stderr.strip()[:300])
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -290,6 +327,9 @@ def _resolve(request_token: str):
     403: {"model": contract.Refusal,
           "description": "the request supplied its own authority, or the data boundary permits no lane "
                          "that can answer. The refusal is written to the chain before this returns."},
+    413: {"model": contract.Refusal,
+          "description": "the question is past the ceiling this deployment accepts. **A size refusal, not a "
+                         "permission one**, so it is answered before any session is resolved."},
     502: {"model": contract.Refusal,
           "description": "retrieval failed, or the model could not be reached after the budget was spent"},
 })
@@ -308,6 +348,14 @@ async def ask(request: Request):
         body = await request.json()
     except Exception:  # noqa: BLE001 - the message is the response
         return JSONResponse({"error": "the request body is not JSON"}, status_code=400)
+
+    # **The same ceiling as the streaming path, checked in the same place for the same reason.** Both endpoints
+    # answer questions, and one implementation of a refusal is how they stay the same refusal. It comes before
+    # the session is resolved because the size of a question is not a permission question: a refusal that named
+    # a session would tell an unauthenticated caller whether their session was valid.
+    too_long = question_too_long((body.get("question") or "").strip())
+    if too_long:
+        return JSONResponse(too_long, status_code=413)
 
     token = body.get("session") or request.headers.get("X-OI-Session", "")
     # A request id, so the lane the interface reports can be tied to the row in the chain that recorded
@@ -867,6 +915,13 @@ async def ask_stream(request: Request):
 
     token = body.get("session") or request.headers.get("X-OI-Session", "")
     question = (body.get("question") or "").strip()
+
+    # **Before the session is resolved, because the size of a question is not a permission question.** A
+    # refusal that named a session for an oversized paste would leak whether the session was valid to somebody
+    # who has not been authenticated for it.
+    too_long = question_too_long(question)
+    if too_long:
+        return JSONResponse(too_long, status_code=413)
     if not question:
         return JSONResponse({"error": "no question was asked"}, status_code=400)
 

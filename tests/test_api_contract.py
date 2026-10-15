@@ -285,3 +285,51 @@ def test_a_refusal_carries_the_id_of_the_row_it_wrote():
     # And both refusals put it on a row.
     assert pipeline.count("request_id=request_id") >= 3, (
         "a refusal records its class but not the id, so the row cannot be found from the response")
+
+
+def test_an_oversized_question_is_refused_by_size_and_not_by_session():
+    """**The alternative was a bare 500 with no explanation.**
+
+    There was no ceiling on a question, so a 204 KB paste reached the audit writer and the write failed with
+    `Argument list too long` — the request that most needed a record was the one that could not have one, and
+    the person saw `Internal Server Error`. An input limit is not a limitation to apologise for; stating it turns
+    an unexplained failure into a sentence somebody can act on.
+
+    The order is the part worth holding: the ceiling is checked **before** the session resolves, because a
+    refusal that named a session for an oversized paste would tell an unauthenticated caller whether their
+    session was valid.
+    """
+    source = APP.read_text()
+
+    assert "MAX_QUESTION_CHARS" in source, "there is no ceiling on a question"
+    # Both endpoints that answer questions.
+    assert source.count("too_long = question_too_long(") == 2, (
+        "the ceiling is checked on fewer than both question endpoints, so one path accepts a paste the other "
+        "refuses")
+    assert '"kind": "question_too_long"' in source, "the refusal has no kind for a client to act on"
+
+    # The refusal comes before the session is resolved on the request path.
+    ask_body = source[source.index("async def ask(request: Request)"):]
+    ceiling_at = ask_body.index("too_long = question_too_long(")
+    session_at = ask_body.index("_session_for(")
+    assert ceiling_at < session_at, (
+        "the size ceiling is checked after the session is resolved, so it reports on a session for a request "
+        "that was never about permission")
+
+
+def test_a_prompt_reaches_the_audit_tool_on_stdin():
+    """A prompt on a command line is bounded by ARG_MAX, and a large question is exactly when the record is
+    most needed. The payload stays an argument because it is metadata by design."""
+    source = APP.read_text()
+    assert 'command += ["--prompt", "-"]' in source, "the prompt is passed as a command-line argument"
+    assert "input=stdin_text" in source, "nothing is written to the tool's stdin"
+
+
+def test_a_record_that_cannot_be_written_stops_the_answer():
+    """**A failed record was printed to stderr and the request continued.** A deployment could answer a question
+    it had no record of, which contradicts the one claim the product rests on."""
+    source = APP.read_text()
+    failure = source[source.index("if result.returncode != 0:"):]
+    failure = failure[:failure.index("\n\n")]
+    assert "raise RuntimeError" in failure, "a failed audit write is still swallowed"
+    assert "print(" not in failure, "the failure is still only printed"
