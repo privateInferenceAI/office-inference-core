@@ -1301,6 +1301,16 @@
             },
             "description": "the request supplied its own authority, or the data boundary permits no lane that can answer. The refusal is written to the chain before this returns."
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "the question is past the ceiling this deployment accepts. **A size refusal, not a permission one**, so it is answered before any session is resolved."
+          },
           "502": {
             "content": {
               "application/json": {
