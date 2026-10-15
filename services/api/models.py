@@ -310,6 +310,15 @@ class Job(BaseModel):
                     "than only the history of producing it")
 
 
+class TaskList(BaseModel):
+    """What `/tasks` returns. A named model rather than a bare object, because a client that reads a field out
+    of an unnamed response is reading a shape nothing publishes, and the app's contract test can only hold the
+    app against what the contract declares."""
+
+    tasks: list["Task"]
+    agentic: bool = Field(description="whether this deployment declares any task at all")
+
+
 class Task(BaseModel):
     """A thing this deployment can be asked to do.
 

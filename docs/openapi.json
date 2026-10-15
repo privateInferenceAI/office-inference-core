@@ -1072,6 +1072,71 @@
         "title": "StreamStart",
         "type": "object"
       },
+      "Task": {
+        "description": "A thing this deployment can be asked to do.\n\n**Read from the manifest.** A deployment with no agentic pack declares none, and the interface then\noffers none, which is the honest outcome rather than a menu of things that cannot run.",
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "needs_approval": {
+            "default": false,
+            "title": "Needs Approval",
+            "type": "boolean"
+          },
+          "tier": {
+            "default": "",
+            "description": "the model role that handles it, from the manifest",
+            "title": "Tier",
+            "type": "string"
+          },
+          "touches": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Touches",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ],
+        "title": "Task",
+        "type": "object"
+      },
+      "TaskList": {
+        "description": "What `/tasks` returns. A named model rather than a bare object, because a client that reads a field out\nof an unnamed response is reading a shape nothing publishes, and the app's contract test can only hold the\napp against what the contract declares.",
+        "properties": {
+          "agentic": {
+            "description": "whether this deployment declares any task at all",
+            "title": "Agentic",
+            "type": "boolean"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/Task"
+            },
+            "title": "Tasks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tasks",
+          "agentic"
+        ],
+        "title": "TaskList",
+        "type": "object"
+      },
       "UnsupportedClaim": {
         "description": "A sentence no retrieved passage backs. Marked rather than dropped, so a client can show it.",
         "properties": {
@@ -1620,7 +1685,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TaskList"
+                }
               }
             },
             "description": "The tasks this deployment declares, for an interface to offer. **Empty when the deployment has no agentic pack**, which is the honest answer rather than a menu of things that cannot run."

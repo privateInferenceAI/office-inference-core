@@ -518,7 +518,8 @@ async def activity(request: Request):
 
 
 @app.get("/tasks", responses={
-    200: {"description": "The tasks this deployment declares, for an interface to offer. **Empty when the "
+    200: {"model": contract.TaskList,
+          "description": "The tasks this deployment declares, for an interface to offer. **Empty when the "
                          "deployment has no agentic pack**, which is the honest answer rather than a menu "
                          "of things that cannot run."},
     401: {"model": contract.Refusal, "description": "no session"},
