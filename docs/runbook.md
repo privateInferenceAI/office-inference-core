@@ -4070,6 +4070,66 @@ like "the row was never written".
 existed, a place that could hold it, and no connection between them, which is why the tests written for them
 assert the connection rather than the presence.
 
+### 5.1e The app, as a service on the deployment
+
+**Goal.** The client application runs on the deployment, reaches the API over the internal network, and is
+reached the way the API is reached: through whatever the deployment puts in front, with nothing published.
+
+**Why the app is a build artifact here and a development server there.** In `oic-ui` the app runs under Vite,
+which serves the sources and proxies `/api` to the API. On a deployment there is no Vite: the app is a static
+bundle of three files, and the API is reached directly. **The thing that makes both work is that the app calls
+a relative `/api`**, so the question is only who answers it. That is why the bundle is served by the same little
+proxy the workbench uses, and why that proxy is now part of the product rather than a scratch tool.
+
+**What it talks to, and what it must not.** The assistant API, over `ai-net`, and nothing else. It holds no
+model key, no database credential, and no knowledge of which model answered. Those are the constraints that let
+the model tier, the retrieval stack and the runtime change underneath without a rewrite here, so they are
+checked rather than intended: `docker compose config` shows the app's environment is two variables and neither
+is a secret.
+
+**Build it.**
+
+```
+cd /opt/oi-core
+# 1. the contract this build is against, copied from the core's own generator
+cp docs/openapi.json oic-ui/docs/openapi.json
+# 2. the bundle
+cd oic-ui/app && npm ci && npm run build && cd ../..
+# 3. the image, which is the bundle and the proxy
+docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env build app
+docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env up -d app
+```
+
+**Prove it.**
+
+```
+docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env ps app
+docker run --rm --network ai-net curlimages/curl -sS http://app:8080/ | head -5
+docker run --rm --network ai-net curlimages/curl -sS http://app:8080/api/health
+```
+
+Expected, and the three lines each prove something different:
+
+```
+app     running
+<!DOCTYPE html>                      the bundle is served
+{... "deployment_id": "oi-core-…"}   and /api is forwarded to the service
+```
+
+**If it breaks.**
+
+- **The page loads and every call says the service is unreachable.** The proxy is not forwarding. Check that
+  `OI_API_URL` names the compose service and that the app is on `ai-net`; a name that does not resolve answers
+  nothing, and the browser reports it as the API being down.
+- **`/` returns 404.** The bundle is not in the image. `npm run build` writes to `app/dist`, and the image
+  copies that directory specifically: a build that failed earlier leaves the previous `dist` in place if one
+  exists, which is why the build step prints its output size.
+- **The app answers but every question refuses with `no_session`.** There is no sign-in yet, so a token has to
+  be minted and pasted. That is C7's work and the manual says so at the point a person meets it.
+- **A blank page with no error.** The bundle was built against a different contract than the API serves. Run
+  `bash oic-ui/scripts/check-contract.sh --live http://api:8088` from the core checkout; it names the paths
+  that moved.
+
 ### 5.2 The task registry, so the interface can show what this deployment can do
 
 **Goal.** The tasks a client can start come from their manifest rather than from our source code.

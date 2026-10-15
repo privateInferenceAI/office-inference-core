@@ -20,3 +20,10 @@ PyYAML>=6.0,<7.0
 # The PDF route runs through reportlab (BSD) rather than pdfkit plus wkhtmltopdf (LGPLv3), which the
 # script selects explicitly.
 faker-file[docx,xlsx,pptx,odt,ods,odp,pdf]>=0.19,<0.20
+
+# **The manifest schema, enforced.** `schemas/manifest.schema.json` declares
+# `additionalProperties: false` and was not being checked against it by anything: the repository's own
+# validator reads the files and applies its own rules, so a manifest with an undeclared key passed clean, and
+# the schema's `access.groups` shape disagreed with the form every manifest uses without anybody noticing.
+# Here rather than in the service images because this is a build-time check, not a runtime dependency.
+jsonschema>=4.20,<5.0

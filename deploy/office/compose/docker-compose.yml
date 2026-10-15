@@ -495,6 +495,38 @@ services:
         condition: service_started
     networks: [ai-net]
 
+  app:
+    # The client application. A static bundle behind the same small proxy the workbench uses, because the app
+    # calls a relative `/api` and something has to answer it.
+    #
+    # **Two environment variables, and neither is a secret.** The app holds no model key and no database
+    # credential: everything it knows arrives through the API. That constraint is what lets the model tier, the
+    # retrieval stack and the runtime change underneath without a rewrite, so it is enforced by what this
+    # service is given rather than by a comment.
+    #
+    # **The build context is the app's own checkout, named by an environment variable rather than inferred.**
+    # The app lives in `oic-ui` and the deployment is this repository, so a build needs both trees visible. The
+    # first version reached for `${OI_ROOT}/..`, which assumes the two checkouts are siblings with particular
+    # names; a deployment that lays them out differently would fail with a missing file and no explanation.
+    # `OI_UI_ROOT` says where the app's sources are, and a deployment sets it in `rendered/env`.
+    build:
+      context: ${OI_UI_ROOT:-/opt/oic-ui}
+      dockerfile: ${OI_ROOT}/services/app/Dockerfile
+    image: oi-core/app:local
+    container_name: app
+    restart: unless-stopped
+    environment:
+      APP_PORT: "8080"
+      # **Including the `/api` prefix, because that is the API's base and the app calls it relatively.** One
+      # rule for the dev server, the workbench and a deployment, rather than three that agree by accident.
+      OI_API_URL: http://api:8088/api
+    # **No published port.** A client reaches the app through whatever the deployment puts in front, the same
+    # way it reaches the API. Publishing one here would be the debug port this project has already paid for.
+    depends_on:
+      api:
+        condition: service_started
+    networks: [ai-net]
+
   session:
     # The session boundary as a tool: establish a session, inspect one, and rehearse the refusal. It runs when
     # called and exits, like the audit sink and the retention commands.

@@ -25,7 +25,10 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["id", "label"],
+            "required": [
+              "id",
+              "label"
+            ],
             "properties": {
               "id": {
                 "type": "string",
@@ -48,7 +51,9 @@
               },
               "touches": {
                 "type": "array",
-                "items": {"type": "string"},
+                "items": {
+                  "type": "string"
+                },
                 "default": [],
                 "description": "What the task reads or changes, in plain words, so the interface can say what it will touch before somebody starts it."
               },
@@ -130,13 +135,42 @@
           "type": "object",
           "description": "Named unions of roots. A group is how a person's access changes over time: a job changes, a group changes, and no code moves. Access is a union with no deny rules and no precedence, which is what makes the model testable to exhaustion.",
           "additionalProperties": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "minLength": 1
-            },
-            "uniqueItems": true,
-            "minItems": 1
+            "description": "The roots a group carries. **Two forms, and the mapping is the documented one.** The renderer accepts both, and the schema accepted only the bare list until this was found: the mapping form is what the manual shows and what every manifest in this repository uses, so every one of them was invalid against its own schema while the validator reported them all clean. A schema nobody enforces is documentation, and documentation that disagrees with the code is worse than none.",
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true,
+                "minItems": 1
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "roots"
+                ],
+                "properties": {
+                  "roots": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true,
+                    "minItems": 1
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                }
+              }
+            ]
           }
         },
         "users": {
