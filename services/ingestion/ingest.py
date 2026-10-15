@@ -70,6 +70,10 @@ def is_transient(exc: BaseException) -> bool:
 # cannot be asked whether it is well, so it records the answer instead.
 STATE_PATH = Path(os.environ.get("INGEST_STATE_PATH", "/state/last-cycle.json"))
 
+# The root a deployment's documents live under. Named so the guard above can tell "the deployment's folder"
+# from "some subset somebody pointed a measurement at".
+DEFAULT_DOCUMENTS_ROOT = Path(os.environ.get("INGEST_DOCUMENTS_ROOT", "/documents"))
+
 # Bumped when the MEANING of a stored payload changes, which is a different thing from its content.
 #
 # The skip decision is made on the file's bytes, and that is right for a file that was edited. It is wrong
@@ -1183,7 +1187,7 @@ class CycleResult:
 
 
 def ingest_cycle(services: Services, documents_root: Path, manifest: Manifest,
-                 dry_run: bool = False) -> CycleResult:
+                 dry_run: bool = False, removing: bool = True) -> CycleResult:
     """One pass: ingest what is new or changed, skip what is not, and remove what has gone.
 
     The three decisions, in the order they are made.
@@ -1209,7 +1213,7 @@ def ingest_cycle(services: Services, documents_root: Path, manifest: Manifest,
 
     # Removal first, so a document that was deleted does not stay retrievable while the rest of the cycle
     # runs. The alternative order would leave it citable for the duration.
-    for relpath in sorted(set(known) - seen_relpaths):
+    for relpath in (sorted(set(known) - seen_relpaths) if removing else []):
         record = known[relpath]
         previous_chunks = record.get("chunk_count") or 0
         if not dry_run:
@@ -1584,7 +1588,25 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     run_id = None if args.dry_run else manifest.start_run()
-    result = ingest_cycle(services, documents_root, manifest, dry_run=args.dry_run)
+    # **The guard that a partial run needs, and it exists because of a mistake rather than a theory.**
+    # Reconciliation removes every document the manifest knows about whose file is not under the root being
+    # walked. That is right when the root is the deployment's whole documents folder, which it is in a normal
+    # run. It is destructive when the root is a *subset*: a measurement run pointed at 300 sample documents
+    # reconciled away the other 9,700, emptying the lexical table and the manifest for a corpus that had
+    # taken three and a half hours to build. The vectors survived only because that run also used a separate
+    # collection, which was luck rather than design.
+    #
+    # **The decision belongs here rather than inside the cycle**, because the cycle cannot tell a subset from
+    # a deployment: both are just a path. The caller knows whether somebody named a root other than the
+    # deployment's own, and that is the only fact the question turns on. The cycle keeps its contract, which
+    # is what lets its own tests go on testing removal.
+    removing = documents_root.resolve() == DEFAULT_DOCUMENTS_ROOT.resolve()
+    if not removing:
+        print(f"  ** not removing anything: this run walks {documents_root}, and a reconciliation would "
+              f"remove every document the manifest holds whose file is not under it. That is right for the "
+              f"deployment's own folder and wrong for a subset, so documents outside this root are left "
+              f"alone.")
+    result = ingest_cycle(services, documents_root, manifest, dry_run=args.dry_run, removing=removing)
     if not args.dry_run:
         manifest.finish_run(run_id, result.as_counts())
         record_cycle(result)

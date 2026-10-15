@@ -52,3 +52,37 @@ def test_the_line_names_every_phase_and_the_total():
     line = ingest.timings_line("timing", ingest.PhaseTimings(parse_ms=1, chunk_ms=2, embed_ms=3, write_ms=4), 7)
     for word in ("parse", "chunk", "embed", "write", "total", "7 chunk"):
         assert word in line, f"{word!r} is missing from the summary line"
+
+
+def test_a_run_against_a_subset_of_the_corpus_removes_nothing():
+    """**The guard, and it exists because of a mistake rather than a theory.**
+
+    Reconciliation removes every document the manifest knows about whose file is not under the root being
+    walked. That is correct when the root is the deployment's whole documents folder, which is what it is in
+    production. It is destructive when the root is a subset: a measurement run pointed at 300 sample
+    documents reconciled away the other 9,700, emptying the lexical table and the manifest for a corpus that
+    had taken three and a half hours to build. The vectors survived only because that run happened to use a
+    separate collection.
+
+    This reads the source rather than running a cycle, because the assertion is about which root the code
+    treats as the deployment's own, and a cycle needs Postgres, Qdrant and a parser to find out.
+    """
+    source = (ROOT / "services" / "ingestion" / "ingest.py").read_text()
+    assert "DEFAULT_DOCUMENTS_ROOT" in source, "there is no notion of the deployment's own root"
+    # The comparison has to resolve both sides, or a trailing slash on the default defeats it.
+    assert "documents_root.resolve() == DEFAULT_DOCUMENTS_ROOT.resolve()" in source, (
+        "the guard does not compare resolved paths, so `/documents/` or a relative path would defeat it")
+    # **The decision belongs at the caller, because the cycle cannot tell a subset from a deployment.** Both
+    # are a path. The caller knows whether somebody named a root other than the deployment's own.
+    assert "removing: bool = True" in source, "the cycle has no way to be told not to remove"
+    assert "if removing else []" in source.replace("(sorted(set(known) - seen_relpaths) if removing else []):",
+                                                   "if removing else []"), \
+        "the removal loop runs regardless of the decision"
+    assert "ingest_cycle(services, documents_root, manifest, dry_run=args.dry_run, removing=removing)" in source, (
+        "the CLI computes the decision and does not pass it, so the guard is decorative")
+
+
+def test_the_guard_says_what_it_is_doing():
+    """A run that silently declined to remove anything would look like a run that found nothing to remove."""
+    source = (ROOT / "services" / "ingestion" / "ingest.py").read_text()
+    assert "not removing anything" in source

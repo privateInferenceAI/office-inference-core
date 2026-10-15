@@ -420,6 +420,20 @@ send.
 batch of 64 answers `422 batch size 64 > maximum allowed batch size 32`, and a burst of 32 concurrent requests
 answers `429 Model is overloaded`, so the worker's default of 16 is the right side of both.
 
+**Do not point a normal run at a subset of the corpus, and this is here because it happened.** The worker
+reconciles deletions from the manifest: a document the manifest knows about whose file is not under the root
+being walked gets removed. That is correct when the root is the deployment's own `documents/` folder. It is
+destructive when the root is a subset — **a measurement run against 300 sample documents removed the other
+9,700**, emptying the lexical table and the manifest for a corpus that had taken three and a half hours to
+build. The vectors survived only because that run also used a separate collection, which was luck rather than
+design.
+
+**The worker refuses to remove anything when the root is not its own now**, and says so. If you genuinely need
+a run over a subset, note that a separate collection is not enough on its own: `chunk_index` and
+`ingest_manifest` are shared, so a partial run needs its own database as well. The supported way to get a
+measurement out of the worker is the timing line described above, which comes from a real run and needs no
+subset at all.
+
 **And an ingest takes as long as it takes: do not wrap it in a `timeout`.** One run of this corpus was killed
 at fifty minutes by a `timeout 3000` around the command, forty per cent of the way in. The worker is
 incremental, so the next run resumed rather than restarted and nothing was lost, but the only reason that is
