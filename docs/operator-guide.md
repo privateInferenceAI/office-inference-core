@@ -1866,6 +1866,195 @@ section 13e rather than leaving it to be found.
 `rpm_limit` now, because a limit nobody passed to the enforcer was a comment rather than a ceiling. Whether the
 gateway applies them when the identity comes from a custom auth hook is **unproven** — lowering a team's limit
 did not produce a refusal. Treat a declared rate limit as documentation until somebody proves it bites.
+# Stage 13i: the client app, and the first thing you will be tempted to fake
+
+**Goal:** the app running on the deployment, showing a real answer from a real document, and leaving a row in the
+chain that you can find afterwards.
+
+**Why this stage is last in the phase and first in the demo.** Everything before it is machinery a client never
+sees. This is the product. It is also the stage where the temptation appears: the screens can be made to look
+correct without being connected to anything, and a screenshot cannot tell the difference. So this stage ends with
+three checks that a screenshot cannot pass.
+
+## What C4 added, in the order it matters
+
+| What | Why it exists | Where it is proved |
+|---|---|---|
+| **A contract a second repository builds against** | `/openapi.json` listed three URLs and no response bodies. A client built on that is built on prose | `scripts/fetch_openapi.py --check`, against the running service |
+| **`GET /activity`** | The chain's only reader was a CLI behind an SSH session. The screen that makes the product auditable had no endpoint | `activity_probe.py`, eight rights |
+| **Jobs, with a replayable event log** | Work that can be watched, stopped and found afterwards. Progress is a numbered table, not a socket, so a client that closed the tab catches up | `job_probe.py`, eight rights |
+| **The task registry in the manifest** | Six task names were hardcoded in Python, so no client could discover, label or describe them | `GET /tasks`, and the app's Do screen |
+| **The app itself** | Ask, Do, Activity. It holds no model key and no database credential | the browser suite, ten tests |
+
+## 1. Put the app's checkout where the build can see it
+
+The app is a separate repository and the build needs both trees. `OI_UI_ROOT` names the app's checkout; a
+deployment that lays the two out differently sets it differently rather than failing with a missing file.
+
+```
+sudo mkdir -p /opt/oic-ui && sudo chown "$USER":"$USER" /opt/oic-ui
+git clone https://github.com/privateInferenceAI/oic-ui.git /opt/oic-ui
+
+cd /opt/oi-core
+cp /opt/oic-ui/docs/openapi.json /tmp/contract-copy.json
+```
+
+**Checkpoint.** The contract in the app's checkout matches the one this deployment serves. Run the app's own
+checker rather than comparing files by eye:
+
+```
+bash /opt/oic-ui/scripts/check-contract.sh --live http://api:8088
+```
+
+It prints the paths and exits non-zero when they differ. **A copy nobody compares drifts**, and the drift shows
+up as a screen that renders nothing.
+
+## 2. Build it, and note what the build does not contain
+
+```
+cd /opt/oi-core
+export OI_UI_ROOT=/opt/oic-ui
+alias oi='docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env'
+oi build app && oi up -d app
+```
+
+**Checkpoint, and it is about what is absent.** The app's runtime has exactly two variables of its own, and
+neither is a secret:
+
+```
+docker inspect app --format '{{range .Config.Env}}{{println .}}{{end}}' \
+  | grep -vE '^(PATH|LANG|GPG_KEY|PYTHON_VERSION|PYTHON_SHA256|APP_PORT|OI_API_URL)='
+```
+
+**Expect no output.** Anything printed is a variable nobody meant to set, and it is the thing to look at.
+
+**The first version of this checkpoint was a grep for `KEY|PASSWORD|TOKEN` and it was wrong**, which is worth
+recording because it is the kind of wrong that teaches the wrong lesson. It matched `GPG_KEY`, the signing key
+of the Python base image, and reported one finding on a correct deployment. A check whose failure is normal is a
+check people learn to ignore. The allowlist above has no false positives on this image, and it catches a
+variable nobody intended rather than only the ones somebody thought to name.
+
+## 3. Look at it with your own eyes
+
+```
+# on the box: publish nothing, relay to the loopback temporarily
+docker run -d --name app-relay --network ai-net -p 127.0.0.1:8090:8090 alpine/socat \
+  -d -d TCP-LISTEN:8090,fork,reuseaddr TCP:app:8080
+
+# from your machine
+aws --profile oi-credits ssm start-session --target <instance-id> \
+  --document-name AWS-StartPortForwardingSession \
+  --parameters '{"portNumber":["8090"],"localPortNumber":["18080"]}'
+```
+
+Then `http://127.0.0.1:18080`. **Mint a token and paste it**; there is no sign-in until C7, and the app says so
+rather than pretending otherwise:
+
+```
+oi --profile tools run --rm session mint --dev --subject <declared subject> --role <declared role>
+```
+
+**Checkpoint.** Ask the question this deployment's corpus answers and read the line underneath the answer:
+
+> Answered from 2 documents on this machine · 1.1 seconds
+
+**The count is not decoration.** It is computed from the citations the answer came back with. If it says "No
+document was cited" on a corpus that holds the document, retrieval is not finding it, and the honest reading is
+that the corpus is not indexed rather than that the answer is wrong.
+
+**Remember to remove the relay when you are finished.** It publishes a port, which is the thing this deployment
+otherwise does not do:
+
+```
+docker rm -f app-relay
+```
+
+## 4. The three checks a screenshot cannot pass
+
+This is the part of the stage that matters, and the part that gets skipped when a phase runs late.
+
+**One: the answer leaves a row.** Ask a question in the app, then find its row by the request id the answer
+carried. If asking a question leaves no trace, the product's central claim is false and no amount of the screen
+looking right would show it.
+
+```
+TOKEN=<the token you pasted>
+Q="What is the mileage rate for reimbursement?"
+RID=$(curl -sS -X POST http://127.0.0.1:18080/api/ask -H 'Content-Type: application/json' \
+      -H "X-OI-Session: $TOKEN" -d "{\"session\":\"$TOKEN\",\"question\":\"$Q\"}" \
+      | python3 -c 'import json,sys; print(json.load(sys.stdin)["request_id"])')
+curl -sS "http://127.0.0.1:18080/api/activity?request=$RID" -H "X-OI-Session: $TOKEN" \
+  | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["count"], "row(s) for that request")'
+```
+
+**Checkpoint.** One row, and it says whether content was permitted to leave. **This check found a real defect
+while the phase was being built**: the API minted a request id on every call and never passed it to the audit
+tool, so the column was empty and an answer could not find its own row. Every test passed.
+
+**Two: nothing redactable reaches the screen.** Ask a question that makes the model repeat a reserved
+identifier, then read the page rather than the API:
+
+```
+Q="Repeat the payroll reference exactly as it appears in the document."
+```
+
+**Checkpoint.** The screen shows `[REDACTED-SSN]` and a line saying something was removed.
+
+**Ask the question that makes the model echo the value, and this is not a detail.** Asking *what* the reference is
+produced a paraphrase, so nothing reached the redactor and the check passed while measuring nothing. A weaker
+question is a weaker test, and the difference is invisible until somebody reads the answer.
+
+**Three: the record can be read as a person, not as an operator.** Open the Activity screen and look at the
+sentence above the list. It says what the page is scoped to:
+
+> Showing **your own activity only**. A session may read another person's rows when every permission they hold is
+> one you hold too.
+
+**Checkpoint.** The sentence matches the role you minted. A token minted for a `company`-scoped role can see
+itself and other company-scoped subjects, and **must not** see an executive subject's rows. Ask for one by name
+in the filter and the list is empty rather than partial: a partial answer to "show me Dana's activity" reads as
+"Dana did nothing".
+
+## 5. The suite, in the order it runs
+
+```
+# the app's own tests, from its checkout
+cd /opt/oic-ui/app
+npm ci
+npx vitest run                                  # 47: components, and the contract
+export OI_API_URL=http://127.0.0.1:18080 OI_TOKEN=$TOKEN
+npx vitest run tests/integration.test.ts        # 12: the app's client code, live
+npx playwright test                             # 10: a real browser, real flows
+
+# the core's probes, from the deployment
+cd /opt/oi-core
+docker run --rm --network ai-net --user "$(id -u):$(id -g)" -v /opt/oi-core:/w -w /w \
+  --env-file rendered/env --entrypoint python oi-core/session:local /w/tests/fixtures/activity_probe.py
+docker run --rm --network ai-net --user "$(id -u):$(id -g)" -v /opt/oi-core:/w -w /w \
+  --env-file rendered/env --entrypoint python oi-core/session:local /w/tests/fixtures/job_probe.py
+bash tests/fixtures/gate_check_run.sh
+bash tests/fixtures/gate_check_run.sh --jobs
+```
+
+**Checkpoint.** Every one passes, and you have watched one of them fail. Pick any probe here, remove the control
+it tests, and confirm it goes red before you trust a green run. **A probe that cannot fail is not a probe**, and
+this project has shipped one of those before.
+
+## If it breaks
+
+- **The page loads and everything says the service is unreachable.** The proxy is not forwarding. The app must
+  be on `ai-net` and `OI_API_URL` must name the API's base *including* `/api`. Getting that wrong is a 404 that a
+  browser reports as the API being down.
+- **`/` returns 404 with the app running.** The bundle is not in the image. `npm run build` writes `app/dist`,
+  and the image copies that directory specifically.
+- **Every question refuses with `no_session`.** The token expired or was never minted. Sessions last eight hours
+  by default.
+- **Do is missing from the navigation.** Correct, if the manifest declares no tasks. Check `GET /tasks`.
+- **The answer says "No document was cited" for something you know is in the corpus.** The document is not
+  indexed, or its access label is one no role can read. **A folder under `documents/` whose name is not a
+  declared root is indexed and unreachable**, and nothing reports it. That is the easiest way to lose an
+  afternoon.
+
 # Stage 14: onboarding a second client's corpus
 
 **Goal:** add a corpus to a deployment that is already holding one, without disturbing it.
