@@ -3780,7 +3780,7 @@ The interface a business actually uses. Ask a question, and get an answer that s
 Start work, and watch it happen. Read back what happened afterwards.
 
 **The phase talks to the API and nothing else.** No model key, no database credential, and no knowledge of
-which model answered. The app lives in its own repository, `office-inference-ui`, and the thing connecting
+which model answered. The app lives in its own repository, `oic-ui`, and the thing connecting
 the two is `docs/openapi.json`, generated from this service by `scripts/fetch_openapi.py`. That file is the
 contract, and `--check` fails when the running service and the committed file disagree.
 
@@ -3793,7 +3793,7 @@ and **no response bodies at all**. Every response was an empty schema. A client 
 been built against the manual's prose, and would have broken the first time a field moved.
 
 **What was added.** `services/api/models.py` declares every payload: the answer with its citations and the
-counts beside them, the degraded answer, the refusal, the four stream frames, and health. They are attached
+counts beside them, the degraded answer, the refusal, the five stream frames, and health. They are attached
 with `responses={...}` and deliberately **not** `response_model`, so the wire format is still decided by the
 code that has been tested against a live deployment, and this change is documentation rather than behaviour.
 
@@ -3809,7 +3809,7 @@ docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
 Expected, and this is the output that proves it:
 
 ```
-OK    /w/docs/openapi.json matches http://api:8088  (3 path(s): /ask, /ask/stream, /health)
+OK    /w/docs/openapi.json matches http://api:8088  (9 path(s): /activity, /ask, /ask/stream, /health, /jobs, /jobs/{job_id}, /jobs/{job_id}/events, /jobs/{job_id}/{action}, /tasks)
 ```
 
 **The check refuses to publish a bad contract**, and each refusal is a test. It names a missing path, a path
@@ -3891,7 +3891,7 @@ ok   RECORDED    the job and every step carry an audit row
 ok   GUARDED     a role-supplied request is refused on /jobs as it is on /ask
 ok   BOUNDARY    a forbidden data class does not run as a job either
 ok   DENIED      a job for a task this deployment does not declare is refused, by name
-PASSED: 6 right(s) held against the documented job interface
+PASSED: 7 right(s) held against the documented job interface, 1 skipped
 ```
 
 **If it breaks.**
@@ -3978,7 +3978,7 @@ ok   FILTERED   type=model_call returns only model calls; outcome=denied only de
 ok   BYREQUEST  the row for a request_id is returned by asking for that request_id
 ok   BYJOB      a job's rows are all returned by asking for that job
 ok   CAPPED     limit=500 is the ceiling and a larger number is refused rather than honoured
-PASSED: 6 right(s) held against the documented activity interface
+PASSED: 8 right(s) held against the documented activity interface
 ```
 
 **If it breaks.**
@@ -4127,8 +4127,17 @@ app     running
 - **The app answers but every question refuses with `no_session`.** There is no sign-in yet, so a token has to
   be minted and pasted. That is C7's work and the manual says so at the point a person meets it.
 - **A blank page with no error.** The bundle was built against a different contract than the API serves. Run
-  `bash oic-ui/scripts/check-contract.sh --live http://api:8088` from the core checkout; it names the paths
-  that moved.
+  **Run it inside the network, because `api` resolves nowhere else** — the line as first written was executed
+  from the host and died with a name-resolution traceback, which the C4 panel's fidelity checker found by doing
+  what the page said:
+
+  ```
+  docker run --rm --network ai-net -v "$PWD/oic-ui:/w:ro" -w /w --entrypoint bash \
+    oi-core/session:local /w/scripts/check-contract.sh --live http://api:8088
+  ```
+
+  It names the paths that moved. **A checkpoint that cannot pass where the page says to run it is not a
+  checkpoint**, and this one had been in three documents that way.
 
 ### 5.1f The app deployed, as it was on 2026-10-14
 
@@ -4160,8 +4169,14 @@ chips sat tight against the answer above them.
 
 **And the corpus was replaced.** The deployment had six documents, four of which were benchmark files from a C2
 test rather than anything a small business would hold. It now carries the corpus generator's own set: 26
-documents under `company` and `executive`, 124 points, with the two deliberate failure fixtures still failing on
-purpose. The generator's travel policy answers the mileage question the manual uses as its example, and its
+documents under `company` and `executive`, 124 points, **with one deliberate failure fixture failing on purpose
+and the other not.**
+
+**The second fixture stopped being a failure and nothing said so.** `dead-letter-fixture.txt` is indexed with one
+chunk and zero failures, because the file on the box is the generator's own text and the parser accepts it. The
+sentence claiming both failed was true when it was written and was never re-measured, and the operator guide's
+Stage 5c depends on a file the parser refuses. **A fixture that stopped failing is worse than no fixture**,
+because the check using it keeps passing while measuring nothing. Recorded rather than quietly reworded. The generator's travel policy answers the mileage question the manual uses as its example, and its
 new-starter record carries the reserved identifiers the redaction check needs.
 
 **One thing this found in the tests themselves, which is the most useful part of the exercise.** Swapping the
@@ -4193,7 +4208,7 @@ list, so the affordance and the enforcement cannot drift apart.
 
 **Goal.** A person who has never seen the system can ask a question and understand what happened.
 
-Built in `office-inference-ui` against `docs/openapi.json`. Ask first, then Activity, then the job view. The
+Built in `oic-ui` against `docs/openapi.json`. Ask first, then Activity, then the job view. The
 test ladder is in `docs/handoff-c4.md` §5, and two rungs of it are the ones that matter: **the data-lane
 indicator cannot disagree with the audit record**, and **doing a thing in the interface leaves a row**.
 

@@ -4243,12 +4243,23 @@ Three lines, and each proves something different: `200` from `/` is the bundle, 
   answers nothing, and a browser reports that as the API being down.
 - **`/` returns 404.** The bundle is not in the image. It is built by `npm run build` into `app/dist`, and the
   image copies that directory specifically.
-- **Every question refuses with `no_session`.** There is no sign-in yet. Mint a token and paste it.
+- **Every question refuses and the sidebar says the deployment declares no tasks.** **The session is the first
+  thing to check, not the deployment.** There is no sign-in yet, so a token can be pasted after it expired or was
+  revoked, and the shell cannot read the task list without one. The screen says "Task list unavailable" for that
+  state; the phrase "declares no tasks" is only true when the list was read and came back empty, which is a
+  manifest without an agentic pack.
 - **A blank page with no error in it.** The bundle was built against a different contract than the API serves.
-  From the core checkout: `bash /opt/oic-ui/scripts/check-contract.sh --live http://api:8088`. It names the paths
+  From the core checkout: `docker run --rm --network ai-net -v /opt/oic-ui:/w:ro -w /w --entrypoint bash \
+  oi-core/session:local /w/scripts/check-contract.sh --live http://api:8088`. It names the paths
   that moved.
-- **The screens are there but Do is missing.** The deployment declares no tasks, which is correct for a manifest
-  without an agentic pack. Check `GET /tasks`.
+- **The screens are there but Do is missing.** Read what the sidebar says. If it says the task list is
+  unavailable, the session cannot be read and that is a token problem. If it says the deployment declares no
+  tasks, the list was read and is empty, which is correct for a manifest without an agentic pack. To tell them
+  apart:
+
+  ```
+  docker run --rm --network ai-net curlimages/curl -sS http://api:8088/tasks -H "X-OI-Session: <a live token>"
+  ```
 
 ### Extending it
 

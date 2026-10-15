@@ -1903,7 +1903,8 @@ cp /opt/oic-ui/docs/openapi.json /tmp/contract-copy.json
 checker rather than comparing files by eye:
 
 ```
-bash /opt/oic-ui/scripts/check-contract.sh --live http://api:8088
+docker run --rm --network ai-net -v /opt/oic-ui:/w:ro -w /w --entrypoint bash \
+  oi-core/session:local /w/scripts/check-contract.sh --live http://api:8088
 ```
 
 It prints the paths and exits non-zero when they differ. **A copy nobody compares drifts**, and the drift shows
