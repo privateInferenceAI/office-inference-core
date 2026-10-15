@@ -396,12 +396,21 @@ scales with length. Measured again at the real size, on the same box and while t
 fifteen of the sixteen cores, while every other container is under 14 percent. It is the largest single
 consumer by a wide margin.
 
-**And it is still not the whole story.** End to end the worker achieves about 0.8 chunks per second, against the
-2.7 the service manages on its own, so **roughly two thirds of the critical path is per-file work**: the parse
-round trip, then a write to the vector store and one to Postgres. Both statements are true, and the honest
-summary is that a bigger corpus is bounded by the embedding service and spends most of its wall clock in
-per-file overhead. Parallelising the per-file path is the speed-up; the embedding service is the wall you hit
-afterwards.
+**Then I made a second mistake on top of the first, and it is worth recording because it is the more common
+one.** From the gap between the service's rate and the worker's, I concluded that "roughly two thirds of the
+critical path is per-file work". **No measurement supports that.** The benchmarks above were run *while the
+ingest was running*, so they measure the marginal capacity left over after the worker had taken its share, not
+the worker's own cost. Decomposing a pipeline with numbers taken from a run that competes with it is not a
+measurement.
+
+**What is actually known:** the worker achieves about 0.8 chunks per second; the embedding service does 2.0 at
+a batch of eight and 0.37 at a batch of one, under the same contention; and the worker sends one or two chunks
+per request because it embeds per document. **The batch-size effect is the solid finding and it is large.**
+
+**What is not known, and how to settle it:** how the worker's second splits between the parse round trip, the
+embedding call, and the two writes. That needs a run on an idle box with per-phase timings, which is a small
+instrumentation change and the right thing to do before choosing between more parallel workers and a faster
+embedding service.
 
 **A warning about benchmarks of this service.** A rate measured on short strings does not describe this load,
 and the error is in the flattering direction. If you measure it, measure it at the chunk size you will actually

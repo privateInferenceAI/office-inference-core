@@ -4255,9 +4255,17 @@ choosing a corpus size will look. The short version:
 hundred-character strings and reported 33 chunks/sec, which led to a line in this runbook claiming the corpus
 was minutes of embedding and that the cost was all per-file overhead. **The ingest disproved it.** At the
 two-thousand-character chunks the corpus actually produces, the same service does about **2.7 chunks/sec**, and
-it runs at 1,574 percent CPU during an ingest, saturating fifteen of the sixteen cores. End to end the worker
-manages about 0.8 chunks/sec, so per-file work is still roughly two thirds of the critical path. Both are true:
-**embedding bounds the job, and per-file overhead spends most of its wall clock.**
+it runs at 1,574 percent CPU during an ingest, saturating fifteen of the sixteen cores.
+
+**Batch size is the solid finding.** Measured under the same contention: one chunk per request gives 0.37
+chunks/sec, eight gives 2.0, and sixteen and thirty-two are rejected with `429 Model is overloaded`. The worker
+embeds per document and these documents average 1.28 chunks, so it sends requests of one or two — the worst end
+of that table, on every document.
+
+**And a claim in this runbook that had to be withdrawn.** It said per-file work was "roughly two thirds of the
+critical path". The benchmarks behind that were run while the ingest was running, so they measure the capacity
+left over rather than the worker's own cost. **Decomposing a pipeline with numbers taken from a run that
+competes with it is not a measurement.** The split needs per-phase timings on an idle box.
 
 **And retrieval was checked rather than assumed.** With 1,400 documents indexed, *"What is recorded about the
 boiler at Lake Kayla?"* returned `company/vol-maintenance-00000.md`, the document that contains it. The
