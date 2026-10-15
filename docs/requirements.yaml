@@ -1037,6 +1037,110 @@ items:
     verify: not applicable
     status: waived
     waiver_reason: one instance and one compose file across both builds
+  # ---------------------------------------------------------------- the client app
+  #
+  # Written during C4 rather than before it, and that is recorded rather than hidden: the phase's handoff says
+  # to write these first and it was not done first. The rows below were drafted against the built system, so
+  # each one describes something that exists and carries the evidence that exists. A register written at the
+  # end describes what happened, which is what these are, and the honest version of that is to say so.
+  - id: UI-ASK-001
+    title: A question returns an answer that carries its sources, and every shape of failure is legible
+    tier: [cloud, hosted, office]
+    phase: C4
+    verify: asking the question the corpus answers returns an answer with at least one citation and a receipt line naming a document count; a question with no source says so rather than answering from the model's own knowledge; a refusal names what was refused; a degraded answer shows the retrieved passages
+    status: verified
+    note: >-
+      Ten browser tests against the deployed app at 1366x768, and twelve integration tests driving the app's own
+      client code against the live API. The receipt line is asserted to name a document count rather than
+      accepting "No document was cited", because the first version of that assertion passed on an empty corpus:
+      a test whose subject can vanish measures nothing, and two redaction tests did exactly that when the corpus
+      was replaced underneath them.
+  - id: UI-REDACT-001
+    title: A value the egress gate strips never reaches the screen, and the screen says something was removed
+    tier: [cloud, hosted]
+    phase: C4
+    verify: a question that makes the model repeat a reserved identifier shows a redaction marker in the DOM, no raw identifier anywhere in the page, and a notice saying something was replaced
+    status: verified
+    note: >-
+      Asserted on the DOM rather than on the API response, because a redaction that happens in the service and is
+      rendered from somewhere else is not a redaction. The question matters and was measured: asking WHAT the
+      reference is produced a paraphrase, so nothing reached the redactor and the check passed while measuring
+      nothing. The question in the suite pushes the model to repeat the value verbatim, which is the only
+      condition under which redaction can be observed. With the weaker question the redaction counts came back
+      empty; with this one they come back `{'ssn': 1}`.
+  - id: UI-AUDIT-001
+    title: An action taken in the interface leaves a row in the chain, findable by the id the answer carried
+    tier: [cloud, hosted, office]
+    phase: C4
+    verify: ask a question in the app, take the request id the answer carries, read the chain for that id, and find the row with the egress verdict on it
+    status: verified
+    note: >-
+      This is the phase's central claim and it is the check the handoff names as the one that gets skipped.
+      **It found a real defect while the phase was being built:** the API minted a request id on every call and
+      never passed it to the audit tool, so the column was empty on every model call and an answer could not find
+      its own row. Every test passed. The probe reports zero rows, which looks exactly like "the row was never
+      written", and that is why the probe makes the thing it then looks for.
+  - id: UI-SCOPE-001
+    title: The activity screen states what it is scoped to, and cannot show a subset as though it were the whole record
+    tier: [cloud, hosted]
+    phase: C4
+    verify: a company-scoped session asking for an executive subject by name gets zero rows and restricted true rather than a partial page; the response names the actors it covered; the screen renders that sentence
+    status: verified
+    note: >-
+      The scoping rule is derived from the permission model rather than invented: a session sees its own rows, and
+      another subject's when every root that subject holds is one the reader holds too. Containment rather than
+      recognition, so an actor with no session record cannot pass a subset test. Applied inside the query rather
+      than after it, which is the argument SEC-ACL-001 already makes about retrieval. Proven able to fail: with
+      the containment test removed, three scope tests fail and name the leaking case.
+  - id: UI-JOB-001
+    title: Work runs as a job with a state, one row per attempt, and a replayable event log
+    tier: [cloud, hosted, office]
+    phase: C4
+    verify: a task runs to a terminal state; every attempt appears whether it worked or not; events are numbered from one and replay from a number; the job and each attempt leave a row; a job belonging to another subject answers 404
+    status: verified
+    note: >-
+      Eight rights against the live deployment. The event log is a table rather than a socket, so a client that
+      closed the tab catches up with `?since=` instead of losing what happened. **The probe found a real defect:**
+      a successful attempt wrote no row of its own, so a job that worked first time left two rows that both said
+      "job" and nothing recording that a step had run. The columns existed, the flags existed, and nobody
+      connected them, which is the second time this project has paid for that.
+  - id: UI-BOUNDARY-001
+    title: The data boundary guards every path to a model, including the ones added after it was built
+    tier: [cloud, hosted]
+    phase: C4
+    verify: against a manifest whose data class may not leave, a request and a job are both refused with a 403 naming the class, and the app is a client of the API alone with no model key or database credential in its environment
+    status: verified
+    note: >-
+      **This is the C3 defect shape a third time, and the first time a probe caught it rather than a person.**
+      `/ask` refused with a 403 and `/jobs` answered 200 with a failed job row, so work no lane was permitted to
+      do had a record and a cheerful status code. The fix is ordering: the boundary is consulted before the job
+      exists. Proven able to fail afterwards, by removing the fix and watching the probe name the endpoint that
+      answered. The app's runtime environment holds two variables and no credential of any kind, checked by
+      allowlist.
+  - id: UI-CONTRACT-001
+    title: The app is built against a published contract, and drift between the two repositories fails a check
+    tier: [cloud, hosted, office]
+    phase: C4
+    verify: the service publishes response models for every endpoint it serves; the app's own tests hold its code against that document; a checker compares the copy against the running service and exits non-zero when they differ
+    status: verified
+    note: >-
+      Before this, `/openapi.json` listed three URLs and **no response bodies at all**: every response was an empty
+      schema, so a second repository would have been built against the manual's prose. **Found from the app's
+      side:** its contract test reported that `Task` was not a component, because `/tasks` returned a bare object
+      with no declared model, and the core's own tests were all passing. Nine paths and twenty-two models now, and
+      the app's copy is compared against the running service by `check-contract.sh --live`.
+  - id: UI-ACCESS-001
+    title: The interface is usable with the keyboard alone at the office's screen size
+    tier: [cloud, hosted, office]
+    phase: C4
+    verify: a question is asked with the keyboard alone, focus is visible on the control being used, and nothing scrolls sideways at 1366x768
+    status: verified
+    note: >-
+      Three browser tests at 1366x768, the size the design names. The office is keyboard-first because front desk
+      staff type faster than they click, so a control a keyboard user cannot find is a control that does not
+      exist for them. The reference instance's screen size was measured rather than assumed: the runbook records
+      1366x768 against the actual host.
+
   - id: NEVER-KB-001
     title: No managed knowledge base
     tier: [cloud, hosted]
