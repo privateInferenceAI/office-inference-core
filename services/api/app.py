@@ -559,6 +559,11 @@ async def create_job(request: Request):
     except Exception:  # noqa: BLE001 - the message is the response
         return JSONResponse({"error": "the request body is not JSON"}, status_code=400)
 
+    # **The job's identifier, minted here rather than at the model call.** A job is its own identifier and the
+    # response carries the job id, but the refusals this handler can produce need something to be found by, and
+    # the request id is what the chain records for that. The first version used a name it had never bound.
+    request_id = uuid.uuid4().hex
+
     session, refusal = _session_for(request, body)
     if refusal:
         return refusal
@@ -608,7 +613,7 @@ async def create_job(request: Request):
             manifest=STATE.get("manifest") or {}, data_class=data_class, task=task,
             model_name=model_for(api_role), default_lane=role_lane(api_role),
             frontier_model=frontier_model_for(api_role), session=session, audit=audit,
-            endpoint="/jobs")
+            endpoint="/jobs", request_id=request_id)
     except answer_module.Refused as refused:
         return JSONResponse(refused.payload, status_code=refused.status)
 

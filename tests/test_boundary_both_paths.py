@@ -19,6 +19,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 API = ROOT / "services" / "api" / "app.py"
 PIPELINE = ROOT / "services" / "api" / "answer.py"
@@ -127,3 +129,50 @@ def test_the_boundary_check_is_not_duplicated():
     assert "def check_boundary(" in pipeline
     assert API.read_text().count("no_permitted_lane") + pipeline.count("no_permitted_lane") <= 3, (
         "the refusal wording appears in more than one place per path, which is how the copies drift")
+
+
+def test_the_boundary_refusal_runs_rather_than_being_present():
+    """**The check that would have caught a NameError on the refusal path.**
+
+    `check_boundary` was given a `request_id` parameter and its body used the name, and the test written for it
+    asserted the string appeared in the source. The string did appear — in `prepare`, which passed it to nothing
+    — and the function itself raised `NameError` the first time a forbidden class reached it. The probe found
+    that on a deployment, which is an expensive place to find a missing parameter.
+
+    So this calls the function. It goes down the refusal path, which is the path that only runs when a class may
+    not leave, and that is why nothing on the ordinary path noticed.
+    """
+    # **The service paths, the way the rest of the suite sets them up.** `answer.py` imports its neighbours by
+    # module name because the image is what normally arranges that, so a test has to reproduce the layout.
+    import sys
+
+    for name in ("api", "retrieval", "ingestion", "session", "gateway", "egress"):
+        path = str(ROOT / "services" / name)
+        if path not in sys.path:
+            sys.path.insert(0, path)
+    import answer as answer_module  # noqa: PLC0415
+
+    class Session:
+        subject = "probe@example.com"
+        role = "viewer"
+        session_id = "an-identifier"
+
+    rows = []
+
+    def audit(*args, **kwargs):
+        rows.append((args, kwargs))
+
+    manifest = {"access": {"egress": {"frontier_classes": ["public", "internal"]}},
+                "models": {"analyst": {"local": "", "frontier": "bedrock/x"}},
+                "lanes": {"frontier": {"enabled": True, "provider": "bedrock"}}}
+
+    with pytest.raises(answer_module.Refused) as refused:
+        answer_module.check_boundary(
+            manifest=manifest, data_class="regulated", task="", model_name="analyst",
+            default_lane="frontier", frontier_model="bedrock/x", session=Session(), audit=audit,
+            endpoint="/ask", request_id="the-id")
+    assert refused.value.status == 403
+    assert refused.value.kind == "no_permitted_lane"
+    # And the row it wrote names the same id the refusal carries, which is what ties the two together.
+    assert refused.value.payload.get("request_id") == "the-id"
+    assert rows and rows[0][1].get("request_id") == "the-id", "the refusal's row does not carry the id"

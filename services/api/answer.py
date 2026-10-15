@@ -111,7 +111,7 @@ def _data_class(manifest: dict) -> str:
 
 
 def check_boundary(*, manifest: dict, data_class: str, task: str, model_name: str, default_lane: str,
-                   frontier_model: str, session, audit, endpoint: str):
+                   frontier_model: str, session, audit, endpoint: str, request_id: str = ""):
     """Step 4 on its own: which lane may answer, and a refusal when none may.
 
     **A separate function because a job has to be refused before it is created.** The job path ran this
@@ -224,7 +224,7 @@ def prepare(*, token: str, question: str, body: dict, ctx: Context, resolve, mod
         check_boundary(manifest=ctx.manifest, data_class=data_class, task=body.get("task") or "",
                        model_name=model, default_lane=role_lane(role),
                        frontier_model=frontier_model_for(role), session=session, audit=audit,
-                       endpoint=endpoint)
+                       endpoint=endpoint, request_id=request_id)
 
     return session, permit, model, result, decision, data_class
 
