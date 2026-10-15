@@ -4130,6 +4130,45 @@ app     running
   `bash oic-ui/scripts/check-contract.sh --live http://api:8088` from the core checkout; it names the paths
   that moved.
 
+### 5.1f The app deployed, as it was on 2026-10-14
+
+**Built and started on the deployment, first try.** The bundle is built in the image and served by the proxy:
+
+```
+$ oi build app && oi up -d app
+app restarts=0 state=running
+
+$ docker run --rm --network ai-net curlimages/curl -sS -o /dev/null -w '%{http_code}\n' http://app:8080/
+200
+$ docker run --rm --network ai-net curlimages/curl -sS http://app:8080/api/health
+{"status":"ok","deployment_id":"oi-core-dev-cloud","registry_declared":true,"default_model_role":"analyst"}
+```
+
+**The constraint, checked rather than asserted.** The app's runtime holds exactly two variables of its own and
+no credential of any kind:
+
+```
+$ docker inspect app --format '{{range .Config.Env}}{{println .}}{{end}}' \
+    | grep -vE '^(PATH|LANG|GPG_KEY|PYTHON_VERSION|PYTHON_SHA256|APP_PORT|OI_API_URL)='
+(nothing)
+```
+
+**Seen, not just measured.** All three screens at 1366x768 through an SSM port forward, with a real answer from
+a real document. Two things came out of looking that no assertion would have produced: the Activity row's actor
+chip rendered as a pressable block because its class name collided with the rail's profile card, and the sources
+chips sat tight against the answer above them.
+
+**And the corpus was replaced.** The deployment had six documents, four of which were benchmark files from a C2
+test rather than anything a small business would hold. It now carries the corpus generator's own set: 26
+documents under `company` and `executive`, 124 points, with the two deliberate failure fixtures still failing on
+purpose. The generator's travel policy answers the mileage question the manual uses as its example, and its
+new-starter record carries the reserved identifiers the redaction check needs.
+
+**One thing this found in the tests themselves, which is the most useful part of the exercise.** Swapping the
+corpus removed the source of a question two tests were built on, and both redaction tests kept passing: one had
+its real assertion inside an `if`, and the other accepted "No document was cited" as a valid outcome. A test
+whose subject can vanish measures nothing, and it reports green while doing it.
+
 ### 5.2 The task registry, so the interface can show what this deployment can do
 
 **Goal.** The tasks a client can start come from their manifest rather than from our source code.
