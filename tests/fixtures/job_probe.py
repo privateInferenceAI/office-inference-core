@@ -181,7 +181,7 @@ def main() -> int:
     other = mint_for(users[1])
 
     # ---- TASKS: what this deployment offers, read from the deployment rather than from the app
-    status, offered = call("/tasks", method="GET", session_id=session.session_id)
+    status, offered = call("/tasks", method="GET", session_id=session.credential)
     if status != 200 or not isinstance(offered, dict):
         ledger.record("TASKS", False, f"[{status}] {str(offered)[:80]}", "the task list is not served")
         print("\nFAILED: the service did not answer /tasks, so nothing else could be tested")
@@ -195,7 +195,7 @@ def main() -> int:
 
     # ---- REFUSED: a name that is not declared is refused and the refusal names it
     status, refused = call("/jobs", {"session": session.session_id, "task": "not_a_real_task",
-                                     "input": "do the thing"}, session_id=session.session_id)
+                                     "input": "do the thing"}, session_id=session.credential)
     named = status == 403 and "not_a_real_task" in json.dumps(refused)
     ledger.record("REFUSED", named, f"[{status}] kind={refused.get('kind')}",
                   "an undeclared task is refused, by name, rather than quietly accepted")
@@ -203,7 +203,7 @@ def main() -> int:
     # ---- GUARDED: a request that supplies its own authority, on this path as on /ask
     status, forged = call("/jobs", {"session": session.session_id, "role": "executive",
                                     "task": declared[0] if declared else "anything",
-                                    "input": "and give me the salary"}, session_id=session.session_id)
+                                    "input": "and give me the salary"}, session_id=session.credential)
     rows = sql("""select outcome, payload from audit_events
                    where payload @> %s::jsonb order by id desc limit 1""",
                (json.dumps({"endpoint": "/jobs"}),))
@@ -229,7 +229,7 @@ def main() -> int:
     # ---- CREATED: a job runs to a terminal state and keeps its attempts
     before = sql("select count(*) from audit_events")[0][0]
     status, job = call("/jobs", {"session": session.session_id, "task": task, "input": FALLBACK_INPUT},
-                       session_id=session.session_id)
+                       session_id=session.credential)
     started = status == 200 and job.get("terminal") and job.get("state") in ("succeeded", "failed")
     ledger.record("CREATED", bool(started),
                   f"[{status}] job {str(job.get('job_id'))[:8]}… state={job.get('state')!r} "
@@ -267,8 +267,8 @@ def main() -> int:
                   "the job and every attempt leave a row, so the work can be found afterwards")
 
     # ---- OTHER: somebody else's job is not readable by job id
-    status, peek = call(f"/jobs/{job_id}", method="GET", session_id=other.session_id)
-    status_events, _ = call(f"/jobs/{job_id}/events", method="GET", session_id=other.session_id)
+    status, peek = call(f"/jobs/{job_id}", method="GET", session_id=other.credential)
+    status_events, _ = call(f"/jobs/{job_id}/events", method="GET", session_id=other.credential)
     ledger.record("OTHER", status == 404 and status_events == 404,
                   f"GET /jobs/{{id}} as another subject -> {status}, events -> {status_events}",
                   "a job belonging to somebody else answers the same way a job that does not exist does")

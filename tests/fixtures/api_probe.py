@@ -175,7 +175,7 @@ def main() -> int:
                                   deployment_id="probe")
 
     # ------------------------------------------------------------------ ANSWER
-    status, body = post("/ask", {"session": session.session_id,
+    status, body = post("/ask", {"session": session.credential,
                                   "question": "What is the mileage rate for reimbursement?"})
     answer = (body.get("answer") or "")
     ledger.record("ANSWER", status == 200 and bool(answer),
@@ -192,7 +192,7 @@ def main() -> int:
                   "an answer with no source behind it is an answer nobody can check")
 
     # ------------------------------------------------------------------ SCOPED
-    status, scoped_body = post("/ask", {"session": session.session_id,
+    status, scoped_body = post("/ask", {"session": session.credential,
                                           "question": "What is the Chief Executive Officer's base salary?"})
     roots = scoped_body.get("roots") or []
     scoped = status == 200 and "executive" not in roots
@@ -202,7 +202,7 @@ def main() -> int:
                   "the service would answer from a root the session does not hold")
 
     # ------------------------------------------------------------------ FORGED
-    status, forged = post("/ask", {"session": session.session_id, "role": "executive",
+    status, forged = post("/ask", {"session": session.credential, "role": "executive",
                                    "question": "What is the mileage rate for reimbursement?"})
     kind = forged.get("kind")
     rows = sql("select count(*) from audit_events where payload->>'session_id' = %s "

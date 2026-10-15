@@ -142,7 +142,7 @@ def main() -> int:
     other = mint_for(users[-1]) if len(users) > 1 else session
 
     # ---- READ
-    status, page = call("/activity?limit=10", session_id=session.session_id)
+    status, page = call("/activity?limit=10", session_id=session.credential)
     events = page.get("events") or []
     if status != 200:
         ledger.record("READ", False, f"[{status}] {str(page)[:120]}",
@@ -175,7 +175,7 @@ def main() -> int:
         wider = other if other.roots > mine else session
         narrower = session if wider is other else other
         status_forbidden, forbidden = call(
-            "/activity?actor=" + urllib.parse.quote(wider.subject), session_id=narrower.session_id)
+            "/activity?actor=" + urllib.parse.quote(wider.subject), session_id=narrower.credential)
         refused = status_forbidden == 200 and (forbidden.get("events") or []) == [] \
             and (forbidden.get("scope") or {}).get("restricted") is True
         ledger.record("SCOPED", refused and seen_rows_ok,
@@ -193,16 +193,16 @@ def main() -> int:
     # ---- ACTOR: asking for somebody outside the scope returns nothing, not the rest of the page
     stranger = "nobody@officeinference.com"
     status_stranger, stranger_page = call("/activity?actor=" + urllib.parse.quote(stranger),
-                                          session_id=session.session_id)
+                                          session_id=session.credential)
     empty = status_stranger == 200 and (stranger_page.get("events") or []) == []
     ledger.record("ACTOR", empty,
                   f"actor={stranger} -> {status_stranger}, {len(stranger_page.get('events') or [])} row(s)",
                   "an actor outside the scope returns nothing rather than a partial page")
 
     # ---- FILTERED
-    status_type, typed = call("/activity?type=model_call&limit=5", session_id=session.session_id)
+    status_type, typed = call("/activity?type=model_call&limit=5", session_id=session.credential)
     only_calls = all(e["type"] == "model_call" for e in (typed.get("events") or []))
-    status_bad, bad = call("/activity?type=not_a_type", session_id=session.session_id)
+    status_bad, bad = call("/activity?type=not_a_type", session_id=session.credential)
     ledger.record("FILTERED", status_type == 200 and only_calls and status_bad == 400,
                   f"type=model_call -> {len(typed.get('events') or [])} row(s), all model calls="
                   f"{only_calls}; type=not_a_type -> {status_bad} {bad.get('kind')}",
@@ -210,13 +210,13 @@ def main() -> int:
 
     # ---- BYREQUEST: make an answer, then find its row by the request id that answer carried
     status_ask, answer = call("/ask", method="POST",
-                              body={"session": session.session_id,
+                              body={"session": session.credential,
                                     "question": "What is the mileage rate for reimbursement?"},
-                              session_id=session.session_id)
+                              session_id=session.credential)
     request_id = answer.get("request_id") if isinstance(answer, dict) else None
     if status_ask == 200 and request_id:
         status_req, by_request = call("/activity?request=" + urllib.parse.quote(request_id),
-                                      session_id=session.session_id)
+                                      session_id=session.credential)
         found = [e for e in (by_request.get("events") or []) if e.get("request_id") == request_id]
         ledger.record("BYREQUEST", len(found) >= 1,
                       f"request_id {request_id[:8]}… -> {len(found)} row(s)",
@@ -227,19 +227,19 @@ def main() -> int:
                       "an answer that carries a request id, so its row can be found")
 
     # ---- BYJOB: run a job, then read back everything it wrote
-    status_tasks, offered = call("/tasks", session_id=session.session_id)
+    status_tasks, offered = call("/tasks", session_id=session.credential)
     tasks = [t["id"] for t in (offered.get("tasks") or [])]
     if not tasks:
         ledger.skip("BYJOB", "this deployment declares no tasks, so there is no job to look up")
     else:
         status_job, job = call("/jobs", method="POST",
-                               body={"session": session.session_id, "task": tasks[0],
+                               body={"session": session.credential, "task": tasks[0],
                                      "input": "What does the fee schedule say about hourly rates?"},
-                               session_id=session.session_id)
+                               session_id=session.credential)
         job_id = job.get("job_id") if isinstance(job, dict) else None
         if status_job == 200 and job_id:
             status_byjob, by_job = call("/activity?job=" + urllib.parse.quote(job_id),
-                                        session_id=session.session_id)
+                                        session_id=session.credential)
             rows = by_job.get("events") or []
             named = [e for e in rows if (e.get("payload") or {}).get("job_id") == job_id]
             # A job that succeeded writes at least a start, an attempt and a finish.
@@ -251,14 +251,14 @@ def main() -> int:
                           "a job whose rows can be read back")
 
     # ---- CAPPED
-    status_ok, _ = call(f"/activity?limit={500}", session_id=session.session_id)
-    status_over, over = call("/activity?limit=5000", session_id=session.session_id)
+    status_ok, _ = call(f"/activity?limit={500}", session_id=session.credential)
+    status_over, over = call("/activity?limit=5000", session_id=session.credential)
     ledger.record("CAPPED", status_ok == 200 and status_over == 400,
                   f"limit=500 -> {status_ok}, limit=5000 -> {status_over} {over.get('error', '')[:60]}",
                   "a limit above the cap is refused rather than silently trimmed")
 
     # ---- RECORDED: reading the record is itself in the record
-    status_reads, reads = call("/activity?type=access&limit=20", session_id=session.session_id)
+    status_reads, reads = call("/activity?type=access&limit=20", session_id=session.credential)
     read_rows = [e for e in (reads.get("events") or [])
                  if (e.get("payload") or {}).get("stage") == "activity_read"]
     ledger.record("RECORDED", len(read_rows) >= 1,
