@@ -58,9 +58,16 @@ docker rm -f "$NAME" >/dev/null 2>&1 || true
 DB_URL=$(docker inspect api --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^DATABASE_URL=//p' | head -1)
 [ -n "$DB_URL" ] || { echo "FAILED: could not read DATABASE_URL from the running api container"; exit 1; }
 
+# **The audit tool is mounted, and the first version did not mount it.** The container could not write a record,
+# and that did not show because a failed write was printed to stderr and the request carried on — so this probe
+# was passing while the deployment it had just spun up was incapable of recording the refusal it was testing.
+# Making a failed write raise turned that into a 500 and made it visible. The same mount the compose service
+# uses, for the same reason: a temporary deployment has to be a faithful one or the probe measures nothing.
 docker run -d --name "$NAME" --network ai-net \
   --user "$(id -u):$(id -g)" -v "$PWD:/w" -w /w \
   --env-file rendered/env -e "DATABASE_URL=$DB_URL" -v "$PWD/rendered:/app/rendered" \
+  -v "$PWD/services/audit/audit.py:/app/audit.py:ro" \
+  -v "$PWD/services/gateway/assertion.py:/app/assertion.py:ro" \
   -e "OI_MANIFEST=/app/rendered/$(basename "$COPY")" oi-core/api:local >/dev/null
 
 for _ in $(seq 1 30); do
