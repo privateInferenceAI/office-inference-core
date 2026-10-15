@@ -4076,9 +4076,17 @@ docker run -d --name app-relay --network ai-net -p 127.0.0.1:8090:8090 alpine/so
   -d -d TCP-LISTEN:8090,fork,reuseaddr TCP:app:8080
 
 # Then forward the port the relay is on, from wherever you administer AWS.
-aws --profile oi-credits ssm start-session --target <instance-id> \
-  --document-name AWS-StartPortForwardingSession \
-  --parameters '{"portNumber":["8090"],"localPortNumber":["18080"]}'
+# **In a loop, because one session is not enough.** `AWS-StartPortForwardingSession` ends
+# its session after a connection and a browser opens several at once, so a single
+# invocation dies on the first page load and every later request is refused by a port
+# nothing is listening on. It looks like the server stopped, and the server is fine.
+while true; do
+  aws --profile oi-credits ssm start-session --target <instance-id> \
+    --document-name AWS-StartPortForwardingSession \
+    --parameters '{"portNumber":["8090"],"localPortNumber":["18080"]}'
+  echo "tunnel dropped; reconnecting"
+  sleep 2
+done
 ```
 
 **The forward has to name a port the instance actually listens on, and that is not the app's own.** The app has
