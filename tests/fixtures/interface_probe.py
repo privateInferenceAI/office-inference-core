@@ -72,6 +72,22 @@ def sql(statement: str, params: tuple = ()):
         conn.close()
 
 
+def call(path: str, session_id: str):
+    """A GET against the service, with the session header. For the task list, which is where the probe finds
+    out what this deployment can actually be asked to do."""
+    request = urllib.request.Request(API + path, method="GET",
+                                     headers={"X-OI-Session": session_id})
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return response.status, json.loads(response.read())
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode(errors="replace")
+        try:
+            return exc.code, json.loads(raw)
+        except json.JSONDecodeError:
+            return exc.code, {"error": raw[:160]}
+
+
 def ask(session_id: str, extra: dict | None = None):
     body = {"session": session_id, "question": QUESTION}
     body.update(extra or {})
@@ -147,11 +163,27 @@ def main() -> int:
                   "a plain question escalates nothing and tells the user nothing")
 
     # TRIGGERS: each names itself, and the record separates what was asked for from what ran.
-    _, agentic = ask(session.credential, {"task": "reconcile"})
+    #
+    # **The task is read from the deployment, not written here.** This right used to send `reconcile`, a name
+    # that was hardcoded in the API before C4 moved the list into the manifest. When the manifest replaced the
+    # hardcoded list, `reconcile` stopped existing — and this probe kept passing, because the trigger it was
+    # sent for no longer fired and nothing it asserted noticed. It failed honestly once the router began
+    # refusing a task the deployment does not declare. A probe that names its own task is a probe that passes
+    # on a task that is gone.
+    status_tasks, offered = call("/tasks", session_id=session.credential)
+    declared = [t.get("id") for t in (offered.get("tasks") or [])]
+    if not declared:
+        ledger.record("TRIGGERS", False, "[%s] no task is declared" % status_tasks,
+                      "the task lookup escalates and names itself")
+        declared = []
+    task_id = declared[0] if declared else ""
+    _, agentic = ask(session.credential, {"task": task_id}) if task_id else (0, {})
     _, asked = ask(session.credential, {"stronger": True})
-    named = agentic.get("trigger") == "agentic_task" and asked.get("trigger") == "user_requested_stronger"
+    named = bool(task_id) and agentic.get("trigger") == "agentic_task" \
+        and asked.get("trigger") == "user_requested_stronger"
     ledger.record("TRIGGERS", bool(named),
-                  "agentic->%r stronger->%r" % (agentic.get("trigger"), asked.get("trigger")),
+                  "task %r -> %r, stronger -> %r" % (task_id, agentic.get("trigger"),
+                                                     asked.get("trigger")),
                   "the task lookup and the request field each escalate and name themselves")
 
     rows = sql("select payload from audit_events where payload ? 'routing_version' order by id desc limit 6")
