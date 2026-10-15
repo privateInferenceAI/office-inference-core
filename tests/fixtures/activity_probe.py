@@ -106,6 +106,20 @@ def main() -> int:
     registry = access_module.load(os.environ.get("ACCESS_REGISTRY", str(W / "rendered" / "access.json")))
     store = session_module.PostgresStore(database_url())
 
+    # **The sessions are minted on the deployment the API actually is, and the first version was not.**
+    # It used the label "activity-probe", which is the audit label a session carries; the read filters rows by
+    # the deployment the API serves, so every row was excluded and READ returned nothing. That looked exactly
+    # like an empty chain, which is the worst way for a probe to be wrong: it reported a fact about the record
+    # that was really a fact about the probe.
+    #
+    # The id comes from the service rather than from a constant here, so the probe works on any deployment.
+    status_health, health = call("/health")
+    deployment_id = (health or {}).get("deployment_id") or "unknown"
+    if deployment_id == "unknown":
+        print(f"FAILED: could not read the deployment id from /health ([{status_health}])", file=sys.stderr)
+        return 2
+    print(f"deployment: {deployment_id}")
+
     # The subjects come from the deployment's registry. The first version of the job probe invented one and the
     # registry refused it, which is the control working: a subject is refused rather than defaulted.
     users = sorted(getattr(registry, "users", {}) or {})
@@ -118,7 +132,7 @@ def main() -> int:
         for candidate in sorted(registry.roles or {"viewer": None}):
             try:
                 return session_module.mint(registry, store, subject, candidate, dev=True,
-                                           deployment_id="activity-probe")
+                                           deployment_id=deployment_id)
             except access_module.AccessError as exc:
                 last = exc
         print(f"FAILED: no role admits {subject}: {last}", file=sys.stderr)
