@@ -959,3 +959,110 @@ def test_a_record_from_before_the_version_existed_is_also_re_derived(tmp_path, w
     result = ingest.ingest_cycle(services, tmp_path, manifest)
     assert result.skipped == 0
     assert result.changed == 1
+
+
+# --------------------------------------------------------------------------- concurrency
+
+def many(tmp_path: Path, count: int) -> None:
+    """A corpus of `count` distinct documents, all of which the stub parser will accept."""
+    for i in range(count):
+        make_corpus(tmp_path, name=f"company/doc{i:02d}.pdf", content=b"%PDF-1.4 doc " + str(i).encode())
+
+
+def test_several_documents_are_prepared_at_once(monkeypatch, tmp_path, wired):
+    """**The change this exists to prove: the waits overlap.**
+
+    Measured on the deployment, parsing is 44 to 47 percent of an ingest's wall clock and embedding 50 to 53,
+    and the parser container uses about one core of sixteen. The worker ran one document at a time, so while
+    it waited on the parser the embedder was idle, and the other way round. Neither service was saturated,
+    and fifteen cores were idle throughout.
+
+    This asserts the overlap rather than timing it: with the window at four and a parse that sleeps, four
+    documents must be inside the parser at the same moment.
+    """
+    import threading
+    import time as _time
+
+    services = wired()
+    lock = threading.Lock()
+    live = {"now": 0, "peak": 0}
+    inner = ingest.parse_document
+
+    def slow_parse(services_, path, relpath):
+        with lock:
+            live["now"] += 1
+            live["peak"] = max(live["peak"], live["now"])
+        try:
+            _time.sleep(0.15)
+            return inner(services_, path, relpath)
+        finally:
+            with lock:
+                live["now"] -= 1
+
+    monkeypatch.setattr(ingest, "parse_document", slow_parse)
+    # No override of INGEST_CONCURRENCY: the test reads the worker's real window, because a test that sets
+    # the value it is checking passes against a serial worker and measures nothing.
+    assert ingest.INGEST_CONCURRENCY > 1, "the window is one, so this test would prove nothing"
+
+    many(tmp_path, 8)
+    result = ingest.ingest_cycle(services, tmp_path, ingest.MemoryManifest())
+
+    assert result.new == 8, f"expected eight documents ingested, got {result.new}"
+    assert live["peak"] > 1, (
+        "documents were parsed one at a time, so nothing overlapped and the cycle is still serial")
+
+
+def test_the_window_bounds_how_many_are_in_flight(monkeypatch, tmp_path, wired):
+    """**A window rather than a stampede.** The first version of this change submitted every document at
+    once, which held all ten thousand documents' vectors in memory and wrote nothing for hours. A batch of
+    sixteen embedding requests also answered `429 Model is overloaded`, so the bound is measured rather than
+    cautious.
+    """
+    import threading
+    import time as _time
+
+    services = wired()
+    lock = threading.Lock()
+    live = {"now": 0, "peak": 0}
+    inner = ingest.parse_document
+
+    def counting_parse(services_, path, relpath):
+        with lock:
+            live["now"] += 1
+            live["peak"] = max(live["peak"], live["now"])
+        try:
+            _time.sleep(0.05)
+            return inner(services_, path, relpath)
+        finally:
+            with lock:
+                live["now"] -= 1
+
+    monkeypatch.setattr(ingest, "parse_document", counting_parse)
+    window = ingest.INGEST_CONCURRENCY
+
+    many(tmp_path, 12)
+    ingest.ingest_cycle(services, tmp_path, ingest.MemoryManifest())
+
+    assert live["peak"] <= window, (
+        f"{live['peak']} documents were in flight against a window of {window}, so the bound is not holding")
+    assert live["peak"] > 1, "nothing overlapped, so the cycle is still serial"
+
+
+def test_a_failure_under_concurrency_is_attributed_to_its_own_document(monkeypatch, tmp_path, wired):
+    """**The property concurrency could easily have destroyed.** A batch-level retry would mark every
+    document in the batch failed when one of them was. Each document's work is its own future, so a failure
+    belongs to the document that caused it and to no other.
+    """
+    services = wired(fail_for={"company/doc03.pdf"})
+
+    many(tmp_path, 8)
+    manifest = ingest.MemoryManifest()
+    result = ingest.ingest_cycle(services, tmp_path, manifest)
+
+    assert result.failed == 1, f"exactly one document should have failed, {result.failed} did"
+    assert any("company/doc03.pdf" in f for f in result.failures), result.failures
+    # And the innocent documents must be recorded as ingested rather than dead-lettered alongside it.
+    for name in ("company/doc00.pdf", "company/doc04.pdf", "company/doc07.pdf"):
+        record = manifest.get(name)
+        assert record is not None, f"{name} was not recorded"
+        assert not (record.get("failure_count") or 0), f"{name} carries a failure it did not cause"

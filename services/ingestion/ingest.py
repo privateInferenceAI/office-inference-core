@@ -26,6 +26,8 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import itertools
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,6 +46,24 @@ from identifiers import extract as identify  # noqa: E402
 # promises a knob the code does not read is a lie told in documentation, and this project has already paid
 # for one of those on the parser options.
 EMBED_BATCH = int(os.environ.get("INGEST_EMBED_BATCH", "16"))
+
+# **How many documents are prepared at once, and why this is the fix rather than more hardware.**
+#
+# Measured on the deployment: parsing is 44 to 47 percent of an ingest's wall clock and embedding 50 to 53,
+# and the parser uses **one core of sixteen**. The worker ran one document at a time, so while it waited on
+# the parser the embedder was idle, and while it embedded the parser was idle. Neither service was saturated
+# on average, and the box had fifteen idle cores throughout.
+#
+# So the cost was never capacity, it was that the two halves of the work never overlapped. Preparing several
+# documents concurrently makes them overlap, fills embedding batches as a side effect, and puts the idle cores
+# to work on parsing. **It is a code change, not a bigger machine.**
+#
+# Four rather than sixteen, and the number comes from a measurement rather than caution: a batch of sixteen
+# embedding requests answered `429 Model is overloaded` while the machine was busy, because the service sheds
+# load rather than queueing. Writes stay on the main thread, which costs nothing — they are two percent of the
+# time — and keeps the manifest's bookkeeping single-threaded, which is the property that makes this change
+# safe rather than merely faster.
+INGEST_CONCURRENCY = max(1, int(os.environ.get("INGEST_CONCURRENCY", "4")))
 
 # A file that fails this many times is dead-lettered rather than retried every cycle. Two, because one
 # failure is usually transient and an unreadable file stays unreadable.
@@ -1225,6 +1245,22 @@ def ingest_cycle(services: Services, documents_root: Path, manifest: Manifest,
         result.chunks_removed += previous_chunks
         print(f"  removed {relpath}  ({previous_chunks} chunks)")
 
+    # **Two phases rather than one loop, and the split is where the speed-up comes from.**
+    #
+    # Phase one walks the documents, decides what needs ingesting from the manifest, and prepares each one —
+    # parse, chunk, embed — across a pool. `ingest_document` is the whole of that work already, so nothing in
+    # it changes; it is simply called from several threads instead of one.
+    #
+    # Phase two writes what came back, on the main thread, in a single stream. **That is deliberate rather
+    # than leftover.** Writes are two percent of the wall clock, so serialising them costs nothing, and they
+    # are the part that touches shared state: the manifest's Postgres connection, the near-duplicate scan that
+    # reads rows other documents wrote, and the counters this cycle reports. Concurrency there would buy two
+    # percent and put the bookkeeping in a race.
+    #
+    # **A failure stays attached to its own document**, which is the property worth protecting. A document
+    # that cannot be parsed or embedded fails as a unit and is dead-lettered as a unit, exactly as before;
+    # nothing about running four at once lets one document's failure mark another's.
+    to_prepare: list[tuple[Document, dict | None, str, int]] = []
     for document in present:
         record = known.get(document.relpath)
         try:
@@ -1282,75 +1318,150 @@ def ingest_cycle(services: Services, documents_root: Path, manifest: Manifest,
             print(f"  would ingest {document.relpath}  ({kind})")
             continue
 
-        print(f"  ingesting {document.relpath}  ({kind}, {size} bytes)")
+        # Nothing slow happens here. The document is queued with everything the write phase needs, and the
+        # preparing happens across the pool below.
+        to_prepare.append((document, record, content_sha256, size))
+
+    if dry_run or not to_prepare:
+        return result
+
+    # ------------------------------------------------------------------ phase two: a window in flight, written as it lands
+    #
+    # **The window is the whole design, and the first version of this got it wrong.** It submitted every
+    # document and collected every result before writing any of them, which held ten thousand documents'
+    # vectors in memory at once and wrote nothing for hours: a crash lost everything and the log went silent
+    # exactly when somebody would be watching it. Preparing and writing have to interleave.
+    #
+    # So at most `window` documents are in flight. As each finishes, its document is written on this thread
+    # and another is submitted. **The pool does the waiting; this thread does the recording.** That is the
+    # division the measurement asked for: parsing and embedding are 97 percent of the clock and are what
+    # benefits from overlapping, and writing is two percent and is what touches shared state.
+    #
+    # **A failure stays attached to its own document**, which concurrency could easily have destroyed. A
+    # document that cannot be parsed or embedded fails as a unit and is dead-lettered as a unit, exactly as
+    # it did when the loop was serial. Nothing here lets one document's failure be recorded against another,
+    # which is what a batch-level retry would have done.
+    window = max(1, INGEST_CONCURRENCY)
+    it = iter(to_prepare)
+
+    def submit(pool, entry):
+        document, record, content_sha256, size = entry
         timings = PhaseTimings()
-        try:
-            points, pages = ingest_document(services, document, content_sha256, timings=timings)
-            _write_started = time.monotonic()
-            if record:
-                delete_document(services, document.relpath)
-            upsert_points(services, points)
-            # The lexical arm's copy, written after the vectors so a failure part way leaves the vectors
-            # authoritative and the next cycle repairs the index rather than the other way round. Replaced
-            # rather than appended, because a document that shrank would otherwise leave rows behind that no
-            # vector point matches and that the fusion would then rank.
-            manifest.remove_chunks(document.relpath)
-            index_for_lexical(manifest, points)
-            # **The write phase ends here, and the boundary is a choice.** It covers the vector store and
-            # both lexical writes, because a document is not ingested until all three have landed. The
-            # near-duplicate scan below is a read whose cost belongs to the corpus rather than to this
-            # document, so it is deliberately outside the phase.
-            timings.write_ms += (time.monotonic() - _write_started) * 1000
-            result.timings.add(timings)
-            result.timed_documents += 1
-            print(timings_line("timing", timings, len(points)))
+        kind = "changed" if record else "new"
+        print(f"  ingesting {document.relpath}  ({kind}, {size} bytes)")
+        return pool.submit(ingest_document, services, document, content_sha256, None, timings), entry, timings
 
-            # Near-duplicates, asked after the rows are written because the comparison reads them. A pair is
-            # recorded and never acted on: two documents a client put in the same folder may be two documents,
-            # and a system that deletes one because it looks like the other is worse than one that asks.
-            for other, overlap in manifest.near_duplicates(document.relpath,
-                                                           DUPLICATE_OVERLAP_THRESHOLD):
-                print(f"    near-duplicate: {overlap:.0%} of the smaller document's chunks are shared with "
-                      f"{other}. Flagged for review rather than acted on; resolve with --supersede or "
-                      f"--distinct.")
-                result.duplicates.append((document.relpath, other, overlap))
-        except Exception as exc:  # noqa: BLE001 - one bad document must not stop the cycle
-            transient = is_transient(exc)
-            result.failed += 1
-            result.failures.append(
-                f"{document.relpath}: {type(exc).__name__}: {exc}"
-                + (" [transient, stays retryable]" if transient else ""))
-            manifest.put(document.relpath, {
-                "relpath": document.relpath, "root": document.root,
-                # The hash of the bytes that FAILED, so the dead-letter check can match them. Keeping a
-                # previous good hash here would mean a file that has never parsed correctly has no hash to
-                # match against, and would be retried forever.
-                "content_sha256": content_sha256,
-                "bytes": size, "page_count": (record or {}).get("page_count"),
-                "chunk_count": (record or {}).get("chunk_count") or 0,
-                # The count only advances for failures that are about the document. A transient one
-                # records itself so the next cycle knows to try again, and leaves the count alone.
-                "failure_count": failures if transient else failures + 1,
-                "failure_kind": "transient" if transient else "permanent",
-                "last_error": f"{type(exc).__name__}: {exc}"[:500],
-                "payload_version": (record or {}).get("payload_version") or PAYLOAD_VERSION,
-            })
-            continue
+    with ThreadPoolExecutor(max_workers=window) as pool:
+        in_flight = {}
+        for entry in itertools.islice(it, window):
+            future, entry, timings = submit(pool, entry)
+            in_flight[future] = (entry, timings)
 
-        if record:
-            result.changed += 1
-        else:
-            result.new += 1
-        result.chunks_written += len(points)
-        manifest.put(document.relpath, {
-            "relpath": document.relpath, "root": document.root,
-            "content_sha256": content_sha256, "bytes": size, "page_count": pages,
-            "chunk_count": len(points), "failure_count": 0, "failure_kind": None, "last_error": None,
-            "payload_version": PAYLOAD_VERSION,
-        })
-        print(f"    {len(points)} chunks, {pages or '?'} pages")
+        while in_flight:
+            done, _ = wait(list(in_flight), return_when=FIRST_COMPLETED)
+            for future in done:
+                (document, record, content_sha256, size), timings = in_flight.pop(future)
+                try:
+                    points, pages = future.result()
+                except Exception as exc:  # noqa: BLE001 - one bad document must not stop the cycle
+                    record_failure(result, manifest, document, record, content_sha256, size, exc)
+                else:
+                    write_document(result, manifest, services, document, record, content_sha256, size,
+                                   timings, points, pages)
+                # Top the window up, so the pool never drains while there is work queued.
+                nxt = next(it, None)
+                if nxt is not None:
+                    f, entry, t = submit(pool, nxt)
+                    in_flight[f] = (entry, t)
 
     return result
+
+
+def write_document(result: CycleResult, manifest: Manifest, services: Services, document: Document,
+                   record: dict | None, content_sha256: str, size: int, timings: PhaseTimings,
+                   points: list, pages: int | None) -> None:
+    """Write one prepared document, and record it.
+
+    **Separated from the pool so the write stays on one thread.** It is two percent of the wall clock and it
+    is the part that touches the manifest's connection, the near-duplicate scan that reads rows other
+    documents wrote, and the counters the cycle reports.
+    """
+    _write_started = time.monotonic()
+    try:
+        if record:
+            delete_document(services, document.relpath)
+        upsert_points(services, points)
+        # The lexical arm's copy, written after the vectors so a failure part way leaves the vectors
+        # authoritative and the next cycle repairs the index rather than the other way round. Replaced
+        # rather than appended, because a document that shrank would otherwise leave rows behind that no
+        # vector point matches and that the fusion would then rank.
+        manifest.remove_chunks(document.relpath)
+        index_for_lexical(manifest, points)
+    except Exception as exc:  # noqa: BLE001 - one bad document must not stop the cycle
+        record_failure(result, manifest, document, record, content_sha256, size, exc)
+        return
+
+    # **The write phase ends here, and the boundary is a choice.** It covers the vector store and both
+    # lexical writes, because a document is not ingested until all three have landed. The near-duplicate
+    # scan below is a read whose cost belongs to the corpus rather than to this document, so it is
+    # deliberately outside the phase.
+    timings.write_ms += (time.monotonic() - _write_started) * 1000
+    result.timings.add(timings)
+    result.timed_documents += 1
+    print(f"    {len(points)} chunks, {pages or '?'} pages")
+    print(timings_line("timing", timings, len(points)))
+
+    # Near-duplicates, asked after the rows are written because the comparison reads them. A pair is
+    # recorded and never acted on: two documents a client put in the same folder may be two documents,
+    # and a system that deletes one because it looks like the other is worse than one that asks.
+    #
+    # **Which pairs are found now depends on completion order rather than on sorted order.** The scan
+    # compares against rows already written, so a pair whose two documents finish out of order may be
+    # reported from the other side. The flag is the same and it is still a flag rather than an action.
+    for other, overlap in manifest.near_duplicates(document.relpath, DUPLICATE_OVERLAP_THRESHOLD):
+        print(f"    near-duplicate: {overlap:.0%} of the smaller document's chunks are shared with "
+              f"{other}. Flagged for review rather than acted on; resolve with --supersede or --distinct.")
+        result.duplicates.append((document.relpath, other, overlap))
+
+    if record:
+        result.changed += 1
+    else:
+        result.new += 1
+    result.chunks_written += len(points)
+    manifest.put(document.relpath, {
+        "relpath": document.relpath, "root": document.root,
+        "content_sha256": content_sha256, "bytes": size, "page_count": pages,
+        "chunk_count": len(points), "failure_count": 0, "failure_kind": None, "last_error": None,
+        "payload_version": PAYLOAD_VERSION,
+    })
+
+
+def record_failure(result: CycleResult, manifest: Manifest, document: Document, record: dict | None,
+                   content_sha256: str, size: int, exc: Exception) -> None:
+    """One document's failure, recorded against that document and no other."""
+    transient = is_transient(exc)
+    result.failed += 1
+    result.failures.append(
+        f"{document.relpath}: {type(exc).__name__}: {exc}"
+        + (" [transient, stays retryable]" if transient else ""))
+    failures = int((record or {}).get("failure_count") or 0)
+    manifest.put(document.relpath, {
+        "relpath": document.relpath, "root": document.root,
+        # The hash of the bytes that FAILED, so the dead-letter check can match them. Keeping a
+        # previous good hash here would mean a file that has never parsed correctly has no hash to
+        # match against, and would be retried forever.
+        "content_sha256": content_sha256,
+        "bytes": size, "page_count": (record or {}).get("page_count"),
+        "chunk_count": (record or {}).get("chunk_count") or 0,
+        # The count only advances for failures that are about the document. A transient one
+        # records itself so the next cycle knows to try again, and leaves the count alone.
+        "failure_count": failures if transient else failures + 1,
+        "failure_kind": "transient" if transient else "permanent",
+        "last_error": f"{type(exc).__name__}: {exc}"[:500],
+        "payload_version": (record or {}).get("payload_version") or PAYLOAD_VERSION,
+    })
+
+
 
 
 # --------------------------------------------------------------------------- command line
