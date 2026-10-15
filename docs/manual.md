@@ -4154,6 +4154,19 @@ displayed a fixed sentence here would be decoration, and decoration is what this
 | `notice` | what happened to the routing, when there is something to tell |
 | `kind: degraded` | the model did not answer, with the retrieved passages shown instead |
 | `kind: no_source` | nothing in the documents this session may read matched |
+| `kind: question_too_long` | the question is past the ceiling, with both numbers named |
+
+**Two of these shapes cannot be produced on a deployment like this one, and the page should say so rather than
+leave a reader hunting.** `no_source` needs retrieval to return nothing, and the retriever has no score
+threshold: it returns the top passages for any question, so three unrelated questions in the C4 panel all came
+back as ordinary answers in which the model declined in prose, never as `no_source`. `degraded` needs a model
+call to fail after the budget is spent, and the executor could not provoke one with forty concurrent requests, a
+204 KB question, or a stream held open for a minute.
+
+**What that means for the claim.** Both branches have component tests against fixed payloads, so **the rendering
+is verified and the live trigger is not.** The shapes are correct when they arrive; nothing here proves they
+arrive. A deployment with a retrieval threshold, or a provider that fails, is where those two get exercised, and
+until then this page says "handled" rather than "seen".
 
 **A degraded answer is not an error screen.** When the model will not answer, the response is the retrieved
 passages with a typed reason, at HTTP 200. Retrieval already did the expensive part and the client is entitled

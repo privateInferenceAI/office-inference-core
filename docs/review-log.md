@@ -687,3 +687,102 @@ of which any test caught because no test ran the thing a person would run.
 **Still not tested, and named so nobody assumes otherwise:** the `degraded` and `no_source` screens rendered in
 the app, Pause, Resume and Cancel on a running job, a task refused for having no permitted lane, and an
 undeclared subject refused at mint time. The executor re-run was asked to start with those.
+
+---
+
+# C4 panel — round 3, 2026-10-14, the executor re-run
+
+**The executor's first run failed and left no report.** It was re-run after rounds 1 and 2, with the brief telling
+it to work in small steps and send a partial report rather than none. It delivered, and it did the two things the
+brief asked for: it started with the four areas nobody had covered, and it re-tested every documented step rather
+than trusting the changelog.
+
+**Verdict: `NO`, six disagreements.** Five were pages that had not moved when the thing they describe did. One
+was a product decision.
+
+### The four uncovered areas, three of them now covered
+
+| Area | Result |
+|---|---|
+| an undeclared subject refused at mint | **verified** — names the subject and lists the two it knows; an unknown role lists the one it knows |
+| a task refused for having no permitted lane | **verified** — `403 no_permitted_lane` on `/ask` **and** `/jobs`, and **no job row was created** |
+| the `degraded` screen | **not reachable** — 40 concurrent requests, a 204 KB question and a minute-long stream produced zero degraded frames |
+| the `no_source` screen | **not reachable** — the retriever has no score threshold, so three unrelated questions all returned ordinary answers in which the model declined in prose |
+
+**What that leaves, stated rather than glossed.** Both shapes have component tests against fixed payloads, so
+**their rendering is verified and their live trigger is not.** The manual now says exactly that, in the section
+that lists them, instead of implying both have been seen.
+
+### The five stale pages
+
+**The tunnel connected to nothing.** Manual 13i told a reader to forward SSM to instance port 8080. The app
+publishes no host port, by design, so the tunnel attached to nothing and the browser reported a dead connection.
+Verified both halves afterwards: host port 8090 answers 200 through the relay, and `docker port app` prints
+nothing. The relay is now described as review scaffolding with the command to remove it, because a published port
+is the thing this deployment otherwise does not do.
+
+**Three quotes had gone stale.** The Activity scope sentence, the `LEFT THE BUILDING` tag that renders as `sent to
+the model`, and the receipt example, which said "Answered from 2 documents" where the live line reads "Answered
+from 4 documents of 6 read". Each was a deliberate rewording whose reasoning is in the code comment beside it,
+and the pages were not moved with the code.
+
+**And Pause, Resume and Cancel cannot appear on this build.** The manual stated them as a present feature. A C4
+job runs one step inside the request that started it, so the window is milliseconds: the executor drove a
+nine-second job, polled every 300 milliseconds, and saw them zero times. The manual says so now, and says the API
+actions work — a terminal job answers `409` naming the state — and that they are the seam C6 plugs into.
+
+### The one where the product needed a decision
+
+**The PII test was intermittent by construction.** It asserted that asking the model to repeat a reserved
+identifier produces redaction counts, and the model is not obliged to repeat it. Twelve runs: ten redactions, and
+twice a safety refusal or a bare `[1]`, so nothing reached the redactor and the assertion failed. The executor
+measured the rate rather than reporting a single failure, which is what made the cause visible.
+
+**Two claims were conflated and are now separate.** The control — no reserved identifier reaches the client — is
+asserted on every attempt and holds unconditionally. The evidence — that the redactor fired — is sought over four
+attempts, and a run where the model never echoes fails with a message naming the model. The redactor's own
+correctness is twenty-four unit tests against fixed input, because **a check whose subject is a model's choice
+measures the model**. Three consecutive clean runs after the change.
+
+### Also found by the executor, and fixed
+
+**A 204 KB question was an unhandled `500`.** The traceback was `OSError: [Errno 7] Argument list too long`: the
+prompt travelled to the audit tool as a command-line argument, so **the request that most needed a record was the
+one that could not have one**. Three faults, three fixes: the prompt goes on stdin; an oversized question is
+refused with `413 question_too_long` before the session resolves, because a size refusal is not a permission
+refusal; and a record that cannot be written now raises instead of printing to stderr and answering anyway.
+
+### What round 3 says about the rounds before it
+
+**Every finding in this round was in a document, and every one was found by running the document.** Two panels
+had read those pages and passed them. Neither had executed them in sequence, which is the only way a tunnel to a
+port nobody listens on, a test count that moved, and controls that cannot render are visible.
+
+### The lane agreement check the phase's plan named and nobody had written
+
+**Found while closing this round, not by a reviewer.** The plan lists "the lane/audit agreement assertion" as one
+of the ladder's rungs and it did not exist. `FACTS` proved that audit rows carry a lane; nothing compared a row
+to the answer it belongs to, so a response claiming `local` while the call went to a provider would have passed
+every right in the probe. It exists now as `LANE-AGREE`, and it checks three things rather than one, because
+agreement alone is satisfiable by two matching lies: the lanes match, the lane is named at all, and the recorded
+egress verdict is the one that lane implies.
+
+**Proved able to fail** by making the writer record a lane the answer does not claim: the right reported
+`answer lane='local', row lane='frontier', egress_allowed=True` and the probe exited 1. Restored, rebuilt, and
+the tree verified clean.
+
+## State at the close of round 3
+
+    api_probe 7/7          access_probe 4/4        activity_probe 8/8
+    job_probe 7/7 + 1 skipped, 8/8 with the gate runner
+    interface_probe 8/8 (LANE-AGREE added)         stream_probe 4/4
+    gate_check exit 0      gate_check --jobs exit 0
+    contract check: OK, 9 paths
+    730 passed, 2 skipped  (was 727)
+    app: 57 unit, 12 integration (three clean runs), 10 browser
+    a 204 KB question: 413 question_too_long
+    a session id from an audit row: 401
+
+**What remains unverified, and it is one thing.** The `degraded` and `no_source` screens have never been rendered
+by this deployment, because nothing here produces those shapes. Their rendering is covered by component tests and
+their trigger is not. That is the honest limit of this phase's evidence.
