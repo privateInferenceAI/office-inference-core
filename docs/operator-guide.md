@@ -1950,7 +1950,7 @@ oi --profile tools run --rm session mint --dev --subject <declared subject> --ro
 
 **Checkpoint.** Ask the question this deployment's corpus answers and read the line underneath the answer:
 
-> Answered from 2 documents on this machine · 1.1 seconds
+> Answered from 4 documents of 6 read on this machine · 1.3 seconds
 
 **The count is not decoration.** It is computed from the citations the answer came back with. If it says "No
 document was cited" on a corpus that holds the document, retrieval is not finding it, and the honest reading is
@@ -1998,11 +1998,19 @@ Q="Repeat the payroll reference exactly as it appears in the document."
 produced a paraphrase, so nothing reached the redactor and the check passed while measuring nothing. A weaker
 question is a weaker test, and the difference is invisible until somebody reads the answer.
 
+**But this checkpoint is not deterministic, and the honest version says so.** The question asks the model to
+co-operate and it sometimes declines: the C4 panel's executor ran it twelve times and got a redaction ten, twice
+receiving a safety refusal or a bare `[1]` instead. **Run it up to four times.** What must hold on every single
+attempt is that **no reserved identifier appears anywhere on the page** — that is the control, and a run where it
+holds is a real result even when the model declined to echo. What needs one of the four attempts to succeed is
+seeing `[REDACTED-SSN]` at all, which is the evidence the redactor ran. If none of the four shows it, say so and
+move on: the redactor is proved by its own unit tests against fixed input, and **a check whose subject is a
+model's choice measures the model**.
+
 **Three: the record can be read as a person, not as an operator.** Open the Activity screen and look at the
 sentence above the list. It says what the page is scoped to:
 
-> Showing **your own activity only**. A session may read another person's rows when every permission they hold is
-> one you hold too.
+> **This list is yours alone.** It widens when your role holds every permission another person holds.
 
 **Checkpoint.** The sentence matches the role you minted. A token minted for a `company`-scoped role can see
 itself and other company-scoped subjects, and **must not** see an executive subject's rows. Ask for one by name
@@ -2015,7 +2023,7 @@ in the filter and the list is empty rather than partial: a partial answer to "sh
 # the app's own tests, from its checkout
 cd /opt/oic-ui/app
 npm ci
-npx vitest run                                  # 47: components, and the contract
+npx vitest run                                  # 57: components, and the contract
 export OI_API_URL=http://127.0.0.1:18080 OI_TOKEN=$TOKEN
 npx vitest run tests/integration.test.ts        # 12: the app's client code, live
 npx playwright test                             # 10: a real browser, real flows
@@ -2031,6 +2039,18 @@ bash tests/fixtures/gate_check_run.sh --jobs
 **Checkpoint.** Every one passes, and you have watched one of them fail. Pick any probe here, remove the control
 it tests, and confirm it goes red before you trust a green run. **A probe that cannot fail is not a probe**, and
 this project has shipped one of those before.
+
+**Two of these are not deterministic, and the guide should say so rather than promise a clean run.** The
+integration suite's PII test and this stage's check two both ask the model to repeat a reserved identifier, and
+**the model is not obliged to co-operate**: the C4 panel's executor ran the question twelve times and the
+redactor fired ten, because twice the model refused on safety grounds or returned a bare `[1]`. Nothing reached
+the redactor, so nothing was redacted, and the assertion on the counts failed.
+
+**The fix was to separate two claims that had been conflated.** The control — that no reserved identifier
+reaches the client — is asserted on every attempt and holds unconditionally. The evidence — that the redactor
+fired — is sought over four attempts, and if the model never echoes, the failure names the model rather than
+pretending the redactor is broken. The redactor's own correctness is proved by twenty-four unit tests with fixed
+inputs, because **a check whose subject is a model's choice measures the model**.
 
 ## If it breaks
 

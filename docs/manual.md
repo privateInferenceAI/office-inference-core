@@ -4071,9 +4071,24 @@ the debug port this project has already paid for once. To look at it from a work
 SSM rather than opening anything:
 
 ```
+# On the box: relay the app's container port to the host loopback. It publishes nothing itself.
+docker run -d --name app-relay --network ai-net -p 127.0.0.1:8090:8090 alpine/socat \
+  -d -d TCP-LISTEN:8090,fork,reuseaddr TCP:app:8080
+
+# Then forward the port the relay is on, from wherever you administer AWS.
 aws --profile oi-credits ssm start-session --target <instance-id> \
   --document-name AWS-StartPortForwardingSession \
-  --parameters '{"portNumber":["8080"],"localPortNumber":["18080"]}'
+  --parameters '{"portNumber":["8090"],"localPortNumber":["18080"]}'
+```
+
+**The forward has to name a port the instance actually listens on, and that is not the app's own.** The app has
+no published port by design, so `SSM` forwarding to 8080 connects to nothing and the browser reports a dead
+tunnel. The relay exists to be the listening port, and **it is review scaffolding rather than part of the
+deployment**: remove it when you have finished looking, because a published port is the thing this deployment
+otherwise does not do.
+
+```
+docker rm -f app-relay
 ```
 
 **What it talks to.** The assistant API, on the internal network, and nothing else. It holds no model key and
@@ -4122,7 +4137,7 @@ Type a question, press Enter. The answer arrives while it is written rather than
 **Under every answer is one line, and it is the point of the product:**
 
 ```
-Answered from 2 documents on this machine · 1.1 seconds
+Answered from 4 documents of 6 read on this machine · 1.3 seconds
 ```
 
 That sentence is a claim about the deployment, and it is computed from the response rather than written by
@@ -4161,7 +4176,15 @@ declared permission somebody approved rather than something the interface decide
 
 **A job is watched, not waited for.** It has a state, a list of attempts and a result. Every attempt appears
 whether it worked or not, because a record that kept only the success would hide the retries the client is
-paying for. Pause, Resume and Cancel appear while the job is not finished, and a cancelled job keeps its rows.
+paying for.
+
+**Pause, Resume and Cancel exist in the API and do not appear in this app, and that is a fact about this phase
+rather than a defect.** A C4 job runs one step inside the request that started it, so by the time the POST
+returns the job is already finished and the screen has nothing to pause. The controls render only while a job is
+not terminal, which on this build is a window of milliseconds. The C4 panel's executor drove a nine-second job
+and polled every 300 milliseconds: they were visible zero times. **The API actions work** — sending one to a
+finished job answers `409` naming the state it could not leave — and they are the seam C6's multi-step executor
+plugs into. A cancelled job keeps its rows, and that part is worth holding on to when the executor arrives.
 
 **A refusal here is the boundary.** A task that no permitted lane can run is refused before the job exists, so a
 person learns that from a message rather than by watching a job fail.
@@ -4174,8 +4197,7 @@ row's columns and its payload.
 **The scope is stated, and that is not decoration.** The API returns which actors a page covered, and the screen
 says so:
 
-> Showing **your own activity only**. A session may read another person's rows when every permission they hold is
-> one you hold too, so this list widens with the role you were given.
+> **This list is yours alone.** It widens when your role holds every permission another person holds.
 
 A screen that showed a subset of the record without saying so would look like the whole record, and *the record
 is complete* is exactly the claim at stake.
@@ -4183,7 +4205,7 @@ is complete* is exactly the claim at stake.
 **Reading the record is itself recorded**, so an auditor asking who looked at the chain can be answered. That
 row appears in this screen, and it is meant to be visible.
 
-**A `LEFT THE BUILDING` tag appears on a row whose call was permitted to leave.** This is per row and it is
+**A `sent to the model` tag appears on a row whose call was permitted to leave.** This is per row and it is
 data rather than a permanent indicator: on a cloud deployment every model call leaves, so a chip that said so on
 every answer would be a warning nobody reads. The office build is where a permanent residency indicator earns
 its place, and the markup for it is kept in `oic-ui/mock/ask.html` with the reasoning.
