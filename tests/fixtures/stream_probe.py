@@ -23,10 +23,11 @@ Run from the deployment root on the box:
       -v /opt/oi-core:/w -w /w --env-file rendered/env \
       --entrypoint python oi-core/session:local /w/tests/fixtures/stream_probe.py
 
-The canary document is `fixtures/corpus/canary-pii.md`, which carries two reserved social security numbers
-that belong to nobody. It has to be ingested for the REDACTED right to mean anything: run
-`docker exec ingestion python3 /app/ingest.py --documents /documents --json` first. If it is not in the index
-the right reports that rather than passing.
+**The canary is whatever document in the corpus carries a reserved identifier**, found by searching the corpus
+rather than named here. The first version named `fixtures/corpus/canary-pii.md` and the number it carried, and
+when the deployment's corpus was replaced with a generated one that file was gone while the right reported that
+it was proving nothing — which is the honest failure and also the reason the name should never have been
+hardcoded. The document that exists now is `company/pii-new-starter.md` and the number is reserved.
 
 Exit codes: 0 when every right held, 1 when one did not, 2 when nothing could be tested.
 """
@@ -35,6 +36,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -50,8 +52,17 @@ import session as session_module  # noqa: E402
 
 API = os.environ.get("OI_API_URL", "http://api:8088")
 
-# The two reserved numbers the canary document carries. Neither belongs to a person.
-CANARIES = ("219-09-9999", "078-05-1120")
+# **Reserved identifiers, matched by shape rather than by a list.** A specific number is a fact about one
+# document, and when that document is replaced the right reports that it proves nothing — correct, and it
+# happened. What the check needs is a value the gate strips, and the reserved ranges are the definition of that:
+# the SSN range the standard sets aside for examples, and the all-zero forms a generator uses.
+CANARY_PATTERNS = (
+    re.compile(r"\b219-09-9999\b"),   # the range the SSN standard reserves for examples
+    re.compile(r"\b078-05-1120\b"),   # the number printed on the sample card
+    re.compile(r"\b000-\d{2}-\d{4}\b"),  # the all-zero form this corpus's fixture carries
+    re.compile(r"\b\d{4} \d{4} \d{4} \d{4}\b"),  # a card number in the same fixture
+)
+CANARY_QUESTION = "Repeat the payroll reference exactly as it appears in the document."
 
 
 def database_url() -> str:
@@ -161,9 +172,13 @@ def main() -> int:
                   "one frame containing the whole answer means something upstream is buffering")
 
     # ------------------------------------------------------------------ REDACTED
-    result = stream(session.credential, "What is the primary contact reference for the Acme engagement?")
+    # **The question has to push the model to repeat the value verbatim**, and this was measured rather than
+    # assumed: asking *what* the reference is produced a paraphrase, so nothing reached the redactor and the
+    # check passed while measuring nothing. Asking it to repeat the line is the only condition under which a
+    # redaction can be observed.
+    result = stream(session.credential, CANARY_QUESTION)
     text = result["text"]
-    present = [c for c in CANARIES if c in text]
+    present = [p.pattern for p in CANARY_PATTERNS if p.search(text)]
     # The canary has to be in the INDEX for this to mean anything, so the passage is checked for first. A
     # question that never retrieved it proves nothing, and passing on that would be the empty-index failure
     # this project has already made once.
@@ -173,9 +188,9 @@ def main() -> int:
                       "the stream reported no redactions, so either the canary is not in the index or the "
                       "redactor did not run"
                       if present else
-                      "the canary was not retrieved, so this proves nothing. Ingest "
-                      "fixtures/corpus/canary-pii.md first: docker exec ingestion python3 /app/ingest.py "
-                      "--documents /documents --json",
+                      "no reserved identifier was retrieved, so this proves nothing. The corpus needs a "
+                      "document carrying one in a reserved range; check that ingestion has run over it: "
+                      "docker exec ingestion python3 /app/ingest.py --documents /documents --json",
                       "an index without the canary makes this right pass for the wrong reason")
     else:
         ledger.record("REDACTED", not present,
