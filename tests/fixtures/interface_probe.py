@@ -203,8 +203,14 @@ def main() -> int:
                   "an escalation the gate refuses is announced rather than silently ignored")
 
     # STREAM: a first token before the last, and a total on the client clock.
+    #
+    # **A frame count is not the property.** This asserted `frames > 3`, which is a statement about how the
+    # model chunked its answer on the day it was written: a short reply arrives in three frames and the right
+    # went red on a service that was streaming correctly. What the right is for is that the answer arrives in
+    # pieces and that the first piece precedes the last, so it asserts that. `stream_probe`'s INCREMENTAL right
+    # is where the count and the arrival times belong, because it measures them properly.
     frames, first_delta, done = stream(session.credential)
-    streamed = frames > 3 and first_delta is not None and (done.get("total_ms") or 0) > 0
+    streamed = frames >= 2 and first_delta is not None and (done.get("total_ms") or 0) > 0
     ledger.record("STREAM", bool(streamed),
                   "%d frame(s), first delta at %sms, total %sms"
                   % (frames, round((first_delta or 0) * 1000), done.get("total_ms")),
