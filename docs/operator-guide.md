@@ -1869,17 +1869,7 @@ sees. This is the product. It is also the stage where the temptation appears: th
 correct without being connected to anything, and a screenshot cannot tell the difference. So this stage ends with
 three checks that a screenshot cannot pass.
 
-## What C4 added, in the order it matters
-
-| What | Why it exists | Where it is proved |
-|---|---|---|
-| **A contract a second repository builds against** | `/openapi.json` listed three URLs and no response bodies. A client built on that is built on prose | `scripts/fetch_openapi.py --check`, against the running service |
-| **`GET /activity`** | The chain's only reader was a CLI behind an SSH session. The screen that makes the product auditable had no endpoint | `activity_probe.py`, eight rights |
-| **Jobs, with a replayable event log** | Work that can be watched, stopped and found afterwards. Progress is a numbered table, not a socket, so a client that closed the tab catches up | `job_probe.py`, eight rights |
-| **The task registry in the manifest** | Six task names were hardcoded in Python, so no client could discover, label or describe them | `GET /tasks`, and the app's Do screen |
-| **The app itself** | Ask, Do, Activity. It holds no model key and no database credential | the browser suite, ten tests |
-
-## 1. Put the app's checkout where the build can see it
+## 13i.1. Put the app's checkout where the build can see it
 
 The app is a separate repository and the build needs both trees. `OI_UI_ROOT` names the app's checkout; a
 deployment that lays the two out differently sets it differently rather than failing with a missing file.
@@ -1903,7 +1893,7 @@ docker run --rm --network ai-net -v /opt/oic-ui:/w:ro -w /w --entrypoint bash \
 It prints the paths and exits non-zero when they differ. **A copy nobody compares drifts**, and the drift shows
 up as a screen that renders nothing.
 
-## 2. Build it, and note what the build does not contain
+## 13i.2. Build it, and note what the build does not contain
 
 ```
 cd /opt/oi-core
@@ -1928,7 +1918,7 @@ of the Python base image, and reported one finding on a correct deployment. A ch
 check people learn to ignore. The allowlist above has no false positives on this image, and it catches a
 variable nobody intended rather than only the ones somebody thought to name.
 
-## 3. Look at it with your own eyes
+## 13i.3. Look at it with your own eyes
 
 ```
 # on the box: publish nothing, relay to the loopback temporarily
@@ -1971,7 +1961,7 @@ otherwise does not do:
 docker rm -f app-relay
 ```
 
-## 4. The three checks a screenshot cannot pass
+## 13i.4. The three checks a screenshot cannot pass
 
 This is the part of the stage that matters, and the part that gets skipped when a phase runs late.
 
@@ -2025,7 +2015,7 @@ itself and other company-scoped subjects, and **must not** see an executive subj
 in the filter and the list is empty rather than partial: a partial answer to "show me Dana's activity" reads as
 "Dana did nothing".
 
-## 5. The suite, in the order it runs
+## 13i.5. The suite, in the order it runs
 
 ```
 # the app's own tests, from its checkout
@@ -2060,7 +2050,7 @@ fired — is sought over four attempts, and if the model never echoes, the failu
 pretending the redactor is broken. The redactor's own correctness is proved by twenty-four unit tests with fixed
 inputs, because **a check whose subject is a model's choice measures the model**.
 
-## If it breaks
+## 13i.6. If it breaks, and what each symptom means
 
 - **The page loads and everything says the service is unreachable.** The proxy is not forwarding. The app must
   be on `ai-net` and `OI_API_URL` must name the API's base *including* `/api`. Getting that wrong is a 404 that a
@@ -2074,6 +2064,16 @@ inputs, because **a check whose subject is a model's choice measures the model**
   indexed, or its access label is one no role can read. **A folder under `documents/` whose name is not a
   declared root is indexed and unreachable**, and nothing reports it. That is the easiest way to lose an
   afternoon.
+
+## 13i.7. What C4 added, in the order it matters
+
+| What | Why it exists | Where it is proved |
+|---|---|---|
+| **A contract a second repository builds against** | `/openapi.json` listed three URLs and no response bodies. A client built on that is built on prose | `scripts/fetch_openapi.py --check`, against the running service |
+| **`GET /activity`** | The chain's only reader was a CLI behind an SSH session. The screen that makes the product auditable had no endpoint | `activity_probe.py`, eight rights |
+| **Jobs, with a replayable event log** | Work that can be watched, stopped and found afterwards. Progress is a numbered table, not a socket, so a client that closed the tab catches up | `job_probe.py`, eight rights |
+| **The task registry in the manifest** | Six task names were hardcoded in Python, so no client could discover, label or describe them | `GET /tasks`, and the app's Do screen |
+| **The app itself** | Ask, Do, Activity. It holds no model key and no database credential | the browser suite, ten tests |
 
 # Stage 14: onboarding a second client's corpus
 

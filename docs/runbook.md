@@ -3935,7 +3935,7 @@ payload is already the content-mode-governed form**: `content.classes` decides w
 a hash, redacted, or in full, and this endpoint reads what was stored rather than deciding for itself. It
 does not widen what a row contains.
 
-### The endpoint
+### 5.1b.i The endpoint, and what each parameter filters
 
 | Method | Path | What it does |
 |---|---|---|
@@ -3955,7 +3955,7 @@ does not widen what a row contains.
 learn that a row exists by asking for it and reading the difference between "no" and "not there". That is the
 same position the 403 wording already takes.
 
-### Run it
+### 5.1b.ii Run it, and read the output
 
 ```
 cd /opt/oi-core
