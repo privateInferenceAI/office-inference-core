@@ -1,5 +1,19 @@
 # Handover: building C4, the client app
 
+> **Status, 2026-10-14.** C4 is built. The app runs as a container on the deployment with Ask, Do and Activity;
+> the API publishes nine paths with a contract a second repository builds against; eight register rows carry
+> their evidence; `docs/runbook.md` phase C4 has the steps with the probe output pasted from real runs, and
+> `docs/manual.md` 13i and `docs/operator-guide.md` stage 13i are the pages a person follows. **The panel has
+> run one round and has not reported at the time of writing**, so verdicts are not recorded yet.
+>
+> **The two scope decisions, taken rather than left open.** Do was built with a one-step executor rather than
+> left as a placeholder, because the interface for the client's own example — *work on this for thirty minutes,
+> fail four times, change approach on the fifth* — is the product and retrofitting it later would rewrite the
+> interaction layer. Review was not built: approvals need C5 and a queue with nothing in it teaches a client the
+> feature is broken. The data-lane indicator was parked out of the cloud build with the reasoning and the markup
+> kept in `oic-ui/mock/ask.html`, since on a cloud deployment every answer leaves and a chip that says so on
+> every answer is a warning nobody reads.
+
 **Read this before the first line of code.** It is what the C3 handoff was: what the phase is, how work happens
 here, how it gets tested, and what will go wrong if nobody says it first. Everything in it comes from the four
 phases already built, and section 9 is the part that cost the most to learn.
@@ -27,6 +41,12 @@ phase. If a task in C4 starts to look like the manifest editor, it belongs somew
 **The register has no C4 rows.** C1, C2, C3, C7 and C8 have items; C4 has none, so the first job is to write
 them. Propose between five and eight, each with a test that could fail, and put them in `docs/requirements.yaml`
 before building rather than after. A requirement written at the end describes what happened.
+
+**As built, 2026-10-14: eight rows, written at the end rather than the beginning, and the register says so.**
+`UI-ASK-001`, `UI-REDACT-001`, `UI-AUDIT-001`, `UI-SCOPE-001`, `UI-JOB-001`, `UI-BOUNDARY-001`,
+`UI-CONTRACT-001` and `UI-ACCESS-001`. Each carries the evidence that exists, and the note on the group records
+plainly that they describe what was built rather than what was intended. This paragraph is here because a
+handover that still says "no C4 rows" is a handover that sends the next reader looking for them.
 
 The four screens and the two indicators are the natural set. Whatever the wording, each one needs a way to be
 wrong: *the answer carries its citations*, not *the Ask screen works*.
