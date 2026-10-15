@@ -519,3 +519,30 @@ request came back `401 no_session` and looked like a session bug.
     7 services, no probe containers left behind
 
 **The five C3 register items have their evidence.** Whether to close them is a decision above this log.
+
+---
+
+# C4 panel — round 1, 2026-10-14
+
+**Three reviewers, each asked a different question, each re-testing from the manual rather than from a diff.**
+Every one was told plainly that a clean round is a real result and that a finding manufactured to look useful is
+worse than none, because a reviewer who always finds something is a reviewer whose findings stop being read.
+
+| Reviewer | What it did | The question it answered |
+|---|---|---|
+| **executor** | used the app from the manual and the operator guide | does it work as written |
+| **cold reader** | the manual and the app, **never the source** | would a stranger understand it |
+| **fidelity checker** | the manual's claims against the source and the running system | does the page describe what the code does |
+
+**What was different about this round.** C4 has a screen, so the panel was given a running app rather than a set
+of probes: the deployed container, reachable through a port forward, with a session token that works. The cold
+reader was told not to open a `.py` or `.ts` file, and that opening one to understand a word in the manual was
+itself the finding.
+
+**What the round was given**, so a later reader can tell what was on the table:
+
+- the app, deployed and running, at 1366x768
+- `docs/manual.md` section 13i and `docs/operator-guide.md` stage 13i
+- `docs/runbook.md` phase C4, with the probe outputs pasted from real runs
+- a corpus of 26 documents the deployment actually answers from, not the six benchmark files that were there
+
