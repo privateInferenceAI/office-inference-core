@@ -2338,10 +2338,7 @@ oi run --rm --entrypoint python eval -c "import os; print('DATABASE_URL set:', b
 The acceptance probe prints the dictionary under each verdict:
 
 ```
-docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
-  -v /opt/oi-core:/w -w /w \
-  --entrypoint python oi-core/ingestion:local \
-  /w/tests/fixtures/hybrid_acceptance.py
+bash scripts/probe.sh hybrid_acceptance.py
 ```
 
 The recorded run, against the deployed store on 2026-10-13, with the lexical index holding 1131 rows and 445
@@ -2361,11 +2358,7 @@ on a phrasing the dense arm happens to handle would prove nothing, which is why 
 **Reranking, and what it changed:**
 
 ```
-docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
-  -v /opt/oi-core:/w -w /w \
-  -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION=us-east-1 \
-  --entrypoint python oi-core/eval:local \
-  /w/tests/fixtures/rerank_acceptance.py
+bash scripts/probe.sh rerank_acceptance.py
 ```
 
 ```
@@ -2621,10 +2614,7 @@ there, they confirm the wrong number. The figure checks are the second half: a r
 number cannot be, and arithmetic the document itself states.
 
 ```
-docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
-  -v /opt/oi-core:/w -w /w \
-  --entrypoint python oi-core/ingestion:local \
-  /w/tests/fixtures/figures_acceptance.py
+bash scripts/probe.sh figures_acceptance.py
 ```
 
 ```
@@ -2741,10 +2731,7 @@ carries the score.
 ### Trying it on the deployment
 
 ```
-docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
-  -v /opt/oi-core:/w -w /w \
-  --entrypoint python oi-core/ingestion:local \
-  /w/tests/fixtures/citations_acceptance.py
+bash scripts/probe.sh citations_acceptance.py
 ```
 
 The probe retrieves passages for a question about the standard labour rate, prints each one with its score,
@@ -2888,18 +2875,10 @@ zero on every question.
 **See it on the deployment:**
 
 ```
-docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
-  -e ACCESS_DENIAL_MODE=counted \
-  -v /opt/oi-core:/w -w /w \
-  --entrypoint python oi-core/ingestion:local \
-  /w/tests/fixtures/acl_probe.py
+bash scripts/probe.sh acl_probe.py
 
 # and again with each policy, so the client's choice is seen rather than taken from a unit test
-docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
-  -e ACCESS_DENIAL_MODE=silent \
-  -v /opt/oi-core:/w -w /w \
-  --entrypoint python oi-core/ingestion:local \
-  /w/tests/fixtures/acl_probe.py
+bash scripts/probe.sh acl_probe.py
 ```
 
 **The `-e ACCESS_DENIAL_MODE=…` is not optional, and leaving it out is the trap this page used to fall into.**
@@ -3180,10 +3159,7 @@ makes the two findable apart without reading payload prose.
 $ python3 scripts/render_manifest.py --manifest manifests/dev-cloud.yaml
 $ oi --profile tools build session
 $ oi --profile tools run --rm session migrate
-$ docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
-    -v /opt/oi-core:/w -w /w --env-file rendered/env \
-    -e AUDIT_TOOL=/w/services/audit/audit.py \
-    --entrypoint python oi-core/eval:local /w/tests/fixtures/access_probe.py
+$ bash scripts/probe.sh access_probe.py
 ```
 
 The probe prints one line per right with the wrong path it rules out beside it, and exits non-zero if any
@@ -3519,10 +3495,7 @@ reaches back to, and a cutoff that is not what the client agreed means the polic
 though the commands above produce it:
 
 ```
-docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
-  -v /opt/oi-core:/w -w /w --env-file rendered/env \
-  --entrypoint python oi-core/retention:local \
-  /w/tests/fixtures/retention_policy_acceptance.py
+bash scripts/probe.sh retention_policy_acceptance.py
 ```
 
 Its four scenarios, and what each proves:
@@ -3731,9 +3704,7 @@ tool mints is refused for request traffic**, which is recorded rather than tidie
 ```
 $ oi --profile tools run --rm keys --provision-teams
 $ oi build api && oi up -d api
-$ docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
-    -v /opt/oi-core:/w -w /w --env-file rendered/env \
-    --entrypoint python oi-core/session:local /w/tests/fixtures/api_probe.py
+$ bash scripts/probe.sh api_probe.py
 ```
 
 Seven rights, each printed with the wrong path it rules out: `ANSWER`, `CITED`, `SCOPED`, `FORGED`, `NO-SESS`,
@@ -3848,9 +3819,7 @@ reaches a model, and streaming is best-effort for anything the model introduces 
     cp fixtures/corpus/canary-pii.md documents/company/
     docker exec ingestion python3 /app/ingest.py --documents /documents --json
 
-    docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
-      -v /opt/oi-core:/w -w /w --env-file rendered/env \
-      --entrypoint python oi-core/session:local /w/tests/fixtures/stream_probe.py
+    bash scripts/probe.sh stream_probe.py
 
 Four rights: `END-TO-END`, `TTFT`, `INCREMENTAL` and `REDACTED`. The last one reads **the raw bytes the client
 received** rather than a reassembled answer, because an answer assembled from a stream is exactly what an
@@ -4010,9 +3979,7 @@ them visible to the deadline and none counted in the record.
     cd /opt/oi-core
     alias oi='docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env'
     oi build api && oi up -d api
-    docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
-      -v /opt/oi-core:/w -w /w --env-file rendered/env \
-      --entrypoint python oi-core/session:local /w/tests/fixtures/interface_probe.py
+    bash scripts/probe.sh interface_probe.py
 
 Seven rights, and each one is a sentence this page told you to expect. If the page and the service disagree,
 that probe fails, which is the point of it.

@@ -755,10 +755,7 @@ number with a real citation, which looks exactly like a right one.
 ## 7a. The five outcomes
 
 ```
-docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
-  -v /opt/oi-core:/w -w /w \
-  --entrypoint python oi-core/ingestion:local \
-  /w/tests/fixtures/citations_acceptance.py
+bash scripts/probe.sh citations_acceptance.py
 ```
 
 The probe builds an answer containing four kinds of sentence and prints a verdict for each. The four
@@ -883,11 +880,7 @@ to a typo.
 ## 8a. Prove the filter, don't assume it
 
 ```
-docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
-  -e ACCESS_DENIAL_MODE=counted \
-  -v /opt/oi-core:/w -w /w \
-  --entrypoint python oi-core/ingestion:local \
-  /w/tests/fixtures/acl_probe.py
+bash scripts/probe.sh acl_probe.py
 ```
 
 ```
@@ -2029,10 +2022,8 @@ npx playwright test                             # 10: a real browser, real flows
 
 # the core's probes, from the deployment
 cd /opt/oi-core
-docker run --rm --network ai-net --user "$(id -u):$(id -g)" -v /opt/oi-core:/w -w /w \
-  --env-file rendered/env --entrypoint python oi-core/session:local /w/tests/fixtures/activity_probe.py
-docker run --rm --network ai-net --user "$(id -u):$(id -g)" -v /opt/oi-core:/w -w /w \
-  --env-file rendered/env --entrypoint python oi-core/session:local /w/tests/fixtures/job_probe.py
+bash scripts/probe.sh activity_probe.py
+bash scripts/probe.sh job_probe.py
 bash tests/fixtures/gate_check_run.sh
 bash tests/fixtures/gate_check_run.sh --jobs
 ```

@@ -3034,10 +3034,7 @@ session asking for something it does not hold. That path is what this phase is f
     oi --profile tools run --rm session mint --dev --subject nobody@client.example --role staff
 
     # The four rights, and the wrong path beside each.
-    docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
-      -v /opt/oi-core:/w -w /w --env-file rendered/env \
-      -e AUDIT_TOOL=/w/services/audit/audit.py \
-      --entrypoint python oi-core/eval:local /w/tests/fixtures/access_probe.py
+    bash scripts/probe.sh access_probe.py
 
     # The refusal, read back out of the chain rather than out of the probe's own report.
     oi --profile tools run --rm audit list --type access | head
@@ -3171,9 +3168,7 @@ better for secrecy.
 
     # A session, then a question through the API.
     oi --profile tools run --rm session mint --dev --subject probe-staff@officeinference.com --role viewer
-    docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
-      -v /opt/oi-core:/w -w /w --env-file rendered/env \
-      --entrypoint python oi-core/eval:local /w/tests/fixtures/api_probe.py
+    bash scripts/probe.sh api_probe.py
 
 **The result, 2026-10-14, on the live deployment.** Six rights held and one measured, from the probe as written:
 
@@ -3318,9 +3313,7 @@ Four things go in from the start because each is invisible to a load test and ob
     cd /opt/oi-core
     alias oi='docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env'
     oi build api && oi up -d api
-    docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
-      -v /opt/oi-core:/w -w /w --env-file rendered/env \
-      --entrypoint python oi-core/session:local /w/tests/fixtures/stream_probe.py
+    bash scripts/probe.sh stream_probe.py
 
 **The result, 2026-10-14, on the live deployment.** Four rights held, and the honest one is `REDACTED`:
 
@@ -3532,9 +3525,7 @@ this document.
     cd /opt/oi-core
     alias oi='docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env'
     oi build api && oi up -d api
-    docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
-      -v /opt/oi-core:/w -w /w --env-file rendered/env \
-      --entrypoint python oi-core/session:local /w/tests/fixtures/degrade_probe.py
+    bash scripts/probe.sh degrade_probe.py
 
 **The result, 2026-10-14, on the live deployment.** A terminal provider failure was forced by putting the
 role's spend over its ceiling, and the answer that came back was the degraded one:
@@ -3665,9 +3656,7 @@ what its criteria ask.
     cd /opt/oi-core
     alias oi='docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env'
     oi build api && oi up -d api
-    docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
-      -v /opt/oi-core:/w -w /w --env-file rendered/env \
-      --entrypoint python oi-core/session:local /w/tests/fixtures/route_probe.py
+    bash scripts/probe.sh route_probe.py
 
 **The result, 2026-10-14, on the live deployment.** All four cases behave, and the streaming path that had no
 retry now has one:
@@ -3776,6 +3765,14 @@ being empty is the evidence rather than the answer being bad.
   rather than implying the swap was validated.
 ## Phase C4 — Client app
 
+**Probes run through `bash scripts/probe.sh <probe.py>`, from the deployment root.** The long `docker run`
+form it replaces was wrong for one probe in a way that mattered: the session image has no `/app/audit.py`,
+because the compose service mounts it, so `access_probe` reported that a refusal could not be recorded and the
+deployment looked like it had no working audit chain. The runner takes the same service the deployment uses,
+so the mounts and variables come from one place. It is also shorter than the line it replaces, which is the
+only kind of fix that survives being copied.
+
+
 The interface a business actually uses. Ask a question, and get an answer that shows where it came from.
 Start work, and watch it happen. Read back what happened afterwards.
 
@@ -3877,9 +3874,7 @@ the streaming one. Each passed every probe, because each probe tested the endpoi
 
 ```
 cd /opt/oi-core
-docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
-  -v /opt/oi-core:/w -w /w --env-file rendered/env \
-  --entrypoint python oi-core/session:local /w/tests/fixtures/job_probe.py
+bash scripts/probe.sh job_probe.py
 ```
 
 Expected:
@@ -3964,9 +3959,7 @@ same position the 403 wording already takes.
 
 ```
 cd /opt/oi-core
-docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
-  -v /opt/oi-core:/w -w /w --env-file rendered/env \
-  --entrypoint python oi-core/session:local /w/tests/fixtures/activity_probe.py
+bash scripts/probe.sh activity_probe.py
 ```
 
 Expected:
@@ -4231,14 +4224,10 @@ cheaper than the error.
     alias oi='docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env'
 
     # A probe that mints a session:
-    docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
-      -v /opt/oi-core:/w -w /w --env-file rendered/env \
-      --entrypoint python oi-core/session:local /w/tests/fixtures/interface_probe.py
+    bash scripts/probe.sh interface_probe.py
 
     # A probe that reads the vector store:
-    docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
-      -v /opt/oi-core:/w -w /w --env-file rendered/env \
-      --entrypoint python oi-core/ingestion:local /w/tests/fixtures/acl_probe.py
+    bash scripts/probe.sh acl_probe.py
 
 **A probe that passes under one image and fails under another is a harness problem until proven otherwise.**
 
