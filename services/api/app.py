@@ -522,7 +522,7 @@ async def activity(request: Request):
           {"stage": "activity_read", "returned": len(page.events), "filters": {
               k: v for k, v in query.items() if k in ("limit", "since", "type", "actor", "outcome", "job",
                                                       "request")},
-           "scope_actors": page.scope.get("actors", []), "session_id": session.session_id})
+           "scope_actors": page.scope.get("actors", [])})
     return JSONResponse(page.to_dict(), status_code=200)
 
 
@@ -574,8 +574,7 @@ async def create_job(request: Request):
     if supplied:
         audit("access", session.subject, str(body.get(supplied)), "denied",
               {"supplied_field": supplied, "session_role": session.role,
-               "session_id": session.session_id,
-               "refusal": "a request may not supply its own authority", "endpoint": "/jobs"})
+                              "refusal": "a request may not supply its own authority", "endpoint": "/jobs"})
         return JSONResponse(
             {"error": "Permission denied on this resource (or it might not exist). A role comes from an "
                       "authenticated session and never from a request field.",
@@ -593,7 +592,7 @@ async def create_job(request: Request):
         # row exists so an operator can see what was asked for.
         audit("access", session.subject, session.role, "denied",
               {"stage": "job", "reason": "task_not_declared", "task": task,
-               "declared": sorted(declared), "session_id": session.session_id}, tool=task)
+               "declared": sorted(declared)}, tool=task)
         return JSONResponse(
             {"error": f"This deployment does not declare a task called '{task}'.",
              "kind": "no_such_task", "declared": sorted(declared)}, status_code=403)
@@ -715,7 +714,7 @@ async def control_job(job_id: str, action: str, request: Request):
 
     audit("tool_call", session.subject, session.role, "ok",
           {"stage": "job", "job_id": job.job_id, "task": job.task, "state": job.state, "action": action,
-           "session_id": session.session_id}, tool=job.task)
+           }, tool=job.task)
     return JSONResponse(job.to_dict(include_result=True), status_code=200)
 
 
@@ -884,7 +883,7 @@ async def ask_stream(request: Request):
         except session_module.SessionError:
             audit("access", session.subject, str(body.get(supplied)), "denied",
                   {"supplied_field": supplied, "session_role": session.role,
-                   "session_id": session.session_id, "endpoint": "/ask/stream"})
+                   "endpoint": "/ask/stream"})
             return JSONResponse(
                 {"error": "Permission denied on this resource (or it might not exist). A role comes from an "
                           "authenticated session and never from a request field.",
@@ -927,7 +926,7 @@ async def ask_stream(request: Request):
               {"stage": "routing", "reason": stream_decision.reason,
                "lane": stream_decision.lane, "data_class": stream_data_class,
                "escalation_requested": stream_decision.escalation_requested,
-               "session_id": session.session_id},
+               },
               data_class=stream_data_class, egress_allowed=False)
         return JSONResponse(
             {"error": "Permission denied on this resource (or it might not exist). "
@@ -941,13 +940,13 @@ async def ask_stream(request: Request):
         result = retriever.search(STATE["services"], question, permit.role, limit=PASSAGES, permit=permit)
     except Exception as exc:  # noqa: BLE001
         audit("access", session.subject, session.role, "error",
-              {"stage": "retrieval", "error": type(exc).__name__, "session_id": session.session_id})
+              {"stage": "retrieval", "error": type(exc).__name__})
         return JSONResponse({"error": f"retrieval failed: {exc}", "kind": "retrieval_failed"}, status_code=502)
 
     if not result.passages:
         audit("access", session.subject, session.role, "denied",
               {"stage": "retrieval", "reason": "no passage the session may read matched",
-               "session_id": session.session_id})
+               })
         return JSONResponse({"answer": "No document you may read answers this question.", "citations": [],
                              "kind": "no_source"}, status_code=200)
 
@@ -1122,7 +1121,7 @@ async def _frames(session, permit, model: str, question: str, result, requested_
             except Exception as exc:  # noqa: BLE001 - a redactor that cannot run must not pass text
                 audit("model_call", session.subject, session.role, "error",
                       {"stage": "redaction", "error": type(exc).__name__,
-                       "emitted_so_far": emitted, "session_id": session.session_id}, model=model)
+                       "emitted_so_far": emitted}, model=model)
                 yield frame("error", {"kind": "redaction_failed", "partial_output": emitted,
                                       "detail": "the response could not be filtered, so it was stopped "
                                                 "rather than sent unfiltered"})
@@ -1141,7 +1140,7 @@ async def _frames(session, permit, model: str, question: str, result, requested_
     audit("model_call", session.subject, session.role, "ok",
           {"stage": "ask_stream", "model": model, "deltas": deltas,
            "passages": len(result.passages), "redactions": report["redactions"],
-           "holdback": report["holdback"], "session_id": session.session_id}, model=model,
+           "holdback": report["holdback"]}, model=model,
           data_class=((STATE.get("manifest") or {}).get("access") or {}).get("data_class")
                      or "regulated",
           egress_allowed=(lane == "frontier"),

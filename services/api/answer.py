@@ -136,7 +136,7 @@ def check_boundary(*, manifest: dict, data_class: str, task: str, model_name: st
         audit("access", session.subject, session.role, "denied",
               {"stage": "routing", "reason": decision.reason, "lane": decision.lane,
                "data_class": data_class, "escalation_requested": decision.escalation_requested,
-               "session_id": session.session_id, "endpoint": endpoint},
+               "endpoint": endpoint},
               data_class=data_class, egress_allowed=False, request_id=request_id)
         raise Refused(403, {
             "error": "Permission denied on this resource (or it might not exist). This request needs a "
@@ -175,8 +175,7 @@ def prepare(*, token: str, question: str, body: dict, ctx: Context, resolve, mod
         except session_module.SessionError:
             audit("access", session.subject, str(body.get(supplied)), "denied",
                   {"supplied_field": supplied, "session_role": session.role,
-                   "session_id": session.session_id,
-                   "refusal": "a request may not supply its own authority", "endpoint": endpoint},
+                                      "refusal": "a request may not supply its own authority", "endpoint": endpoint},
                   request_id=request_id)
             # AIP-211: this says the permission was denied OR the resource might not exist. A 404 instead
             # of a 403 is worse for the operator and no better for secrecy.
@@ -197,7 +196,7 @@ def prepare(*, token: str, question: str, body: dict, ctx: Context, resolve, mod
         result = retriever.search(ctx.services, question, permit.role, limit=ctx.passages, permit=permit)
     except Exception as exc:  # noqa: BLE001 - the message is the response
         audit("access", session.subject, session.role, "error",
-              {"stage": "retrieval", "error": type(exc).__name__, "session_id": session.session_id})
+              {"stage": "retrieval", "error": type(exc).__name__})
         raise Refused(502, {"error": f"retrieval failed: {exc}", "kind": "retrieval_failed"},
                       "retrieval_failed") from exc
 
@@ -206,7 +205,7 @@ def prepare(*, token: str, question: str, body: dict, ctx: Context, resolve, mod
         # not contain the thing, which is a different fact from the service being broken.
         audit("access", session.subject, session.role, "denied",
               {"stage": "retrieval", "reason": "no passage the session may read matched",
-               "session_id": session.session_id, "roots": sorted(permit.roots)})
+               "roots": sorted(permit.roots)})
         raise Refused(200, {"answer": "No document you may read answers this question.", "citations": [],
                             "kind": "no_source", "role": session.role,
                             "roots": sorted(permit.roots)}, "no_source")
@@ -285,7 +284,7 @@ def finish(*, question: str, answer: str, session, permit, model, result, decisi
     audit("model_call", session.subject, session.role, "ok",
           {"stage": "ask", "model": model, "passages": len(result.passages),
            "supported": len(payload["supported"]), "unsupported": len(payload["unsupported"]),
-           "session_id": session.session_id, "roots": sorted(permit.roots),
+           "roots": sorted(permit.roots),
            **routing.audit_facts(decision, data_class)},
           model=model, data_class=data_class, egress_allowed=(decision.lane == "frontier"),
           redactions=report.counts, unverified_card_shapes=report.unverified_cards,
