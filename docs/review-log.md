@@ -786,3 +786,48 @@ the tree verified clean.
 **What remains unverified, and it is one thing.** The `degraded` and `no_source` screens have never been rendered
 by this deployment, because nothing here produces those shapes. Their rendering is covered by component tests and
 their trigger is not. That is the honest limit of this phase's evidence.
+
+---
+
+# C4 panel — round 4, 2026-10-14, closing the executor's findings
+
+**Two regressions, both introduced by the fixes for round 3, and both worth more than the fixes.**
+
+### The gate check was passing on a deployment that could not record a refusal
+
+Round 3 made a failed audit write raise instead of printing to stderr and carrying on. That turned
+`gate_check_run.sh` red, and the traceback was the finding: **the temporary container it spins up had no audit
+tool**, so every refusal it produced was unrecorded. Two mounts were missing, both of which the compose service
+has — `services/audit/audit.py` and the statement verifier it looks for beside itself.
+
+**That probe exists to prove a refusal is a control rather than a message, and it was measuring a deployment
+where the record could not be written at all.** It reported `PASSED` in that state for as long as it existed.
+What found it was making a silent failure loud: **the change that broke this probe is the change that proved it
+was hollow.** It passes now with a working record, which is a stronger result than the one it used to report.
+
+### The contract lagged the service by the status code I had just added
+
+Adding a `413` to `/ask` is a contract change and the committed document did not have it, so the checker
+reported nine paths whose contents differ. Regenerated from the running service rather than hand-edited, then
+copied into the app's checkout, because the app builds against that copy.
+
+**This one is ordinary and that is the point.** A response added to an endpoint and not to the contract is the
+most predictable drift there is, and the project has a check for it that failed exactly as designed. Worth
+recording because it is the first time in this phase that a check caught something before a reviewer did.
+
+### State at the close of round 4
+
+    api_probe 7/7          access_probe 4/4        activity_probe 8/8
+    job_probe 7/7 + 1 skipped, 8/8 with the gate runner
+    interface_probe 8/8    stream_probe 4/4
+    gate_check exit 0      gate_check --jobs exit 0      (both with a working audit tool)
+    contract check: OK, 9 paths, 22 models
+    730 passed, 2 skipped
+    app: 69 unit and component, 12 integration live, 10 browser against the deployed app
+    a 204 KB question -> 413 question_too_long
+    a session id taken from an audit row -> 401
+    deployed: api and app running, no restarts, contract matching
+
+**The one thing this phase never saw, stated once more so it is not mistaken for coverage:** the `degraded` and
+`no_source` shapes have never been produced by this deployment. Their rendering has component tests; their
+trigger has nothing. The manual says so in the section that lists them.
