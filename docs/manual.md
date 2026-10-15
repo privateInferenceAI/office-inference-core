@@ -61,6 +61,10 @@ of 13 because they are operations like the rest of it.
 13g. The assistant API
 13h. Routing, and what happens when the model will not answer
 
+**Part 3c, the client app (phase C4)**
+
+13i. The client app
+
 **Part 4, changing things**
 16. The manifest, field by field
 17. Adding a role
@@ -4089,6 +4093,171 @@ written into the page as though it worked.
   every commit, so a routing change that nobody looked at fails the build and prints what moved.
 - **Different thresholds** are environment variables, and the two lanes have separate ones. Deriving the local
   numbers from the llama.cpp server's own counters is the work that is still owed.
+## 13i. The client app
+
+**What it is for.** The interface a person in a business actually uses. Ask a question and get an answer with
+its sources. Start a piece of work and watch it happen. Read back what happened afterwards.
+
+**Where it runs.** Its own container on the internal network, port 8080, **with no published port on purpose**,
+for the same reason the API has none. A deployment puts whatever it likes in front; publishing one here would be
+the debug port this project has already paid for once. To look at it from a workstation, forward the port over
+SSM rather than opening anything:
+
+```
+aws --profile oi-credits ssm start-session --target <instance-id> \
+  --document-name AWS-StartPortForwardingSession \
+  --parameters '{"portNumber":["8080"],"localPortNumber":["18080"]}'
+```
+
+**What it talks to.** The assistant API, on the internal network, and nothing else. It holds no model key and
+no database credential, and it does not know which model answered. That is what lets the model tier, the
+retrieval stack and the runtime change underneath without a rewrite here, so it is worth defending when the
+first tempting shortcut appears.
+
+### The three screens, and why there are three
+
+| Screen | What it is | What is behind it |
+|---|---|---|
+| **Ask** | one question, one cited answer, streamed so the first words appear while the rest is written | `POST /ask/stream`, falling back to `POST /ask` |
+| **Do** | the work this deployment can be run, and what happened when it ran | `GET /tasks`, `POST /jobs`, `GET /jobs/{id}` |
+| **Activity** | the audit chain in plain language, filterable, with each row openable | `GET /activity` |
+
+**Do appears only when the deployment declares tasks.** That is not a UI setting: the app reads `GET /tasks`,
+which reads the manifest. A client without the agentic pack sees no Do screen at all, because a menu of things
+that cannot run teaches a client that the feature is broken. On the development deployment four tasks are
+declared, so it is there.
+
+**Activity is the screen that makes the product auditable to a client**, and it is the one with the most care
+behind it. See the scoping note below.
+
+### Signing in
+
+**There is no sign-in yet.** Real identity arrives at C7 with Cognito; until then a session is a token minted on
+the box, and the app asks for it plainly rather than inventing an account screen:
+
+```
+cd /opt/oi-core
+alias oi='docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env'
+oi --profile tools run --rm session mint --dev --subject <a declared subject> --role <a declared role>
+```
+
+Paste the token into the first field. **A subject or a role this deployment does not declare is refused rather
+than defaulted**, so the error names what it does know. That refusal is deliberate: defaulting here would grant
+the broader of two permissions to a typo.
+
+The token is kept in `sessionStorage` rather than `localStorage`, so a shared front-desk machine does not
+remember a session after the browser closes.
+
+### Ask
+
+Type a question, press Enter. The answer arrives while it is written rather than after it is finished.
+
+**Under every answer is one line, and it is the point of the product:**
+
+```
+Answered from 2 documents on this machine · 1.1 seconds
+```
+
+That sentence is a claim about the deployment, and it is computed from the response rather than written by
+hand: the count is the citations the answer came back with, and the time is the round trip. A screen that
+displayed a fixed sentence here would be decoration, and decoration is what this line exists to avoid.
+
+**What the answer carries, and what the screen does with it:**
+
+| Field | What a person sees |
+|---|---|
+| `citations` | a chip per source, with the document, its access label and the page |
+| `redactions` | *"Something was removed before you saw it: 1 × SSN"* — only when a value was replaced |
+| `unsupported` | the sentences no retrieved passage backs, listed rather than dropped |
+| `notice` | what happened to the routing, when there is something to tell |
+| `kind: degraded` | the model did not answer, with the retrieved passages shown instead |
+| `kind: no_source` | nothing in the documents this session may read matched |
+
+**A degraded answer is not an error screen.** When the model will not answer, the response is the retrieved
+passages with a typed reason, at HTTP 200. Retrieval already did the expensive part and the client is entitled
+to their own material, so the screen shows it. A client that rendered only the `answer` field would show a blank
+where those passages were, which is why the shape is handled explicitly.
+
+**Asking without streaming** uses the JSON endpoint. Both are kept because they are different code on the
+server, and a screen that only ever streams hides a JSON-path defect behind a streaming one. That is not
+hypothetical: C3 shipped a redaction on one path and a data boundary on the other.
+
+### Do
+
+Pick a task, describe what it should work on, press Start. The deployment declares which tasks exist, each with
+a label in a person's words, the model role that handles it, and what it touches.
+
+**A task is not a model choice.** The app sends a task identifier; the manifest decides which tier answers it,
+and the data boundary decides whether that tier is reachable at all. That is why there is no model picker
+anywhere in this interface: when a client's document reaches a remote provider, the answer to *why* has to be a
+declared permission somebody approved rather than something the interface decided.
+
+**A job is watched, not waited for.** It has a state, a list of attempts and a result. Every attempt appears
+whether it worked or not, because a record that kept only the success would hide the retries the client is
+paying for. Pause, Resume and Cancel appear while the job is not finished, and a cancelled job keeps its rows.
+
+**A refusal here is the boundary.** A task that no permitted lane can run is refused before the job exists, so a
+person learns that from a message rather than by watching a job fail.
+
+### Activity
+
+The chain, newest first, with filters for type, outcome, one person, or a request id. Each row opens to show the
+row's columns and its payload.
+
+**The scope is stated, and that is not decoration.** The API returns which actors a page covered, and the screen
+says so:
+
+> Showing **your own activity only**. A session may read another person's rows when every permission they hold is
+> one you hold too, so this list widens with the role you were given.
+
+A screen that showed a subset of the record without saying so would look like the whole record, and *the record
+is complete* is exactly the claim at stake.
+
+**Reading the record is itself recorded**, so an auditor asking who looked at the chain can be answered. That
+row appears in this screen, and it is meant to be visible.
+
+**A `LEFT THE BUILDING` tag appears on a row whose call was permitted to leave.** This is per row and it is
+data rather than a permanent indicator: on a cloud deployment every model call leaves, so a chip that said so on
+every answer would be a warning nobody reads. The office build is where a permanent residency indicator earns
+its place, and the markup for it is kept in `oic-ui/mock/ask.html` with the reasoning.
+
+### Run it
+
+```
+cd /opt/oi-core
+alias oi='docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env'
+export OI_UI_ROOT=/opt/oic-ui          # where the app's checkout lives
+oi build app && oi up -d app
+oi ps app
+docker run --rm --network ai-net curlimages/curl -sS -o /dev/null -w '%{http_code}\n' http://app:8080/
+docker run --rm --network ai-net curlimages/curl -sS http://app:8080/api/health
+```
+
+Three lines, and each proves something different: `200` from `/` is the bundle, and the health document from
+`/api/health` is the proxy reaching the service.
+
+### If it breaks
+
+- **The page loads and every call says the service is unreachable.** The proxy is not forwarding. Check that the
+  app is on `ai-net` and that `OI_API_URL` names the API's base including `/api`. A name that does not resolve
+  answers nothing, and a browser reports that as the API being down.
+- **`/` returns 404.** The bundle is not in the image. It is built by `npm run build` into `app/dist`, and the
+  image copies that directory specifically.
+- **Every question refuses with `no_session`.** There is no sign-in yet. Mint a token and paste it.
+- **A blank page with no error in it.** The bundle was built against a different contract than the API serves.
+  From the core checkout: `bash /opt/oic-ui/scripts/check-contract.sh --live http://api:8088`. It names the paths
+  that moved.
+- **The screens are there but Do is missing.** The deployment declares no tasks, which is correct for a manifest
+  without an agentic pack. Check `GET /tasks`.
+
+### Extending it
+
+- **A fourth screen** is a route and a component. Nothing else knows how many screens there are.
+- **A new capability the client can start** is a task in the manifest, not a screen. That is the whole point of
+  the task registry: the menu fills itself in from the deployment.
+- **A different identity provider** replaces the token field with whatever the provider needs. Everything above
+  it reads `GET /activity` and the answer payloads, and neither knows how a session was established.
+
 ## 21. Troubleshooting
 
 Every item below is something that actually happened, with what it looked like and what fixed it.
