@@ -42,14 +42,25 @@ echo "=== 3. the decomposition, from 300 documents forced back through the worke
 # still present makes the worker treat them as new. Reconciliation looks for manifest rows whose *file* has
 # gone, and none have, so it removes nothing. This is the safe way to sample a pipeline whose sample mode is
 # otherwise in the hands of a deletion pass.
+# **Spread across topics rather than taken from one**, because a sample of three hundred maintenance
+# records is a sample of one document shape. `md5(relpath)` rather than `random()` so the same three hundred
+# come back on a second run, which is what makes a measurement repeatable.
+N="${1:-300}"
 $DB -A -t -c "
   delete from ingest_manifest
    where relpath in (
      select relpath from ingest_manifest
-      where relpath like 'company/vol-maintenance-%'
-      order by relpath limit 300)" | sed 's/^/  rows removed: /'
+      where relpath like 'company/vol-%'
+      order by md5(relpath) limit $N)" | sed 's/^/  rows removed: /'
 
-N="${1:-300}"
+echo "  topics in the sample:"
+$DB -A -t -c "
+  select split_part(split_part(relpath, '/', 2), '-', 2) as topic, count(*)
+    from (select relpath from ingest_manifest
+           where relpath like 'company/vol-%'
+           order by md5(relpath) limit $N) t
+   group by 1 order by 2 desc limit 6" | sed 's/^/    /'
+
 docker exec ingestion sh -c "python3 /app/ingest.py > /tmp/decomp.log 2>&1" || true
 docker exec ingestion grep -E "^(seen|chunks written|where the time went|  per document)" /tmp/decomp.log \
   || docker exec ingestion tail -20 /tmp/decomp.log
