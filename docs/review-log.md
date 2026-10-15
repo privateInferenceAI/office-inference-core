@@ -625,3 +625,65 @@ reading it.
 **What round 1 did not prove.** An undeclared subject refused at mint time, the `degraded` and `no_source`
 screens, Pause, Resume and Cancel on a running job, and a task refused for having no permitted lane. The cold
 reader named all four as untested and made no claim about them, which is the right way to leave a gap.
+
+---
+
+# C4 panel — round 2, 2026-10-14
+
+**What triggered it.** The fidelity checker's six findings were fixed, and fixing them meant running every
+documented command for the first time in one sitting. That is when the pattern showed: **four documented
+commands could not work as written**, and each had been copied into more than one document.
+
+**The four, and they are one defect wearing four hats.** A long invocation copied between documents, where one
+clause is wrong and nothing runs it.
+
+| The command | What happened when it was run as printed |
+|---|---|
+| `check-contract.sh --live http://api:8088` | name-resolution traceback: `api` resolves inside the network, not on the host |
+| the probe `docker run` line | `access_probe` reported "the refusal could not be recorded", because the session image has no `/app/audit.py` — the compose service mounts it |
+| the same line, in the manual | mounted the repo at `/w` for some probes and not others, so one died on `ModuleNotFoundError` |
+| the API base as `/api` | every call 404s; the failure stayed hidden because the deployed image predated the change |
+
+**The fix is one script and twenty-two replacements.** `bash scripts/probe.sh <probe.py>` takes the compose
+service the deployment uses, so the mounts and variables come from one place and a probe cannot drift from the
+service it tests. It is shorter than the line it replaced, which is the only kind of fix that survives being
+copied.
+
+### Running all six probes found three defects that reading them had not
+
+**`interface_probe`'s TRIGGERS right was testing a task that stopped existing.** It sent `reconcile`, a name
+hardcoded in the API until C4 moved the task list into the manifest. The manifest declares four others. The
+right kept passing after the move, because its assertion was that a trigger named itself and nothing checked
+the task was real. It failed honestly once the router began refusing an undeclared task. It reads `GET /tasks`
+now and sends the first id the deployment declares.
+
+**Its STREAM right counted frames.** `frames > 3` is a statement about how the model chunked its answer, and a
+short reply arrives in three. The right exists to prove the answer arrives in pieces with the first before the
+last, so it asserts that. The count and the arrival times are `stream_probe`'s INCREMENTAL right, which
+measures them properly.
+
+**`stream_probe`'s canary named a document that had been deleted.** The corpus was replaced this week with a
+generated one and `canary-pii.md` went with it. The right reported that it was proving nothing, which is the
+honest failure and also why a canary should never be a document name. It matches reserved ranges now, and the
+question pushes the model to repeat the value verbatim — measured, not assumed, because asking *what* the
+reference is produces a paraphrase and the check then passes while measuring nothing.
+
+### What this round says about the phase
+
+**Every one of these was found by executing a documented command rather than by reading it.** The panel's whole
+premise is that a page is a claim and a run is a measurement, and this round is the strongest evidence for it
+that the project has: four commands that could not work, three probe defects, and a credential disclosure, none
+of which any test caught because no test ran the thing a person would run.
+
+### State at the close of round 2
+
+    api_probe 7/7          access_probe 4/4        activity_probe 8/8
+    job_probe 7/7 + 1 skipped, 8/8 with the gate runner
+    interface_probe 7/7    stream_probe 4/4
+    gate_check exit 0      gate_check --jobs exit 0
+    contract check: OK, 9 paths
+    727 passed, 2 skipped
+
+**Still not tested, and named so nobody assumes otherwise:** the `degraded` and `no_source` screens rendered in
+the app, Pause, Resume and Cancel on a running job, a task refused for having no permitted lane, and an
+undeclared subject refused at mint time. The executor re-run was asked to start with those.
