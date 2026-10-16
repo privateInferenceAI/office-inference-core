@@ -177,6 +177,38 @@ Two ways. The first keeps credentials off the server entirely:
 storing a token there. Client boxes should never hold our repository credentials, so the habit
 starts here. Use Option B when you want the box to pull its own updates.
 
+**And install `oi`, which every command after this one assumes.** The wrapper is in the repository at
+`deploy/office/oi` and the rest of this book uses its short form throughout — `oi build`, `oi run`, `oi ps`,
+`oi up`, `oi restart`.
+
+```
+sudo ln -sf /opt/oi-core/deploy/office/oi /usr/local/bin/oi
+oi
+```
+
+Expected: the usage text, listing the verbs.
+
+**Why a symlink and not a copy.** The wrapper resolves its own location to find the compose file and the
+rendered environment, so a symlink follows the repository through every pull and a copy drifts the moment one
+happens.
+
+**Why this step is not optional.** For most of this build the documentation referred to `oi` more than a
+hundred times and the command did not exist: not on the box, not in the repository, not as an alias. Every one
+of those references failed with `command not found`, including the one in the update procedure:
+
+```
+cd /opt/oi-core
+git pull
+oi build audit keys
+```
+
+**That is how a deployment came to be running an image from before a fix that `main` already had.** A teardown
+on it cleared every index, wrote a destruction record, and left 10,033 client documents on disk, because the
+code that removes them was in the repository and not in the image, and the step that rebuilds the image could
+not be run. A documented command that cannot run is worse than no documentation: it turns a missing step into
+a step somebody believes they performed.
+
+
 ### 0.9 Validate the manifests
 
     sudo apt -y install python3-yaml
