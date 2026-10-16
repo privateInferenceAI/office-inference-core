@@ -19,9 +19,13 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "services" / "api"))
+# The workflow package, so the manifest's `needs_approval` flag can be cross-checked against the engine that
+# would have to honour it. A test that only read the manifest could not tell a gate from a promise.
+sys.path.insert(0, str(ROOT / "services"))
 
 import jobs  # noqa: E402
 import routing  # noqa: E402
+import workflow.plans as workflow_plans  # noqa: E402
 
 
 # --------------------------------------------------------------------------- helpers
@@ -565,9 +569,17 @@ def test_the_dev_deployment_declares_tasks_that_are_honest_about_what_they_do():
             f"{task['id']} names tier {task['tier']!r}, which this manifest does not declare. A task "
             "pointing at a role that does not exist is a menu entry that cannot run")
         assert task["description"], f"{task['id']} does not say what it does"
-        # Nothing in this deployment writes, so nothing needs an approval gate. When something does, its
-        # task flips this flag and the interface renders it.
-        assert task["needs_approval"] is False
+        # **The flag and the engine have to agree, and that is stronger than the constant it replaced.**
+        # This asserted `needs_approval is False` for every task, with a comment saying that when something
+        # does write, its task flips the flag. C5 made one flip, so the assertion becomes the cross-check that
+        # comment was describing: a task claiming a gate must be one the engine gates, and a task the engine
+        # gates must claim it. The flag is what the Do screen renders **before** somebody starts, so a task
+        # promising a stop that never comes is a sentence the interface says and the engine breaks.
+        plan = workflow_plans.plan_for(task["id"])
+        gated = plan is not None and any(getattr(step, "gate", False) for step in plan.steps)
+        assert task["needs_approval"] == gated, (
+            f"{task['id']} declares needs_approval={task['needs_approval']} and the engine "
+            f"{'does' if gated else 'does not'} gate it")
 
     assert routing.declared_tasks(manifest) == frozenset(t["id"] for t in tasks)
 

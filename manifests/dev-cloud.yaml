@@ -174,3 +174,19 @@ agentic:
       tier: analyst
       touches: [documents]
       needs_approval: false
+    # **The first task this deployment can run that is not one step.** The four above are answered by the C4
+    # executor inside the request that started them. This one is a six-step plan with a gate, so it is the
+    # only route over HTTP to the workflow engine, and until it existed the engine was wired and unreachable:
+    # `plan_for` knew `invoice_intake` while the manifest declared four other ids, so `POST /jobs` refused it
+    # with `no_such_task` and nothing could reach a gate at all.
+    #
+    # `needs_approval: true` is not a preference. It is what tells the Do screen that starting this stops for
+    # a person, and the engine's gate refuses to be skipped either way.
+    - id: invoice_intake
+      label: Prepare a supplier invoice
+      description: >-
+        Read an invoice, pull out the vendor and the amount, draft the entry it would post, and stop for you
+        to approve before anything is written.
+      tier: analyst
+      touches: [documents]
+      needs_approval: true

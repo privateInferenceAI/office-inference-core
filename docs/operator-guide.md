@@ -2337,6 +2337,105 @@ visible rather than making the old records stronger. Building that deliberately 
 record that ages well and one somebody has to explain.
 
 
+# Stage 13k: the screen that watches, and the screen that decides
+
+Two screens, one rule: everything either of them shows is read back out of the record. Nothing is estimated,
+nothing is animated into looking busy, and nothing is offered that the record cannot back.
+
+**Why these two are one stage.** The live view is where a person learns the system is working, and the Review
+queue is where they decide whether it may continue. Both fail the same way: by looking confident about
+something the record does not say.
+
+## 13k.1. See the two screens run without a deployment
+
+The fastest way to understand what was built is to watch it, and neither screen needs a box. The browser rung
+answers `/api` from the shapes the contract publishes, which is the same file the app is compiled against.
+
+```
+cd <oic-ui>/app
+npm test -- --run
+npx playwright test e2e/review.spec.ts e2e/live.spec.ts
+```
+
+Expected: the unit suite passes, and the browser rung reports the review cases and the live cases. Three of
+those tests are the ones worth watching rather than reading: the content is present in the document before the
+Approve control is enabled, a queue of five *different* items offers no batch action, and a job that stops
+reporting looks stopped within the shipped 45 second window.
+
+## 13k.2. Understand why there is no spinner
+
+Show this screen to somebody and the first suggestion is a progress bar. The answer is in the research, and it
+is worth having ready.
+
+Luke Wroblewski shipped agentic interfaces at Bench and ChatDB and published what failed: at Bench several
+levels of progressive disclosure with tool calls collapsed by default "was too much", and the conclusion he
+draws is that the agent's work should *be* the progress indicator "instead of forcing people to watch a spinner
+while things work." A spinner beside a step list competes with the only informative part of the screen.
+
+The percentage is the other half. The duration of a step is not knowable in advance, so a bar is either
+fiction or a thing that sticks at 90 percent. And a CHI 2026 study of 240 participants found that a 2 second
+first token was rated *less* thoughtful and *less* useful than a 9 or 20 second one: a wait that is explained
+reads as work. That is an argument for explaining a wait, not for adding one, and the study measured a chat
+answer rather than a watched job.
+
+## 13k.3. Check the stall for yourself, because it is the one that fails quietly
+
+The hard case is a job that stops without the connection noticing. A keep-alive comment holds the socket open
+and is invisible to a reader by design, so a screen that trusts the socket keeps looking alive over a frozen
+worker.
+
+```
+cd <oic-ui>/app
+npx playwright test e2e/live.spec.ts -g "looks stalled"
+```
+
+Expected: the job shows "Working." and then, within the real 45 second window, "No progress reported." with the
+time it last heard anything. The window is not shortened for the test, because a shortened one would be a
+number nobody ships.
+
+## 13k.4. Read the queue the way a rubber stamp would
+
+Open the Review screen with five pending items and ask what makes it easy to approve all five. The answer is
+supposed to be: nothing, unless the system can show they are identical.
+
+```
+cd <oic-ui>/app
+npx playwright test e2e/review.spec.ts -g "five different items"
+npx playwright test e2e/review.spec.ts -g "naming five"
+```
+
+Expected: the mixed queue has no batch control anywhere on the page, and the identical queue offers exactly one
+control that names the count and states the rule. The data behind the caution: 46% of merged pull requests are
+approved with no comment at all and 65% with three words or fewer, among engineers reviewing their peers.
+
+## 13k.5. Watch the drift refusal, which is the one that protects the record
+
+Every waiting item carries the digest of the content it is about, and the decision sends it back. If the
+content moved while somebody was reading it the route answers `409 approval_drift`.
+
+The screen's job is not to report a failure. It re-reads the item and asks again, because a person who is told
+"something went wrong" after clicking Approve believes they approved the thing they read.
+
+```
+cd <oic-ui>/app
+npm test -- --run -t "drifted"
+```
+
+Expected: the run passes and the case names the drift sentence. The check itself is the service's; this is the
+screen's half of it.
+
+## 13k.6. What to take from it
+
+**The interface is not allowed to know more than the record.** That is the whole stage. The steps come from the
+job, the sentences come from the record's own fields, the staleness is measured from real events, and the
+identity wording is a function of a field the record carries. An interface that computed any of those from
+intent would be a lie that looks like a feature.
+
+**And the two limits are stated on screen rather than hidden.** A queue that cannot see the whole role says so
+above the list. A record that carries only a digest offers no decision at all. Both are the same instinct the
+approval record itself is built on: say what you know, say what you do not, and make the second hard to drop.
+
+
 # Stage 13l: invoice intake, and the mailbox the client has to buy
 
 **Goal:** a client's supplier invoices arrive in the system with provenance, and the client can keep that

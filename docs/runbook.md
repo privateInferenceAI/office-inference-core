@@ -4710,7 +4710,7 @@ step, and the chain has no row for it. Either both are present or neither is.
 ```
 ok   RUNS        state='awaiting_approval', 4 step row(s), 3 succeeded before the gate
 ok   GATED       state='awaiting_approval', digest=sha256:5b480b869b4…, 0 row(s) after the gate
-ok   SHOWSACTION read from the gate event: 'Post USD 4,210.00 to accounts payable for accounts@ferguson.example'
+ok   SHOWSACTION read from the job row: 'Post USD 4,210.00 to accounts payable for accounts@ferguson.example'
 ok   RESUMED     state='succeeded', post-gate rows={'post_entry': 1, 'close_out': 1}
 ok   DENIED      state='failed', reason='denied_at_the_gate', 0 row(s) after the gate
 ok   CANCELLED   state='cancelled', slow row=('slow', 'failed', 'cancelled_mid_step'), 0 row(s) after the stop
@@ -4720,10 +4720,16 @@ ok   BOUNDED     state='failed' after 0.52s (deadline 0.5s), kind='step_timeout'
 ok   IDEMPOTENT  state='succeeded', far side applied 1 time(s) over 2 call(s), 2 attempt row(s), 1 ledger row(s)
 ok   ATOMIC      child exit=-9 (killed=True), job row='queued', 0 step row(s), 0 chain row(s)
 ok   BOTHPRESENT control run: 4 step row(s), 8 chain row(s)
-ok   CHAIN       ok   /tmp/workflow-probe-export-x6767gtt/audit-events.jsonl: 54 event(s), chain intact
+ok   CHAIN       ok   /tmp/workflow-probe-export-1w3334cd/audit-events.jsonl: 108 event(s), chain intact
 
 PASSED: 13 right(s) held against the documented workflow engine
 ```
+
+**One line moved on the second run, and it moved because somebody fixed something.** The first run at
+`2b1cd6a` reported `SHOWSACTION read from the gate event`, because `pending_action` was written on the job and
+dropped by the store: it had no column and `PostgresStore.get` did not read it. With migration 021 applied and
+the store carrying it, the same right now reads the action **from the job row**, which is the path a browser
+takes. The line above is the second run and the evidence moved with the claim.
 
 `ATOMIC`'s line is the whole piece: the child was killed (`exit=-9`), and the job row is still `queued` with
 no step rows and no chain rows. `BOTHPRESENT` is the control, so that line cannot be green on an engine that
@@ -4751,10 +4757,10 @@ close. The mutation was reverted before the run above; the `ok` line is the same
 
 **What this step cannot prove, said plainly.** The probe kills a *runner* process, not the API service. That
 is the stronger test of durability, because resume depends on the row and not on the process, but it is not
-the same sentence as "restart the service" and the runbook will not pretend it is. **The service-level restart
-was not done**, because the engine is not yet wired into `POST /jobs`: `services/api/app.py` belongs to
-another owner and the handover is requested rather than made. Until that lands, a workflow cannot be started
-over HTTP at all.
+the same sentence as "restart the service" and the runbook will not pretend it is. The service-level restart
+belongs to step 6.2, and **it has not been done**: the engine is wired into `services/api/app.py` and the
+manifest now declares the task, but the API runs from a built image that mounts none of that source, so the
+path needs a rebuild and a restart before a browser can reach a gate. Step 6.2 says exactly how far that goes.
 
 **This step found that WF-ENGINE-001 was not achievable as written.** The register row asked for a property
 that the deployed architecture could not have: with the chain written through a subprocess, no transaction
@@ -4867,11 +4873,36 @@ The fix is the route's, and it is to pass `outcome="ok"` and let the decision li
 `payload -> approval -> decision`, which is where `build_payload` puts it and where both the view and
 `describe()` read it. 6.0 said this route had never run end to end; this is what was waiting there.
 
-**What this step cannot prove, said plainly.** The probe restarts the *runner*, not the API service container.
-The engine is not yet wired into `POST /jobs`, `POST /jobs/{id}/approvals` or the `resume` action, because
-those routes belong to `services/api/app.py`. Until they are wired, a workflow cannot be started over HTTP
-and the gate is reachable only from the probe and the tests. That wiring is a change to another owner's file
-and is requested rather than made.
+**What this step cannot prove, said plainly, and the second half changed on 2026-10-16.**
+
+The probe restarts the *runner*, not the API service container. Restarting the runner is the stronger test of
+durability, because resume depends on the row and not on the process, but it is not the sentence the register
+writes, and the runbook will not swap one for the other.
+
+**The wiring landed, and the path is still unreachable.** `services/api/app.py` now imports the engine, builds
+a runner with `_workflow_runner`, passes `workflow.budgets_for(task)` at job creation, and drives
+`runner.resume` after an approve and after the `resume` action. So the three edits this step asked for are in.
+
+**The manifest followed, and the path is still undeployed.** `manifests/dev-cloud.yaml` now declares
+`invoice_intake` with `needs_approval: true`, which is the task this plan is for, so `POST /jobs` will accept it
+once that manifest is rendered onto a deployment. It has not been rendered onto the box, and **rendering it
+would not be enough on its own**: the `api` service builds `oi-core/api:local` from `services/api/Dockerfile`
+and mounts only `rendered/`, `audit.py` and `assertion.py` into `/app`, so the handover needs the image rebuilt
+and the service restarted before any of it runs. That is a deployment action, it would put an uncommitted
+manifest in front of a client-facing service, and this step did not take it.
+
+**So the service-level restart was not done, and it is the one thing this step set out to prove.** What is
+proved is the same property one level down: the job is written, the connection is closed, a second connection
+reloads it with its digest and its action intact, the decision is applied and the run finishes with one row per
+post-gate step. The difference between that and `docker restart api` is real and is written down rather than
+blurred: a restart also exercises the image, the mounted manifest and the lifespan hook, and none of those
+three has been through this path.
+
+**A second known gap, and it is a decision rather than an omission.** `jobs.result` has no column, so a job
+that succeeds **after a resume** reads back from `GET /jobs/{id}` with an empty result. The answer is in the
+`done` event, which is readable and is the record; the job row is not. The owner's decision on 2026-10-16 was
+not to add the column, on the grounds that it is a schema change for a screen detail. It is written here so
+that a client seeing an empty result finds the explanation rather than a mystery.
 
 **If it breaks.**
 

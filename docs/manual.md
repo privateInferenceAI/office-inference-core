@@ -4417,6 +4417,148 @@ the record.
 Only an approval may omit it.
 
 
+## 13k. The two screens a person watches work on
+
+Two screens in the client app exist for the agentic pack: the live view of a job that is running, and the
+Review queue of decisions waiting for somebody. They are described together because they are the same claim
+from two sides. Everything either screen shows is read back out of the record, and neither can show something
+that did not happen.
+
+### The live view: the work is the progress indicator
+
+**There is no spinner, and that is a decision rather than a style.** Luke Wroblewski shipped agentic
+interfaces at Bench and at ChatDB and published what failed: at Bench several levels of progressive disclosure
+with tool calls collapsed by default "was too much", and at ChatDB the working column collapses to a summary
+once the result arrives. The principle he draws out is the design of this screen: *the agent's work should
+serve as a detailed progress indicator, instead of forcing people to watch a spinner while things work.*
+
+So the step list is the progress indicator. It is not a log beside a spinner, and there is no second thing
+saying the same thing less well.
+
+**Two levels of disclosure, and the second is one expand away.** Nielsen's rule is explicit that "designs that
+go beyond 2 disclosure levels typically have low usability because users often get lost when moving between the
+levels."
+
+| | What it holds |
+|---|---|
+| Level one | The current step as a sentence, the steps already done with their timings, what happens at the gate, and the stop control |
+| Level two | The ordered event list with sequence numbers, attempts, timings and typed failures |
+| Neither | Raw tool arguments and model reasoning, and any percentage complete |
+
+**No percentage, ever.** The duration of a step is not knowable in advance, and a bar that sticks at 90
+percent or moves backwards is worse than no bar. The research's caution is worth repeating to whoever asks for
+one: a CHI 2026 experiment with 240 participants found that a 2 second wait was rated *less* thoughtful and
+*less* useful than a 9 or 20 second one, so speed is not unambiguously good in an interface that is supposed to
+look considered. That study measured a chat answer rather than a watched job, so it is an argument for
+explaining a wait rather than for creating one.
+
+**A job that has stopped looks stopped.** The route sends a keep-alive every fifteen seconds to hold the
+connection open through a proxy. A keep-alive comment is invisible to a reader by design, so it cannot be what
+tells a person the job is alive. The screen stamps the arrival of the last real event instead, and after 45
+seconds without one it stops claiming progress and says when the job last reported. Forty-five is three
+heartbeats: long enough that a slow step does not flicker, short enough that nobody watches a dead run.
+
+**The screen is drawn from the record before the connection exists.** On opening a job the app calls
+`GET /jobs/{id}`, renders everything it can from that response, takes the cursor from it, and only then attaches
+the event stream. A refresh, a closed laptop or a dropped connection therefore returns to the same run rather
+than losing it. The stream is an optimisation over the record.
+
+### The Review screen: what a decision is allowed to look like
+
+**Assume the approval will be a rubber stamp unless it is made easy to evaluate.** The closest large-scale
+measurement of approval behaviour is a study of merged pull requests: 46% were approved with no comment at all,
+65% with three words or fewer, and in 8.4% of merges several reviewers approved without a single comment. That
+is professional engineers reviewing their peers. A practice manager approving an agent's work is in a weaker
+position on both counts.
+
+Four rules follow, and each is a test:
+
+1. **The content is on screen before the control is offered.** For a drafted email that means the recipient,
+   the subject and the whole body, plus the reason it was drafted and what happens if it is approved. When the
+   record holds only a digest, the screen says so and offers **no** decision. Approving a hash is not approving
+   an action.
+2. **Approve is never the default.** No autofocus, no key binding, no Enter-to-confirm. A queue that can be
+   cleared by holding a key is a queue that gets cleared that way.
+3. **Bulk approval is a stated rule over enumerated items.** The screen offers it only when the digest of every
+   item in the group is equal, which is the one equality the system can *show*, and the sentence above the
+   button names the count and the digest. A queue of items that differ in any way offers no batch action at
+   all, and that absence is the assertion the test makes.
+4. **A decision quotes the content's digest.** If the draft moved while it was being read the route answers
+   `409 approval_drift`, and the screen re-reads the job and asks again. It does not report a generic failure:
+   *something went wrong* leaves a person believing they approved what they read.
+
+### The banner, and the sentence
+
+The Approve control carries one line above it, before anybody clicks:
+
+> Identity not verified. This approval will be recorded against a role, not a person.
+
+And the sentence a reader gets afterwards never names anybody while the basis is a session token:
+
+> Approved at 2:14pm under the executive role. The person who decided was not identified: sign-in is not
+> enabled on this deployment, so the system cannot verify who acted.
+
+The three decision words are `Approved`, `Denied` and `Changes requested`.
+
+**Every sentence the screen can produce lives in one module**, `app/src/approvalSentences.ts`, and the test
+calls every export with a record carrying a name and asserts the name does not come back. A rule about wording
+inside JSX is a rule nobody can check; a rule about an exported function is one that fails a build.
+
+### Where the Review queue comes from
+
+`GET /approvals` returns the pending decisions for the session's role, and it is the route the screen is built
+for. A queue derived from the jobs one browser started cannot show an approval to the person whose job it is to
+approve them, which is the entire point of the screen.
+
+**The service does not serve that route yet.** Until it does, the app reads the jobs this browser remembers and
+keeps those in `awaiting_approval`, and the screen states that scope in the sentence above the list rather than
+implying it is the whole queue. An empty queue and a missing route are different facts, and only one of them
+means *nothing is waiting*.
+
+### Run it
+
+From the app repository, with no deployment and no token:
+
+```
+cd <oic-ui>/app
+npm run typecheck
+npm test -- --run
+npx playwright test e2e/review.spec.ts e2e/live.spec.ts
+```
+
+The browser rung starts the dev server itself and answers `/api` from the shapes `docs/openapi.json`
+publishes, which is why it needs neither a box nor a session. From the core checkout, confirm the contract copy
+the app builds against is the one the service serves:
+
+```
+bash <oic-ui>/scripts/check-contract.sh
+```
+
+### If it breaks
+
+**A refreshed tab comes back to a blank job.** The view is being drawn from the stream instead of from
+`GET /jobs/{id}`, or the job id is not in the URL. Both are the same defect: the connection became the only
+copy of progress.
+
+**The screen says a dead job is working.** The keep-alive is being counted as progress. Only a real event with
+a sequence number may reset the staleness clock.
+
+**Steps appear twice after a reconnect.** The view is appending instead of keying on `seq`. Replay is a
+feature, and duplicate delivery is its normal consequence.
+
+**An approval is offered with no content above it.** The screen is falling back to the digest. The bug is that
+a control was rendered at all, not that the content failed to load.
+
+**The screen shows a name.** Something is rendering the claimed subject, or a sentence is being built outside
+`approvalSentences.ts`. The record is honest and the display is not, and the display is what a client reads.
+
+**Bulk approval appears on a mixed queue.** The comparison is on the count or on the task instead of on the
+digest.
+
+**A 409 arrives and the screen says something went wrong.** The drift branch is missing, and the person is
+left believing they approved what they read.
+
+
 ## 13l. Invoice intake, and the four ways it goes quiet
 
 **What this is for.** A client's suppliers send invoices to an address the client already uses. This section
