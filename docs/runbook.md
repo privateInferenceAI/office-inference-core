@@ -5770,19 +5770,18 @@ would make it run. A skip that printed nothing would be the failure this suite h
 
 ```
 $ npx playwright test e2e/live.spec.ts
-Running 11 tests using 1 worker
-  ✓  1 › a refresh mid-run comes back to the same job with the recorded steps (971ms)
-  ✓  2 › shows a step as it arrives, in a sentence, while the job is still running (528ms)
-  ✓  3 › offers the two levels and no more (481ms)
-  ✓  4 › a job that stops reporting looks stalled, within the shipped window (47.4s)
-  ✓  5 › the Review screen › shows what will happen, why, and the exact content before a decision is offered
-  ...
-  11 passed (55.7s)
+Running 4 tests using 1 worker
+  ✓  1 › a refresh mid-run comes back to the same job with the recorded steps (983ms)
+  ✓  2 › shows a step as it arrives, in a sentence, while the job is still running (508ms)
+  ✓  3 › offers the two levels and no more (503ms)
+  ✓  4 › a job that stops reporting looks stalled, within the shipped window (47.5s)
+
+  4 passed (53.0s)
 ```
 
-That is both browser specs, because the second is one command and the stall case takes 47 seconds of the total.
 The fourth line is the one worth looking at: it waits out the real 45 second window rather than a shortened one,
-so the number it proves is the number that ships.
+so the number it proves is the number that ships. Running both specs together is thirteen tests and just under a
+minute, because one of them is fifty of those seconds.
 
 **What this step cannot prove, said plainly.** Nothing can reach the gate on a live deployment yet, because the
 multi-step executor is the next piece; the job this screen watches is driven by the C4 one-step executor. So the
@@ -5889,20 +5888,24 @@ core's with `/jobs/{job_id}/approvals` among the paths.
 
 ```
 $ npx playwright test e2e/review.spec.ts
-Running 7 tests using 1 worker
-  ✓  1 › shows what will happen, why, and the exact content before a decision is offered (522ms)
-  ✓  2 › offers no bulk action on a queue of five different items (573ms)
-  ✓  3 › offers one stated rule naming five when five items hold the same content (562ms)
-  ✓  4 › refuses to offer a decision when the record carries only a digest (534ms)
-  ✓  5 › an empty queue says nothing is waiting rather than looking broken (493ms)
-  ✓  6 › a decision leaves the queue without a manual refresh (546ms)
-  ✓  7 › where the queue comes from › a job started in this browser reaches the live view and then the queue (960ms)
-  7 passed (55.7s)
+Running 9 tests using 1 worker
+  ✓  1 › shows what will happen, why, and the exact content before a decision is offered (783ms)
+  ✓  2 › offers no bulk action on a queue of five different items (623ms)
+  ✓  3 › offers one stated rule naming five when five items hold the same content (639ms)
+  ✓  4 › refuses to offer a decision when the record carries only a digest (597ms)
+  ✓  5 › an empty queue says nothing is waiting rather than looking broken (563ms)
+  ✓  6 › denying records the reason, and the queue reflects it with no manual refresh (752ms)
+  ✓  7 › asking for changes records the reason, and the queue reflects it with no manual refresh (746ms)
+  ✓  8 › a decision leaves the queue without a manual refresh (588ms)
+  ✓  9 › where the queue comes from › a job started in this browser reaches the live view and then the queue (872ms)
+  9 passed (8.4s)
 ```
 
-The second line is UI-REVIEW-003's half that matters and it is an assertion of absence. The seventh is the one
-that found the limit of the queue described above: a job started in this browser is visible to it and to nobody
-else, which is why the screen states its scope and why `GET /approvals` is the route this screen is built for.
+The second line is UI-REVIEW-003's half that matters and it is an assertion of absence. Lines six to eight are
+UI-REVIEW-002's three controls, one test each, and each asserts that the job leaves `awaiting_approval` and that
+the queue reflects the decision with no manual refresh. The ninth is the one that found the limit of the queue
+described above: a job started in this browser is visible to it and to nobody else, which is why the screen
+states its scope and why `GET /approvals` is the route this screen is built for.
 
 ```
 $ bash scripts/check-contract.sh
