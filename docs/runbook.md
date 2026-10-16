@@ -4499,9 +4499,410 @@ Frame counts vary run to run (9 to 44 on the same question) because the provider
 its rights is a timing assertion. **A probe that fails under load is weak evidence**, so when it fails, re-run it
 alone before believing it, and treat a repeatable failure as real.
 Check the import before believing the failure.
-## Phase 6 — Workflows and one connector  *(outline)*
+## Phase C5 — Workflows and the first connector
 
-n8n for deterministic work with an approval gate, plus the first MCP connector.
+**Invoice intake end to end, with an approval gate.** Two screens that exist and do nothing get an engine
+underneath them: Do shows a task menu with nothing to run, and Review was left out of C4 on purpose because
+an approval queue with nothing in it teaches a client the feature is broken.
+
+**The register is the specification.** Thirty-four rows, `phase: C5`, in `docs/requirements.yaml`. This phase
+is not finished while any of them is open.
+
+**Five research reports are the input rather than background reading**, in `docs/research/` and
+`docs/design/c5-approval-record-identity.md`. Three findings in them changed the plan and none is obvious:
+the workflow engine is ours rather than adopted, and the reason is transactional audit rather than licence;
+a shared mailbox cannot be used at all, which changes what a client buys; and an approval cannot claim a
+verified identity, which changes what the interface may say.
+
+### 6.0 The contract, before anything is built on it
+
+**Goal.** A second repository, and three agents, can be written against this contract without reading its
+source. And no route can record an approval without also recording what the system does not know.
+
+**Why this is the first step, again.** C4 wrote the same step for the same reason and it paid for itself: the
+OpenAPI document listed three URLs and **no response bodies at all**, so a client built against it would have
+been built against the manual's prose. The approval route has a sharper version of that problem. **It is the
+one place in the product where a wrong record is worse than a missing one**, because a client reads it and
+believes it.
+
+**What already exists.** `POST /jobs/{id}/{action}` takes pause, resume and cancel. `awaiting_approval` has
+been in the state machine since C4 and is reachable from `running`. Nothing has ever reached it, which is why
+C5 is its first writer and why two defects are still cheap to fix (`AUD-APPROVAL-001`, `UI-FEED-001`).
+
+**What is added, and why it is a route of its own rather than a fourth action.**
+
+| Method | Path | What it does |
+|---|---|---|
+| POST | `/jobs/{id}/approvals` | a decision on a job that is waiting for one |
+
+Pause and cancel are **controls on the work**. An approval is an **authorization of it**, and it carries a
+body, a reason, and a record that outlives the job. Folding it into `{action}` would put a path segment where
+a payload belongs, and the payload is the part that has to be right.
+
+**The request.**
+
+```
+POST /jobs/{id}/approvals
+{"session": "<token>", "decision": "approve", "reason": "", "note": "", "action_digest": "sha256:..."}
+```
+
+**Three decisions, and one of them requires a reason.**
+
+| decision | reason |
+|---|---|
+| `approve` | not required |
+| `deny` | **required**, and a denial without one is refused rather than stored blank |
+| `request_changes` | **required**, for the same reason |
+
+**`action_digest` is what makes the approval an approval rather than a click.** It is the hash of the exact
+content being approved, and a decision whose digest does not match what is waiting is refused. Without it the
+record says somebody approved something, and the link to what can be re-pointed afterwards.
+
+**The record, and where it goes.** Into `payload`, **not** into `audit_events.approval`. That column is a
+jsonb field with an approval event type and it is not among the eighteen fields the canonical function takes,
+so a value written there can be edited by hand while every chain check passes. It is the identical defect
+migration 013 was written to close for the redaction columns. `payload_sha256` already covers `payload`, so
+this needs no schema change and no new chain version.
+
+**And the record carries what the system does not know**, which is the half that is easy to omit:
+
+```
+"identity": {
+  "assurance": "unverified",
+  "basis": "session_token",
+  "claimed_subject": "dana",
+  "claimed_role": "staff"
+},
+"part11_11_50_manifestation": {
+  "printed_name": null,
+  "name_absent_reason": "sign-in is not enabled on this deployment, so the system cannot verify who acted",
+  "signed_at": "2026-10-16T16:20:00Z",
+  "meaning": "approved the action described by action_digest"
+}
+```
+
+**Two rules make the assurance field work, and both are the kind that fail quietly.**
+
+- **Unknown values resolve downward.** A value the reader does not recognise becomes `unverified`, never
+  something stronger. The four are `unverified`, `provider_verified`, `proofed` and `re_attested`; only the
+  first is reachable today.
+- **Assurance never rises on read.** The display path reads assurance **from the record** and never joins to
+  the live session. This is the argument `017_sessions.sql` already makes for `access_roots`: a permission read
+  live at comparison time is a permission that has since moved. Identity read live is an identity that was not
+  verified when the act happened.
+
+**The fields are named `claimed_` rather than `subject_` on purpose.** The caveat lives in the field name,
+where an interface cannot drop it by choosing not to render a paragraph.
+
+**What no sentence may say.** Not *"Approved by Dana at 2:14pm"*, and not *"A person approved an action"*
+either. The second is the line `audit_feed` renders today and it asserts something the system does not know.
+The true sentence is: *"Approved at 2:14pm under the executive role. The person who approved was not
+identified: sign-in is not enabled yet."*
+
+**Verify.**
+
+```
+cd /opt/oi-core
+bash scripts/probe.sh jobs_probe.py
+python3 scripts/fetch_openapi.py --check
+python3 -m pytest tests/ -q
+```
+
+Expected: the contract check lists `/jobs/{job_id}/approvals` among the paths, the probe drives a job to the
+gate, approves it, and finds the approval inside the hash chain rather than beside it.
+
+**If it breaks.**
+
+- **A denial stored with no reason**: the route is treating `reason` as optional for all three decisions. Only
+  `approve` may omit it.
+- **`verify_chain` reports a break on rows nobody touched**: the approval went into the `approval` column,
+  which is outside the canonical string, so the row hash covers something the row does not. Move it to
+  `payload`.
+- **The screen says a person approved**: something is rendering `claimed_subject` without the basis. The
+  record is honest and the display is not, and the display is what the client reads.
+- **An old job's approval changes when a session changes**: assurance is being read live instead of from the
+  record. It must be read from the record.
+
+
+### 6.4 The email intake connector
+
+**Goal.** An invoice arrives in the client's own AP mailbox and becomes a document in the system with a
+provenance row naming the sender, the message identifier, the arrival time and the sha256 of its bytes. That
+hash and the hash the ingestion worker records for the same file are the same number. A second copy of the
+same invoice does not run the workflow twice. Nothing on the path belongs to Office Inference, and cutting
+every cord to us leaves it working.
+
+**Why the mailbox is a licensed regular mailbox, and why that is a purchase the client has to be told
+about.** Three findings in `docs/research/email-intake/handover-owned-email-intake.md` decide this step.
+
+**A shared mailbox cannot be used at all.** Microsoft's shared-mailbox documentation says sign-in on the
+associated user account should be blocked and kept blocked, and that every shared mailbox has a
+system-generated password nobody knows. Delegated OAuth needs one interactive sign-in to mint the refresh
+token, so a shared mailbox is not a slower path, it is no path. The failure it forces is the one to avoid:
+the moment intake sits on a shared mailbox you are pushed to application permission, and application
+`Mail.Read` reads every mailbox in the tenant.
+
+**Delegated permission is the only scope that is right without PowerShell.** Delegated `Mail.Read` reads the
+signed-in user's mail and nothing else. It needs no Exchange RBAC grant, no management scope and no cmdlet.
+Application permission is the one that needs scoping, and the scoping mechanism is PowerShell only, which is
+why choosing delegated removes the problem rather than solving it. It also removes the trap in the other
+mechanism: Exchange RBAC for Applications is **additive** to the Entra grant, so an administrator who
+completes three of four steps has built something that looks scoped and is not.
+
+**The app registration cannot be created anywhere but the client's tenant.** There is no supported move of an
+app registration between tenants. A service principal in the client's tenant pointing at an application
+object in ours is the disqualified design: the client cannot rotate the secret, cannot change the redirect
+URI, and deleting their service principal does not stop our app object existing.
+
+So the client needs one licensed regular mailbox, and the onboarding checklist says so before the quote
+rather than after it, because it is a line item they are buying.
+
+**Why this connector reads a mailbox instead of owning an address.** The C5 channel research recommended an
+address we host, on the evidence that email is the largest automatable arrival channel and the only one with
+no stored credential. That recommendation is superseded for this build by `BIZ-INDEPENDENT-001`: an address
+we host is infrastructure the client depends on us for, and the requirement is that they can cut every cord
+and keep working. Reading their own mailbox over delegated permission keeps the data in their tenant and
+gives us a credential that reaches exactly one mailbox.
+
+**What is built.** One new service, `services/intake/`. It imports nothing from `services/api/` or
+`services/workflow/`, and the seam to the workflow is the deposited document and its hash rather than a
+job. That is deliberate: the intake piece was built in parallel with the workflow piece, and a seam of one
+file plus one hash is the one that survives two authors.
+
+| Module | What it owns |
+|---|---|
+| `intake.py` | The CLI. `check-config`, `cord-check`, `migrate`, `fetch`, `watch`, `watch-folder`, `enumerate-reach`, `monitor`, `verify-manifest`, `status` |
+| `config.py` | Reads and validates the client's YAML. Refuses an application permission, a shared mailbox, an alert recipient on a domain we own, and any host that is not Microsoft's |
+| `net.py` | The only place an HTTP request is made. Holds the host allowlist and refuses anything else, and refuses any Graph method other than GET |
+| `secretstore.py` | Reads the credential from the client's secret store at the point of use. Refuses a group- or world-readable file, caches nothing |
+| `graph.py` | The refresh-token grant, the message list, the attachments. Classifies `AADSTS` codes into a sentence a client can act on |
+| `sender.py` | Envelope sender against header sender, the `Authentication-Results` header, the supplier allowlist |
+| `content.py` | Instruction detection in a body or a subject, and the rule that a body is data |
+| `provenance.py` | The record, the deposit, the dedupe by content hash, and the journal |
+| `folder.py` | The polling folder connector and its settle check |
+| `monitor.py` | The heartbeat, the volume floor, the alert classification, the recipient check |
+| `reach.py` | Enumerating what the credential can actually reach |
+| `schema/001_intake_events.sql` | Intake's own table, beside the service rather than in `db/migrations/` (see below) |
+
+**Why the migration lives beside the service.** `db/migrations/` is owned by the workflow piece this phase,
+and two writers in one migrations directory is a conflict with no upside. The table is intake's and the file
+travels with the code that writes it. Moving it into `db/migrations/` later is a rename, and the note is here
+so the next person does not read the placement as a decision about ownership.
+
+**The record.** Every arrival writes one row, whether or not it is a duplicate.
+
+| Field | What it is, and why |
+|---|---|
+| `intake_id` | Stable id, the primary key |
+| `received_at` | Arrival time as the mail system states it, not as we noticed it |
+| `observed_at` | When intake saw it. The two differ and an auditor asks about the first |
+| `channel` | `graph` or `folder` |
+| `mailbox`, `folder` | Which mailbox, which mail folder. One credential reads one mailbox and the record says which |
+| `message_id` | The RFC 5322 `Message-ID`. The identifier a mail administrator can search for |
+| `provider_id` | Graph's immutable message id, when the channel has one |
+| `sender` | Envelope sender, header `From`, `Reply-To`. The envelope sender is the one that authorised the delivery and the header one is the one a person sees, so both are recorded because they can differ |
+| `auth` | SPF, DKIM and DMARC results, parsed from `Authentication-Results` |
+| `verdict` | `trusted` or `marked`. Marked means the sender could not be verified |
+| `content_sha256`, `bytes`, `relpath` | The hash of the deposited bytes, the size, and where it landed under the documents root |
+| `raw_message_sha256` | The hash of the message as received, so the envelope can be proved later without keeping it |
+| `duplicate_of` | The earlier `intake_id` when this content has been seen before, otherwise null |
+| `content_flags` | Instruction attempts and the risk markers that fired, by name |
+| `requires_review` | Always true. Intake never approves anything |
+
+**Intake has no approval capability at all.** `requires_review` is a constant rather than a decision, and
+`auto_approved` is not a field. A component that can approve its own intake is a component that can be
+talked into approving by the thing it just read, which is what `CON-INJECT-001` is about.
+
+**Where the deposit lands.** `<documents_root>/<root>/intake/<YYYY-MM-DD>/<message-sha8>/<filename>`. The
+first path component is the access root, so an invoice deposited under `company` is readable by everyone
+with the `company` label, which is the label a client expects an invoice to carry. The file is written under
+a `.part` name and renamed into place, because the ingestion worker walks the same tree and `.part` is
+already in its list of suffixes it will not read. A half-written PDF never becomes a document.
+
+**Commands.**
+
+    cd /opt/oi-core
+
+    # What the configuration must satisfy, before anything is fetched.
+    python3 services/intake/intake.py check-config --config /etc/oi-intake/intake.yaml
+
+    # Cut every cord and see whether anything still resolves to us.
+    python3 services/intake/intake.py cord-check --config /etc/oi-intake/intake.yaml
+
+    # Intake's own table. Idempotent, like the audit sink's migrate.
+    python3 services/intake/intake.py migrate --dsn "$DATABASE_URL"
+
+    # One poll. Reads, deposits, records, and exits. This is what the timer runs.
+    python3 services/intake/intake.py fetch --config /etc/oi-intake/intake.yaml
+
+    # The daemon: poll on an interval, write a heartbeat on every success.
+    python3 services/intake/intake.py watch --config /etc/oi-intake/intake.yaml
+
+    # The second channel: a shared folder, polled, with a settle check.
+    python3 services/intake/intake.py watch-folder --config /etc/oi-intake/intake.yaml
+
+    # What the credential can actually reach, rather than what it was granted.
+    python3 services/intake/intake.py enumerate-reach --config /etc/oi-intake/intake.yaml
+
+    # The heartbeat and the volume floor, evaluated now.
+    python3 services/intake/intake.py monitor --config /etc/oi-intake/intake.yaml
+
+    # The recorded hash against the ingest manifest's hash for the same file.
+    python3 services/intake/intake.py verify-manifest --config /etc/oi-intake/intake.yaml --dsn "$DATABASE_URL"
+
+    # Everything above, without a database and without a tenant.
+    python3 tests/fixtures/intake_acceptance.py
+
+**Expected.** `check-config` prints `ok` and the five components with their owner. `cord-check` prints
+`no cord` and exits 0. `fetch` prints one line per message with `deposited`, `duplicate` or `marked`, and a
+summary naming the count of each. `enumerate-reach` prints a probe table where exactly one row is `reached`.
+`monitor` prints `no alert` when the heartbeat is fresh and the volume is inside the floor. The acceptance
+probe prints ten `PASS` lines, one per register row, and exits 0.
+
+**Verify.** The ten rows this step owns are CON-OWNED-001, CON-LEAST-001, CON-INTAKE-001, CON-DUPE-001,
+CON-INJECT-001, CON-SENDER-001, CON-FOLDER-001, CON-SILENT-001, SEC-CON-001 and SEC-INTAKE-002. The test
+command and its output are below.
+
+    python3 -m pytest tests/ -q
+    python3 tests/fixtures/intake_acceptance.py
+
+**If it breaks.**
+
+- **`check-config` refuses the permission as `application`**: this is the guard working, not a bug. Application
+  `Mail.Read` is refused because its RBAC scope is additive and a leftover Entra grant makes it a no-op. Change
+  the app registration to delegated `Mail.Read`.
+- **A shared mailbox is refused with "cannot sign in"**: also the guard. The client needs a licensed regular
+  mailbox, and `CON-OWNED-001` carries the note explaining why this is a purchase rather than a setting.
+- **`fetch` prints `AADSTS65001`**: consent was revoked. The token request failed cleanly and the alert says
+  re-approval, not the code.
+- **`fetch` returns zero messages and no error**: this is the failure the connector cannot see. Go to 6.4a.
+- **The hash on the record and the hash in `ingest_manifest` differ**: the deposit was rewritten after the
+  record was written, or the record was written before the rename. The record is written after `os.replace`
+  and the bytes are hashed from the file itself.
+- **`verify-manifest` reports a relpath that will never be ingested**: the attachment's suffix is not one the
+  ingestion worker accepts. Intake records `unreadable_by_ingest` on the row rather than reporting a deposit
+  that never becomes a document.
+
+#### 6.4.a The two failures that leave a working credential
+
+**Goal.** The connector notices the two ways intake stops that produce no error at all: a break that leaves
+the credential working and the queue empty, and a poll that never happens because the connector went away.
+
+**Why a heartbeat rather than error logging, and why polling rather than a filesystem watch.** Both are the
+same argument about a signal that is absent rather than wrong.
+
+**Error logging cannot see a silent failure.** A revoked scope, a pulled licence and a mail rule diverting
+invoices all leave a credential that authenticates and a queue that is empty. Every one of them looks exactly
+like a quiet week. Error logging reports nothing in all three cases, which is why every "we log exceptions"
+answer fails this requirement. The connector writes a heartbeat on every successful poll, and a separate
+check alerts when the last success is older than the interval allows. That catches the failures that produce
+no error, because the signal is the absence of a success rather than the presence of a failure.
+
+**A volume floor catches the third one.** A licence pulled from the mailbox, or a rule that quietly diverts
+invoices to a subfolder, both leave a connector that polls fine and reads nothing. No invoice for longer than
+the quiet period is a fault rather than a slow month, and seven days at an 80 percent decline is the second
+signal. The floor is configuration, because a plumber in February and a landscaper in February have
+different rhythms.
+
+**The folder connector must poll.** `inotify(7)` says it plainly: it "does not catch remote events that occur
+on network filesystems", and applications "must fall back to polling the filesystem to catch such events".
+A scanner writing into a share, or a person dragging a file onto a mapped drive, produces no local event on
+the machine doing the reading. An inotify connector therefore works on the developer's laptop and misses
+every real arrival, and the test that writes a file locally and watches a local path passes on it. The
+connector polls, and it decides a file is finished by seeing the same size and mtime on two consecutive
+scans rather than by hearing about a write.
+
+**The alert goes to the client's address.** If alerts route only to Office Inference, monitoring quietly
+reintroduces the dependency the design exists to remove. Recipients are configuration, and
+`check-config` refuses any recipient whose domain is not the client's, so the rule is enforced rather than
+remembered.
+
+**Commands.** Covered by 6.4. The two that matter here:
+
+    python3 services/intake/intake.py monitor --config /etc/oi-intake/intake.yaml
+    python3 services/intake/intake.py watch-folder --config /etc/oi-intake/intake.yaml
+
+**Expected.** `monitor` prints `no alert` on a healthy deployment, and one line per alert naming the failure
+in a sentence rather than a code. On a stale heartbeat it prints `stale_heartbeat` with the age in minutes
+and the address the alert was sent to. On a volume floor breach it prints `volume_floor` with the count and
+the window. `watch-folder` prints one line per file it takes, and prints nothing at all for a file that is
+still being written.
+
+**Verify.** `CON-SILENT-001` is proved by three simulated failures in
+`tests/test_intake_silent.py`, each of which leaves the credential working and the queue empty.
+`CON-FOLDER-001` is proved by `tests/test_intake_folder.py`, which starts the connector as its own process,
+writes a file from a second process, and asserts the connector holds no inotify file descriptor while it
+runs.
+
+**If it breaks.**
+
+- **`monitor` says `no alert` while the queue is empty**: the quiet period is longer than the outage. That is
+  the configuration being wrong rather than the check, and it is worth checking against the client's real
+  invoice rhythm.
+- **An alert names Office Inference as the recipient**: `check-config` should have refused it. The recipient
+  list is read from the client's configuration file, so the fix is in that file rather than in the code.
+- **`watch-folder` picks up a file that is still being written**: the settle check is comparing one scan
+  rather than two, or it is comparing mtime alone on a filesystem whose mtime granularity is a second.
+- **`watch-folder` misses a file copied in with an old timestamp**: it is using mtime as a watermark. It must
+  decide by content hash, because `rsync` and a scanner both preserve or reset mtime and neither is a fact
+  about arrival.
+
+#### 6.4.b Cutting the cord
+
+**Goal.** Prove, on a running deployment, that nothing in intake resolves to infrastructure Office Inference
+operates.
+
+**Why this is a step of its own.** `BIZ-INDEPENDENT-001` says the client may take the system over completely
+and we are out of the picture, and its test is that you can cut every cord to us and the acceptance still
+passes. Two versions of this design failed it before a line was written: one put the client's invoice address
+on infrastructure we would operate, and one put the OAuth application registration in our identity tenant.
+Both would have passed an offboarding rehearsal and both are rebuilds rather than edits once a client has
+paid. The constraint is cheap here and expensive later, so it is checked by a command that runs on any
+deployment at any time.
+
+**The five components, and the owner each must name.**
+
+| Component | Where it lives | What the check refuses |
+|---|---|---|
+| The intake address | The client's Microsoft 365 tenant | Any address whose domain is not in `client.domains` |
+| The mailbox | The client's Exchange Online | A shared mailbox, or a mailbox with no licence |
+| The app registration | The client's Microsoft Entra ID | A `tenant_id` that differs from the deployment's tenant, or `registered_by` anyone but the client |
+| The consent grant | The client's Microsoft Entra ID | A grant recorded against another tenant |
+| The credential | The client's own secret store | A path outside the client's estate, or a file another account can read |
+
+**And the network.** Every request intake makes goes through one function in `net.py`, which holds the host
+allowlist. There are exactly two entries, `login.microsoftonline.com` and `graph.microsoft.com`, and the
+function refuses anything else before a socket is opened. That makes "does anything phone home" a property
+of one function rather than a claim about the whole codebase, and it is why the cord check can be a command
+rather than an audit.
+
+**Commands.**
+
+    python3 services/intake/intake.py cord-check --config /etc/oi-intake/intake.yaml
+    python3 services/intake/intake.py enumerate-reach --config /etc/oi-intake/intake.yaml
+
+**Expected.** `cord-check` prints the five components with `client` beside each and then `no cord` and exits
+0. `enumerate-reach` prints one row per probe: the client's own mailbox `reached`, a second mailbox
+`refused`, the directory `refused`, a different Microsoft service `refused`, and any other host
+`refused by the allowlist`, which is the control acting before the network rather than the tenant refusing
+after it.
+
+**Verify.** `CON-OWNED-001` and `SEC-CON-001` are proved in `tests/test_intake_ownership.py`, including a
+negative control that moves each of the five components to us in turn and asserts the check fails.
+`CON-LEAST-001` and `SEC-INTAKE-002` are proved in `tests/test_intake_reach.py`, which asserts what the
+credential reached rather than the permission it was granted.
+
+**If it breaks.**
+
+- **`cord-check` refuses a component we did not expect**: read which one and why. Every refusal names the
+  component and the value, and the fix is in the client's configuration or in their tenant rather than in
+  the code.
+- **`enumerate-reach` shows a second mailbox reached**: the app registration has an application permission,
+  or a delegated permission was granted tenant-wide by a grant that is not the one the deployment recorded.
+  Both are the failure `CON-LEAST-001` exists for, and the enumeration is why it was caught rather than
+  assumed.
+- **A request to a host that is not Microsoft's is made**: it went around `net.py`. That is the only way to
+  reach a third host, and the test that asserts the allowlist is what keeps it that way.
 
 ## Phase 7 — Agent runtime and MCP gateway  *(outline)*
 

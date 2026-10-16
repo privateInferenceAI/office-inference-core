@@ -30,6 +30,7 @@ import time
 import subprocess
 import sys
 import uuid
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -55,6 +56,7 @@ import access as access_module  # noqa: E402
 import assertion  # noqa: E402
 import citations  # noqa: E402
 import documents as documents_module  # noqa: E402
+import approvals as approvals_module  # noqa: E402
 import redaction  # noqa: E402
 import ingest  # noqa: E402
 import retriever  # noqa: E402
@@ -807,6 +809,80 @@ async def control_job(job_id: str, action: str, request: Request):
     audit("tool_call", session.subject, session.role, "ok",
           {"stage": "job", "job_id": job.job_id, "task": job.task, "state": job.state, "action": action,
            }, tool=job.task)
+    return JSONResponse(job.to_dict(include_result=True), status_code=200)
+
+
+@app.post("/jobs/{job_id}/approvals", responses={
+    200: {"model": contract.Job, "description": "the job after the decision"},
+    400: {"model": contract.Refusal,
+          "description": "not one of the three decisions, or a denial or change request with no reason"},
+    401: {"model": contract.Refusal, "description": "no session"},
+    403: {"model": contract.Refusal, "description": "the request supplied its own authority"},
+    404: {"model": contract.Refusal, "description": "no such job"},
+    409: {"model": contract.Refusal,
+          "description": "**the job is not waiting for a decision**, or the decision names different content "
+                         "from what is waiting. The second is `approval_drift` and it means the draft changed "
+                         "while somebody was reading it."},
+})
+async def decide_job(job_id: str, request: Request):
+    """Approve, deny, or ask for changes on a job that is waiting.
+
+    **This is the one route in the product where a wrong record is worse than a missing one**, because a
+    client reads an approval and believes it. Three things follow from that and each is here rather than in a
+    convention.
+
+    * **The decision is refused unless the job is actually waiting.** A decision on a running job would
+      produce a record of an approval nobody was asked for.
+    * **The decision quotes the content it is about.** `action_digest` has to match what the job is holding,
+      so a draft that changed between the screen rendering and the button being pressed is refused rather than
+      silently approved. That is `approval_drift` and it is a real case, not a theoretical one: a retry can
+      rewrite a draft in that window.
+    * **The record says what the system does not know.** The identity object carries `unverified` and the
+      Part 11 manifestation marks the printed name absent with the reason stated. See `approvals.py`.
+    """
+    session, refusal = _session_for(request)
+    if refusal:
+        return refusal
+    job = _find_job(job_id, session)
+    if job is None:
+        return JSONResponse({"error": "no such job", "kind": "not_found"}, status_code=404)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "no JSON body", "kind": "no_input"}, status_code=400)
+
+    decision = str(body.get("decision") or "").strip()
+    reason = str(body.get("reason") or "")
+    note = str(body.get("note") or "")
+    quoted = str(body.get("action_digest") or "").strip()
+
+    problem = approvals_module.validate(decision, reason)
+    if problem:
+        return JSONResponse({"error": problem, "kind": "bad_decision"}, status_code=400)
+
+    store = STATE["jobs"]
+    try:
+        jobs_module.decide(job, store, decision, quoted)
+    except jobs_module.ApprovalDrift as drifted:
+        # **409 rather than 400, and the body carries both digests.** The client's request was well formed;
+        # the world moved. A screen that gets this can re-render and ask again, and a screen that got a 400
+        # would be told its request was malformed, which is false.
+        return JSONResponse({"error": str(drifted), "kind": "approval_drift",
+                             "waiting_on": drifted.waiting, "quoted": drifted.quoted}, status_code=409)
+    except jobs_module.TransitionRefused as refused:
+        return JSONResponse({"error": str(refused), "kind": "transition_refused",
+                             "was": refused.was, "wanted": refused.wanted}, status_code=409)
+
+    # The record goes in `payload`, which `payload_sha256` covers, rather than in the `approval` column, which
+    # the hash chain does not. Migration 013 closed the identical gap for the redaction columns; see
+    # AUD-APPROVAL-001.
+    record = approvals_module.build_payload(
+        session, job, decision, reason, note, quoted,
+        signed_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    )
+    audit("approval", session.subject, session.role, decision, record, tool=job.task)
+
     return JSONResponse(job.to_dict(include_result=True), status_code=200)
 
 

@@ -57,6 +57,11 @@ EXPECTED_PATHS = {
     "/jobs/{job_id}",
     "/jobs/{job_id}/events",
     "/jobs/{job_id}/{action}",
+    # **The approval decision, and it is a path of its own rather than a fourth action.** Pause and cancel
+    # are controls on the work; an approval authorises it, and it carries a body, a reason, and a record that
+    # outlives the job. Folding it into `{action}` would put a path segment where a payload belongs, and the
+    # payload is the part that has to be right. See runbook 6.0.
+    "/jobs/{job_id}/approvals",
     # **Reading the document behind a citation.** The chips on the Ask screen name the documents an answer
     # came from, and until this path existed they were spans: a person could see that an answer rested on the
     # travel policy and could not read the travel policy. The id carries slashes, hence the path parameter.

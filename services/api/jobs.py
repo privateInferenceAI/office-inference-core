@@ -35,6 +35,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
+# The decision vocabulary lives with the record rather than here, because the record is what has to be read
+# back years later and the state machine is one of several things that will act on it. Importing rather than
+# redeclaring keeps a decision name from meaning two things.
+from approvals import DECISION_APPROVE, DECISION_DENY
+
 # --------------------------------------------------------------------------- the machine
 #
 # Small on purpose. A client has to be able to draw every state and know what may follow, and a state
@@ -97,6 +102,24 @@ class TransitionRefused(JobError):
         super().__init__(f"job {job_id} is {was} and may not become {wanted}")
 
 
+class ApprovalDrift(JobError):
+    """An approval quoted a digest that is not what the job is waiting about.
+
+    **Its own exception rather than a `TransitionRefused`, because the two are different faults with different
+    fixes.** A refused transition means the caller asked at the wrong moment; drift means the thing they
+    decided about is no longer the thing in front of them. The second is the one that would otherwise produce
+    a record saying somebody approved something they never saw.
+    """
+
+    def __init__(self, job_id: str, waiting: str, quoted: str):
+        self.job_id, self.waiting, self.quoted = job_id, waiting, quoted
+        super().__init__(
+            f"job {job_id} is waiting for a decision on {waiting or 'nothing'}, and this decision names "
+            f"{quoted or 'nothing'}. The content changed while it was being read, so the decision has to be "
+            f"made again against what is there now."
+        )
+
+
 # --------------------------------------------------------------------------- the records
 
 
@@ -154,6 +177,12 @@ class Job:
     data_class: str = "internal"
     state: str = QUEUED
     outcome_reason: str = ""
+    # **What this job is waiting to have approved, as a hash rather than a pointer.** When a job stops at the
+    # gate it has something specific in mind: an email it has drafted, an entry it wants to post. The digest
+    # of that thing is held here and an approval has to quote it. Without it the record says somebody approved
+    # something, and the link between the approval and the act can be re-pointed afterwards by anything that
+    # can edit a job row.
+    pending_action_digest: str = ""
     time_budget_s: int = DEFAULT_TIME_BUDGET_S
     attempt_budget: int = DEFAULT_ATTEMPT_BUDGET
     created_at: float = field(default_factory=time.time)
@@ -199,6 +228,12 @@ class Job:
             out["duration_ms"] = int((self.finished_at - self.started_at) * 1000) if self.started_at else None
         if self.outcome_reason:
             out["outcome_reason"] = self.outcome_reason
+        # **Published only while the job is waiting.** A client deciding needs to know what it is deciding
+        # about, and the Review screen quotes this back so the route can refuse a decision that has drifted
+        # from the thing it was made about. Once the gate is passed the digest is history and lives in the
+        # audit row instead.
+        if self.state == AWAITING_APPROVAL and self.pending_action_digest:
+            out["pending_action_digest"] = self.pending_action_digest
         if include_result and self.result:
             out["result"] = self.result
         return out
@@ -655,4 +690,73 @@ def cancel(job: Job, store) -> Job:
     transition(job, CANCELLED, reason="cancelled_by_operator")
     store.put(job)
     store.append(job.job_id, EV_DONE, {"state": CANCELLED, "attempts": job.attempts})
+    return job
+
+
+# --------------------------------------------------------------------------- the approval gate
+#
+# **The state existed since C4 and nothing reached it.** `awaiting_approval` has been in ALLOWED since the
+# machine was written, and the C4 notes say why: the interface has to render it, and a state added later
+# would change the shape of the screen. C5 is its first writer, which is what makes two audit defects still
+# cheap to fix rather than archaeology.
+
+
+def action_digest(action: str) -> str:
+    """The hash an approval quotes, over the thing being approved.
+
+    **Over the content rather than an identifier.** A digest of a row id would survive the row being edited,
+    so an approval would still verify against a draft that had since changed. Hashing the content means the
+    thing approved and the thing recorded are the same thing or the route refuses.
+    """
+    import hashlib
+    return "sha256:" + hashlib.sha256((action or "").encode("utf-8")).hexdigest()
+
+
+def request_approval(job: Job, store, action: str, *, note: str = "") -> Job:
+    """Stop at the gate, holding what it wants approved.
+
+    The digest is written before the transition, so a job can never be observed in `awaiting_approval`
+    without the thing it is waiting about. A window where the state says waiting and the digest is empty is a
+    window where an approval could be recorded against nothing.
+    """
+    job.pending_action_digest = action_digest(action)
+    transition(job, AWAITING_APPROVAL)
+    store.put(job)
+    store.append(job.job_id, EV_STEP, {
+        "state": AWAITING_APPROVAL,
+        "action_digest": job.pending_action_digest,
+        "note": note or "waiting for a decision",
+    })
+    return job
+
+
+def decide(job: Job, store, decision: str, action_digest_quoted: str) -> Job:
+    """Apply a decision, and refuse one that has drifted from the thing it was made about.
+
+    **The refusal is the feature, and it is the same argument as the state machine's.** An approval route that
+    accepted any decision on a waiting job would record "somebody approved this" where the honest record is
+    "somebody approved something else". A job whose draft changed while a client was reading it is exactly the
+    case this catches, and it is not hypothetical: a retry can rewrite the draft between the screen rendering
+    and the decision arriving.
+
+    A denial and a request for changes both stop the job. The difference is what the next run learns: a denial
+    says the work should not happen, and a request for changes says it should happen differently. Both keep the
+    job's rows, because a decision is a fact about the work rather than a reason to delete it.
+    """
+    if job.state != AWAITING_APPROVAL:
+        raise TransitionRefused(job.job_id, job.state, "decided")
+    if not job.pending_action_digest or job.pending_action_digest != action_digest_quoted:
+        raise ApprovalDrift(job.job_id, job.pending_action_digest, action_digest_quoted)
+
+    if decision == DECISION_APPROVE:
+        job.pending_action_digest = ""
+        transition(job, RUNNING)
+        store.append(job.job_id, EV_STEP, {"state": RUNNING, "note": "approved"})
+    elif decision == DECISION_DENY:
+        transition(job, FAILED, reason="denied_at_the_gate")
+        store.append(job.job_id, EV_DONE, {"state": FAILED, "note": "denied"})
+    else:
+        transition(job, FAILED, reason="changes_requested_at_the_gate")
+        store.append(job.job_id, EV_DONE, {"state": FAILED, "note": "changes requested"})
+    store.put(job)
     return job
