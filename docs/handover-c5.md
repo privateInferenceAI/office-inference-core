@@ -423,8 +423,16 @@ commit that introduced the `events_through` bug, and it would have failed on `Js
 
 ### 6.5 The register, and a defect in the register itself
 
-**26 of 34 C5 rows are verified, 8 are open.** The open ones belong to the intake connector's
-tenant gap, below.
+**26 of 34 C5 rows are verified, 8 are open.** The open eight are the approval set:
+`APR-STATE-001`, `APR-DECIDE-001`, `APR-RESUME-001`, `APR-HONEST-001`, `APR-IRREVERSIBLE-001`,
+`APR-UPGRADE-001`, `AUD-APPROVAL-001`, `SEC-APR-001`. Most are open because the behaviour was proved
+by hand in round one and the **formal test does not exist yet**; the register holds a row to its
+`verify` field, and a probe run by a person is not a test in the suite.
+
+**All nine `CON-` rows are verified**, so the intake connector carries no open rows. (The first
+version of this paragraph said the open ones were the intake tenant gap, which is wrong and an
+incoming agent caught it within an hour of picking this up. **The register is authoritative and this
+document is not.** Where they disagree, read the register.)
 
 **Two of the verified rows carry their limit in the note, not only their result.**
 `CON-OWNED-001` and `CON-LEAST-001` are proved against a stand-in tenant that implements the
