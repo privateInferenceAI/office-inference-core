@@ -4603,8 +4603,15 @@ identified: sign-in is not enabled yet."*
 
 ```
 cd /opt/oi-core
-bash scripts/probe.sh job_probe.py        # the C4 job interface, which this step must not have broken
-python3 scripts/fetch_openapi.py --check  # the contract, including the new path
+bash scripts/probe.sh job_probe.py
+
+# The contract check has to run ON the docker network, because it fetches http://api:8088 and that name
+# resolves only there. `python3 scripts/fetch_openapi.py --check` on the host fails with a name resolution
+# error, which reads like a broken service and is a broken command.
+docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
+  -v /opt/oi-core:/w -w /w --entrypoint python oi-core/session:local \
+  /w/scripts/fetch_openapi.py --check
+
 python3 -m pytest tests/ -q
 ```
 
@@ -4617,11 +4624,11 @@ piece. So the approval route is verified here for its shape, its refusals and it
 and its end-to-end path is verified by the workflow piece. A page that claimed otherwise would be describing
 a test that does not exist.
 
-**The probe name was wrong when this step was first written**, and it is worth recording how it was caught.
-The page said `jobs_probe.py` and the file is `job_probe.py`, so the documented command failed with no such
-file. Step 4 of the four activities, following your own page, is what found it, within the hour. This project
-has now hit a documented command that cannot run four times, and each one was found by somebody running it
-rather than reading it.
+**Both commands in this step were wrong when it was first written, and following it is what found them.**
+It said `jobs_probe.py` and the file is `job_probe.py`. Then it said `python3 scripts/fetch_openapi.py
+--check`, which cannot resolve `api` from the host, when the correct form was already written out in step
+5.0 four hundred lines above. Neither error is visible by reading. This project has now hit a documented
+command that cannot run five times, and every one was found by somebody running it.
 
 **If it breaks.**
 
