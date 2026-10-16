@@ -308,6 +308,25 @@ class Job(BaseModel):
         default=None,
         description="the answer, when a step produced one. A client that comes back gets the result rather "
                     "than only the history of producing it")
+    # **Declared here so a client learns they exist.** The Review screen cannot offer a decision without
+    # `pending_action`: it shows the recipient, the subject and the body, and refuses to enable an approve
+    # control when it cannot. The app's contract test was holding these three open with an allowance list,
+    # which is a green that fails the moment the fields land and the fix is to delete three strings.
+    pending_action_digest: Optional[str] = Field(
+        default=None,
+        description="the sha256 of the exact content being approved, published only while the job waits. The "
+                    "decision quotes it back, so a draft that changed while somebody was reading it is "
+                    "refused rather than approved")
+    pending_action: Optional[dict] = Field(
+        default=None,
+        description="what the decision is about: a one-sentence summary, why it was drafted, the target, the "
+                    "subject, the body, what approving it does, and any note")
+    events_through: Optional[int] = Field(
+        default=None,
+        description="the highest event sequence number this job has. A client renders the job from this "
+                    "response and then attaches the stream with `?since=<events_through>`, so the connection "
+                    "is never the only copy of what happened. Without it a reconnecting client restarts from "
+                    "zero, which is what the live view had to do")
 
 
 class TaskList(BaseModel):

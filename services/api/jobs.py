@@ -187,6 +187,10 @@ class Job:
     # cannot render it; this is the drafted email, the entry to post, the reason it was drafted and what
     # approving it will do. Only the engine fills it, and only while the job is at the gate.
     pending_action: dict = field(default_factory=dict)
+    # **How far the event log has got, so a client can attach the stream where it stopped.** Written by the
+    # store when it reads a job, because the events are rows and the job row does not carry them. A screen
+    # renders from `GET /jobs/{id}` and then asks for `?since=<events_through>`.
+    events_through: int = 0
     time_budget_s: int = DEFAULT_TIME_BUDGET_S
     attempt_budget: int = DEFAULT_ATTEMPT_BUDGET
     created_at: float = field(default_factory=time.time)
@@ -242,6 +246,12 @@ class Job:
             out["pending_action"] = self.pending_action
         if include_result and self.result:
             out["result"] = self.result
+        # **The cursor, so a client never starts from zero.** A screen renders the job from this response and
+        # then attaches the stream with `?since=<events_through>`. Without it the live view had to use
+        # `?since=0` and rely on replay being idempotent, which works and makes the client re-read everything
+        # it already has every time it connects.
+        if self.events_through:
+            out["events_through"] = self.events_through
         return out
 
 
@@ -399,6 +409,11 @@ class PostgresStore:
                        duration_ms
                   from job_steps where job_id = %s order by attempt
                 """, (job_id,))
+            # The cursor, read in the same round trip as the steps rather than as a second query a caller
+            # has to remember. A job with no events is 0, which is the same as "start from the beginning".
+            cur.execute("select coalesce(max(seq), 0) from job_events where job_id = %s", (job_id,))
+            through = int((cur.fetchone() or [0])[0])
+
             steps = [Step(step_id=r[0], job_id=job_id, attempt=r[1], name=r[2], state=r[3],
                           failure_kind=r[4], failure_detail=r[5], retryable=r[6], lane=r[7],
                           model=r[8], duration_ms=r[9]) for r in cur.fetchall()]
@@ -409,7 +424,7 @@ class PostgresStore:
                    started_at=float(row[13]) if row[13] is not None else None,
                    finished_at=float(row[14]) if row[14] is not None else None,
                    data_class=row[15], pending_action_digest=row[16] or "",
-                   pending_action=dict(row[17] or {}), steps=steps)
+                   pending_action=dict(row[17] or {}), events_through=through, steps=steps)
 
     def append(self, job_id: str, event: str, data: dict) -> int:
         """Write one event and assign its number in the same statement that inserts it.
