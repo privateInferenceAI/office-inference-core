@@ -1252,6 +1252,403 @@ items:
       the shell claim the deployment declares no tasks while the same header said all systems ready, so the
       shell has three states now: known, empty, and unreadable.
 
+  # ---- C5: workflows and the first connector ------------------------------------------------
+  # Every row here is subject to BIZ-INDEPENDENT-001: nothing may sit on infrastructure we operate.
+  # The research behind these is in docs/research/, and the two audit defects C5 is the first writer
+  # for are recorded on AUD-APPROVAL-001.
+
+  - id: WF-ENGINE-001
+    title: A workflow runs more than one step, and every step is written to the audit chain in the same transaction as the state change
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      run the invoice workflow end to end; the job carries more than one step; the audit chain has a row per
+      step naming the job id; and verify_chain passes afterwards. The transactional half is tested by killing
+      the process between the state write and the audit write: either both are present or neither is, and a
+      step that changed state with no chain row fails the test.
+    status: open
+    note: >-
+      Same-transaction is the reason the engine is ours rather than adopted. Every off-the-shelf engine sits
+      outside our transaction and reports by webhook, so a crash between the business write and the audit write
+      leaves a gap in the artifact a client may ask to verify.
+
+  - id: WF-RESUME-001
+    title: A workflow paused for approval survives a restart of the service
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      stop a job at awaiting_approval, restart the service, approve it, and the job completes. The steps after
+      the gate each have exactly one row, so a resumed run does not repeat work it already did.
+    status: open
+
+  - id: WF-FAIL-001
+    title: A failed step is recorded with its cause and the workflow does not continue past it
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      force a step to fail by stopping a service it needs; the job reaches failed, the failing step carries a
+      typed cause rather than a string, and no later step has a row. A test that asserts only the failure and
+      not the absence of later steps passes on a workflow that ran to the end and failed at the last hurdle.
+    status: open
+
+  - id: WF-TIMEOUT-001
+    title: A step that hangs is stopped, rather than hanging the job indefinitely
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      point a step at an endpoint that accepts a connection and never answers; the step fails on its timeout
+      with the timeout named, and the job reaches a terminal state within a bounded time.
+    status: open
+
+  - id: WF-CANCEL-001
+    title: A person can stop a running workflow, and the stop is recorded with who asked
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      cancel a running job; the state becomes cancelled, no further steps run, and the record names the session
+      that asked. A cancel that leaves a step running is a failure even though the state says cancelled.
+    status: open
+
+  - id: WF-IDEMPOTENT-001
+    title: Retrying a step does not repeat an effect it already had
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      fail a step after its side effect but before its state write, then let it retry; the effect happens once.
+      The test counts the effect, not the attempts.
+    status: open
+
+  - id: CON-OWNED-001
+    title: Every component of intake lives in the client's estate, and intake keeps working when we are gone
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      the address is one the client already uses; the mailbox is licensed and in their tenant; the application
+      registration is in their identity tenant; the consent grant is theirs; the credential is in their secret
+      store. Cut every cord to Office Inference and intake still works. The test fails if any of those five
+      lives with us.
+    status: open
+    note: >-
+      A shared mailbox cannot be used and this is the finding that shaped the design: Microsoft keeps sign-in
+      blocked on shared mailboxes with a system-generated password, and delegated OAuth needs one interactive
+      sign-in. A shared mailbox therefore forces application permissions, which is where Graph Mail.Read reads
+      every mailbox in the tenant. The client needs a licensed regular mailbox, and that belongs in the
+      onboarding checklist because it is a purchase.
+
+  - id: CON-LEAST-001
+    title: The mail credential reads one mailbox and can reach nothing else in the client's tenant
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      enumerate what the credential can reach and assert it is one mailbox. The path taken is delegated
+      permission on a licensed mailbox, which is scoped by construction; an application permission with an
+      RBAC scope is refused, because that scope is additive and Microsoft's own guidance says a leftover Entra
+      grant makes it a no-op, so an administrator who completes three of four steps builds something that
+      looks scoped and is not.
+    status: open
+
+  - id: CON-INTAKE-001
+    title: Every document taken in is recorded with its source, its arrival time and its content hash
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      put a document into intake; a row exists naming the sender, the message identifier, the arrival time and
+      the sha256 of the content; the same hash appears on the ingest manifest row. An intake that records the
+      file but not where it came from cannot answer an auditor asking what arrived.
+    status: open
+
+  - id: CON-DUPE-001
+    title: The same document arriving twice does not run the workflow twice
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      deliver the same invoice twice, once as a re-send and once as a forward; the second is recognised by
+      content hash, no second job is created, and the duplicate is recorded as a duplicate rather than
+      discarded silently.
+    status: open
+
+  - id: CON-INJECT-001
+    title: Content arriving through intake cannot make the system act on instructions inside it
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      deliver an invoice whose body contains an instruction, such as a line telling the system to email a list
+      to an outside address; the workflow's actions are unchanged and the attempt is visible in the record. The
+      test asserts the action did not happen, not merely that a guard exists.
+    status: open
+    note: >-
+      Invoice fraud is a live surface rather than a hypothetical: AFP's 2025 survey found 79 percent of
+      organisations saw payment fraud attempts and invoice fraud almost doubled to 24 percent, and the FBI
+      logged 21,442 business email compromise complaints in 2024. Every commercial comparator we surveyed
+      hardened intake with sender verification or per-account addressing, and all four pair it with a human
+      review step. The approval gate is what makes this survivable, which is why intake and approval are one
+      phase rather than two.
+
+  - id: CON-SENDER-001
+    title: An invoice whose sender cannot be verified is marked rather than trusted
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      deliver an invoice from an address that is not a known supplier, and one whose envelope sender differs
+      from its header sender; both are marked and neither is approved automatically. SPF, DKIM and DMARC
+      results are recorded with the message.
+    status: open
+
+  - id: CON-FOLDER-001
+    title: The folder connector polls, because inotify does not see a network filesystem
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      write a file into the watched share from a second machine and assert it is picked up without a restart.
+      A test that writes locally and watches a local path passes on a connector that would miss every real
+      arrival, because inotify's own man page says it does not catch remote events on network filesystems.
+    status: open
+
+  - id: CON-SILENT-001
+    title: Intake detects a break that leaves a working credential and an empty queue
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      simulate each silent failure, which is a revoked scope, a pulled licence and a mail rule diverting
+      invoices; in every case the credential still works and the queue empties, so error logging reports
+      nothing. A heartbeat plus a volume floor catches all three. The alerts route to an address the client
+      controls, because an alert to us reintroduces the dependency the design exists to remove.
+    status: open
+
+  - id: APR-STATE-001
+    title: A job stops at awaiting_approval and stays there until a person decides
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      run a job to its gate and leave it; it is still awaiting_approval after a wait longer than any step
+      timeout, it has not proceeded and it has not failed. A gate that quietly expires into a failure is worse
+      than one that waits, because the work is lost and nobody was asked.
+    status: open
+
+  - id: APR-DECIDE-001
+    title: Approve, deny and request-changes are each recorded, and a denial carries a reason
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      three jobs, one per decision; each record names the decision and the session that made it; the denied one
+      carries a reason, and a denial submitted without one is refused rather than stored blank.
+    status: open
+
+  - id: APR-RESUME-001
+    title: An approval resumes the job where it stopped, and a denial stops it without running the rest
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      approve a paused job and assert the steps after the gate run exactly once while the steps before it do
+      not run again; deny a second job and assert no step after the gate runs at all.
+    status: open
+
+  - id: APR-HONEST-001
+    title: An approval record does not claim a verified identity the system cannot verify
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      every approval row carries an identity basis, and no row records a verified identity while that basis is
+      a session token. The test fails if the field is absent, and it fails on any sentence in the API, the UI
+      or the activity feed that names a person or asserts that a person acted.
+    status: open
+    note: >-
+      21 CFR 11.100(b) makes identity verification a precondition to an electronic signature existing, and the
+      FDA's 2003 enforcement discretion kept the signature rules when it relaxed everything else, so this is
+      the one corner of Part 11 that was never softened. Section 11.50 wants a printed name, a timestamp and
+      the meaning, and C5 can establish two of three honestly. No wording fixes the third. Two defects are
+      live here and C5 is the first writer for both: audit_events.approval is outside the hash chain, the
+      identical defect migration 013 fixed for the redaction columns, so the record goes in payload instead;
+      and audit_feed renders an approval as 'a person ' || outcome || ' an action', which asserts something
+      the system does not know.
+
+  - id: APR-IRREVERSIBLE-001
+    title: Nothing irreversible happens before an approval
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      a workflow whose final step sends an email stops at the gate; assert nothing was sent, then approve and
+      assert it was sent exactly once. The test asserts the absence before approval, because a test that only
+      checks the send afterwards passes on a system that sends twice.
+    status: open
+
+  - id: APR-UPGRADE-001
+    title: Approval records can be re-attested when real identity arrives, without rewriting the chain
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      take an approval recorded before identity existed, append a re-attestation naming the account that held
+      the session, and assert the original row is byte-identical, the new row links to both its id and its
+      row_hash, and verify_chain still passes. Migration 013 is the template: version the formula, never
+      recompute old rows.
+    status: open
+    note: >-
+      The limit is worth stating rather than discovering. Assurance cannot be upgraded retroactively: the C5
+      token is a bearer credential and the workstation is often shared, so a later statement by a named person
+      is a new claim rather than evidence about the original act. Every C5-era approval is unverified
+      permanently, plus one appended statement about which account held the session. The purpose of the C7
+      work is to make that boundary visible and dated, not to make old approvals verified.
+
+  - id: UI-REVIEW-001
+    title: The queue shows what will happen, why, and the exact content, before a decision is offered
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      a pending approval for a drafted email shows the recipient, the subject and the full body, and the reason
+      it was drafted. A browser test asserts the body is present in the document before the approve control is
+      enabled, so a screen that offers approval before showing the content fails.
+    status: open
+
+  - id: UI-REVIEW-002
+    title: Approve, deny and ask-for-changes are all reachable and their result is visible
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      three browser tests, one per control, each asserting the job leaves awaiting_approval and the screen
+      reflects the decision without a manual refresh.
+    status: open
+
+  - id: UI-REVIEW-003
+    title: Bulk approval exists only for items the system can show are identical, and it states the count
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      five identical approvals offer one action naming five; a queue of five different items offers none. The
+      test asserts the absence on the mixed queue, which is the half that matters.
+    status: open
+    note: >-
+      The evidence says assume rubber-stamping: Graphite's data on merged pull requests found 46 percent
+      approved with no comment at all and 65 percent with three words or fewer, and that is engineers
+      reviewing peers. Bulk approval is therefore a stated rule with a count rather than a checkbox column,
+      and it is refused unless the items are genuinely identical.
+
+  - id: UI-REVIEW-004
+    title: An empty queue says so, rather than looking broken
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      a browser test on a deployment with no approvals asserts a sentence explaining that nothing is waiting,
+      not a blank panel and not a spinner that never stops. Review was deliberately left out of C4 for this
+      reason, so the screen that finally ships must not repeat the fault.
+    status: open
+
+  - id: UI-LIVE-001
+    title: A running job shows its steps as they happen, in a sentence rather than a step identifier
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      start a multi-step job and assert each step's line appears while the job is still running, and that the
+      line is a sentence a non-technical reader understands. Two levels of disclosure and no more, because
+      beyond two users get lost.
+    status: open
+    note: >-
+      The most useful practitioner evidence is LukeW's February 2026 account of shipping agentic interfaces:
+      his team built deep progressive disclosure, pulled back, and concluded the agent's work should serve as
+      the progress indicator rather than sitting beside a spinner. One finding cuts against instinct: a CHI 26
+      study of 240 participants found a 2 second time-to-first-token rated LESS thoughtful and LESS useful
+      than 9 or 20 seconds, so speed is not unambiguously good in an interface that is supposed to look
+      considered. Skeleton screens are not cited as evidence for anything, because the study behind the common
+      advice found no significant difference.
+
+  - id: UI-LIVE-002
+    title: The live view survives a refresh and reconstructs itself from the recorded events
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      refresh the browser mid-run; the view returns to the same job with the steps already recorded, none
+      missing and none invented. Render the complete screen from the job first and derive the stream cursor
+      from it, so the connection is never the only copy of progress.
+    status: open
+
+  - id: UI-LIVE-003
+    title: A job that has stopped progressing looks stalled rather than working
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      freeze the worker mid-job; the view stops claiming progress within the staleness window and says the job
+      has not reported since a stated time. A heartbeat does not solve this on its own, because a keep-alive
+      comment is invisible to a reader by design, so only a real event changes what the screen says.
+    status: open
+
+  - id: UI-FEED-001
+    title: No sentence in the interface asserts something the record does not know
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      read every string the activity feed and the review screen can produce for an approval, and fail any that
+      names a person or asserts that a person acted while the identity basis is unverified. The existing feed
+      line fails this test today, which is the point of writing it.
+    status: open
+
+  - id: AUD-APPROVAL-001
+    title: No audit column carrying meaning sits outside the hash chain
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      for every column on audit_events that a reader would treat as a fact, assert it is either inside the
+      canonical string or hashed into payload_sha256. audit_events.approval fails this today: it is a jsonb
+      column with an approval event type and it is not among the eighteen fields the canonical function takes,
+      so a value written there can be edited by hand while every chain check passes.
+    status: open
+    note: >-
+      This is the identical defect migration 013 was written to close for the four redaction columns, and its
+      comment states the consequence better than a new sentence could: a field the chain does not cover is a
+      field that can be rewritten while every check passes, and the check would report the record intact.
+      Nothing writes an approval row yet, so C5 is the first writer and the choice is still open. The
+      recommendation is payload, which payload_sha256 already covers, so no schema change and no new chain
+      version is needed.
+      The defect was found on 2026-10-16, before any writer existed.
+
+  - id: AUD-WF-001
+    title: Every workflow step, tool call and approval is addressable by the job that caused it
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      run a full workflow, then ask the chain what the job did and assert every step, every tool call and the
+      approval come back. A step that ran with no chain row fails, and so does a chain row that cannot be
+      traced to a job.
+    status: open
+
+  - id: AUD-WF-002
+    title: The chain verifies after a full workflow run, including a resumed and a denied one
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      verify_chain passes after a completed run, a run resumed from approval, and a run denied at the gate. The
+      three paths are tested separately because a resume re-enters the same code in a different state.
+    status: open
+
+  - id: SEC-APR-001
+    title: An approval cannot be issued by a caller who supplies their own role
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      submit an approval carrying an executive role in the body with no valid session; the request is refused
+      and the attempt is recorded. This is the guard C3 paid for and it applies to the approval route exactly
+      as it applies to a question.
+    status: open
+
+  - id: SEC-CON-001
+    title: The intake credential is not readable from the application container or the repository
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      inspect the image and the container environment for the credential and find none; attempt to read it
+      from inside the application container and fail; scan the repository and find no key. The credential is
+      read from the client's secret store at the point of use, and a rotation by the client's administrator
+      takes effect without a redeploy.
+    status: open
+
+  - id: SEC-INTAKE-002
+    title: Intake cannot be used to reach anything beyond the mailbox it reads
+    tier: [cloud, hosted, office]
+    phase: C5
+    verify: >-
+      attempt to use the intake credential against a second mailbox, a different service and the directory;
+      every attempt is refused. The test enumerates what the credential can reach rather than asserting the
+      permission it was granted, because the two differ when a scope is additive.
+    status: open
+
   - id: NEVER-KB-001
     title: No managed knowledge base
     tier: [cloud, hosted]
