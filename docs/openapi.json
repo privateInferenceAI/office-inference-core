@@ -698,6 +698,18 @@
             ],
             "title": "Duration Ms"
           },
+          "events_through": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "the highest event sequence number this job has. A client renders the job from this response and then attaches the stream with `?since=<events_through>`, so the connection is never the only copy of what happened. Without it a reconnecting client restarts from zero, which is what the live view had to do",
+            "title": "Events Through"
+          },
           "finished_at": {
             "anyOf": [
               {
@@ -728,6 +740,31 @@
             ],
             "description": "why it ended, when it did not succeed. A typed reason such as attempts_exhausted",
             "title": "Outcome Reason"
+          },
+          "pending_action": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "what the decision is about: a one-sentence summary, why it was drafted, the target, the subject, the body, what approving it does, and any note",
+            "title": "Pending Action"
+          },
+          "pending_action_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "the sha256 of the exact content being approved, published only while the job waits. The decision quotes it back, so a draft that changed while somebody was reading it is refused rather than approved",
+            "title": "Pending Action Digest"
           },
           "result": {
             "anyOf": [
