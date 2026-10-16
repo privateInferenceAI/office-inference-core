@@ -64,11 +64,16 @@ import textwrap
 import zipfile
 from pathlib import Path
 
-# The suffix set the worker accepts, copied here rather than imported: this script must be runnable
-# without the service code on the path, and a drift between the two is caught by the coverage check at
-# the end of a run rather than by an import error here.
-ACCEPTED_SUFFIXES = (".pdf", ".docx", ".pptx", ".xlsx", ".html", ".htm", ".md", ".markdown",
-                     ".txt", ".csv", ".rtf", ".odt", ".ods", ".odp", ".eml")
+# **Loaded from the worker's own list rather than copied.**
+#
+# This was a second tuple, and the coverage report at the end of a run measured the corpus against it. So the
+# denominator was a copy of the list: the report confirmed that two copies of one list agreed with each other
+# and said `15/15 formats covered (complete)` while a third of what the parser reads was unreachable. The copy
+# is gone, and the direction of the check is reversed below.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "ingestion"))
+import formats  # noqa: E402  (after the path insert, deliberately)
+
+ACCEPTED_SUFFIXES = tuple(sorted(formats.ACCEPTED_SUFFIXES))
 
 SEED = 20261013
 
@@ -416,6 +421,111 @@ def write_authored(target: Path, lines: list[str]) -> dict:
     return written
 
 
+def scanned_pages(target: Path, lines: list[str], written: dict) -> None:
+    """Raster scans, so the OCR path has fixtures rather than only a paragraph in a runbook.
+
+    **The gap this closes was invisible for the whole project.** The worker accepted no image format at all,
+    so a client's scanned page could not enter the pipeline, while the parser has OCR installed and reads one
+    correctly in about three seconds. Nothing tested it because nothing could reach it: a format absent from
+    the accepted list is a format no fixture can exercise, and the coverage report measured the corpus against
+    that same list, so it reported complete.
+
+    Rendered rather than scanned for real, which is a limitation worth stating: these have clean synthetic
+    glyphs at a known size, so they prove the path works and they do not prove it works on a 1998 fax. A real
+    scan of poor quality is a fixture this cannot make and the corpus does not have.
+    """
+    from PIL import Image, ImageDraw, ImageFont
+
+    font = None
+    for candidate in ("/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+                      "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"):
+        if Path(candidate).exists():
+            font = ImageFont.truetype(candidate, 30)
+            break
+    if font is None:
+        note(lines, "**No TrueType font found, so the scan fixtures were skipped.** Install")
+        note(lines, "`fonts-dejavu-core` and run again; without them the OCR path has no fixture.")
+        return
+
+    # Values chosen to appear nowhere else in the corpus, so a question about them can only be answered from
+    # the scan. That is what makes the fixture a test of OCR rather than of the rest of the index.
+    page = [
+        "HALLORAN MECHANICAL LTD",
+        "INVOICE 2026-0417",
+        "",
+        "Site: Lake Kayla pumping station",
+        "Work: boiler service and pressure test",
+        "Parts: 1,284.00   Labour: 2,610.50",
+        "Total due: 4,218.50",
+        "",
+        "Authorised by: D. Okonkwo",
+    ]
+
+    def render(width: int, height: int) -> "Image.Image":
+        image = Image.new("RGB", (width, height), "white")
+        draw = ImageDraw.Draw(image)
+        for index, row in enumerate(page):
+            draw.text((60, 60 + index * 46), row, fill="black", font=font)
+        return image
+
+    image = render(1400, 560)
+    # Three suffixes because they arrive from three places: a scanner writes TIFF, a screenshot writes PNG,
+    # and a phone writes JPEG. All three go through the same OCR path and only one of them needs a fixture to
+    # prove it, but a client's file arriving as any of them must not be refused.
+    for name in ("scan-invoice.tif", "scan-invoice.tiff", "scan-invoice.png", "scan-invoice.jpg"):
+        out = target / "company" / name
+        out.parent.mkdir(parents=True, exist_ok=True)
+        image.save(out)
+        written["company"].append(name)
+
+
+def legacy_office(target: Path, lines: list[str], written: dict) -> None:
+    """The pre-2007 Office formats, converted from the modern ones with LibreOffice.
+
+    **These are what a bookkeeper has kept since 2009**, and until this change the pipeline refused all three
+    in silence. LibreOffice reads them, the parser image now carries the Calc and Impress components it needs,
+    and the accepted list now names them -- so the corpus has to hold one of each, or the next change to that
+    list can break them without a test noticing.
+
+    A conversion rather than a hand-built file, because a synthesised OLE2 container would be a guess at the
+    format rather than the format. `soffice` is required; its absence is reported rather than passed over,
+    because a fixture that silently did not get written is how a coverage report lies.
+    """
+    import shutil as _shutil
+    import subprocess
+
+    soffice = _shutil.which("soffice") or _shutil.which("libreoffice")
+    if not soffice:
+        note(lines, "**LibreOffice is not on this machine, so the legacy Office fixtures were skipped.**")
+        note(lines, "They are `.doc`, `.xls` and `.ppt`: install `libreoffice` and run again. Without them")
+        note(lines, "nothing in the corpus proves the three formats a longstanding client is most likely")
+        note(lines, "to still hold.")
+        return
+
+    sources = {
+        "legacy-memo.doc": target / "company" / "onboarding-notes.md",
+        "legacy-ledger.xls": target / "company" / "asset-register.xlsx",
+        "legacy-briefing.ppt": target / "company" / "board-briefing.pptx",
+    }
+    for name, source in sources.items():
+        if not source.exists():
+            note(lines, f"**{name} was not written: {source.name} is missing to convert from.**")
+            continue
+        out = target / "company" / name
+        result = subprocess.run(
+            [soffice, "--headless", "--norestore", "--convert-to", out.suffix.lstrip("."),
+             "--outdir", str(out.parent), str(source)],
+            capture_output=True, text=True, timeout=180)
+        produced = out.parent / (source.stem + out.suffix)
+        if produced.exists() and produced != out:
+            produced.rename(out)
+        if out.exists():
+            written["company"].append(name)
+        else:
+            note(lines, f"**LibreOffice did not produce {name}.** It said: "
+                        f"{(result.stderr or result.stdout or 'nothing').strip()[:200]}")
+
+
 REPORTLAB_GENERATOR = ("faker_file.providers.pdf_file.generators."
                         "reportlab_generator.ReportlabPdfGenerator")
 
@@ -739,20 +849,41 @@ def coverage_report(target: Path, lines: list[str]) -> None:
     honest output includes what is still missing.
     """
     present = {p.suffix.lower() for p in target.rglob("*") if p.is_file()}
-    covered = sorted(present & set(ACCEPTED_SUFFIXES))
-    missing = sorted(set(ACCEPTED_SUFFIXES) - present)
+    # **Measured against the formats a client actually hands over, not against everything the worker reads.**
+    # The worker accepts sixty; twenty-one of them are what a small business brings and the rest is a long
+    # tail that costs nothing to support. Reporting 15/60 would read as a failing corpus and bury the number
+    # that matters, which is which of the twenty-one are still absent.
+    required = set(formats.CORPUS_MUST_COVER)
+    covered = sorted(present & required)
+    missing = sorted(required - present)
+    extra_suffixes = sorted({p.suffix.lower() for p in target.rglob("*") if p.is_file()} - required)
 
     note(lines, "## Format coverage")
     note(lines, "")
-    note(lines, f"Accepted by the worker: {len(ACCEPTED_SUFFIXES)}")
+    note(lines, f"Formats a client brings: {len(required)}")
     note(lines, f"Covered by this corpus: {len(covered)}")
     note(lines, "")
+    if extra_suffixes:
+        note(lines, f"Present beyond the required set: {' '.join(extra_suffixes)}")
+        note(lines, "")
     if missing:
         note(lines, f"**Still missing: {' '.join(missing)}.** The usual reason is an uninstalled")
         note(lines, "`faker-file` extra, which is reported above. Install it and run again, or accept")
         note(lines, "the gap knowingly.")
     else:
         note(lines, "**Every accepted suffix is covered.**")
+    note(lines, "")
+    # **What this number does not mean, stated where somebody would otherwise read it as a clean bill.**
+    #
+    # It measures the corpus against the list the worker reads. That is a useful thing to know and it is not
+    # the question that matters: the list itself can be wrong, and for most of this project's life it was,
+    # while this line reported complete. The question that matters is whether the list covers what the parser
+    # can read, and `scripts/check_parser_formats.sh` is what answers it, because that comparison needs the
+    # parser image and this script has no business requiring one.
+    note(lines, "**This counts the corpus against the worker's accepted list, which is not the same as the")
+    note(lines, "list being right.** For every format the parser can read, the accepted list either takes it")
+    note(lines, "or names it as excluded with a reason, and `bash scripts/check_parser_formats.sh` is what")
+    note(lines, "checks that direction. Run it after any parser upgrade.")
     note(lines, "")
 
 
@@ -883,11 +1014,15 @@ def main() -> int:
 
     (target / "PLACEMENT.md").write_text(placement_document_body(target, written))
 
+    scanned_pages(target, lines, written)
+    legacy_office(target, lines, written)
+
     files = sorted(p for p in target.rglob("*") if p.is_file())
     present = {p.suffix.lower() for p in files}
-    missing = sorted(set(ACCEPTED_SUFFIXES) - present)
+    required = set(formats.CORPUS_MUST_COVER)
+    missing = sorted(required - present)
     print(f"  total files: {len(files)}")
-    print(f"  suffixes covered: {len(present & set(ACCEPTED_SUFFIXES))}/{len(ACCEPTED_SUFFIXES)}"
+    print(f"  formats a client brings: {len(present & required)}/{len(required)}"
           + (f"  (missing: {' '.join(missing)})" if missing else "  (complete)"))
     print(f"  read {target / 'PLACEMENT.md'} before copying anything anywhere")
     return 0

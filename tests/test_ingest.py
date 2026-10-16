@@ -294,13 +294,68 @@ def test_a_dry_run_writes_nothing_and_still_reports(tmp_path, wired):
 
 def test_only_accepted_file_types_are_discovered(tmp_path, wired):
     """A client's folder will contain a .DS_Store and a shortcut. Neither is an error, so neither is
-    failed; they are simply not documents."""
+    failed; they are simply not documents, and neither belongs in the unreadable count either, because a
+    number that includes debris is a number an operator learns to ignore."""
     make_corpus(tmp_path, "company/policy.pdf")
     make_corpus(tmp_path, "company/notes.docx")
     (tmp_path / "company" / ".DS_Store").write_bytes(b"\x00")
     (tmp_path / "company" / "shortcut.lnk").write_bytes(b"\x00")
-    discovered = {document.relpath for document in ingest.discover(tmp_path)}
-    assert discovered == {"company/policy.pdf", "company/notes.docx"}
+    discovered, unreadable = ingest.discover(tmp_path)
+    assert {document.relpath for document in discovered} == {"company/policy.pdf", "company/notes.docx"}
+    assert unreadable == [], "operating-system debris is not an unreadable document"
+
+
+def test_a_format_the_worker_does_not_read_is_reported_rather_than_skipped(tmp_path, wired):
+    """**The failure a client cannot see, and the reason this test exists.**
+
+    An unsupported format used to be dropped inside `discover` with no count, no log line and no error: the
+    file was in the client's folder, absent from every search, and nothing anywhere said so. For a product
+    that promises a client's documents are searchable, that is the worst available outcome, because the only
+    way to discover it is to look for something and not find it.
+
+    So the name is returned and the cycle prints it. The cases here are formats a small business genuinely
+    has and this pipeline genuinely does not read, which is a different list from the one it used to be: the
+    scan and the legacy spreadsheet beside them are read now, and `test_the_formats_the_parser_advertises_are
+    _read_or_excluded` is what keeps that honest.
+    """
+    make_corpus(tmp_path, "company/policy.pdf")
+    for name in ("company/message.msg", "company/network-diagram.vsd", "company/accounts.accdb"):
+        (tmp_path / name).write_bytes(b"\x00" * 16)
+    discovered, unreadable = ingest.discover(tmp_path)
+    assert {d.relpath for d in discovered} == {"company/policy.pdf"}
+    assert sorted(unreadable) == ["company/accounts.accdb", "company/message.msg",
+                                  "company/network-diagram.vsd"]
+
+
+def test_the_formats_a_client_keeps_records_in_are_read(tmp_path, wired):
+    """**The regression guard for the gap this change closes.**
+
+    A scanner produces a TIFF; a phone produces a JPEG; a bookkeeper has kept an `.xls` since 2009. Every one
+    of those was refused in silence, and the parser could read all of them: OCR is installed and works, and
+    LibreOffice reads the legacy spreadsheet once its Calc component is present. The allowlist was the only
+    thing in the way.
+    """
+    wanted = ["company/scan.tiff", "company/scan.tif", "company/photo.jpg", "company/photo.jpeg",
+              "company/screenshot.png", "company/ledger.xls", "company/deck.ppt", "company/letter.doc",
+              "company/macro-sheet.xlsm", "company/template.dotx", "company/saved-page.mht",
+              "company/report.potx"]
+    make_corpus(tmp_path, "company/policy.pdf")
+    for name in wanted:
+        (tmp_path / name).write_bytes(b"\x00" * 16)
+    discovered, unreadable = ingest.discover(tmp_path)
+    assert unreadable == [], f"these should all be read now: {unreadable}"
+    assert {d.relpath for d in discovered} == set(wanted) | {"company/policy.pdf"}
+
+
+def test_the_cycle_counts_the_files_it_could_not_read(tmp_path, wired):
+    """The count reaches the result, because a number that stops at `discover` reaches nobody."""
+    services = wired()
+    make_corpus(tmp_path, "company/policy.pdf")
+    (tmp_path / "company" / "message.msg").write_bytes(b"\x00" * 16)
+    result = ingest.ingest_cycle(services, tmp_path, ingest.MemoryManifest())
+    assert result.unreadable == 1
+    assert result.unreadable_files == ["company/message.msg"]
+    assert result.as_counts()["unreadable"] == 1, "the count has to survive into the machine-readable output"
 
 
 def test_the_same_bytes_produce_the_same_point_ids_across_runs(tmp_path, wired):

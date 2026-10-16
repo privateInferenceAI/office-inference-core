@@ -35,6 +35,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import chunker  # noqa: E402
+import formats  # noqa: E402
 
 # The same extractor the retriever queries with, in this directory so the image's fixed file list carries it.
 # Sharing one implementation is the point: `W-4` is `w4` at ingestion and `w4` in a query because it is one
@@ -128,18 +129,21 @@ DEFAULT_DOCUMENTS_ROOT = Path(os.environ.get("INGEST_DOCUMENTS_ROOT", "/document
 # simply been ingested under rules that did not include the new store. v3 is that bump.
 PAYLOAD_VERSION = "payload-v4"
 
-# File types the pipeline accepts. Anything else is ignored rather than failed, because a client's
-# document folder will contain a .DS_Store and a shortcut sooner or later, and neither is an error.
-# What the worker will look at. `.eml` was missing until RET-FORMAT-001, so a client's saved email messages were
-# skipped as an unsupported format while the parser handled them perfectly: the requirement names email among
-# the formats that must work, and the only thing standing between it working and not was this set.
+# **What the worker will look at, and it is loaded rather than written here.**
 #
-# `.msg` is deliberately NOT here. It is a compound binary format rather than RFC 822, and whether the parser
-# reads it is unverified. Adding a suffix to this set is a promise that files with it are ingested, and an
-# unverified promise is worse than an honest gap: a client would see the file in their folder and not in the
-# index with nothing said.
-ACCEPTED_SUFFIXES = {".pdf", ".docx", ".pptx", ".xlsx", ".html", ".htm", ".md", ".markdown",
-                     ".txt", ".csv", ".rtf", ".odt", ".ods", ".odp", ".eml"}
+# This set used to be inline, and `fixtures/generate_corpus.py` carried a second copy that the corpus's
+# format-coverage report measured against. So the report's denominator was the list itself: it said
+# `15/15 formats covered (complete)` while a third of what the parser reads was unreachable, and no test
+# could have said otherwise. The list now lives once, in `formats.json`, both readers load it, and the test
+# that guards it measures against the parser's own advertised formats.
+#
+# `.eml` was missing until RET-FORMAT-001 and `.doc` until this change, both by omission rather than
+# decision: the parser handled them and nothing in the pipeline said so.
+#
+# **A file whose suffix is not here is now counted and reported rather than skipped in silence.** That is the
+# difference between a client's unsupported file being a support ticket and being a mystery: before this, a
+# `.tiff` dropped into a documents folder produced no index entry, no log line, no counter and no error.
+ACCEPTED_SUFFIXES = formats.ACCEPTED_SUFFIXES
 
 
 def sha256_of(path: Path) -> tuple[str, int]:
@@ -650,7 +654,21 @@ class Document:
     path: Path
 
 
-def discover(documents_root: Path) -> list[Document]:
+# How many unreadable filenames a cycle prints. The count is the message; the names make the first
+# few actionable without letting one unsupported type fill the log.
+UNREADABLE_REPORTED = 20
+
+# Suffixes that are operating-system or editor debris rather than a document, so their absence from the index
+# is correct and reporting them would bury the files that matter. Kept short deliberately: the moment this
+# list covers a format a client could plausibly consider a document, the unreadable count stops meaning
+# anything.
+IGNORED_SUFFIXES = frozenset({
+    "", ".tmp", ".temp", ".swp", ".swo", ".bak", ".lock", ".crdownload", ".part", ".partial",
+    ".lnk", ".url", ".ds_store", ".ini", ".cfg", ".log", ".db", ".sqlite", ".thumbs",
+})
+
+
+def discover(documents_root: Path) -> tuple[list[Document], list[str]]:
     """Every document under a root, recursively, with its access root as the top-level folder.
 
     Recursive because a client's policy folder has subfolders, and the root is the FIRST component of the
@@ -658,15 +676,26 @@ def discover(documents_root: Path) -> list[Document]:
     gets the root's own name, so nothing is unlabelled.
     """
     found: list[Document] = []
+    unreadable: list[str] = []
     if not documents_root.exists():
-        return found
+        return found, unreadable
     for path in sorted(documents_root.rglob("*")):
-        if not path.is_file() or path.suffix.lower() not in ACCEPTED_SUFFIXES:
+        if not path.is_file():
+            continue
+        if path.suffix.lower() not in ACCEPTED_SUFFIXES:
+            # **Counted, not skipped.** A file the worker will not read is the one outcome a client cannot
+            # discover by looking: it is in their folder, it is absent from every search, and before this
+            # nothing anywhere said so. Hidden files and known noise are excluded from the count because
+            # reporting a `.DS_Store` as an unreadable document trains an operator to ignore the number,
+            # and the number is the point.
+            name = path.name
+            if not name.startswith(".") and path.suffix.lower() not in IGNORED_SUFFIXES:
+                unreadable.append(str(path.relative_to(documents_root)))
             continue
         relpath = str(path.relative_to(documents_root))
         root = relpath.split(os.sep, 1)[0] if os.sep in relpath else documents_root.name
         found.append(Document(relpath=relpath, root=root, path=path))
-    return found
+    return found, unreadable
 
 
 @dataclass
@@ -1213,6 +1242,17 @@ class CycleResult:
     aborted: str | None = None
     # Near-duplicate pairs found this cycle, for the summary. Recorded rather than acted on.
     duplicates: list[tuple[str, str, float]] = field(default_factory=list)
+    # **Files in the documents folder the worker will not read, and why they are counted.**
+    #
+    # An unsupported format used to be dropped inside `discover` with no count, no log line and no error, so a
+    # client's `.tiff` was in their folder, absent from every search, and invisible to everyone including us.
+    # For a product that promises a client's documents are searchable, that is the failure mode that cannot be
+    # discovered by looking: the answer is simply missing and nothing says why.
+    #
+    # The names are capped because a client can drop ten thousand files of one unsupported type and the
+    # number is the message; the list is there to make the first few actionable.
+    unreadable: int = 0
+    unreadable_files: list[str] = field(default_factory=list)
     # **Where the cycle's time went, summed over the documents it ingested.** Not persisted: timing is a
     # property of the machine and the moment, and a manifest column that changed every run would defeat the
     # diff the manifest exists to make.
@@ -1222,7 +1262,7 @@ class CycleResult:
     def as_counts(self) -> dict:
         return {"seen": self.seen, "new": self.new, "changed": self.changed, "skipped": self.skipped,
                 "failed": self.failed, "chunks_written": self.chunks_written,
-                "chunks_removed": self.chunks_removed}
+                "chunks_removed": self.chunks_removed, "unreadable": self.unreadable}
 
 
 def ingest_cycle(services: Services, documents_root: Path, manifest: Manifest,
@@ -1245,7 +1285,9 @@ def ingest_cycle(services: Services, documents_root: Path, manifest: Manifest,
     a removal, and a mount that failed to appear cannot empty a client's index.
     """
     result = CycleResult()
-    present = discover(documents_root)
+    present, unreadable = discover(documents_root)
+    result.unreadable = len(unreadable)
+    result.unreadable_files = unreadable[:UNREADABLE_REPORTED]
     result.seen = len(present)
     known = manifest.all()
     seen_relpaths = {document.relpath for document in present}
@@ -1752,6 +1794,8 @@ def main(argv: list[str] | None = None) -> int:
                                          "embed": round(result.timings.embed_ms),
                                          "write": round(result.timings.write_ms)},
                           "timed_documents": result.timed_documents,
+                          "unreadable": result.unreadable,
+                          "unreadable_files": result.unreadable_files,
                           "failures": result.failures}, indent=2))
     else:
         print()
@@ -1759,6 +1803,21 @@ def main(argv: list[str] | None = None) -> int:
               f"skipped {result.skipped}, failed {result.failed}")
         print(f"chunks written {result.chunks_written}, chunks removed {result.chunks_removed}, "
               f"documents removed {result.documents_removed}")
+        if result.unreadable:
+            # **Printed whenever it is not zero, rather than behind a verbose flag.**
+            #
+            # This is the one number that describes documents a client believes they gave us and
+            # that we did not take. It used to be nothing at all: not a count, not a line, not a
+            # failure. An operator who never sees it cannot tell a client why their scan is not
+            # findable, and the honest answer would have been that nobody looked.
+            print(f"** {result.unreadable} file(s) in the documents folder are a format this "
+                f"worker does not read, so no search will find them:")
+            for name in result.unreadable_files:
+                print(f"     {name}")
+            if result.unreadable > len(result.unreadable_files):
+                print(f"     ... and {result.unreadable - len(result.unreadable_files)} more")
+            print("   The formats this worker reads are listed in services/ingestion/formats.json. "
+                      "If one of these is a format a client expects to be searchable, the gap is in that file.")
         # **The line that answers "why is this slow".** Percentages of the time the cycle actually spent
         # ingesting, over the documents it ingested. Absent when nothing was ingested, rather than a row of
         # zeroes that reads like a fast run.

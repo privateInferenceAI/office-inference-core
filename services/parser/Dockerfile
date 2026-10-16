@@ -26,9 +26,20 @@ COPY parser_service.py /app/parser_service.py
 # The symptom was therefore a supported format silently never being indexed. Nothing in the pipeline said a
 # binary was missing; the manifest recorded a failure count, and the reason sat unread in `last_error`.
 #
-# `libreoffice-writer` rather than the full suite: 332 MB installed against several times that, and it is the
-# component that opens a Word or RTF document. `--setopt=install_weak_deps=False` keeps out the fonts, Java
-# runtimes and mail-merge extras that arrive as recommendations and none of which a converter needs.
+# **The full converter set, and the earlier Writer-only decision was wrong.** It was made to save image size:
+# `libreoffice-writer` is 332 MB installed against several times that for the suite. The saving was real and
+# the consequence was not acceptable. Writer reads Word and RTF; it cannot open a spreadsheet or a slide deck,
+# so every `.xls` and `.ppt` a client had was refused, and refused **in silence** -- the suffix was absent from
+# the worker's accepted list, so the file was never submitted to the parser and nothing anywhere recorded that
+# it had been left out. A client's bookkeeping since 2009 was not in the index and no one could say why.
+#
+# Docling's own format table lists `XLS` and `PPT`, so the parser advertised support for both while the image
+# could not read either. **Calc and Impress are the components that close that**, and the build asserts the
+# three registry files exist rather than trusting the package names, because a base-image change that dropped
+# one would otherwise be invisible until a client's file failed.
+#
+# `--setopt=install_weak_deps=False` keeps out the fonts, Java runtimes and mail-merge extras that arrive as
+# recommendations and none of which a converter needs.
 #
 # No application code changes. Docling finds the binary itself with `shutil.which` and already isolates its
 # own LibreOffice profile per process and applies a timeout, so the library handles concurrency rather than us.
@@ -41,12 +52,16 @@ COPY parser_service.py /app/parser_service.py
 # user is switched back immediately, so the image's runtime identity is unchanged.
 USER root
 RUN set -eux; \
-    dnf install -y --setopt=install_weak_deps=False libreoffice-writer; \
+    dnf install -y --setopt=install_weak_deps=False libreoffice-writer libreoffice-calc libreoffice-impress; \
     dnf clean all; \
     rm -rf /var/cache/dnf; \
     command -v soffice >/dev/null; \
     python -c "from docling.backend.docx.drawingml.utils import get_libreoffice_cmd; \
-assert get_libreoffice_cmd(), 'Docling cannot find LibreOffice, so .rtf will dead-letter again'"
+assert get_libreoffice_cmd(), 'Docling cannot find LibreOffice, so .rtf will dead-letter again'; \
+import subprocess; \
+missing = [f for f in ('calc.xcd', 'impress.xcd', 'writer.xcd') \
+           if not __import__('pathlib').Path('/usr/lib64/libreoffice/share/registry/' + f).exists()]; \
+assert not missing, f'LibreOffice is missing the components that read legacy Office files: {missing}'"
 USER 1001
 
 ENV PYTHONUNBUFFERED=1 \

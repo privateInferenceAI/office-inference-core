@@ -1,0 +1,162 @@
+{
+  "docling_version": "2.132.0",
+  "generated": "2026-10-16",
+  "formats": {
+    "AFP": [
+      "afp"
+    ],
+    "ASCIIDOC": [
+      "adoc",
+      "asc",
+      "asciidoc"
+    ],
+    "AUDIO": [
+      "aac",
+      "flac",
+      "m4a",
+      "mp3",
+      "ogg",
+      "wav"
+    ],
+    "BOXNOTE": [
+      "boxnote"
+    ],
+    "CSV": [
+      "csv"
+    ],
+    "DCLX": [
+      "dclx"
+    ],
+    "DOC": [
+      "doc",
+      "dot"
+    ],
+    "DOCX": [
+      "docm",
+      "docx",
+      "dotm",
+      "dotx"
+    ],
+    "EBCDIC": [
+      "ebc",
+      "ebcdic"
+    ],
+    "EMAIL": [
+      "eml",
+      "msg"
+    ],
+    "EPUB": [
+      "epub"
+    ],
+    "HTML": [
+      "htm",
+      "html",
+      "xhtml"
+    ],
+    "IMAGE": [
+      "bmp",
+      "gif",
+      "jpeg",
+      "jpg",
+      "png",
+      "tif",
+      "tiff",
+      "webp"
+    ],
+    "IWORK_KEYNOTE": [
+      "key"
+    ],
+    "IWORK_PAGES": [
+      "pages"
+    ],
+    "JSON_DOCLING": [
+      "json"
+    ],
+    "LATEX": [
+      "latex",
+      "tex"
+    ],
+    "MD": [
+      "markdown",
+      "md",
+      "qmd",
+      "rmd",
+      "text",
+      "txt"
+    ],
+    "METS_GBS": [
+      "tar.gz"
+    ],
+    "MHTML": [
+      "mht",
+      "mhtml"
+    ],
+    "ODP": [
+      "odp",
+      "otp"
+    ],
+    "ODS": [
+      "ods",
+      "ots"
+    ],
+    "ODT": [
+      "odt",
+      "ott"
+    ],
+    "PDF": [
+      "pdf"
+    ],
+    "PPT": [
+      "pot",
+      "pps",
+      "ppt"
+    ],
+    "PPTX": [
+      "potm",
+      "potx",
+      "ppsm",
+      "ppsx",
+      "pptm",
+      "pptx"
+    ],
+    "RTF": [
+      "rtf"
+    ],
+    "VIDEO": [
+      "avi",
+      "mkv",
+      "mov",
+      "mp4",
+      "webm"
+    ],
+    "VTT": [
+      "vtt"
+    ],
+    "XLS": [
+      "xls",
+      "xlt"
+    ],
+    "XLSX": [
+      "xlsm",
+      "xlsx",
+      "xltm",
+      "xltx"
+    ],
+    "XML_DOCLANG": [
+      "dclg",
+      "dclg.xml"
+    ],
+    "XML_JATS": [
+      "nxml",
+      "xml"
+    ],
+    "XML_USPTO": [
+      "txt",
+      "xml"
+    ],
+    "XML_XBRL": [
+      "xbrl",
+      "xml"
+    ]
+  }
+}

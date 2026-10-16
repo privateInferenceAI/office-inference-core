@@ -28,7 +28,10 @@ WORKDIR /app
 # points at, and ingest.py is the policy around it.
 # identifiers.py is the normalisation shared with the retriever, which imports it from this directory. One
 # implementation, so a reference normalises the same way on the way in and on the way out of the search.
-COPY chunker.py ingest.py identifiers.py contract.py ./
+# formats.py and formats.json travel together: the module reads the file, and the file is the one list of
+# what this worker will read. Copying the module without the data would build an image that starts and then
+# refuses to decide which of a client's documents to open.
+COPY chunker.py ingest.py identifiers.py contract.py formats.py formats.json ./
 
 # The state directory holds the last cycle's result, which the healthcheck reads. Created here so the
 # container can write it as a non-root user.
