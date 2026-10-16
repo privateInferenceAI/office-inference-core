@@ -7,10 +7,31 @@
 
 name: ci
 
+# **Nothing runs on every push any more, and this is a correction rather than a saving.**
+#
+# This workflow used to run on every push to main: four jobs, about 45 seconds each, and GitHub bills per job
+# rounded up to the minute. That is four minutes a push, and 517 pushes came to roughly the whole 2,000-minute
+# monthly allowance on a private repository. When it ran out GitHub stopped starting runners and every run
+# began failing **in three seconds** -- so CI went silently dead and every push afterwards ran no tests at all
+# while looking entirely normal.
+#
+# **It was also enforcing nothing.** Branch protection is a paid feature this repository does not have, so a
+# red run never blocked a merge. The check was a decoration with a bill attached.
+#
+# **And it was duplicated.** Every command below runs locally in under twenty seconds: `compileall`, the
+# pytest suite, the audit verifier, the manifest validator, the requirements register check, the model
+# lifecycle check, and the fixture corpus check. The negative control is covered too --
+# `tests/test_validate_manifests.py` asserts that the broken manifest is still refused, and says so in its
+# failure message.
+#
+# The real verification is the ladder in the runbook, which runs against the deployment with real documents
+# and real vectors. That is worth more than re-running unit tests on a runner.
+#
+# **Run it by hand when a second environment is the point:**
+#
+#     gh workflow run ci.yml
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
