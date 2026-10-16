@@ -5737,6 +5737,53 @@ npx playwright test e2e/live.spec.ts
 Expected: the unit suite passes with the live-view tests named, and the browser rung reports the refresh case,
 where the page is reloaded mid-run and the steps already recorded come back, none missing and none invented.
 
+**Run, and the output pasted here.** Six commands, on 2026-10-16, from a checkout of the app with no deployment
+and no session token.
+
+```
+$ npm run typecheck
+> tsc -b --noEmit
+```
+
+Exit 0. A type error here is a field the app believes exists, which is the class of mistake no runtime test
+catches until the screen renders nothing.
+
+```
+$ npm test -- --run
+ ✓ tests/jobSentences.test.ts (37 tests) 50ms
+ ✓ tests/contract.test.ts (28 tests) 9ms
+ ✓ tests/AnswerView.test.tsx (33 tests) 55ms
+ ✓ tests/approvalSentences.test.ts (28 tests) 19ms
+ ✓ tests/DocumentPanel.test.tsx (7 tests) 385ms
+ ✓ tests/review.test.tsx (15 tests) 883ms
+ ↓ tests/integration.test.ts (12 tests | 12 skipped)
+ ✓ tests/live.test.tsx (12 tests) 2076ms
+     ✓ stops claiming progress within the window and says when it last reported  640ms
+     ✓ clears the stalled line when a real event arrives  710ms
+
+ Test Files  7 passed | 1 skipped (8)
+      Tests  159 passed | 12 skipped (171)
+```
+
+The twelve skips are the integration rung, which needs a live deployment and says so with the two commands that
+would make it run. A skip that printed nothing would be the failure this suite has already paid for once.
+
+```
+$ npx playwright test e2e/live.spec.ts
+Running 11 tests using 1 worker
+  ✓  1 › a refresh mid-run comes back to the same job with the recorded steps (971ms)
+  ✓  2 › shows a step as it arrives, in a sentence, while the job is still running (528ms)
+  ✓  3 › offers the two levels and no more (481ms)
+  ✓  4 › a job that stops reporting looks stalled, within the shipped window (47.4s)
+  ✓  5 › the Review screen › shows what will happen, why, and the exact content before a decision is offered
+  ...
+  11 passed (55.7s)
+```
+
+That is both browser specs, because the second is one command and the stall case takes 47 seconds of the total.
+The fourth line is the one worth looking at: it waits out the real 45 second window rather than a shortened one,
+so the number it proves is the number that ships.
+
 **What this step cannot prove, said plainly.** Nothing can reach the gate on a live deployment yet, because the
 multi-step executor is the next piece; the job this screen watches is driven by the C4 one-step executor. So the
 live view is verified against a stubbed deployment whose responses are the contract's shapes, and against the
@@ -5838,12 +5885,47 @@ the approve control is enabled, that the mixed queue offers no bulk action, and 
 sentence rather than a blank panel or a spinner; and the contract check reports the app's copy matching the
 core's with `/jobs/{job_id}/approvals` among the paths.
 
+**Run, and the output pasted here.** Same session as 6.5, no deployment and no token.
+
+```
+$ npx playwright test e2e/review.spec.ts
+Running 7 tests using 1 worker
+  ✓  1 › shows what will happen, why, and the exact content before a decision is offered (522ms)
+  ✓  2 › offers no bulk action on a queue of five different items (573ms)
+  ✓  3 › offers one stated rule naming five when five items hold the same content (562ms)
+  ✓  4 › refuses to offer a decision when the record carries only a digest (534ms)
+  ✓  5 › an empty queue says nothing is waiting rather than looking broken (493ms)
+  ✓  6 › a decision leaves the queue without a manual refresh (546ms)
+  ✓  7 › where the queue comes from › a job started in this browser reaches the live view and then the queue (960ms)
+  7 passed (55.7s)
+```
+
+The second line is UI-REVIEW-003's half that matters and it is an assertion of absence. The seventh is the one
+that found the limit of the queue described above: a job started in this browser is visible to it and to nobody
+else, which is why the screen states its scope and why `GET /approvals` is the route this screen is built for.
+
+```
+$ bash scripts/check-contract.sh
+OK    the app's contract matches /home/anthony/projects/office-inference-core/docs/openapi.json
+      11 path(s): /activity, /ask, /ask/stream, /documents/{doc_id}, /health, /jobs, /jobs/{job_id},
+      /jobs/{job_id}/approvals, /jobs/{job_id}/events, /jobs/{job_id}/{action}, /tasks
+      24 model(s)
+```
+
+Eleven paths and not ten, and the whole-set comparison in `tests/contract.test.ts` is what made the eleventh
+impossible to add quietly. **The check also found a gap it could not close from here**: `Job.to_dict()` on the
+service publishes `pending_action`, `pending_action_digest` and `events_through`, and `contract.Job` declares
+none of the three, so they are absent from the published document. The app reads them anyway, defensively, and
+`tests/contract.test.ts` names all three in an allowance list that fails the moment they are declared. The fix
+is three fields in `services/api/models.py`, which is not this piece's scope and has been reported.
+
 **What this step cannot prove, said plainly.** No client can leave a live deployment's job waiting at the gate
 until the multi-step executor lands, so the screen is verified against a stubbed deployment built from the
 contract's shapes. The `409 approval_drift` path is driven by a stub that answers 409, not by a real draft
-rewritten mid-read. And `audit_feed`'s approval branch lives in `db/migrations/002_audit_events.sql`, which is
-the workflow piece's scope rather than this one: the app's own sentences are covered here, and the view is
-reported as still saying *"a person approved an action"* until that piece changes it.
+rewritten mid-read. And the queue is the jobs this browser started, because `GET /approvals` is named in
+`docs/design/system-design.md` and is not in the contract yet; the screen says so above the list rather than
+implying it is the whole queue. Until those land, a Review screen opened on a live deployment shows an empty
+queue with an honest scope line, which is the correct behaviour for a queue that cannot see the role's work.
 
 **If it breaks.**
 

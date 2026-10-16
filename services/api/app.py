@@ -665,8 +665,13 @@ def _run_or_resume(job, store) -> None:
     will reuse.
     """
     plan = workflow_module.plan_for(job.task)
+    # **The job has to be in the store before anything drives it, and both paths need it for different
+    # reasons.** The C4 executor reads it back as it goes. The engine refuses outright with "job ... is not in
+    # the store, so it cannot be driven" — the right behaviour, and how this was found: the first version put
+    # the job only in the `plan is None` branch, so a freshly created job lived in memory and nowhere else,
+    # and `POST /jobs` answered 500 the first time a workflow was ever started over HTTP.
+    store.put(job)
     if plan is None:
-        store.put(job)
         jobs_module.run(job, store, _step_once, audit=audit)
         return
     runner = _workflow_runner(store, plan)
