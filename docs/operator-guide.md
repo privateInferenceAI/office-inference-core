@@ -40,7 +40,9 @@ hardware limit.
 
 ## The shape of the thing
 
-Six containers run all the time, and the assistant API is one of them. Four tools run when you call them. Knowing which is which makes the
+Eight containers run all the time: the six on the retrieval path below, and the assistant API and the app,
+which are the two things a person or a client actually talks to. Five tools run when you call them, and the
+intake connector runs from the checkout because it has no compose service yet. Knowing which is which makes the
 rest of this guide readable.
 
 ```
@@ -76,6 +78,8 @@ Long-running services, and what each is for:
 | `parser` | Turns a document into structured text with page numbers, tables and OCR | Ingestion fails on every document |
 | `vector` | Holds the chunk vectors and, in each payload, the access label | Retrieval returns nothing |
 | `embeddings` | Turns text into vectors, on CPU | Ingestion fails; retrieval fails |
+| `api` | The assistant API. One surface for questions, jobs, documents and the record, with sessions read from a token | Nothing a client calls answers, including the app |
+| `app` | The client application: Ask, Do, Job, Review, Activity. It holds no model key and no database credential | The screens are gone and the API is reached directly or not at all |
 
 Tools, which run only when called:
 
@@ -85,6 +89,8 @@ Tools, which run only when called:
 | `keys` | Mints per-role API keys and their budgets | manual section 12 |
 | `retention` | Deletes: one document on request, or everything a period has run out on | manual section 13f |
 | `eval` | Runs the fixed question set against retrieval | manual section 13b |
+| `session` | Establishes a session and rehearses the refusal. Development only until real sign-in | manual section 13g |
+| intake | Reads the client's AP mailbox and deposits what it finds. No compose service yet, so it runs from the container described in manual section 13l | manual section 13l, stage 13l of this guide |
 
 **Four names for one thing, and this trips everybody.** Throughout the system the token `qwen3-14b` (in an
 office build) or `amazon.nova-lite-v1:0` (in a cloud build) appears in four different shapes: the role name
@@ -266,7 +272,8 @@ it produces a refusal that names an unconfigured deployment rather than the fiel
 
 # Stage 3: bring the stack up
 
-**Goal:** six containers running, five of them healthy, and nothing listening from outside.
+**Goal:** the stack running — seven containers to begin with, eight once the app is added — and nothing
+listening from outside.
 
 Migrations first, because the tools need the schema and the workers need the tables. Then the stack.
 
@@ -275,9 +282,15 @@ cd /opt/oi-core
 alias oi='docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env'
 
 oi run --rm audit migrate
-oi up -d
+oi up -d postgres litellm parser ingestion vector embeddings api
 oi ps
 ```
+
+**Name the services rather than running a bare `up -d`, and the reason is one service.** The compose file also
+declares `app`, whose build context is the client app's checkout (`OI_UI_ROOT`, `/opt/oic-ui` by default). A
+bare `up -d` builds it, and on a box where that checkout does not exist yet the build fails before anything
+starts. The app is brought up where its checkout is: stage 13i.2 runs `oi build app && oi up -d app`, and that
+is the eighth container.
 
 **The alias only exists in the shell where you typed it.** In `ssh host 'command'`, in a script, or in a
 cron entry it does not expand and you get `oi: command not found`, which reads like a missing tool rather
@@ -294,8 +307,8 @@ it is tens of minutes, and the containers look stuck because their logs are quie
 oi ps
 ```
 
-Expect **six** services. Four report `healthy`: `postgres`, `parser`, `ingestion`, `embeddings`. Two do
-not: `litellm` and `vector` declare no healthcheck, so for those `Up` is the whole of the information.
+Expect **seven** services. Four report `healthy`: `postgres`, `parser`, `ingestion`, `embeddings`. Three do
+not: `litellm`, `vector` and `api` declare no healthcheck, so for those `Up` is the whole of the information.
 That is correct rather than a fault, and a `ps` showing two services is a deployment that has not started
 the document pipeline at all.
 
@@ -2261,7 +2274,7 @@ individual."* An approval is a second-person review. So the honest record says t
 identified, and the dishonest one says a person did it.
 
 **The temptation is real and it is worth naming.** Every screen wants a name. A name makes the interface feel
-finished. A record that says "the person who approved was not identified" looks like a bug to somebody who
+finished. A record that says "the person who decided was not identified" looks like a bug to somebody who
 has not read this page, and the pressure to write the friendlier sentence will come from someone who means
 well.
 
@@ -2271,36 +2284,115 @@ The gate is only reachable from `running`. A freshly created job is `queued`, an
 `queued -> awaiting_approval`, which is correct: a job that never ran cannot be waiting to approve something
 it has not produced. This caught a test helper during the build, and the machine was right.
 
+The probe is the cheap check, and it stays useful:
+
 ```
 cd /opt/oi-core
 bash scripts/probe.sh job_probe.py
 ```
 
-Expected: seven rights held. The probe drives the C4 one-step executor, so it does **not** reach the gate
-yet, and it says so rather than reporting a green that means nothing.
+Expected: seven rights held. The probe drives the C4 one-step executor on purpose, so it does **not** reach
+the gate. That is the next command's job.
+
+**And the path a client takes does reach it.** `invoice_intake` is declared in the manifest with
+`needs_approval`, the engine is wired into `services/api/app.py`, and `POST /jobs` runs the six-step plan to
+the gate. Two commands: one mints a session, the other starts the job and prints what the job is doing.
+
+```
+cd /opt/oi-core
+
+# A session for a subject this deployment declares; rendered/access.json lists them. Without --dev the
+# mint refuses, which is deliberate: a hand-established identity is a development act.
+TOKEN=$(oi run --rm session mint --dev --subject probe-staff@officeinference.com --role viewer --json \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+
+# The API publishes no port, so the request runs in a container on ai-net, where the name resolves.
+docker run --rm --network ai-net curlimages/curl -sS -X POST http://api:8088/jobs \
+  -H 'Content-Type: application/json' \
+  -d "{\"session\":\"$TOKEN\",\"task\":\"invoice_intake\",\"input\":\"INV-2026-0417 from accounts@ferguson.example Total 4210.00 due 2026-11-15\"}" \
+  | python3 -c 'import json,sys; j=json.load(sys.stdin); print("state ", j["state"]); print("job_id", j["job_id"]); print("digest", j.get("pending_action_digest","")); print("steps ", " | ".join(s["name"]+" "+s["state"] for s in j["steps"]))'
+```
+
+Expected:
+
+```
+state  awaiting_approval
+job_id 178e4523057540b3bb87d569852c93c9
+digest sha256:5b480b869b4bbb02f…
+steps  read_message succeeded | extract_fields succeeded | draft_action succeeded | approval running
+```
+
+**The input text is the part that goes wrong.** The plan reads a message and extracts four fields with
+patterns; text that does not match fails as `unreadable_invoice`, which is the extractor refusing on purpose
+rather than a broken feature. The four patterns, their casing and the two required fields are in 13m.0 below
+and in the manual's section 13j.
 
 ## 13j.3. Read a record, and check the four things
 
-Fetch an approval and look at it. There are four things to check and each has a test that fails if it stops
-being true.
+Fetch the record that job left and look at it. There are four things to check and each has a test that fails
+if it stops being true.
 
-1. **`assurance` is `unverified`**, and an unknown value in that field resolves **downward**. Try it: write
-   `PROOFED` into a row and confirm the reader reports `unverified`. Resolving upward would let a typo claim
-   a verification that never happened.
+1. **`assurance` is `unverified`**, and an unknown value in that field resolves **downward**. `PROOFED`,
+   `Proofed`, `verified` and the empty string all read back as `unverified`. Resolving upward would let a
+   typo claim a verification that never happened.
 2. **`printed_name` is null with the reason beside it**, not absent.
 3. **The sentence names no person.** Read the rendered text and confirm `claimed_subject` does not appear in
    it while the basis is a session.
-4. **A denial with no reason is refused.** Send one and confirm a `400` that names what was missing, rather
-   than a stored blank.
+4. **A denial with no reason is refused.** The route answers `400` and names what was missing, rather than
+   storing a blank.
+
+```
+cd /opt/oi-core
+JOB=<the job_id the command above printed>
+
+# 1 and 2. What the row carries. `assurance` is a string; the printed name is a null with the reason beside it.
+docker exec postgres psql -U oicore -d oicore -tAc \
+  "select payload->'approval'->'identity'->>'assurance',
+          payload->'approval'->'part11_11_50_manifestation'->>'printed_name',
+          payload->'approval'->'part11_11_50_manifestation'->>'name_absent_reason'
+     from audit_events where payload->>'job_id' = '$JOB' and event_type = 'approval'"
+
+# 3. The sentence the feed renders for the newest approval.
+docker exec postgres psql -U oicore -d oicore -tAc \
+  "select summary from audit_feed where event_type = 'approval' order by id desc limit 1"
+
+# 1's downward rule, written into a row on purpose. It is a unit test rather than a deployment edit, because
+# the chain is append-only and an edited row is the thing the chain exists to catch.
+~/venv/bin/python -m pytest tests/test_approvals.py -q -k assurance
+
+# 4. A denial with no reason is refused, and the refusal names what was missing.
+docker run --rm --network ai-net curlimages/curl -sS -w '\nHTTP %{http_code}\n' \
+  -X POST "http://api:8088/jobs/$JOB/approvals" -H 'Content-Type: application/json' \
+  -d "{\"session\":\"$TOKEN\",\"decision\":\"deny\"}"
+```
+
+Expected: `unverified` with a null printed name and the reason beside it; a sentence that names no person;
+every assurance test passing, `PROOFED` and `Proofed` among the unknown values that must land on `unverified`;
+and `400` with `a 'deny' needs a reason` rather than a stored blank.
 
 ## 13j.4. Break the drift check on purpose
 
-Fetch a job waiting at the gate, note its `pending_action_digest`, then change what it is waiting about and
-submit the old digest.
+The job above is waiting on a digest. Quote a different one and the route refuses the decision.
 
-Expected: `409` with `kind: approval_drift` and **both** digests in the body. A screen that gets this can
-re-render and ask again. A screen that got a `400` would be told its request was malformed, which is false:
-the request was fine and the world moved.
+```
+cd /opt/oi-core
+JOB=<the job_id>
+TOKEN=<the token>
+
+# A digest the job is not holding. Any wrong value does; a draft that was rewritten while somebody read it
+# arrives at the same branch.
+docker run --rm --network ai-net curlimages/curl -sS -w '\nHTTP %{http_code}\n' \
+  -X POST "http://api:8088/jobs/$JOB/approvals" -H 'Content-Type: application/json' \
+  -d "{\"session\":\"$TOKEN\",\"decision\":\"approve\",\"action_digest\":\"sha256:0000000000000000\"}"
+```
+
+Expected: `409` with `kind: approval_drift` and **both** digests in the body, `waiting_on` and `quoted`. A
+screen that gets this can re-render and ask again. A screen that got a `400` would be told its request was
+malformed, which is false: the request was fine and the world moved.
+
+**The route cannot tell "the content changed" from "you quoted the wrong digest", and it should not try.**
+Both mean the thing being decided is not the thing in front of the decider, which is the one case that must
+never produce a record.
 
 **Why this matters more than it looks.** Without the digest an approval says somebody approved something, and
 the link to what can be re-pointed afterwards by anything that can edit a job row. With it, the thing
@@ -2311,11 +2403,29 @@ approved and the thing recorded are the same thing or the route refuses.
 This is the check that would have caught a real defect, and it is worth running by hand once.
 
 ```
+cd /opt/oi-core
+JOB=<the job_id>
+
+# The record's own fields, out of the row the approval wrote.
 docker exec postgres psql -U oicore -d oicore -tAc \
-  "select payload->'approval'->'identity'->>'assurance' from audit_events where event_type = 'approval'"
+  "select payload->'approval'->>'decision',
+          payload->'approval'->'identity'->>'assurance',
+          payload->'approval'->'part11_11_50_manifestation'->>'meaning'
+     from audit_events where payload->>'job_id' = '$JOB' and event_type = 'approval'"
+
+# And the chain itself, which is the check that catches a row written outside the one writer. The audit
+# tool is a container on the deployment's network, not a python file inside the postgres container: postgres
+# is the stock image and has neither /app nor the tool.
+oi run --rm audit export --date "$(date -u +%F)"
+oi run --rm audit verify "/app/exports/$(date -u +%F)/audit-events.jsonl"
 ```
 
-Then verify the chain. **The record must be in `payload`**, which `payload_sha256` covers, and not in the
+Expected: the decision, `unverified` and a meaning line that quotes the digest the decision was about; then
+`ok …/audit-events.jsonl: N event(s), chain intact`. With no anchor supplied the verifier also prints its
+standing caveat: deleting rows from the end and re-exporting would still verify, which is what the anchor
+job is for.
+
+**The record must be in `payload`**, which `payload_sha256` covers, and not in the
 `audit_events.approval` column, which is outside the canonical string. That column is a jsonb field with an
 approval event type and it is not among the eighteen fields the canonical hash function takes, so a value
 written there can be edited by hand while every chain check passes.
@@ -2325,7 +2435,23 @@ comment states the consequence: a field the chain does not cover is a field that
 check passes, and the check would report the record intact. That defect was found before C5 became the first
 writer. It will not be this cheap again.
 
-## 13j.6. What to take from it
+## 13j.6. Checkpoint
+
+```
+cd /opt/oi-core
+docker exec postgres psql -U oicore -d oicore -tAc \
+  "select summary from audit_feed where event_type = 'approval' order by id desc limit 1"
+```
+
+**Checkpoint.** One sentence, it names a role, it names no person, and it says why:
+
+> Approved at 2026-10-16T18:18:25+00:00 under the viewer role. The person who decided was not identified:
+> sign-in is not enabled on this deployment, so the system cannot verify who acted.
+
+A row that names the claimed subject, or one that says a person approved, is the defect this whole stage
+exists to prevent. When it appears, the record is right and whatever rendered the sentence is wrong.
+
+## 13j.7. What to take from it
 
 **A record is a claim, and a claim has to be true.** The whole stage is one idea applied four times: say what
 you know, say what you do not, and make the second impossible to drop by accident. The `claimed_` prefix, the
@@ -2352,7 +2478,7 @@ The fastest way to understand what was built is to watch it, and neither screen 
 answers `/api` from the shapes the contract publishes, which is the same file the app is compiled against.
 
 ```
-cd <oic-ui>/app
+cd /opt/oic-ui/app
 npm test -- --run
 npx playwright test e2e/review.spec.ts e2e/live.spec.ts
 ```
@@ -2385,7 +2511,7 @@ and is invisible to a reader by design, so a screen that trusts the socket keeps
 worker.
 
 ```
-cd <oic-ui>/app
+cd /opt/oic-ui/app
 npx playwright test e2e/live.spec.ts -g "looks stalled"
 ```
 
@@ -2399,7 +2525,7 @@ Open the Review screen with five pending items and ask what makes it easy to app
 supposed to be: nothing, unless the system can show they are identical.
 
 ```
-cd <oic-ui>/app
+cd /opt/oic-ui/app
 npx playwright test e2e/review.spec.ts -g "five different items"
 npx playwright test e2e/review.spec.ts -g "naming five"
 ```
@@ -2417,7 +2543,7 @@ The screen's job is not to report a failure. It re-reads the item and asks again
 "something went wrong" after clicking Approve believes they approved the thing they read.
 
 ```
-cd <oic-ui>/app
+cd /opt/oic-ui/app
 npm test -- --run -t "drifted"
 ```
 
@@ -2479,12 +2605,19 @@ an hour of debugging a credential.
 
 1. Take the mailbox, the app registration, the consent, and the refresh token from the client's
    administrator. Nothing else: no tenant role, no guest account, no standing access.
-2. Put the credential in the client's own store at mode 0600. The reader refuses anything a second account
-   can read, so a file written with a default umask fails loudly at the first poll.
+2. Put the credential in the client's own store at mode 0600: `client_id`, `tenant_id` and `refresh_token` are
+   required, `client_secret` and `certificate_path` are optional, and nothing else in the file is read. **No
+   command in this repository mints it** — the refresh token comes from the administrator's one interactive
+   sign-in as the mailbox — and `secretstore.write` is the tool that puts it on disk in the shape and mode the
+   reader enforces. The reader refuses anything a second account can read, so a file written with a default
+   umask fails loudly at the first poll.
 3. Write the configuration and run `check-config`, then `cord-check`. Cord-check is the one that matters for
    us leaving: it asserts that all five components are the client's and that the only two hosts this service
    can reach are Microsoft's.
-4. Run `migrate`, then one `fetch`, and read the output rather than the exit code.
+4. Run `migrate`, then one `fetch`, and read the output rather than the exit code. **Both run inside a
+   container on the deployment's network**: the DSN is assembled by the compose file for containers, so the
+   host's `DATABASE_URL` is empty and `--dsn "$DATABASE_URL"` from a host shell passes an empty string. Manual
+   13l.2 has the two commands.
 5. Run `verify-manifest` after the next ingestion cycle. The hash intake recorded and the hash in
    `ingest_manifest` must be the same number, and that equality is the requirement.
 6. Put `fetch` on a timer and `monitor` on a second timer. `monitor` is what notices that `fetch` has
@@ -2530,9 +2663,14 @@ is short for that reason. What is left is to prove it.
    the strongest available proof that our copy is dead.
 3. **Re-mint the refresh token**, or delete the grant and re-grant it, which invalidates every outstanding
    refresh token for that client and user.
-4. **Enumerate and export.** Run the two enumeration commands in the research report section 6.2 and save the
-   output to a file the client keeps. **Do this before the 180-day audit window closes over the evidence**,
-   which is the step people miss.
+4. **Enumerate and export.** Save the output of the two commands that say what the credential could reach and
+   what still resolves to us, in a file the client keeps:
+
+       cd /opt/oi-core
+       ~/venv/bin/python services/intake/intake.py enumerate-reach --config /etc/oi-intake/intake.yaml
+       ~/venv/bin/python services/intake/intake.py cord-check --config /etc/oi-intake/intake.yaml
+
+   **Do this before the 180-day audit window closes over the evidence**, which is the step people miss.
 5. **Prove we are not on the box.** No vendor SSH key, no vendor VPN client, no vendor monitoring agent.
 6. **Record it.** Date, actor, command output, in a document the client keeps.
 
@@ -2584,6 +2722,39 @@ Total 4210.00 due 2026-11-15 from Ferguson Mechanical Ltd.
 | vendor | `\bfrom\s+([^\s,;]+)` | yes |
 | due | `\bdue\s+([0-9]{4}-[0-9]{2}-[0-9]{2})` | no |
 | reference | `\b([A-Z]{2,}-[0-9]{4}-[0-9]{3,})\b` | no |
+
+**The first three are compiled with `re.IGNORECASE` and the reference is not.** `Total 4210.00` therefore
+matches the lowercase pattern above; `INV-2026-0417` has to be uppercase, because that is what an invoice
+number looks like. A reader who sends lowercase text and sees `reference` come back empty has matched the
+table and not found a bug.
+
+**And here is how to send it.** The plan runs from a job, the job is started over HTTP, and the API publishes
+no port, so both commands run on the deployment:
+
+```
+cd /opt/oi-core
+
+# A session for a subject this deployment declares. rendered/access.json lists them.
+TOKEN=$(oi run --rm session mint --dev --subject probe-staff@officeinference.com --role viewer --json \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+
+docker run --rm --network ai-net curlimages/curl -sS -X POST http://api:8088/jobs \
+  -H 'Content-Type: application/json' \
+  -d "{\"session\":\"$TOKEN\",\"task\":\"invoice_intake\",\"input\":\"INV-2026-0417 from accounts@ferguson.example Total 4210.00 due 2026-11-15\"}" \
+  | python3 -c 'import json,sys; j=json.load(sys.stdin); print("state ", j["state"]); print("job_id", j["job_id"]); print("digest", j.get("pending_action_digest","")); print("steps ", " | ".join(s["name"]+" "+s["state"] for s in j["steps"]))'
+```
+
+Expected:
+
+```
+state  awaiting_approval
+job_id 178e4523057540b3bb87d569852c93c9
+digest sha256:5b480b869b4bbb02f…
+steps  read_message succeeded | extract_fields succeeded | draft_action succeeded | approval running
+```
+
+`invoice_intake` is declared in the manifest with `needs_approval`, and `POST /jobs` runs the six-step plan to
+the gate. Stage 13j.2 has the same two commands where the gate itself is the subject.
 
 **A typed refusal rather than a default, and that is the point.** An invoice whose total could not be read is
 not an invoice for zero, and carrying on with a zero would post an entry nobody approved the shape of. The
@@ -2648,11 +2819,13 @@ that matters is a non-zero chain count against a state that never moved.
 
 ## 13m.3. Watch a workflow stop at the gate
 
-The invoice plan is six steps and the fourth is the gate.
+The invoice plan is six steps and the fourth is the gate. Use the job 13m.0 started, or one the probe left at
+the gate in 13m.1:
 
 ```
+JOB=<the job_id 13m.0 printed, or one the probe reports>
 docker exec postgres psql -U oicore -d oicore -c \
-  "select name, state from job_steps where job_id = '<job_id>' order by attempt"
+  "select name, state from job_steps where job_id = '$JOB' order by attempt"
 ```
 
 Expected: `read_message`, `extract_fields` and `draft_action` all `succeeded`, `approval` `running`, and **no
@@ -2667,10 +2840,14 @@ is asking somebody to approve something they cannot read.
 
 ```
 # The probe's RESUMED right does this; by hand, the route is:
-curl -s -X POST http://api:8088/jobs/<job_id>/approvals \
-  -H 'X-OI-Session: <session>' -H 'Content-Type: application/json' \
-  -d '{"session": "<session>", "decision": "approve", "action_digest": "<the digest>"}'
+docker run --rm --network ai-net curlimages/curl -sS -w '\nHTTP %{http_code}\n' \
+  -X POST "http://api:8088/jobs/<job_id>/approvals" -H 'Content-Type: application/json' \
+  -d "{\"session\":\"<session>\",\"decision\":\"approve\",\"action_digest\":\"<the digest>\"}"
 ```
+
+**On `ai-net`, not from the host.** The API publishes no port, so `http://api:8088` resolves only inside the
+deployment's network; the same request from a host shell fails to connect and reads like a service that is
+down. The digest is the one the job is holding, printed by the command in 13m.0.
 
 Then re-read the step rows. Expected: `post_entry` and `close_out` each have **exactly one** row. A resume
 that repeats work shows two, and the position is derived from the succeeded rows rather than kept in a cursor,
@@ -2688,23 +2865,43 @@ Every step has rows and every row names the job. Then verify the chain itself, w
 a row written outside the one writer:
 
 ```
-docker exec -it postgres bash -c 'cd /app && python3 audit.py export --out /app/exports/check'
-docker exec -it postgres bash -c 'cd /app && python3 audit.py verify /app/exports/check/audit-events.jsonl'
+cd /opt/oi-core
+oi run --rm audit export --date "$(date -u +%F)"
+oi run --rm audit verify "/app/exports/$(date -u +%F)/audit-events.jsonl"
 ```
 
-Expected: `chain intact`. **If it reports a break on rows nobody touched**, something wrote the chain with its
-own definition of the hash, and there is only one.
+**The audit tool runs as its own container on the network, not inside the postgres container.** Postgres is
+the stock `postgres:16-alpine` image: it has no `/app` and no python, so `docker exec postgres python3 audit.py
+…` fails with `cd: /app: No such file or directory` and reads like a broken audit tool. `oi run --rm audit`
+supplies the tool, its migrations and its exports mount, which is the form the manual uses in section 13b.
+
+Expected: `ok …/audit-events.jsonl: N event(s), chain intact`. **If it reports a break on rows nobody
+touched**, something wrote the chain with its own definition of the hash, and there is only one.
 
 ## 13m.6. What this stage cannot prove
 
-**The engine is not wired into the HTTP routes yet.** `POST /jobs` still runs the C4 one-step executor, and the
-gate is reachable from the probe and the tests rather than from a browser. The loop handover is a change to
-`services/api/app.py`, which belongs to another owner and is requested rather than made. Until it lands, a
-workflow cannot be started over HTTP, and the Review screen has nothing to review.
+**The engine is wired into the HTTP routes.** `POST /jobs` runs the six-step `invoice_intake` plan to the gate,
+a `docker restart api` in the middle leaves the job waiting with its digest intact, and
+`POST /jobs/{id}/approvals` finishes it: six step rows, one each. Runbook 6.2 records that run with its output,
+and 13m.0 above is the command that starts it.
 
-**Restarting the runner is not restarting the service.** The probe kills a runner process and resumes from the
-database, which is the stronger test of durability: resume depends on the row and not on the process. It is not
-the same sentence as `docker restart api`, and this stage will not pretend it is.
+**The queue does not express separation of duties.** `GET /approvals` returns every gate whose access roots the
+session holds, so the person who drafted a job may approve it. That is a policy this deployment does not yet
+have, and it belongs with the identity work rather than with the queue.
+
+**And the app's Review screen does not call that route yet.** `loadQueue()` reads the jobs this browser started
+and filters them on `awaiting_approval`, and the screen says so above the list rather than implying it is the
+whole queue. The route exists and answers; the switch to it is a change in the app's own repository.
+
+**A job that succeeds after a resume reads back with an empty result.** `jobs.result` has no column, so
+`GET /jobs/{id}` returns no `result` for it; the answer is in the `done` event, which is readable and is the
+record. That is an owner's decision on 2026-10-16 rather than an oversight, and it is written here so that a
+client seeing an empty result finds the explanation.
+
+**Restarting the runner is not restarting the service, and both have now been done.** The probe kills a runner
+process and resumes from the database, which is the stronger test of durability: resume depends on the row and
+not on the process. The service-level restart was done on 2026-10-16 as well, over HTTP, so neither sentence is
+a promise about a test that does not exist.
 
 **A step abandoned at its deadline may still be running.** A Python thread inside a blocking call cannot be
 killed. The engine stops waiting, the job reaches a terminal state, and the row says the step was stopped

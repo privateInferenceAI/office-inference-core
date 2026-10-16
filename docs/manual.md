@@ -4640,12 +4640,21 @@ npx playwright test e2e/review.spec.ts e2e/live.spec.ts
 ```
 
 The browser rung starts the dev server itself and answers `/api` from the shapes `docs/openapi.json`
-publishes, which is why it needs neither a box nor a session. From the core checkout, confirm the contract copy
-the app builds against is the one the service serves:
+publishes, which is why it needs neither a box nor a session. From the core checkout, compare the contract copy
+the app builds against with the one the service serves:
 
 ```
-bash <oic-ui>/scripts/check-contract.sh
+cd /opt/oi-core
+bash /opt/oic-ui/scripts/check-contract.sh /opt/oi-core/docs/openapi.json
 ```
+
+**That command exits 1 today, and the reason is the app's copy rather than the service.** The core's contract
+publishes twelve paths and the three job fields `pending_action`, `pending_action_digest` and `events_through`;
+the app's copy was last regenerated before them, and the app is compiled against its own copy. Refreshing that
+copy is a change in the app's repository, so this check is the honest statement that the two repositories are
+three routes apart until it lands. The script's default path assumes the two checkouts are siblings, which on
+the deployment they are not, so the core's contract is passed explicitly; the guide's stage 13i.1 has the
+`--live` form that compares the copy against the running service in a container.
 
 ### If it breaks
 
@@ -4831,10 +4840,12 @@ four mistakes in it should take one pass rather than four.
 
 ### 13l.2 The first poll
 
-`migrate` applies intake's own table and `fetch` reads the mailbox. Neither runs from the host shell: the
-compose file assembles `DATABASE_URL` for containers, so the variable the host has is empty and
-`--dsn "$DATABASE_URL"` there is `--dsn ""`. Run them in a container on the deployment's network, which is
-where the variable is set and where `postgres` resolves.
+`migrate` applies intake's own table and `fetch` reads the mailbox. **`migrate` cannot run from the host shell:**
+the compose file assembles `DATABASE_URL` for containers, so the variable the host has is empty and
+`--dsn "$DATABASE_URL"` there passes an empty string. `fetch` needs no database, but it is the command that
+reaches the client's mailbox and writes to the four paths their configuration names, so it runs where the
+deployment does. Both run in a container on the deployment's network, which is where the variable is set, where
+`postgres` resolves, and where the client's paths can be mounted.
 
 ```
 cd /opt/oi-core
@@ -4903,7 +4914,7 @@ mirror exists so the row can be joined to everything else, and `intake_events` i
 ### 13l.4 The second channel: a share, polled
 
 ```
-python3 services/intake/intake.py watch-folder --config /etc/oi-intake/intake.yaml
+~/venv/bin/python services/intake/intake.py watch-folder --config /etc/oi-intake/intake.yaml
 ```
 
 Point `intake.share` at the folder the scanner or the office manager already uses. **This connector polls,
@@ -4924,7 +4935,7 @@ A folder arrival has no sender, so it is recorded as `marked` rather than truste
 ### 13l.5 The four ways it goes quiet
 
 ```
-python3 services/intake/intake.py monitor --config /etc/oi-intake/intake.yaml
+~/venv/bin/python services/intake/intake.py monitor --config /etc/oi-intake/intake.yaml
 ```
 
 Run this from cron or a systemd timer, not from the poller. Its whole job is to notice that the poller is not
@@ -4954,7 +4965,7 @@ outbox file the client's own monitoring picks up, or their own SMTP relay, set b
 ### 13l.6 What to check monthly, and what to do when something breaks
 
 ```
-python3 services/intake/intake.py enumerate-reach --config /etc/oi-intake/intake.yaml
+~/venv/bin/python services/intake/intake.py enumerate-reach --config /etc/oi-intake/intake.yaml
 ```
 
 Run this monthly. It makes six requests and reports what came back: the client's mailbox reached, and a
@@ -4980,14 +4991,14 @@ simulated tenant that implements the delegated-permission semantics from Microso
 faithful to the contract and is not the contract.
 
 ```
-python3 tests/fixtures/intake_acceptance.py
+~/venv/bin/python tests/fixtures/intake_acceptance.py
 ```
 
 The five commands that need neither a tenant nor a database, against a scratch directory:
 
 ```
 mkdir -p /tmp/oi-demo/documents /tmp/oi-demo/state /tmp/oi-demo/share
-python3 - <<'PY'
+~/venv/bin/python - <<'PY'
 import pathlib, yaml
 config = yaml.safe_load(pathlib.Path("services/intake/intake.example.yaml").read_text())
 config["intake"]["documents_root"] = "/tmp/oi-demo/documents"
@@ -5000,12 +5011,16 @@ pathlib.Path("/tmp/oi-demo/share/demo-invoice.pdf").write_bytes(
     b"%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R/Amount 1450.00>>\n%%EOF\n")
 PY
 
-python3 services/intake/intake.py check-config --config /tmp/oi-demo/intake.yaml
-python3 services/intake/intake.py cord-check --config /tmp/oi-demo/intake.yaml
-python3 services/intake/intake.py watch-folder --config /tmp/oi-demo/intake.yaml --iterations 3 --poll-seconds 1
-python3 services/intake/intake.py status --config /tmp/oi-demo/intake.yaml
-python3 services/intake/intake.py monitor --config /tmp/oi-demo/intake.yaml
+~/venv/bin/python services/intake/intake.py check-config --config /tmp/oi-demo/intake.yaml
+~/venv/bin/python services/intake/intake.py cord-check --config /tmp/oi-demo/intake.yaml
+~/venv/bin/python services/intake/intake.py watch-folder --config /tmp/oi-demo/intake.yaml --iterations 3 --poll-seconds 1
+~/venv/bin/python services/intake/intake.py status --config /tmp/oi-demo/intake.yaml
+~/venv/bin/python services/intake/intake.py monitor --config /tmp/oi-demo/intake.yaml
 ```
+
+**`~/venv/bin/python`, not `python3`.** The demo imports `yaml`, and on a box where the venv is the Python
+that was set up for the tests that is the interpreter that has it. Every other command on this page uses the
+same one.
 
 `check-config`, `cord-check`, `status` and `monitor` need no network at all. `watch-folder` reads a directory
 and touches nothing else. `fetch`, `watch` and `enumerate-reach` need the client's mailbox, and `migrate` and
@@ -5041,6 +5056,24 @@ belong in this repository only if the business decides they do.
 A workflow here is a job with several steps. One of them turns an invoice into an entry, another stops and asks
 a person to approve it, and the rest run only after they have. Nothing about that is unusual. What is unusual
 is the thing underneath it.
+
+### The text to send, before you blame the extractor
+
+**Do this first, because a refusal here reads as a broken feature.** `invoice_intake`'s first real step reads
+the job's input as a message and extracts four fields from it with patterns, and text that does not match them
+fails as `unreadable_invoice`. The text that works:
+
+```
+INV-2026-0417 from accounts@ferguson.example Total 4210.00 due 2026-11-15
+```
+
+**These three patterns are compiled with `re.IGNORECASE` and the fourth is not.** `total`, `from` and `due`
+match in any casing, so `Total 4210.00` matches the lowercase pattern the table in section 13j prints. The
+reference pattern is uppercase-only, because `INV-2026-0417` is what an invoice number looks like.
+
+**A total and a vendor are required and the other two are not.** Section 13j has the four patterns, what each
+one looks for, and the two commands that mint a session and start this job; the guide's stage 13m.0 has the
+same text with the reason it is a refusal rather than a default.
 
 ### The record and the state change are one write
 
@@ -5382,6 +5415,7 @@ reads like a broken deployment rather than a command in the wrong place.
 | Path | What is in it |
 |---|---|
 | `/opt/oi-core` | The repository |
+| `/opt/oic-ui` | The client app's checkout, which these pages write as `<oic-ui>`. A separate repository, built by the compose file's `app` service and mounted nowhere else |
 | `/opt/oi-core/rendered/env` | Secrets and settings, mode 600, never committed |
 | `/opt/oi-core/rendered/keys.json` | Per-role API keys, mode 600 |
 | `/opt/oi-core/rendered/litellm.yaml` | The gateway's model list |

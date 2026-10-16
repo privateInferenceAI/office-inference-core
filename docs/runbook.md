@@ -16,11 +16,12 @@ commands.
 **How to use this:** work one phase at a time. A phase is not finished until its verification step
 passes. Later phases stay as outlines until we reach them, so nothing here goes stale.
 
-**Status, 2026-10-11:** **C0 complete.** Phases 0, 1, and 2 built, run, and verified on the cloud
-reference instance. The chain holds the first live model call, the day is exported with a manifest,
-the anchor ships on a timer to a bucket the box cannot delete from, and per-role keys with hard
-budgets are written. C1 still owes the purge tombstone, the per-data-class content modes, the audit
-CLI's refusal of hand-typed actors, and a decision on model deprecation. Phases 3 to 11 outlined.
+**Status, 2026-10-16:** **C0 to C5 complete.** Phases 0 to 3 built, run, and verified on the cloud reference
+instance: the gateway, the hash-chained record with export and anchoring, per-role keys with hard budgets,
+document ingestion with citation verification, access control, redaction and retention. C3 added the assistant
+API and its routing, C4 the client application and the contract a second repository builds against, and C5 the
+workflow engine, the approval gate, the two screens that watch and decide, and the email intake connector.
+C6 to C9, and phases 7 to 11 below, are still outlines.
 
 ## The environment we are building on
 
@@ -1406,7 +1407,7 @@ and a table kept whole even when the parser handed it over in pieces.
 **Commands.** The rules are unit-tested, so the box only has to prove they hold on real parser output:
 
     cd /opt/oi-core
-    python3 -m pytest tests/test_chunker.py -q
+    ~/venv/bin/python -m pytest tests/test_chunker.py -q
     docker run --rm --network ai-net -v /opt/oi-core:/w -w /w \
       --entrypoint python ghcr.io/docling-project/docling-serve-cpu:v1.36.0 \
       /w/tests/fixtures/chunk_fee_schedule.py
@@ -1617,7 +1618,7 @@ flight. Applying it before a first ingest costs nothing extra; applying it after
 **Verify.**
 
 ```
-python3 -m pytest tests/test_chunker.py -q -k "heading or title_is_in_the_chunk_text"
+~/venv/bin/python -m pytest tests/test_chunker.py -q -k "heading or title_is_in_the_chunk_text"
 bash scripts/probe.sh interface_probe.py
 ```
 
@@ -4595,9 +4596,27 @@ this needs no schema change and no new chain version.
 where an interface cannot drop it by choosing not to render a paragraph.
 
 **What no sentence may say.** Not *"Approved by Dana at 2:14pm"*, and not *"A person approved an action"*
-either. The second is the line `audit_feed` renders today and it asserts something the system does not know.
-The true sentence is: *"Approved at 2:14pm under the executive role. The person who approved was not
-identified: sign-in is not enabled yet."*
+either. The second is the line `audit_feed` rendered until migration 022 and it asserts something the system
+does not know. The sentence `approvals.describe()` prints, and therefore the sentence the feed renders and the
+one a client reads, is:
+
+```
+Approved at 2026-10-16T18:18:25+00:00 under the viewer role. The person who decided was not identified:
+sign-in is not enabled on this deployment, so the system cannot verify who acted.
+```
+
+Every word is load-bearing. **Decided** rather than approved, because one sentence renders all three
+decisions. The **role**, because that is what the record establishes. The reason **as
+`approvals.UNVERIFIED_REASON` holds it**, so the sentence cannot drift from the record it describes.
+`tests/test_workflow_chain.py` compares the view's sentence against `describe()` for all three decisions,
+because a sentence defined twice is a sentence that drifts.
+
+**And the contract cannot see route order, which is how this route stayed dead through every check.**
+`docs/openapi.json` lists both `/jobs/{job_id}/{action}` and `/jobs/{job_id}/approvals` and passes, because a
+schema is generated from the route table and does not know which entry wins a match. Starlette matches in
+declaration order, and the wildcard was declared first, so `approvals` arrived as an action and was correctly
+refused with `bad_action`. **The route had never run, for any decision, and every check was green.** Only a
+request carrying a valid session can tell the two apart, and 6.2 is that request.
 
 **Verify.**
 
@@ -4612,11 +4631,14 @@ docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
   -v /opt/oi-core:/w -w /w --entrypoint python oi-core/session:local \
   /w/scripts/fetch_openapi.py --check
 
-python3 -m pytest tests/ -q
+~/venv/bin/python -m pytest tests/ -q
 ```
 
-Expected: `job_probe.py` reports its rights and none regresses, and the contract check names
-`/jobs/{job_id}/approvals` among the paths it verified.
+Expected: `job_probe.py` reports its rights and none regresses; the contract check prints
+`OK … (12 path(s): …)` with `/jobs/{job_id}/approvals` among them and exits 0; and the suite passes with the
+database-backed files skipped, which is a skipped right and not a held one. **`~/venv/bin/python` and not a
+bare `python3`**: the system Python on the reference machine has no pytest, so the bare form fails with
+`No module named pytest` before it runs a single test.
 
 **What this step cannot yet prove, said plainly.** The probe drives the C4 one-step executor, and **that
 executor never reaches the gate**, because reaching it needs a multi-step run and the engine is the next
@@ -4680,7 +4702,7 @@ definition of the hash.
 with store.conn.transaction():          # psycopg3 begins a real transaction even in autocommit mode
     store.put(job)                      # the state change
     store.append(job_id, EV_STEP, ...)  # the event, numbered in the same transaction
-    chain.insert_event(store.conn.cursor(), ...)   # the chain row, same eighteen columns
+    chain.record(store.conn.cursor(), ...)  # the chain row, same eighteen columns
 ```
 
 Commit at the end. A `SIGKILL` anywhere inside leaves the connection for Postgres to reap, and it rolls back
@@ -4697,7 +4719,7 @@ cannot repeat work it already recorded, and there is no cursor table to fall out
 ```
 cd /opt/oi-core
 bash scripts/probe.sh workflow_probe.py
-python3 -m pytest tests/test_workflow_engine.py -q
+~/venv/bin/python -m pytest tests/test_workflow_engine.py -q
 ```
 
 Expected: the probe reports `RUNS`, `RECORDED` and `ATOMIC` held. `ATOMIC` is the one that matters: it starts
@@ -4735,9 +4757,14 @@ takes. The line above is the second run and the evidence moved with the claim.
 no step rows and no chain rows. `BOTHPRESENT` is the control, so that line cannot be green on an engine that
 writes nothing at all.
 
+**`CHAIN`'s event count grows with every run, and a reader comparing two pages should know why.** The probe
+exports the whole day's chain rather than the rows its own job wrote, so 108 is the number of events in that
+day at that moment: every probe, every test run and every model call since midnight adds to it. The number to
+read is `chain intact`, not the count.
+
 ```
-$ python3 -m pytest tests/test_workflow_engine.py -q
-21 passed in 0.65s
+$ ~/venv/bin/python -m pytest tests/test_workflow_engine.py -q
+23 passed in 0.65s
 ```
 
 **And the right can fail, which is the part worth checking.** A test that cannot fail proves nothing, and
@@ -4829,32 +4856,46 @@ cd /opt/oi-core
 bash scripts/probe.sh workflow_probe.py
 docker exec postgres psql -U oicore -d oicore -tAc \
   "select summary from audit_feed where event_type = 'approval' order by id desc limit 3"
-OI_TEST_DATABASE_URL=<a database of your own> python3 -m pytest tests/test_workflow_chain.py -q
+OI_TEST_DATABASE_URL=<a database of your own> ~/venv/bin/python -m pytest tests/test_workflow_chain.py -q
 ```
 
-**And the sequence the register actually writes, which is four commands and one restart.** The engine is
+**And the sequence the register actually writes, which is five commands and one restart.** The engine is
 wired into the API and the manifest declares the task, so this is the whole thing from outside:
 
 ```
 # 1. rebuild, because the API runs from an image that mounts none of its own source
 cd /opt/oi-core && oi build api && oi up -d api
 
-# 2. a session for a subject the registry declares, then start the workflow
-oi --profile tools run --rm session mint --dev --subject <a declared subject> --role viewer > /tmp/mint.out
-awk '/^token/{print $2}' /tmp/mint.out > /tmp/tok
-#    POST /jobs {"session": <tok>, "task": "invoice_intake", "input": "INV-2026-0417 from … total 4210.00 …"}
-#    -> 200, state=awaiting_approval, four steps, a digest and a pending_action
+# 2. a session for a subject the registry declares. rendered/access.json lists them.
+TOKEN=$(oi run --rm session mint --dev --subject probe-staff@officeinference.com --role viewer --json \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
 
-# 3. restart the service while it waits
+# 3. start the workflow. The input is a message rather than an invoice description: the plan reads the text
+#    with four patterns, the vendor is the one word after "from", and an ellipsis in that position is
+#    captured as the vendor. The request runs on ai-net because the API publishes no port.
+JOB=$(docker run --rm --network ai-net curlimages/curl -sS -X POST http://api:8088/jobs \
+  -H 'Content-Type: application/json' \
+  -d "{\"session\":\"$TOKEN\",\"task\":\"invoice_intake\",\"input\":\"INV-2026-0417 from accounts@ferguson.example Total 4210.00 due 2026-11-15\"}" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["job_id"])')
+#    -> 200, state=awaiting_approval, four step rows, a pending_action and a digest
+
+# 4. restart the service while it waits, and read the row rather than the response
 docker restart api
+docker exec postgres psql -U oicore -d oicore -tAc \
+  "select state, pending_action_digest from jobs where job_id = '$JOB'"
+#    -> awaiting_approval | sha256:5b480b869b4bbb02f…
 
-# 4. approve, quoting the digest the job is holding
-#    POST /jobs/{job_id}/approvals {"session": <tok>, "decision": "approve", "action_digest": "<digest>"}
+# 5. approve, quoting the digest the job is holding
+DIGEST=$(docker exec postgres psql -U oicore -d oicore -tAc \
+  "select pending_action_digest from jobs where job_id = '$JOB'" | tr -d '[:space:]')
+docker run --rm --network ai-net curlimages/curl -sS -X POST \
+  "http://api:8088/jobs/$JOB/approvals" -H 'Content-Type: application/json' \
+  -d "{\"session\":\"$TOKEN\",\"decision\":\"approve\",\"action_digest\":\"$DIGEST\"}"
 #    -> 200, state=succeeded, six steps, each exactly one row
 ```
 
 Expected: the job survives the restart with its digest intact, and the approval route — not the probe —
-finishes the run.
+finishes the run. `$TOKEN` and `$JOB` are what the later commands in this step use.
 
 **Two things in that sequence are not obvious and both cost somebody an afternoon.** `POST /jobs` needs a
 *session in the body*, not only in the header, and the subject has to be one the deployment's registry
@@ -4882,7 +4923,7 @@ Approved at 2026-10-16T16:20:00+00:00 under the staff role. The person who decid
 Approved at 2026-10-16T16:20:00+00:00 by dana (staff)
 Changes requested at 2026-10-16T16:20:00+00:00 under the staff role. The person who decided was not identified: sign-in is not enabled on this deployment, so the system cannot verify who acted.
 
-$ OI_TEST_DATABASE_URL=… python3 -m pytest tests/test_workflow_chain.py -q
+$ OI_TEST_DATABASE_URL=… ~/venv/bin/python -m pytest tests/test_workflow_chain.py -q
 14 passed in 0.56s
 ```
 
@@ -5031,7 +5072,7 @@ both and the retry applies it once. That case needs no key discipline because it
 ```
 cd /opt/oi-core
 bash scripts/probe.sh workflow_probe.py
-python3 -m pytest tests/test_workflow_engine.py -q
+~/venv/bin/python -m pytest tests/test_workflow_engine.py -q
 ```
 
 Expected: `TYPED`, `BOUNDED` and `IDEMPOTENT` held. `TYPED` reports the failing step's kind with no later row;
@@ -5046,8 +5087,8 @@ ok   TYPED       state='failed', refusing step=('refuse', 'failed', 'unreadable_
 ok   BOUNDED     state='failed' after 0.52s (deadline 0.5s), kind='step_timeout', 0 row(s) after it
 ok   IDEMPOTENT  state='succeeded', far side applied 1 time(s) over 2 call(s), 2 attempt row(s), 1 ledger row(s)
 
-$ python3 -m pytest tests/test_workflow_engine.py -q
-21 passed in 0.65s
+$ ~/venv/bin/python -m pytest tests/test_workflow_engine.py -q
+23 passed in 0.65s
 ```
 
 `IDEMPOTENT`'s line is the one to read twice. **Two calls, one application.** The step ran twice, the far side
@@ -5141,7 +5182,9 @@ and two writers in one migrations directory is a conflict with no upside. The ta
 travels with the code that writes it. Moving it into `db/migrations/` later is a rename, and the note is here
 so the next person does not read the placement as a decision about ownership.
 
-**The record.** Every arrival writes one row, whether or not it is a duplicate.
+**The record.** Every arrival writes one row, whether or not it is a duplicate. The row has thirty-one keys and
+`build_record` in `services/intake/provenance.py` is the definition of all of them; the table below is the ones
+a reader asks about, with the column names a query has to use.
 
 | Field | What it is, and why |
 |---|---|
@@ -5152,8 +5195,8 @@ so the next person does not read the placement as a decision about ownership.
 | `mailbox`, `folder` | Which mailbox, which mail folder. One credential reads one mailbox and the record says which |
 | `message_id` | The RFC 5322 `Message-ID`. The identifier a mail administrator can search for |
 | `provider_id` | Graph's immutable message id, when the channel has one |
-| `sender` | Envelope sender, header `From`, `Reply-To`. The envelope sender is the one that authorised the delivery and the header one is the one a person sees, so both are recorded because they can differ |
-| `auth` | SPF, DKIM and DMARC results, parsed from `Authentication-Results` |
+| `sender_from`, `sender_envelope`, `sender_reply_to` | Header `From`, the envelope sender and `Reply-To`, as three columns. The envelope sender is the one that authorised the delivery and the header one is the one a person sees, so both are recorded because they can differ |
+| `auth_spf`, `auth_dkim`, `auth_dmarc` | The three results parsed out of `Authentication-Results`, one column each |
 | `verdict` | `trusted` or `marked`. Marked means the sender could not be verified |
 | `content_sha256`, `bytes`, `relpath` | The hash of the deposited bytes, the size, and where it landed under the documents root |
 | `raw_message_sha256` | The hash of the message as received, so the envelope can be proved later without keeping it |
@@ -5176,47 +5219,65 @@ already in its list of suffixes it will not read. A half-written PDF never becom
     cd /opt/oi-core
 
     # What the configuration must satisfy, before anything is fetched.
-    python3 services/intake/intake.py check-config --config /etc/oi-intake/intake.yaml
+    ~/venv/bin/python services/intake/intake.py check-config --config /etc/oi-intake/intake.yaml
 
     # Cut every cord and see whether anything still resolves to us.
-    python3 services/intake/intake.py cord-check --config /etc/oi-intake/intake.yaml
+    ~/venv/bin/python services/intake/intake.py cord-check --config /etc/oi-intake/intake.yaml
 
     # Intake's own table. Idempotent, like the audit sink's migrate.
-    python3 services/intake/intake.py migrate --dsn "$DATABASE_URL"
+    # **In a container on ai-net, not from the host.** compose assembles DATABASE_URL for containers and
+    # the renderer does not write it, so `--dsn "$DATABASE_URL"` in a host shell passes an empty string and
+    # psycopg refuses it. `eval` is the image on this box carrying a YAML parser and the Postgres driver;
+    # intake has its own Dockerfile and no compose service yet.
+    oi run --rm --entrypoint sh -v /opt/oi-core:/w:ro -w /w eval -c \
+      'python /w/services/intake/intake.py migrate --dsn "$DATABASE_URL"'
 
-    # One poll. Reads, deposits, records, and exits. This is what the timer runs.
-    python3 services/intake/intake.py fetch --config /etc/oi-intake/intake.yaml
+    # One poll. Reads, deposits, records, and exits. This is what the timer runs. Needs the client's four
+    # paths mounted: the config and credential under /etc/oi-intake, intake.documents_root, intake.state_dir.
+    oi run --rm --entrypoint sh -v /opt/oi-core:/w:ro -w /w \
+      -v /etc/oi-intake:/etc/oi-intake:ro \
+      -v <intake.documents_root>:<intake.documents_root> \
+      -v <intake.state_dir>:<intake.state_dir> \
+      eval -c 'python /w/services/intake/intake.py fetch --config /etc/oi-intake/intake.yaml'
 
-    # The daemon: poll on an interval, write a heartbeat on every success.
-    python3 services/intake/intake.py watch --config /etc/oi-intake/intake.yaml
+    # The daemon: poll on an interval, write a heartbeat on every success. The same poll in a loop; the
+    # timer runs `fetch`.
+    ~/venv/bin/python services/intake/intake.py watch --config /etc/oi-intake/intake.yaml
 
     # The second channel: a shared folder, polled, with a settle check.
-    python3 services/intake/intake.py watch-folder --config /etc/oi-intake/intake.yaml
+    ~/venv/bin/python services/intake/intake.py watch-folder --config /etc/oi-intake/intake.yaml
 
     # What the credential can actually reach, rather than what it was granted.
-    python3 services/intake/intake.py enumerate-reach --config /etc/oi-intake/intake.yaml
+    ~/venv/bin/python services/intake/intake.py enumerate-reach --config /etc/oi-intake/intake.yaml
 
     # The heartbeat and the volume floor, evaluated now.
-    python3 services/intake/intake.py monitor --config /etc/oi-intake/intake.yaml
+    ~/venv/bin/python services/intake/intake.py monitor --config /etc/oi-intake/intake.yaml
 
-    # The recorded hash against the ingest manifest's hash for the same file.
-    python3 services/intake/intake.py verify-manifest --config /etc/oi-intake/intake.yaml --dsn "$DATABASE_URL"
+    # The recorded hash against the ingest manifest's hash for the same file. Same container, same reason
+    # as `migrate`.
+    oi run --rm --entrypoint sh -v /opt/oi-core:/w:ro -w /w \
+      -v /etc/oi-intake:/etc/oi-intake:ro eval -c \
+      'python /w/services/intake/intake.py verify-manifest --config /etc/oi-intake/intake.yaml --dsn "$DATABASE_URL"'
 
     # Everything above, without a database and without a tenant.
-    python3 tests/fixtures/intake_acceptance.py
+    ~/venv/bin/python tests/fixtures/intake_acceptance.py
 
 **Expected.** `check-config` prints `ok` and the five components with their owner. `cord-check` prints
-`no cord` and exits 0. `fetch` prints one line per message with `deposited`, `duplicate` or `marked`, and a
-summary naming the count of each. `enumerate-reach` prints a probe table where exactly one row is `reached`.
-`monitor` prints `no alert` when the heartbeat is fresh and the volume is inside the floor. The acceptance
-probe prints ten `PASS` lines, one per register row, and exits 0.
+`no cord` and exits 0. **`fetch` prints one JSON object for the poll, not a line per message**, with these
+keys: `channel`; `messages_seen` and `no_attachment`, which count messages; and `attachments`, `deposited`,
+`duplicates`, `already` and `marked`, which count attachments. `deposited` writes a row and deposits a file,
+`duplicates` writes a row with `duplicate_of` and deposits nothing, `already` writes **no row at all** (the
+same attachment on a message read on an earlier poll), and `marked` is a count of a sender verdict on the
+deposited rows rather than a fourth outcome. `enumerate-reach` prints a probe table where exactly one row is
+`reached`. `monitor` prints `no alert` when the heartbeat is fresh and the volume is inside the floor. The
+acceptance probe prints ten `PASS` lines, one per register row, and exits 0.
 
 **Verify.** The ten rows this step owns are CON-OWNED-001, CON-LEAST-001, CON-INTAKE-001, CON-DUPE-001,
 CON-INJECT-001, CON-SENDER-001, CON-FOLDER-001, CON-SILENT-001, SEC-CON-001 and SEC-INTAKE-002. The test
 command and its output are below.
 
-    python3 -m pytest tests/ -q
-    python3 tests/fixtures/intake_acceptance.py
+    ~/venv/bin/python -m pytest tests/ -q
+    ~/venv/bin/python tests/fixtures/intake_acceptance.py
 
 **If it breaks.**
 
@@ -5235,15 +5296,17 @@ command and its output are below.
   ingestion worker accepts. Intake records `unreadable_by_ingest` on the row rather than reporting a deposit
   that never becomes a document.
 
-**As it ran, on 2026-10-16.** Recorded from the development checkout, following manual section 13l.7 word for
-word. There is no client tenant and no database on this machine, so what follows is the acceptance run against
-the simulated tenant and the five commands that need neither.
+**As it ran, on 2026-10-16.** Recorded on the deployment at `/opt/oi-core`, following manual section 13l.7 word
+for word. There is no client tenant and no database on this machine, so what follows is the acceptance run
+against the simulated tenant and the five commands that need neither. **`~/venv/bin/python`, not a bare
+`python3`**: the system Python on the reference machine has no pytest, and the acceptance script's own
+dependencies come from `requirements-dev.txt`.
 
 ```
-$ python3 tests/fixtures/intake_acceptance.py
+$ ~/venv/bin/python tests/fixtures/intake_acceptance.py
 
 C5-C intake acceptance
-  started 2026-10-16T16:42:11+00:00
+  started 2026-10-16T18:59:40+00:00
   **the tenant is simulated.** tests/fixtures/intake_env.py implements the delegated-permission
   semantics from Microsoft's documentation. No Microsoft tenant is contacted, so the rows below
   are proved against the contract rather than against the service. See the runbook for which
@@ -5264,16 +5327,20 @@ PASS  SEC-INTAKE-002  a second mailbox, the directory, the profile and another s
 ```
 
 ```
-$ python3 -m pytest tests/test_intake_*.py -q
-90 passed in 20.54s
+$ ~/venv/bin/python -m pytest tests/test_intake_*.py -q
+90 passed in 19.85s
 
-$ python3 -m pytest tests/ -q
-894 passed, 17 skipped in 41.78s
+$ ~/venv/bin/python -m pytest tests/ -q
+884 passed, 23 skipped in 32.23s
 ```
 
-**The 17 skips are not intake's.** Fourteen are `tests/test_workflow_chain.py`, which needs a real Postgres
-because the property it checks is a property of a transaction. Three are pre-existing. Every intake test runs
-on a machine with no database and no tenant, which is the point of the simulated one.
+**The 23 skips are not intake's, and none of them is a silent pass.** Fourteen are
+`tests/test_workflow_chain.py` and five are `tests/test_store_parity.py`, both of which need a real Postgres
+because the property they check is a property of a transaction. Two are `tests/test_audit_statement.py`, which
+needs the audit tool's Postgres driver. One is `tests/test_format_coverage.py`, which runs inside the parser
+image because it needs docling. One is `tests/test_manifest_schema.py`, which skips without jsonschema, and the
+deployment's venv does not carry it. Every intake test runs on a machine with no database and no tenant, which
+is the point of the simulated one.
 
 **And the ten rows can fail.** Each control was broken deliberately, one at a time, and the test for its row
 was run against the broken build. Ten of the eleven mutations were caught by the intended assertion; the
@@ -5317,8 +5384,8 @@ remembered.
 
 **Commands.** Covered by 6.4. The two that matter here:
 
-    python3 services/intake/intake.py monitor --config /etc/oi-intake/intake.yaml
-    python3 services/intake/intake.py watch-folder --config /etc/oi-intake/intake.yaml
+    ~/venv/bin/python services/intake/intake.py monitor --config /etc/oi-intake/intake.yaml
+    ~/venv/bin/python services/intake/intake.py watch-folder --config /etc/oi-intake/intake.yaml
 
 **Expected.** `monitor` prints `no alert` on a healthy deployment, and one line per alert naming the failure
 in a sentence rather than a code. On a stale heartbeat it prints `stale_heartbeat` with the age in minutes
@@ -5350,7 +5417,7 @@ this is the whole thing running for real: three scans, a file that arrives durin
 check visible in the output.
 
 ```
-$ python3 services/intake/intake.py watch-folder --config /tmp/oi-demo/intake.yaml --iterations 3 --poll-seconds 1
+$ ~/venv/bin/python services/intake/intake.py watch-folder --config /tmp/oi-demo/intake.yaml --iterations 3 --poll-seconds 1
 {"duplicates": [], "scanned": 1, "skipped": [], "taken": [], "unreadable": 0}
 {"duplicates": [], "scanned": 1, "skipped": [], "taken": [{"bytes": 84, "content_sha256": "1ccf744751ce302df4a1219520d9546f14cd45f1b32bf1dea4f2b4be0491be54", "intake_id": "in-86fdb4a2dc4bdb9f2daf", "relpath": "demo-invoice.pdf"}], "unreadable": 0}
 {"duplicates": [], "scanned": 1, "skipped": [{"content_sha256": "1ccf744751ce302df4a1219520d9546f14cd45f1b32bf1dea4f2b4be0491be54", "path": "/tmp/oi-demo/share/demo-invoice.pdf", "reason": "already taken"}], "taken": [], "unreadable": 0}
@@ -5403,8 +5470,8 @@ rather than an audit.
 
 **Commands.**
 
-    python3 services/intake/intake.py cord-check --config /etc/oi-intake/intake.yaml
-    python3 services/intake/intake.py enumerate-reach --config /etc/oi-intake/intake.yaml
+    ~/venv/bin/python services/intake/intake.py cord-check --config /etc/oi-intake/intake.yaml
+    ~/venv/bin/python services/intake/intake.py enumerate-reach --config /etc/oi-intake/intake.yaml
 
 **Expected.** `cord-check` prints the five components with `client` beside each and then `no cord` and exits
 0. `enumerate-reach` prints one row per probe: the client's own mailbox `reached`, a second mailbox
@@ -5433,7 +5500,7 @@ credential reached rather than the permission it was granted.
 needs no tenant and no database, and it is the command `BIZ-INDEPENDENT-001` turns on.
 
 ```
-$ python3 services/intake/intake.py cord-check --config /tmp/oi-demo/intake.yaml
+$ ~/venv/bin/python services/intake/intake.py cord-check --config /tmp/oi-demo/intake.yaml
 ok   Acme Tool & Die (acme-2026)
      ok   intake address     client   ap@acmetool.example
      ok   mailbox            client   ap@acmetool.example (regular_user, exchange_online)
@@ -5803,7 +5870,7 @@ That is why the route must not log its full URL.
 **Verify.**
 
 ```
-cd /home/anthony/projects/oic-ui/app
+cd /opt/oic-ui/app
 npm run typecheck
 npm test -- --run
 
@@ -5812,6 +5879,10 @@ npm test -- --run
 # renders but does nothing, which component tests cannot see.
 npx playwright test e2e/live.spec.ts
 ```
+
+**The app is a separate repository and `/opt/oic-ui` is its checkout on the deployment** (guide 13i.1); it is
+not on the core's machine at any other path. Check it is at the commit these screens were built from before
+running the commands: `git -C /opt/oic-ui log --oneline -1`.
 
 Expected: the unit suite passes with the live-view tests named, and the browser rung reports the refresh case,
 where the page is reloaded mid-run and the steps already recorded come back, none missing and none invented.
@@ -5841,7 +5912,7 @@ $ npm test -- --run
      ✓ clears the stalled line when a real event arrives  710ms
 
  Test Files  7 passed | 1 skipped (8)
-      Tests  159 passed | 12 skipped (171)
+      Tests  160 passed | 12 skipped (172)
 ```
 
 The twelve skips are the integration rung, which needs a live deployment and says so with the two commands that
@@ -5862,11 +5933,13 @@ The fourth line is the one worth looking at: it waits out the real 45 second win
 so the number it proves is the number that ships. Running both specs together is thirteen tests and just under a
 minute, because one of them is fifty of those seconds.
 
-**What this step cannot prove, said plainly.** Nothing can reach the gate on a live deployment yet, because the
-multi-step executor is the next piece; the job this screen watches is driven by the C4 one-step executor. So the
-live view is verified against a stubbed deployment whose responses are the contract's shapes, and against the
-real route only as far as one attempt gets. The refresh path is exercised through the app's own client, not
-through a worker killed on a box.
+**What this step cannot prove, said plainly.** A live deployment's job can reach the gate, and 6.2 records that
+run: the engine is wired into `services/api/app.py` and `POST /jobs` drives the six-step plan. What this step
+still cannot prove is the *screen* against a live gate: the live view's acceptance is the browser rung, whose
+responses are the contract's shapes against a stubbed deployment, and the refresh path is exercised through the
+app's own client rather than through a worker killed on a box. Two rows of the register are therefore about the
+mechanism and not about the deployment: the screen renders what the record says, and the record is proved
+elsewhere.
 
 **If it breaks.**
 
@@ -5929,16 +6002,23 @@ the workstation is often shared. So:
 - **No sentence names a person while the basis is unverified.** Not the claimed subject, and not "a person
   approved an action" either. The banner above the Approve control says what the record will say before anybody
   clicks it: *"Identity not verified. This approval will be recorded against a role, not a person."* The
-  sentence a reader gets afterwards is *"Approved at 2:14pm under the executive role. The person who approved
-  was not identified: sign-in is not enabled on this deployment."*
+  sentence a reader gets afterwards is the one `approvals.describe()` prints, in the app's own words in
+  `approvalSentences.ts`: *"Approved at 2026-10-16T18:18:25+00:00 under the viewer role. The person who decided
+  was not identified: sign-in is not enabled on this deployment, so the system cannot verify who acted."*
 - **`claimed_subject` never sits where a verified name would sit.** The field is named `claimed_` on purpose,
   where an interface cannot drop the caveat by choosing not to render a paragraph.
 
-**The queue, and where it comes from.** `GET /approvals` returns the pending decisions for the session's role.
-It is a route of its own rather than a filter on the job list, because a queue derived from the jobs one browser
-started cannot show an approval to the person whose job it is to approve them, which is the whole point of the
-screen. A deployment that does not serve the route says so rather than showing an empty queue: an empty queue
-and a missing route are different facts, and only one of them means "nothing is waiting".
+**The queue, and where it comes from.** `GET /approvals` returns the jobs waiting at a gate that this session
+may decide on, newest first, scoped **by access roots**: a job appears if the roots it carries are a subset of
+the roots the session holds, which is the same comparison the retrieval boundary makes everywhere else. Roots
+rather than a role and rather than the subject, because the subject answers *who asked* and this question is
+*who may decide*. **It does not decide who the right approver is**: every session holding the roots sees every
+gate in them, so separation of duties is a policy this deployment does not yet express. And **the app does not
+call the route yet**: `loadQueue()` in `app/src/queue.ts` reads the jobs this browser started and filters them
+on `awaiting_approval`, and the screen states that scope above the list rather than offering a browser's own
+history as the role's queue. A queue derived from the jobs one browser started cannot show an approval to the
+person whose job it is to approve them, which is the whole point of the screen; that is why the route exists
+and why the screen has a single switch point waiting for it.
 
 **What is built.** `app/src/screens/Review.tsx` in the app repository, with every sentence it can produce for an
 approval in `app/src/approvalSentences.ts`. That module is separate from the component for the same reason
@@ -5948,20 +6028,23 @@ test can read a module that a test cannot read out of JSX.
 **Verify.**
 
 ```
-cd /home/anthony/projects/oic-ui/app
+cd /opt/oic-ui/app
 npm test -- --run
 
 # The browser rung, against a stubbed deployment: five identical approvals, a mixed queue, and an empty one.
 npx playwright test e2e/review.spec.ts
 
-# The app's copy of the contract against the core's, because the app is built against the copy.
-cd /home/anthony/projects/oic-ui && bash scripts/check-contract.sh
+# The app's copy of the contract against the core's, because the app is built against the copy. Run from
+# the core's checkout, where the two repositories are both on the box; the script's default path assumes
+# they are siblings and on the deployment they are not.
+cd /opt/oi-core && bash /opt/oic-ui/scripts/check-contract.sh /opt/oi-core/docs/openapi.json
 ```
 
 Expected: the review tests name the four rows; the browser rung asserts the full body is in the document before
 the approve control is enabled, that the mixed queue offers no bulk action, and that the empty queue renders a
-sentence rather than a blank panel or a spinner; and the contract check reports the app's copy matching the
-core's with `/jobs/{job_id}/approvals` among the paths.
+sentence rather than a blank panel or a spinner. **And the contract check exits 1 today**, because the app's
+copy of the contract is behind the core's: the lines below are what it prints, and the paragraph after them
+says which side the fix is on.
 
 **Run, and the output pasted here.** Same session as 6.5, no deployment and no token.
 
@@ -5987,27 +6070,40 @@ described above: a job started in this browser is visible to it and to nobody el
 states its scope and why `GET /approvals` is the route this screen is built for.
 
 ```
-$ bash scripts/check-contract.sh
-OK    the app's contract matches /home/anthony/projects/office-inference-core/docs/openapi.json
-      11 path(s): /activity, /ask, /ask/stream, /documents/{doc_id}, /health, /jobs, /jobs/{job_id},
-      /jobs/{job_id}/approvals, /jobs/{job_id}/events, /jobs/{job_id}/{action}, /tasks
-      24 model(s)
+$ bash /opt/oic-ui/scripts/check-contract.sh /opt/oi-core/docs/openapi.json
+FAILED: docs/openapi.json differs from /opt/oi-core/docs/openapi.json
+        the app is built against the file, so this is a client that will call the wrong thing
+        paths in the core: /activity, /approvals, /ask, /ask/stream, /documents/{doc_id}, /health, /jobs,
+        /jobs/{job_id}, /jobs/{job_id}/approvals, /jobs/{job_id}/events, /jobs/{job_id}/{action}, /tasks
+        paths in this repo: /activity, /ask, /ask/stream, /health, /jobs, /jobs/{job_id},
+        /jobs/{job_id}/events, /jobs/{job_id}/{action}, /tasks
 ```
 
-Eleven paths and not ten, and the whole-set comparison in `tests/contract.test.ts` is what made the eleventh
-impossible to add quietly. **The check also found a gap it could not close from here**: `Job.to_dict()` on the
-service publishes `pending_action`, `pending_action_digest` and `events_through`, and `contract.Job` declares
-none of the three, so they are absent from the published document. The app reads them anyway, defensively, and
-`tests/contract.test.ts` names all three in an allowance list that fails the moment they are declared. The fix
-is three fields in `services/api/models.py`, which is not this piece's scope and has been reported.
+**The check fails, and the fix is in the other repository.** The core's `docs/openapi.json` now publishes
+`/approvals`, `/documents/{doc_id}` and the three job fields `Job.to_dict()` has always sent
+(`pending_action`, `pending_action_digest`, `events_through`); the app's copy was last regenerated before them,
+and the app is compiled against its own copy. Regenerating that copy is a change in `oic-ui` and is being made
+there. Until it lands, this check is the honest statement that the two repositories are three routes apart, and
+the app's `tests/contract.test.ts` allowance list is the thing that must shrink with it.
 
-**What this step cannot prove, said plainly.** No client can leave a live deployment's job waiting at the gate
-until the multi-step executor lands, so the screen is verified against a stubbed deployment built from the
-contract's shapes. The `409 approval_drift` path is driven by a stub that answers 409, not by a real draft
-rewritten mid-read. And the queue is the jobs this browser started, because `GET /approvals` is named in
-`docs/design/system-design.md` and is not in the contract yet; the screen says so above the list rather than
-implying it is the whole queue. Until those land, a Review screen opened on a live deployment shows an empty
-queue with an honest scope line, which is the correct behaviour for a queue that cannot see the role's work.
+**The paragraph this replaces had it backwards, and that is worth recording.** It said the three job fields
+were absent from the published document and that the gap could not be closed from here. They were absent from
+the *committed file* while the service had been serving them, which `scripts/fetch_openapi.py --check` caught
+the moment it was run: the file had 11 paths against the service's 12. Regenerated and verified on 2026-10-16
+at twelve paths and twenty-six schemas.
+
+**The twelve paths are not ten, and the whole-set comparison is what keeps it that way.** `tests/contract.test.ts`
+compares the whole path set rather than a subset, so a route added on the service side and not on the client
+side fails the app's own suite rather than being discovered by a client that calls it.
+
+**What this step cannot prove, said plainly.** A live deployment's job reaches the gate and waits there, and
+6.2 records that run, so the remaining gap is narrower than it was: **the screen's own acceptance is still the
+browser rung**, whose responses are the contract's shapes against a stubbed deployment rather than a live gate.
+The `409 approval_drift` path is driven by a stub that answers 409, not by a real draft rewritten mid-read; the
+service's own half of drift is proved in `tests/test_workflow_chain.py`, which needs a database. And **the queue
+on screen is the jobs this browser started**, because `loadQueue()` reads them and does not call
+`GET /approvals`. That route exists, answers, and is scoped by access roots, so the switch is a change in the
+app's repository rather than a wait on the service; the screen states its scope above the list until then.
 
 **If it breaks.**
 
