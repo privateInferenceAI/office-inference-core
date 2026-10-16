@@ -1059,6 +1059,28 @@ items:
     phase: BIZ
     verify: a rehearsal teardown leaves the client able to run the system and the data export complete
     status: open
+  - id: BIZ-INDEPENDENT-001
+    title: No part of the client's system depends on infrastructure Office Inference operates
+    tier: [cloud, hosted, office]
+    phase: BIZ
+    verify: >-
+      cut every cord to Office Inference, then run the acceptance test on the client's deployment and have it
+      pass. Concretely: block every hostname we control at the resolver, revoke every credential of ours held
+      anywhere in their estate, and remove any address we host. The test fails if the client's intake address
+      is ours rather than theirs, if the OAuth application registration reading their mail lives in an identity
+      tenant we own, or if any component phones home for a licence, an update or telemetry. It is a test that
+      runs on any deployment at any time, not only at handover.
+    status: open
+    note: >-
+      BIZ-OFFBOARD-001 covers the package handed over at the end, and its rehearsal proves the client can run
+      the system once we leave. This row is the design constraint that stops the dependency being built, and
+      the difference is not academic. On 2026-10-16 the email intake design put a client's invoice address on
+      infrastructure we would operate, and a second version put the OAuth application registration in our
+      identity tenant. Both would have passed BIZ-OFFBOARD-001 until the rehearsal, and fixing either at that
+      point is a rebuild rather than an edit. The owner's own words when he heard the design: the client takes
+      over completely, we are out of the picture, so the address cannot be ours. That was known as a to-do in
+      build-plan.md 7.5 and production-readiness.md, which is where a constraint goes to be forgotten.
+
   - id: BIZ-SUBPROC-001
     title: There is a subprocessor register
     tier: [cloud, hosted]
