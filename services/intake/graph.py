@@ -111,7 +111,10 @@ AADSTS_ACTIONS = {
                      "created again."),
 }
 
-AADSTS_PATTERN = re.compile(r"(AADSTS\d{5})")
+# Microsoft's codes are six and seven digits, not five, and the first version of this pattern said five. The
+# test that maps each code to a sentence is what found it: three of the six codes fell through to "not
+# recognised", which is the failure mode where a client gets a code they cannot act on and no action at all.
+AADSTS_PATTERN = re.compile(r"(AADSTS\d{5,7})")
 
 
 def classify_failure(status: int, body: str, mailbox: str) -> dict:

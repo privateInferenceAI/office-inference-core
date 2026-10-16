@@ -1266,7 +1266,16 @@ items:
       step naming the job id; and verify_chain passes afterwards. The transactional half is tested by killing
       the process between the state write and the audit write: either both are present or neither is, and a
       step that changed state with no chain row fails the test.
-    status: open
+    status: verified
+    note: >-
+      Verified 2026-10-16, `docs/runbook.md` step 6.1. The engine runs a six-step invoice plan and every step
+      leaves a chain row naming the job id. The transactional half is proved twice: `workflow_probe.py`'s
+      ATOMIC right SIGKILLs a child process between the state write and the chain write and then reads
+      Postgres (job `queued`, 0 step rows, 0 chain rows), and
+      `test_workflow_chain.py::test_a_chain_write_that_fails_rolls_back_the_state_change_with_it` does it
+      with an exception. This row was not achievable before the build: `cmd_record` opened its own
+      connection, so the audit row was always a separate transaction. `services/audit/audit.py` now has
+      `insert_event(cur, ...)`.
     note: >-
       Same-transaction is the reason the engine is ours rather than adopted. Every off-the-shelf engine sits
       outside our transaction and reports by webhook, so a crash between the business write and the audit write
@@ -1279,7 +1288,13 @@ items:
     verify: >-
       stop a job at awaiting_approval, restart the service, approve it, and the job completes. The steps after
       the gate each have exactly one row, so a resumed run does not repeat work it already did.
-    status: open
+    status: verified
+    note: >-
+      Verified 2026-10-16, `docs/runbook.md` step 6.2. The probe writes the job, closes the connection,
+      reloads it in a second connection with `pending_action_digest` intact, approves, and resumes;
+      `post_entry` and `close_out` each have exactly one row. `pending_action_digest` was on the dataclass
+      and in neither the INSERT nor the SELECT, so every approval after a restart would have been refused as
+      drift; migration 021 adds the column.
 
   - id: WF-FAIL-001
     title: A failed step is recorded with its cause and the workflow does not continue past it
@@ -1289,7 +1304,11 @@ items:
       force a step to fail by stopping a service it needs; the job reaches failed, the failing step carries a
       typed cause rather than a string, and no later step has a row. A test that asserts only the failure and
       not the absence of later steps passes on a workflow that ran to the end and failed at the last hurdle.
-    status: open
+    status: verified
+    note: >-
+      Verified 2026-10-16, `docs/runbook.md` step 6.3. The probe's TYPED right reports `unreadable_invoice`
+      on the failing step and **zero rows for the step after it**, which is the assertion the row asks for
+      rather than the failure alone.
 
   - id: WF-TIMEOUT-001
     title: A step that hangs is stopped, rather than hanging the job indefinitely
@@ -1298,7 +1317,12 @@ items:
     verify: >-
       point a step at an endpoint that accepts a connection and never answers; the step fails on its timeout
       with the timeout named, and the job reaches a terminal state within a bounded time.
-    status: open
+    status: verified
+    note: >-
+      Verified 2026-10-16, `docs/runbook.md` step 6.3. The probe points a step at a listening socket that
+      accepts and never answers; the step ignores its own deadline, and the engine stops waiting at 0.5s,
+      fails the step with `step_timeout` and leaves no row for the step after it. BOUNDED reports the elapsed
+      time (0.52s).
 
   - id: WF-CANCEL-001
     title: A person can stop a running workflow, and the stop is recorded with who asked
@@ -1307,7 +1331,12 @@ items:
     verify: >-
       cancel a running job; the state becomes cancelled, no further steps run, and the record names the session
       that asked. A cancel that leaves a step running is a failure even though the state says cancelled.
-    status: open
+    status: verified
+    note: >-
+      Verified 2026-10-16, `docs/runbook.md` step 6.3. The probe cancels a running job from another thread;
+      the job is `cancelled`, no later step has a row, and the in-flight step is closed as
+      `failed/cancelled_mid_step` rather than left saying `running`. The session that asked is on the route's
+      own audit row; that path is the API's.
 
   - id: WF-IDEMPOTENT-001
     title: Retrying a step does not repeat an effect it already had
@@ -1316,7 +1345,13 @@ items:
     verify: >-
       fail a step after its side effect but before its state write, then let it retry; the effect happens once.
       The test counts the effect, not the attempts.
-    status: open
+    status: verified
+    note: >-
+      Verified 2026-10-16, `docs/runbook.md` step 6.3. The probe fails a step **after** its external effect
+      and before its state write, then lets it retry: the far side applied the effect once over two calls,
+      and the ledger has one row. The engine's key is `sha256(job_id|step_name)`, so it does not move between
+      attempts; a key derived from the attempt would have applied it twice with the job still reporting
+      success.
 
   - id: CON-OWNED-001
     title: Every component of intake lives in the client's estate, and intake keeps working when we are gone
@@ -1578,7 +1613,15 @@ items:
       read every string the activity feed and the review screen can produce for an approval, and fail any that
       names a person or asserts that a person acted while the identity basis is unverified. The existing feed
       line fails this test today, which is the point of writing it.
-    status: open
+    status: verified
+    note: >-
+      Fixed 2026-10-16 in migration 022, which replaces `audit_feed`'s approval branch. It read `'a person '
+      || outcome || ' an action'`, which asserts a person the system has not identified; it now renders from
+      `payload -> approval -> identity` and falls back to the unverified sentence for any value it does not
+      recognise. `test_workflow_chain.py` compares the view's sentence against `approvals.describe()` for all
+      three decisions, which is what stops the SQL and the Python drifting. **The design document's suggested
+      expression reads `payload -> identity`, which is null for every row; that path would have taken the
+      honest branch for verified approvals too, invisibly.**
 
   - id: AUD-APPROVAL-001
     title: No audit column carrying meaning sits outside the hash chain
@@ -1607,7 +1650,11 @@ items:
       run a full workflow, then ask the chain what the job did and assert every step, every tool call and the
       approval come back. A step that ran with no chain row fails, and so does a chain row that cannot be
       traced to a job.
-    status: open
+    status: verified
+    note: >-
+      Verified 2026-10-16, `docs/runbook.md` step 6.1. After a full run the probe counts 13 chain rows naming
+      the job and 6 distinct steps, and no step row exists without one. The approval decision's own row is
+      written by the route, not the engine.
 
   - id: AUD-WF-002
     title: The chain verifies after a full workflow run, including a resumed and a denied one
@@ -1616,7 +1663,11 @@ items:
     verify: >-
       verify_chain passes after a completed run, a run resumed from approval, and a run denied at the gate. The
       three paths are tested separately because a resume re-enters the same code in a different state.
-    status: open
+    status: verified
+    note: >-
+      Verified 2026-10-16, `docs/runbook.md` step 6.2. The probe exports the day and verifies it after a
+      completed run, a run resumed from approval and a run denied at the gate: `chain intact`. The three
+      paths are exercised as separate rights in one probe run.
 
   - id: SEC-APR-001
     title: An approval cannot be issued by a caller who supplies their own role

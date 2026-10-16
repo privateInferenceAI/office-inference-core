@@ -183,6 +183,10 @@ class Job:
     # something, and the link between the approval and the act can be re-pointed afterwards by anything that
     # can edit a job row.
     pending_action_digest: str = ""
+    # **What a person reads, where the digest is what the route checks.** The digest is a hash and a screen
+    # cannot render it; this is the drafted email, the entry to post, the reason it was drafted and what
+    # approving it will do. Only the engine fills it, and only while the job is at the gate.
+    pending_action: dict = field(default_factory=dict)
     time_budget_s: int = DEFAULT_TIME_BUDGET_S
     attempt_budget: int = DEFAULT_ATTEMPT_BUDGET
     created_at: float = field(default_factory=time.time)
@@ -234,6 +238,8 @@ class Job:
         # audit row instead.
         if self.state == AWAITING_APPROVAL and self.pending_action_digest:
             out["pending_action_digest"] = self.pending_action_digest
+        if self.state == AWAITING_APPROVAL and self.pending_action:
+            out["pending_action"] = self.pending_action
         if include_result and self.result:
             out["result"] = self.result
         return out
@@ -322,15 +328,21 @@ class PostgresStore:
         return applied
 
     def put(self, job: Job) -> None:
+        # **Imported here for the same reason `psycopg` is imported inside `__init__`**: this module must be
+        # importable with no driver present, so the tests need no database. The first version of
+        # `pending_action` used `Jsonb` without this line, which is a `NameError` on the one path no test in
+        # this repository reaches, because every test uses `MemoryStore`.
+        from psycopg.types.json import Jsonb
+
         with self.conn.cursor() as cur:
             cur.execute(
                 """
                 insert into jobs (job_id, deployment_id, subject, actor_role, access_roots,
                                   credential_sha256, task, input, state, outcome_reason, time_budget_s,
                                   attempt_budget, created_at, started_at, finished_at, data_class,
-                                  pending_action_digest)
+                                  pending_action_digest, pending_action)
                 values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, to_timestamp(%s), %s, %s, %s,
-                        coalesce(%s, ''))
+                        coalesce(%s, ''), %s)
                 on conflict (job_id) do update set
                   state = excluded.state,
                   outcome_reason = excluded.outcome_reason,
@@ -341,13 +353,15 @@ class PostgresStore:
                   -- next gate could be satisfied by a decision made about the previous one. A column
                   -- written only on insert is a column that never changes, which is the opposite of what
                   -- this one is for.
-                  pending_action_digest = excluded.pending_action_digest
+                  pending_action_digest = excluded.pending_action_digest,
+                  pending_action = excluded.pending_action
                 """,
                 (job.job_id, job.deployment_id, job.subject, job.actor_role,
                  json.dumps(sorted(job.roots)), job.credential_sha256 or None, job.task, job.input, job.state,
                  job.outcome_reason or None, job.time_budget_s, job.attempt_budget, job.created_at,
                  _ts(job.started_at), _ts(job.finished_at), job.data_class,
-                 job.pending_action_digest or None))
+                 job.pending_action_digest or None,
+                 Jsonb(job.pending_action) if job.pending_action else None))
             for step in job.steps:
                 cur.execute(
                     """
@@ -371,7 +385,8 @@ class PostgresStore:
                 select job_id, deployment_id, subject, actor_role, access_roots, coalesce(credential_sha256, ''),
                        task, input, state, coalesce(outcome_reason, ''), time_budget_s, attempt_budget,
                        extract(epoch from created_at), extract(epoch from started_at),
-                       extract(epoch from finished_at), data_class, coalesce(pending_action_digest, '')
+                       extract(epoch from finished_at), data_class, coalesce(pending_action_digest, ''),
+                       coalesce(pending_action, '{}'::jsonb)
                   from jobs where job_id = %s
                 """, (job_id,))
             row = cur.fetchone()
@@ -393,7 +408,8 @@ class PostgresStore:
                    attempt_budget=row[11], created_at=float(row[12]),
                    started_at=float(row[13]) if row[13] is not None else None,
                    finished_at=float(row[14]) if row[14] is not None else None,
-                   data_class=row[15], pending_action_digest=row[16] or "", steps=steps)
+                   data_class=row[15], pending_action_digest=row[16] or "",
+                   pending_action=dict(row[17] or {}), steps=steps)
 
     def append(self, job_id: str, event: str, data: dict) -> int:
         """Write one event and assign its number in the same statement that inserts it.

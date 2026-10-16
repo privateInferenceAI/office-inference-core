@@ -52,10 +52,16 @@ sys.path.insert(0, "/app/services/session")
 sys.path.insert(0, "/app/services/gateway")
 sys.path.insert(0, "/app/services/egress")
 
+# The workflow engine, which owns the multi-step loop and the approval gate. It is a package under
+# `services/`, so the parent goes on the path rather than the package directory. Its modules import `jobs`
+# themselves, so nothing else here changes.
+sys.path.insert(0, "/app/services")
+
 import access as access_module  # noqa: E402
 import assertion  # noqa: E402
 import citations  # noqa: E402
 import documents as documents_module  # noqa: E402
+import workflow as workflow_module  # noqa: E402
 import approvals as approvals_module  # noqa: E402
 import redaction  # noqa: E402
 import ingest  # noqa: E402
@@ -636,6 +642,42 @@ async def tasks(request: Request):
     return {"tasks": declared, "agentic": bool(declared)}
 
 
+def _workflow_runner(store, plan):
+    """A runner for a multi-step plan, with the statement minter it needs to record who is acting.
+
+    **The engine writes the chain row itself, in the same transaction as the state change**, which is the
+    property WF-ENGINE-001 exists for and the reason this engine is ours rather than adopted. It records
+    through `audit.insert_event(cur, ...)` on its own cursor, so it needs a way to prove the actor: the same
+    `assertion.mint_audit` the API uses, because the chain refuses a hand-typed actor.
+    """
+    return workflow_module.runner_for(
+        store, plan,
+        mint=lambda actor, role: assertion.mint_audit(STATE["key"], actor, role,
+                                                      deployment_id=DEPLOYMENT_ID),
+        deployment_id=DEPLOYMENT_ID, key_path=os.environ.get("OI_ASSERTION_KEY"))
+
+
+def _run_or_resume(job, store) -> None:
+    """Run a planned job, or hand a paused one back to the engine. A one-step task keeps the C4 path.
+
+    **A deployment with no workflow pack has no plans**, so `plan_for` returns None and the C4 executor runs
+    exactly as it did. That is why the C4 probe still passes unchanged, and it is the shape the C6 handover
+    will reuse.
+    """
+    plan = workflow_module.plan_for(job.task)
+    if plan is None:
+        store.put(job)
+        jobs_module.run(job, store, _step_once, audit=audit)
+        return
+    runner = _workflow_runner(store, plan)
+    if job.state == jobs_module.AWAITING_APPROVAL:
+        return  # waiting is where this call ends; an approval drives the rest
+    if job.steps and job.state == jobs_module.RUNNING:
+        runner.resume(job)
+    else:
+        runner.start(job)
+
+
 @app.post("/jobs", responses={
     200: {"model": contract.Job, "description": "the job, already run to a terminal state by the one-step "
                                                "executor this phase ships"},
@@ -710,15 +752,20 @@ async def create_job(request: Request):
     except answer_module.Refused as refused:
         return JSONResponse(refused.payload, status_code=refused.status)
 
+    # **A multi-step plan needs a budget of more than one attempt**, so the plan supplies the budgets when
+    # there is one and the C4 defaults stand when there is not. A six-step invoice run under a five-attempt
+    # budget fails on its sixth step for a reason that has nothing to do with the work.
+    plan = workflow_module.plan_for(task)
+    budgets = workflow_module.budgets_for(task) if plan else {}
     job = jobs_module.new_job(
         deployment_id=DEPLOYMENT_ID, subject=session.subject, actor_role=session.role,
         roots=session.permit().roots,
         # **The hash, not the credential.** The job needs to run after this request ends, and the first version
         # solved that by keeping the credential in the row, which made a job row a working identity.
-        credential_sha256=session.credential_sha256, task=task, input=text, data_class=data_class)
+        credential_sha256=session.credential_sha256, task=task, input=text, data_class=data_class,
+        **budgets)
     store = STATE["jobs"]
-    store.put(job)
-    jobs_module.run(job, store, _step_once, audit=audit)
+    _run_or_resume(job, store)
     return JSONResponse(job.to_dict(include_result=True), status_code=200)
 
 
@@ -797,6 +844,10 @@ async def control_job(job_id: str, action: str, request: Request):
             jobs_module.pause(job, store)
         elif action == "resume":
             jobs_module.resume(job, store)
+            # A resumed multi-step job continues through the engine rather than the C4 one-step executor.
+            plan = workflow_module.plan_for(job.task)
+            if plan is not None:
+                _workflow_runner(store, plan).resume(job)
         elif action == "cancel":
             jobs_module.cancel(job, store)
         else:
@@ -881,7 +932,25 @@ async def decide_job(job_id: str, request: Request):
         session, job, decision, reason, note, quoted,
         signed_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
     )
-    audit("approval", session.subject, session.role, decision, record, tool=job.task)
+    # **`outcome` is the outcome of the RECORDING, not the decision.** `audit_events.outcome` is constrained
+    # to ('ok','denied','error','pending') and this route passed the decision, which raised a CheckViolation
+    # *after* `jobs.decide()` had already committed the state change: a job that resumed with no record of
+    # who approved it, and a 500 to the client. The decision lives in `payload -> approval -> decision`,
+    # where `build_payload` already puts it and where `describe()` already reads it.
+    #
+    # Widening the enum to fit a caller is the direction not taken. `outcome` says whether the thing
+    # succeeded, and for a model call `denied` means the egress gate refused it. An approval that records
+    # successfully has outcome `ok` whatever was decided. A column that means two things depending on the
+    # event type is a column nobody can filter on, and `audit_feed` filters on this one.
+    audit("approval", session.subject, session.role, "ok", record, tool=job.task)
+
+    # **The engine continues from the step after the gate.** An approve puts the job back in `running` and
+    # nothing would move it further without this. A deny or a change request ends the job, so there is
+    # nothing to drive.
+    if job.state == jobs_module.RUNNING:
+        plan = workflow_module.plan_for(job.task)
+        if plan is not None:
+            _workflow_runner(store, plan).resume(job)
 
     return JSONResponse(job.to_dict(include_result=True), status_code=200)
 

@@ -51,6 +51,14 @@ def install_service_paths() -> None:
         if path in sys.path:
             sys.path.remove(path)
         sys.path.insert(0, path)
+    # **`services/` itself, for the packages that have one.** `services/workflow` is a package because its
+    # modules import each other relatively, so it is reached as `workflow.engine` with `services/` on the
+    # path. Adding the package directory alone would make `import engine` work and every relative import
+    # inside it fail, which reads as a broken module rather than as the wrong path.
+    services = str(ROOT / "services")
+    if services in sys.path:
+        sys.path.remove(services)
+    sys.path.insert(0, services)
 
 
 def stub_sse_starlette() -> bool:

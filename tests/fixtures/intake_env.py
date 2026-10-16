@@ -193,7 +193,11 @@ class FakeGraph:
         self.token_error: str | None = None          # an AADSTS code, e.g. AADSTS65001
         self.mailbox_status: int | None = None       # 403 with a healthy token: the licence case
         self.empty_folder = False                    # a rule diverting the mail: no error anywhere
+        # What a deployment looks like when an application permission was granted and the Exchange scope that
+        # was meant to narrow it is additive rather than a replacement. The directory and every mailbox answer.
+        self.application_permission = False
         self.calls: list[dict] = []
+        self.token_requests: list[dict] = []
         self.tokens_issued = 0
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
@@ -289,9 +293,12 @@ def _handler_for(server: FakeGraph):
 
         def do_POST(self):  # noqa: N802
             length = int(self.headers.get("Content-Length") or 0)
-            self.rfile.read(length)
+            raw = self.rfile.read(length)
             server.record("POST", self.path, dict(self.headers))
             if self.path.endswith("/oauth2/v2.0/token"):
+                # The form is kept, because the two things a rotation test has to see are which client id and
+                # which secret were presented, and neither is visible anywhere else in the exchange.
+                server.token_requests.append(dict(urllib.parse.parse_qsl(raw.decode())))
                 status, payload = server.token_response()
                 self._send(status, payload)
                 return
@@ -303,6 +310,12 @@ def _handler_for(server: FakeGraph):
 
             if server.mailbox_status:
                 self._send(server.mailbox_status, server.graph_denied()[1])
+                return
+
+            if server.application_permission and path.startswith("/v1.0/"):
+                # Tenant-wide. This is what `Mail.Read` application permission buys, and why the enumeration
+                # exists: the configuration would still say `delegated` while this is what answers.
+                self._send(200, {"value": []})
                 return
 
             # The one thing a delegated Mail.Read token can do.
@@ -350,6 +363,24 @@ def install(server: FakeGraph):
     transport = transport_for(server)
     net.set_transport(transport)
     return transport
+
+
+def install_recording(server: FakeGraph) -> list[str]:
+    """Point `net` at the server and record **the URLs the connector asked for**.
+
+    The cord check needs this. The loopback server only ever sees its own address, so it cannot answer "did
+    anything try to reach a host we control". The URLs handed to the transport are what the connector actually
+    asked for, and that list is what `BIZ-INDEPENDENT-001` is about.
+    """
+    asked: list[str] = []
+    inner = transport_for(server)
+
+    def transport(*, url, method, headers, data, timeout):
+        asked.append(url)
+        return inner(url=url, method=method, headers=headers, data=data, timeout=timeout)
+
+    net.set_transport(transport)
+    return asked
 
 
 # --------------------------------------------------------------------------- the client's environment
@@ -407,9 +438,12 @@ def write_config(tmp_path: Path, **overrides) -> Path:
 def environment(tmp_path: Path, server: FakeGraph, **overrides) -> Path:
     """A configuration file whose paths point into the test's own directory tree."""
     root = Path(tmp_path)
-    (root / "documents").mkdir(exist_ok=True)
-    (root / "state").mkdir(exist_ok=True)
-    (root / "share").mkdir(exist_ok=True)
+    # `parents=True` because a caller may hand this a subdirectory that does not exist yet, and the failure
+    # without it is a FileNotFoundError from deep inside a fixture, which reads as a broken test rather than
+    # as a missing directory.
+    (root / "documents").mkdir(parents=True, exist_ok=True)
+    (root / "state").mkdir(parents=True, exist_ok=True)
+    (root / "share").mkdir(parents=True, exist_ok=True)
     config = client_config(
         identity={"tenant_id": server.tenant,
                   "app": {"tenant_id": server.tenant},

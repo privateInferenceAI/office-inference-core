@@ -4705,15 +4705,69 @@ a job in a child process, kills that process with `SIGKILL` at the moment betwee
 chain write, and then reads the database. The step's row is absent, the job's state is the one before the
 step, and the chain has no row for it. Either both are present or neither is.
 
+**Run it, as it was on 2026-10-16.** On the box, through `scripts/probe.sh`, which is the command above:
+
+```
+ok   RUNS        state='awaiting_approval', 4 step row(s), 3 succeeded before the gate
+ok   GATED       state='awaiting_approval', digest=sha256:5b480b869b4…, 0 row(s) after the gate
+ok   SHOWSACTION read from the gate event: 'Post USD 4,210.00 to accounts payable for accounts@ferguson.example'
+ok   RESUMED     state='succeeded', post-gate rows={'post_entry': 1, 'close_out': 1}
+ok   DENIED      state='failed', reason='denied_at_the_gate', 0 row(s) after the gate
+ok   CANCELLED   state='cancelled', slow row=('slow', 'failed', 'cancelled_mid_step'), 0 row(s) after the stop
+ok   RECORDED    6 step row(s), 13 chain row(s) naming the job, 6 distinct step(s)
+ok   TYPED       state='failed', refusing step=('refuse', 'failed', 'unreadable_invoice'), 0 row(s) after it
+ok   BOUNDED     state='failed' after 0.52s (deadline 0.5s), kind='step_timeout', 0 row(s) after it
+ok   IDEMPOTENT  state='succeeded', far side applied 1 time(s) over 2 call(s), 2 attempt row(s), 1 ledger row(s)
+ok   ATOMIC      child exit=-9 (killed=True), job row='queued', 0 step row(s), 0 chain row(s)
+ok   BOTHPRESENT control run: 4 step row(s), 8 chain row(s)
+ok   CHAIN       ok   /tmp/workflow-probe-export-x6767gtt/audit-events.jsonl: 54 event(s), chain intact
+
+PASSED: 13 right(s) held against the documented workflow engine
+```
+
+`ATOMIC`'s line is the whole piece: the child was killed (`exit=-9`), and the job row is still `queued` with
+no step rows and no chain rows. `BOTHPRESENT` is the control, so that line cannot be green on an engine that
+writes nothing at all.
+
+```
+$ python3 -m pytest tests/test_workflow_engine.py -q
+21 passed in 0.65s
+```
+
+**And the right can fail, which is the part worth checking.** A test that cannot fail proves nothing, and
+`ATOMIC` is the one this whole piece exists for, so it was mutated on purpose: `PostgresUnit.__enter__` was
+changed to skip the transaction, which is the smallest possible version of the mistake — every write still
+goes through the same functions, they simply commit one at a time.
+
+```
+AS BUILT   ok   ATOMIC  child exit=-9 (killed=True), job row='queued',  0 step row(s), 0 chain row(s)
+MUTATED    FAIL ATOMIC  child exit=-9 (killed=True), job row='running', 0 step row(s), 0 chain row(s)
+```
+
+**That is the defect stated in one line.** With the transaction, the kill leaves nothing: the job is still
+`queued` and the chain is empty. Without it, the job row survives as `running` while the chain has no record of
+it — a job that moved and nothing that says who moved it, which is exactly the gap an adopted engine cannot
+close. The mutation was reverted before the run above; the `ok` line is the same run this step pastes.
+
 **What this step cannot prove, said plainly.** The probe kills a *runner* process, not the API service. That
 is the stronger test of durability, because resume depends on the row and not on the process, but it is not
-the same sentence as "restart the service" and the runbook will not pretend it is. The service-level restart
-is step 6.2's, and it needs the API to drive the engine, which is a separate change in `services/api/app.py`.
+the same sentence as "restart the service" and the runbook will not pretend it is. **The service-level restart
+was not done**, because the engine is not yet wired into `POST /jobs`: `services/api/app.py` belongs to
+another owner and the handover is requested rather than made. Until that lands, a workflow cannot be started
+over HTTP at all.
 
 **This step found that WF-ENGINE-001 was not achievable as written.** The register row asked for a property
 that the deployed architecture could not have: with the chain written through a subprocess, no transaction
-spanned both writes at any level of care. The row is unchanged and the code moved, which is the direction
-that is allowed.
+spanned both writes at any level of care. `services/audit/audit.py` now has `insert_event(cur, ...)`, which
+takes a caller's cursor, and `cmd_record` calls it, so the CLI and the engine still write through one INSERT
+statement. The row is unchanged and the code moved, which is the direction that is allowed.
+
+**And the first version of this step named a command that does not exist.** It said
+`python3 -m pytest tests/test_workflow_failure.py -q` in 6.3 and `tests/test_workflow_gate.py` and
+`tests/test_workflow_feed.py` in 6.2. None of the three files was ever written; the tests live in
+`test_workflow_engine.py` (no database needed) and `test_workflow_chain.py` (a database needed, and it says
+so). Following this page literally is what found them, which is the same way every other wrong command in this
+runbook was found.
 
 **If it breaks.**
 
@@ -4769,11 +4823,49 @@ cd /opt/oi-core
 bash scripts/probe.sh workflow_probe.py
 docker exec postgres psql -U oicore -d oicore -tAc \
   "select summary from audit_feed where event_type = 'approval' order by id desc limit 3"
-python3 -m pytest tests/test_workflow_gate.py tests/test_workflow_feed.py -q
+OI_TEST_DATABASE_URL=<a database of your own> python3 -m pytest tests/test_workflow_chain.py -q
 ```
 
 Expected: `GATED` and `RESUMED` held, the approval summaries say the person was not identified and never name
 the claimed subject, and the post-gate steps have one row each.
+
+**The last command needs its own database, and it says so rather than skipping quietly.** It writes rows into
+an append-only chain, so it takes `OI_TEST_DATABASE_URL` and never `DATABASE_URL`: a deployment's own variable
+would put test rows into a client's record, which is the one table that cannot be tidied afterwards. Without
+the variable the tests **skip with the reason and the command to start one**, which is a skipped right and not
+a held one.
+
+**Run it, as it was on 2026-10-16.** The feed, read out of the view after the chain tests ran — **in the test
+database `OI_TEST_DATABASE_URL` points at, not on the deployment**, because the deployment has no approval row
+yet and this step is what will produce the first one. Three rows, one per decision, and the middle one is the
+case where the record says the identity was verified:
+
+```
+$ psql -tAc "select summary from audit_feed where event_type = 'approval' order by id desc limit 3"
+Approved at 2026-10-16T16:20:00+00:00 under the staff role. The person who decided was not identified: sign-in is not enabled on this deployment, so the system cannot verify who acted.
+Approved at 2026-10-16T16:20:00+00:00 by dana (staff)
+Changes requested at 2026-10-16T16:20:00+00:00 under the staff role. The person who decided was not identified: sign-in is not enabled on this deployment, so the system cannot verify who acted.
+
+$ OI_TEST_DATABASE_URL=… python3 -m pytest tests/test_workflow_chain.py -q
+14 passed in 0.56s
+```
+
+The two English sentences are produced in two languages: the view assembles one in SQL and
+`approvals.describe()` assembles the other in Python. **Four of those fourteen tests compare them, for all
+three decisions**, because a sentence defined twice is a sentence that drifts. The comparison is the only
+thing holding them together, and it is why the view's fallback branch is written to match
+`describe()`'s rather than being independently reasonable.
+
+**This step's first version named two test files that do not exist** — `tests/test_workflow_gate.py` and
+`tests/test_workflow_feed.py`. The tests are in `test_workflow_chain.py`. Found by following the page.
+
+**This step also found a defect in `services/api/app.py` that no probe could have caught.** `decide_job`
+passes the decision as the audit row's `outcome`, and `audit_events.outcome` is constrained to
+`ok`, `denied`, `error` and `pending`. So `POST /jobs/{id}/approvals` raises `CheckViolation` inside
+`audit()`, after `jobs.decide()` has already committed — a job that resumed with no record of who approved it.
+The fix is the route's, and it is to pass `outcome="ok"` and let the decision live in
+`payload -> approval -> decision`, which is where `build_payload` puts it and where both the view and
+`describe()` read it. 6.0 said this route had never run end to end; this is what was waiting there.
 
 **What this step cannot prove, said plainly.** The probe restarts the *runner*, not the API service container.
 The engine is not yet wired into `POST /jobs`, `POST /jobs/{id}/approvals` or the `resume` action, because
@@ -4829,12 +4921,34 @@ both and the retry applies it once. That case needs no key discipline because it
 ```
 cd /opt/oi-core
 bash scripts/probe.sh workflow_probe.py
-python3 -m pytest tests/test_workflow_failure.py -q
+python3 -m pytest tests/test_workflow_engine.py -q
 ```
 
 Expected: `TYPED`, `BOUNDED` and `IDEMPOTENT` held. `TYPED` reports the failing step's kind with no later row;
 `BOUNDED` reports the elapsed time against the bound; `IDEMPOTENT` reports the far side's application count
 as one against a call count of two.
+
+**Run it, as it was on 2026-10-16.** The three lines below are from the box run above; the fourth is the
+suite, which needs no database because these three properties are properties of the loop:
+
+```
+ok   TYPED       state='failed', refusing step=('refuse', 'failed', 'unreadable_invoice'), 0 row(s) after it
+ok   BOUNDED     state='failed' after 0.52s (deadline 0.5s), kind='step_timeout', 0 row(s) after it
+ok   IDEMPOTENT  state='succeeded', far side applied 1 time(s) over 2 call(s), 2 attempt row(s), 1 ledger row(s)
+
+$ python3 -m pytest tests/test_workflow_engine.py -q
+21 passed in 0.65s
+```
+
+`IDEMPOTENT`'s line is the one to read twice. **Two calls, one application.** The step ran twice, the far side
+saw the same key both times, and it counted one. If the engine derived the key from the attempt number, that
+line would say two applications, the job would still be `succeeded`, and nothing else in this runbook would
+notice. `tests/test_workflow_engine.py::test_the_effect_key_is_derived_from_the_job_and_the_step_and_never_from_the_attempt`
+is what makes it visible without a database.
+
+**And the first version of this step named a test file that does not exist** —
+`tests/test_workflow_failure.py`. These three properties are tested in `test_workflow_engine.py`. That is the
+second wrong command this page had when it was written, and both were found the same way.
 
 **What this step cannot prove, said plainly.** The timeout test uses a real listening socket that accepts a
 connection and never answers, which is the shape the register names. It does not test a provider that stops
@@ -5011,6 +5125,52 @@ command and its output are below.
   ingestion worker accepts. Intake records `unreadable_by_ingest` on the row rather than reporting a deposit
   that never becomes a document.
 
+**As it ran, on 2026-10-16.** Recorded from the development checkout, following manual section 13l.7 word for
+word. There is no client tenant and no database on this machine, so what follows is the acceptance run against
+the simulated tenant and the five commands that need neither.
+
+```
+$ python3 tests/fixtures/intake_acceptance.py
+
+C5-C intake acceptance
+  started 2026-10-16T16:42:11+00:00
+  **the tenant is simulated.** tests/fixtures/intake_env.py implements the delegated-permission
+  semantics from Microsoft's documentation. No Microsoft tenant is contacted, so the rows below
+  are proved against the contract rather than against the service. See the runbook for which
+  part of each row needs a real tenant.
+
+PASS  CON-OWNED-001   five components owned by {client}; 6 request(s) to graph.microsoft.com,login.microsoftonline.com; a host we control refused before a socket
+PASS  CON-LEAST-001   6 probe(s), reached: own_mailbox; granted scopes Mail.Read,offline_access
+PASS  CON-INTAKE-001  4 row(s) with sender, message id, arrival time and a 64-character hash; 4 verified equal to the ingestion worker's own sha256_of of the deposited file
+PASS  CON-DUPE-001    the same bytes twice: 1 deposited, 1 recorded as a duplicate pointing at in-b35b9d3c8623b28d7e6a; 1 copy on disk, no second job notice
+PASS  CON-INJECT-001  signals act_as_system,bank_details_changed,conceal,exfiltrate_document,ignore_previous; 0 write request(s) to the mail API; requested actions {()}; the instruction text is not in the row
+PASS  CON-SENDER-001  known supplier trusted; unknown sender marked; envelope bounce@mailer.example vs header billing@supplier.example -> marked; DMARC recorded on all three; every row requires review
+PASS  CON-FOLDER-001  a second process copied a file into the share; the connector took it without restarting (1 row); 0 inotify descriptor(s) held while it ran
+PASS  CON-SILENT-001  revoked scope: no error logged (True), alerts volume_floor; pulled licence: exit 2, kind mailbox_not_readable, alerts mailbox_not_readable,volume_floor; diverted mail: exit 0, no error logged (True), alerts volume_floor
+PASS  SEC-CON-001     0 key(s) in the service; a rotation took effect on the next poll with no restart (not-a-real-secret -> the-new-secret); the value is not in the record; mode 0644 refused; the api container declares no access to the store
+PASS  SEC-INTAKE-002  a second mailbox, the directory, the profile and another service refused; a write method refused in code; and the enumeration caught a tenant-wide credential (reached own_mailbox,second_mailbox,directory,profile,other_service)
+
+10 PASS, 0 FAIL
+```
+
+```
+$ python3 -m pytest tests/test_intake_*.py -q
+90 passed in 20.54s
+
+$ python3 -m pytest tests/ -q
+894 passed, 17 skipped in 41.78s
+```
+
+**The 17 skips are not intake's.** Fourteen are `tests/test_workflow_chain.py`, which needs a real Postgres
+because the property it checks is a property of a transaction. Three are pre-existing. Every intake test runs
+on a machine with no database and no tenant, which is the point of the simulated one.
+
+**And the ten rows can fail.** Each control was broken deliberately, one at a time, and the test for its row
+was run against the broken build. Ten of the eleven mutations were caught by the intended assertion; the
+eleventh, adding a watcher import, failed at collection instead, so it was proved separately by adding a
+module that imports `inotify` and watching the assertion fire. Two mutations were caught by more than one
+test, which is the belt and braces on the rows that carry two properties.
+
 #### 6.4.a The two failures that leave a working credential
 
 **Goal.** The connector notices the two ways intake stops that produce no error at all: a break that leaves
@@ -5075,6 +5235,33 @@ runs.
   decide by content hash, because `rsync` and a scanner both preserve or reset mtime and neither is a fact
   about arrival.
 
+**As it ran, on 2026-10-16.** The folder channel is the one that needs neither a tenant nor a database, so
+this is the whole thing running for real: three scans, a file that arrives during the second, and the settle
+check visible in the output.
+
+```
+$ python3 services/intake/intake.py watch-folder --config /tmp/oi-demo/intake.yaml --iterations 3 --poll-seconds 1
+{"duplicates": [], "scanned": 1, "skipped": [], "taken": [], "unreadable": 0}
+{"duplicates": [], "scanned": 1, "skipped": [], "taken": [{"bytes": 84, "content_sha256": "1ccf744751ce302df4a1219520d9546f14cd45f1b32bf1dea4f2b4be0491be54", "intake_id": "in-86fdb4a2dc4bdb9f2daf", "relpath": "demo-invoice.pdf"}], "unreadable": 0}
+{"duplicates": [], "scanned": 1, "skipped": [{"content_sha256": "1ccf744751ce302df4a1219520d9546f14cd45f1b32bf1dea4f2b4be0491be54", "path": "/tmp/oi-demo/share/demo-invoice.pdf", "reason": "already taken"}], "taken": [], "unreadable": 0}
+```
+
+**Read the three lines in order, because they are the settle check.** The first scan sees the file and waits.
+The second takes it, because size and mtime agreed with the first. The third finds it already taken by content
+hash and leaves it where it is.
+
+The silent failures, from the acceptance run above, one line per scenario (wrapped here to fit the page,
+verbatim apart from the wrap):
+
+```
+PASS  CON-SILENT-001  revoked scope: no error logged (True), alerts volume_floor;
+                      pulled licence: exit 2, kind mailbox_not_readable, alerts mailbox_not_readable,volume_floor;
+                      diverted mail: exit 0, no error logged (True), alerts volume_floor
+```
+
+**`no error logged (True)` is the finding.** Two of the three scenarios left the credential working, the read
+succeeding and nothing in the log, and the volume floor caught both.
+
 #### 6.4.b Cutting the cord
 
 **Goal.** Prove, on a running deployment, that nothing in intake resolves to infrastructure Office Inference
@@ -5131,6 +5318,42 @@ credential reached rather than the permission it was granted.
   assumed.
 - **A request to a host that is not Microsoft's is made**: it went around `net.py`. That is the only way to
   reach a third host, and the test that asserts the allowlist is what keeps it that way.
+
+**As it ran, on 2026-10-16.** Cord-check against the example configuration, on the development checkout. It
+needs no tenant and no database, and it is the command `BIZ-INDEPENDENT-001` turns on.
+
+```
+$ python3 services/intake/intake.py cord-check --config /tmp/oi-demo/intake.yaml
+ok   Acme Tool & Die (acme-2026)
+     ok   intake address     client   ap@acmetool.example
+     ok   mailbox            client   ap@acmetool.example (regular_user, exchange_online)
+     ok   app registration   client   AP Invoice Intake in tenant 00000000-0000-0000-0000-000000000000
+     ok   consent grant      client   granted by client in tenant 00000000-0000-0000-0000-000000000000
+     ok   credential         client   /tmp/oi-demo/credential.json
+     ok   host allowlist      login.microsoftonline.com, graph.microsoft.com
+     ok   a host we control is refused before a socket is opened
+     ok   no licence server, update check or telemetry in the configuration
+no cord
+```
+
+**The fourth and fifth lines of the check section are the ones that matter.** The host allowlist is asserted
+rather than described, and then exercised: the command makes a request to a host we control and reports the
+refusal. A control proved by refusing something is a control; a control described in a paragraph is a
+paragraph.
+
+`enumerate-reach` needs the client's mailbox, so it was run inside the acceptance probe rather than here. Its
+result, from the same run, wrapped to fit the page:
+
+```
+PASS  SEC-INTAKE-002  a second mailbox, the directory, the profile and another service refused; a write method
+                      refused in code; and the enumeration caught a tenant-wide credential
+                      (reached own_mailbox,second_mailbox,directory,profile,other_service)
+PASS  CON-LEAST-001   6 probe(s), reached: own_mailbox; granted scopes Mail.Read,offline_access
+```
+
+**The words after "and" are the half worth having.** A tenant-wide credential was handed to the same
+enumeration and it was caught, which is what makes the one-mailbox result on the left evidence rather than a
+line that would print the same thing whatever the credential could reach.
 
 ## Phase 7 — Agent runtime and MCP gateway  *(outline)*
 
@@ -5398,4 +5621,211 @@ All four of these must pass:
   A bad password in `DATABASE_URL` shows up as an authentication error.
 - **curl cannot resolve `litellm`:** the container has to be on the same network. `--network ai-net`
   is not optional, and omitting it is the most common version of this mistake.
+
+### 6.5 The live view, where the work is the progress indicator
+
+**Goal.** Somebody who starts a job watches it in sentences, and a job that has stopped moving looks stopped
+rather than busy. The screen is the record read back, so it cannot show anything that did not happen.
+
+**Why the step list *is* the progress indicator and not a panel beside a spinner.** Luke Wroblewski shipped
+agentic interfaces at Bench and at ChatDB and wrote down what failed. At Bench the team built several levels of
+progressive disclosure with tool calls collapsed by default and his verdict was "it was too much", with the note
+that showing less process by default "became even more important as the number of tools grew". At ChatDB the
+working column collapses to a summary and a link once the result arrives. The principle he draws out of that is
+this screen's entire design: "the agent's work should serve as a detailed progress indicator, instead of forcing
+people to watch a spinner while things work"
+(`docs/research/live-updates-transport-and-agentic-ux.md` §4.1).
+
+So there is no spinner here. When the step list stops changing, the screen has stopped claiming progress, which
+is what makes a stalled job visible instead of merely slow.
+
+**Two levels of disclosure, and the second is one expand away.** Nielsen's rule is more restrictive than it
+looks: "designs that go beyond 2 disclosure levels typically have low usability because users often get lost
+when moving between the levels." The line between the two is drawn by consequence rather than by technical
+depth: something belongs at level one if a person would need it to decide whether to trust the run or to stop
+it.
+
+| Level | What is on it | Why there |
+|---|---|---|
+| One, always visible | The step running now as a sentence in the client's language. The steps already done, with when the record says they happened. What happens at the gate, stated before the gate arrives. The stop control | These are the four things a person acts on |
+| Two, one expand | The ordered event list with its sequence numbers, per-step timings, retries and typed failures | An auditor and a support call want it; nobody needs it to decide |
+| Neither | Raw tool arguments and model reasoning. Any percentage | The firehose the brief rules out, and a percentage over an unknown duration that will stick or move backwards |
+
+Nielsen is explicit that anything slower than ten seconds needs "a clearly signposted way for the user to
+interrupt the operation", which is why the stop control is at level one and not in a menu. `POST
+/jobs/{id}/cancel` already exists.
+
+**A long wait is not a defect, and the interface must not imply that it is.** A CHI 2026 controlled experiment
+(n=240, between-subjects) varied time-to-first-token at 2, 9 and 20 seconds with the streaming rate held fixed,
+and the participants who got the 2 second answer rated the output **less thoughtful and less useful** than the
+ones who waited. The qualitative data says why: a longer wait read as deliberation. So this screen never counts
+down, never animates a bar, and states the work rather than the speed. The caution from the same page applies
+and is worth keeping: that study measured a chat answer, not a monitored job, so applying it here is an
+inference and not a replication, and the finding is not a licence to add latency.
+
+**A heartbeat does not fix a stalled job, and this is the part that is easy to get wrong.** The route sends
+`ping=15` to keep the connection open through a proxy, and a keep-alive comment is invisible to a reader by
+design: the comment line is ignored before it reaches any handler. A screen that treats a ping as progress
+therefore shows a live-looking job forever while nothing is happening. So the screen stamps the arrival of the
+last **real** event, from the event log rather than from the socket, and after **45 seconds** without one it
+stops claiming progress and says when the job last reported. Forty-five is three heartbeats: long enough that a
+slow step does not flicker into stalled on a healthy run, short enough that nobody is left watching a dead one.
+
+**Render the screen first and attach the stream second.** The connection is an optimisation over the record and
+never the only copy of progress, which is the difference between a refresh that returns to the same run and a
+tab that has to stay open:
+
+1. `GET /jobs/{job_id}` returns the job with its steps, state and result. Draw the complete screen from that
+   alone, before any stream exists.
+2. Take the cursor from the same response, which publishes `events_through`.
+3. Attach `GET /jobs/{job_id}/events?since=<cursor>`, or from the start when the response carries no cursor.
+4. Key the view on the event's `seq`. Replay re-delivers frames, so duplicate delivery is normal here rather
+   than an error, and a view that appended blindly would show a step twice.
+5. Close the stream on a terminal state. The job says `terminal` rather than leaving the screen to infer it, and
+   a stream left open on a finished job holds a per-host connection slot for nothing.
+
+**What is built.** The live view is `app/src/screens/JobView.tsx` in the app repository, with the step and event
+sentences in `app/src/jobSentences.ts` so the wording is a function of the record rather than a template inline
+in a component. `app/src/api.ts` gains `jobEvents()`, which is the only place an `EventSource` is constructed,
+and the session travels as the `?session=` query parameter because a stock `EventSource` cannot set a header.
+That is why the route must not log its full URL.
+
+**Verify.**
+
+```
+cd /home/anthony/projects/oic-ui/app
+npm run typecheck
+npm test -- --run
+
+# The browser rung. Playwright starts the dev server itself and the tests answer /api from the shapes the
+# contract publishes, so this needs no deployment and no token. It is the rung that catches a screen which
+# renders but does nothing, which component tests cannot see.
+npx playwright test e2e/live.spec.ts
+```
+
+Expected: the unit suite passes with the live-view tests named, and the browser rung reports the refresh case,
+where the page is reloaded mid-run and the steps already recorded come back, none missing and none invented.
+
+**What this step cannot prove, said plainly.** Nothing can reach the gate on a live deployment yet, because the
+multi-step executor is the next piece; the job this screen watches is driven by the C4 one-step executor. So the
+live view is verified against a stubbed deployment whose responses are the contract's shapes, and against the
+real route only as far as one attempt gets. The refresh path is exercised through the app's own client, not
+through a worker killed on a box.
+
+**If it breaks.**
+
+- **A refreshed tab comes back to a blank job**: the screen is being drawn from the stream instead of from
+  `GET /jobs/{id}`, or the job id is not in the URL. A view that only exists while a socket is open is the
+  defect the ordering above prevents.
+- **Steps appear twice after a reconnect**: the view is appending instead of keying on `seq`. Replay is a
+  feature and duplicate delivery is its normal consequence.
+- **The screen says a dead job is working**: the ping is being counted as progress. Only a real event with a
+  sequence number may reset the staleness clock.
+- **An event arrives and the screen does not change**: check the event name against what the route sends.
+  `EV_STEP`, `EV_PROGRESS`, `EV_NOTICE` and `EV_DONE` are four different things and only some of them move the
+  step list.
+- **`EventSource` never connects and the console shows a 401**: the session is being sent as a header. A stock
+  `EventSource` cannot set one, so on this route the session is a query parameter.
+
+### 6.6 The Review screen, and what a decision is allowed to look like
+
+**Goal.** A pending approval shows what will happen, why, and the exact content, *before* a decision is offered.
+Bulk approval exists only for items the system can show are identical, and it states the count. An empty queue
+says so rather than looking broken. And no sentence on any screen names a person the record cannot identify.
+
+**Why the default assumption is a rubber stamp.** The closest large-scale measurement of human approval
+behaviour is a study of merged pull requests: **46% were approved with no comment at all** and 65% with three
+words or fewer, and in 8.4% of merges several reviewers approved without leaving a single comment. That is a
+population of professional engineers reviewing their peers' work. A practice manager approving an agent's work
+is in a weaker position on both counts: less able to judge the artefact, and less able to be held responsible
+for it. The design therefore assumes a presented approval will often be a gesture, and the only defence is
+making the decision genuinely easy to evaluate (`docs/research/live-updates-transport-and-agentic-ux.md` §5.1).
+
+**What "easy to evaluate" means here, in three rules.**
+
+- **Show the action, not the conclusion.** The gate states the specific thing in concrete terms: which
+  recipient, which subject, which body, and what changes if it is approved. An engineer approving a diff sees
+  the diff.
+- **Approve is never the default.** No key binding, no focus, no Enter-to-confirm. A queue a person can clear by
+  holding a key is a queue that gets cleared that way.
+- **A decision quotes the content it is about.** The screen sends `action_digest` back with the decision. If the
+  content moved while it was being read the route answers `409 approval_drift`, and the screen re-reads the job
+  and asks again in its new form. It does not report a generic failure, because "something went wrong" leaves a
+  person believing they approved the thing they read.
+
+**Bulk approval is a stated rule over enumerated items, never a checkbox column.** The research's construction
+is the one built: *"approve these 5 invoices, all matching their purchase order"*, with the rule and the list
+captured in the record. That is auditable in a way that five checkbox clicks are not, and stating the qualifying
+condition is what forces a person to read it. The screen offers the bulk action only when the **digest of every
+pending item is equal**, which is the only equality the system can *show*, and the control names the count. A
+queue of items that differ in any way offers no bulk action at all, and that absence is the assertion the test
+makes, because the presence of the action on the identical case is the easy half.
+
+**The identity rule, which is the one that fails quietly.** An approval recorded on this deployment is
+attributable to a session holding a role and not to an identified individual: the basis is a bearer token and
+the workstation is often shared. So:
+
+- **The screen reads assurance from the record and never from the live session.** A permission read live at
+  comparison time is a permission that has since moved; identity read live is an identity that was not verified
+  when the act happened.
+- **An unknown assurance value resolves downward to `unverified`.** A typo, an old row or a value written by a
+  later version must never render as a verified identity.
+- **No sentence names a person while the basis is unverified.** Not the claimed subject, and not "a person
+  approved an action" either. The banner above the Approve control says what the record will say before anybody
+  clicks it: *"Identity not verified. This approval will be recorded against a role, not a person."* The
+  sentence a reader gets afterwards is *"Approved at 2:14pm under the executive role. The person who approved
+  was not identified: sign-in is not enabled on this deployment."*
+- **`claimed_subject` never sits where a verified name would sit.** The field is named `claimed_` on purpose,
+  where an interface cannot drop the caveat by choosing not to render a paragraph.
+
+**The queue, and where it comes from.** `GET /approvals` returns the pending decisions for the session's role.
+It is a route of its own rather than a filter on the job list, because a queue derived from the jobs one browser
+started cannot show an approval to the person whose job it is to approve them, which is the whole point of the
+screen. A deployment that does not serve the route says so rather than showing an empty queue: an empty queue
+and a missing route are different facts, and only one of them means "nothing is waiting".
+
+**What is built.** `app/src/screens/Review.tsx` in the app repository, with every sentence it can produce for an
+approval in `app/src/approvalSentences.ts`. That module is separate from the component for the same reason
+`services/api/approvals.py` is separate from the route: the wording is the part that lies if it drifts, and a
+test can read a module that a test cannot read out of JSX.
+
+**Verify.**
+
+```
+cd /home/anthony/projects/oic-ui/app
+npm test -- --run
+
+# The browser rung, against a stubbed deployment: five identical approvals, a mixed queue, and an empty one.
+npx playwright test e2e/review.spec.ts
+
+# The app's copy of the contract against the core's, because the app is built against the copy.
+cd /home/anthony/projects/oic-ui && bash scripts/check-contract.sh
+```
+
+Expected: the review tests name the four rows; the browser rung asserts the full body is in the document before
+the approve control is enabled, that the mixed queue offers no bulk action, and that the empty queue renders a
+sentence rather than a blank panel or a spinner; and the contract check reports the app's copy matching the
+core's with `/jobs/{job_id}/approvals` among the paths.
+
+**What this step cannot prove, said plainly.** No client can leave a live deployment's job waiting at the gate
+until the multi-step executor lands, so the screen is verified against a stubbed deployment built from the
+contract's shapes. The `409 approval_drift` path is driven by a stub that answers 409, not by a real draft
+rewritten mid-read. And `audit_feed`'s approval branch lives in `db/migrations/002_audit_events.sql`, which is
+the workflow piece's scope rather than this one: the app's own sentences are covered here, and the view is
+reported as still saying *"a person approved an action"* until that piece changes it.
+
+**If it breaks.**
+
+- **An approval is offered with no content above it**: the screen is falling back to the digest. Refusing the
+  decision is the correct outcome, so the bug is that a control was rendered at all.
+- **The screen shows a name**: `claimed_subject` is being rendered, or `approvalSentences.ts` is not the only
+  place the sentence is built. The record is honest and the display is not, and the display is what a client
+  reads.
+- **A bulk action appears on a mixed queue**: the comparison is on the count or on the task rather than on the
+  digest. Equal digests are the one equality the system can demonstrate.
+- **A 409 arrives and the screen says "something went wrong"**: the drift branch is missing. Re-read the job,
+  re-render, and ask again; the person's decision was about content that no longer exists.
+- **An empty queue renders a blank panel**: the loading state and the empty state are the same branch. Three
+  states, not two, which is the same defect the shell had when it reported "no tasks declared" for a session it
+  could not read.
 

@@ -28,6 +28,19 @@ import net
 # and `intake.officeinference.net` are both ours, and a list of exact domains would miss the second one.
 VENDOR_MARKERS = ("officeinference", "office-inference")
 
+# Office Inference's own Entra tenant ids, so the check can refuse a deployment whose identity tenant is ours.
+#
+# **Empty, and that is a finding rather than a placeholder.** Every other rule in this file compares the
+# client's declarations against each other, which catches the realistic mistake (an app registration in a
+# different tenant from the mailbox) and cannot catch a configuration that consistently names our tenant for
+# everything. Turning that into an absolute check needs the ids written down here, and this repository does
+# not hold them: they live in the administration repository, which is local and sensitive.
+#
+# `test_a_deployment_in_our_own_tenant_is_refused` sets this list and asserts the refusal, so the rule is
+# tested and the only thing missing is the value. Recording the two tenant ids here is the whole fix, and it
+# belongs to whoever owns the business records rather than to this service.
+VENDOR_TENANT_IDS: tuple[str, ...] = ()
+
 # Exactly two scopes are allowed, and the list is an allowlist rather than a denylist. A denylist of known
 # bad permissions is a list that stops covering the problem the first time Microsoft adds a permission.
 ALLOWED_SCOPES = ("Mail.Read", "offline_access")
@@ -222,6 +235,12 @@ def validate(config: Config) -> list[Problem]:
 
     if not tenant:
         problems.append(Problem("no-tenant", "identity.tenant_id is empty"))
+    elif tenant in VENDOR_TENANT_IDS:
+        problems.append(Problem(
+            "tenant-is-ours",
+            f"identity.tenant_id is {tenant}, which is an Office Inference tenant. The app registration is "
+            "created in the client's tenant because it cannot be moved afterwards, and a deployment whose "
+            "identity lives in ours is the cord BIZ-INDEPENDENT-001 exists to cut."))
     if app.get("tenant_id") and app["tenant_id"] != tenant:
         problems.append(Problem(
             "app-elsewhere",

@@ -115,9 +115,21 @@ def test_a_job_is_refused_before_it_is_created():
     source = API.read_text()
     create = source.index("async def create_job(")
     check = source.index("answer_module.check_boundary(", create)
-    store_put = source.index("store.put(job)", create)
-    assert check < store_put, (
+    # **`_run_or_resume`, not `store.put(job)`, and the change is not a weakening.** C5 moved the store write
+    # behind a helper, because a planned task is driven by the workflow engine and a one-step task by the C4
+    # executor, and both paths persist the job. The helper is now the first thing after the boundary that can
+    # create a row, so it is what this ordering check has to name. The property is unchanged: no job row exists
+    # before the boundary is consulted.
+    first_store = source.index("_run_or_resume(job, store)", create)
+    assert check < first_store, (
         "the job is stored before the boundary is consulted, so work no lane may do gets a row and a 200")
+    # **And the helper must still be something that persists**, so naming it here is naming the right thing. If
+    # a later refactor moves the write again, this fails rather than the ordering check quietly passing on a
+    # line that no longer stores anything.
+    start = source.index("def _run_or_resume(")
+    helper = source[start:start + 900]
+    assert "store.put(job)" in helper or "runner.start(job)" in helper, (
+        "`_run_or_resume` no longer persists anything, so this ordering check is watching the wrong line")
 
 
 def test_the_boundary_check_is_not_duplicated():

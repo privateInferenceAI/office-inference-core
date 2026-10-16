@@ -2337,6 +2337,257 @@ visible rather than making the old records stronger. Building that deliberately 
 record that ages well and one somebody has to explain.
 
 
+# Stage 13l: invoice intake, and the mailbox the client has to buy
+
+**Goal:** a client's supplier invoices arrive in the system with provenance, and the client can keep that
+working after every cord to Office Inference is cut.
+
+This stage is the operator's half of manual section 13l. The manual tells you which command does what. This
+tells you what to settle with the client before you quote, what to hand over when you leave, and how to
+rehearse the part that is easy to get wrong.
+
+## 13l.1. The four things to settle before the quote
+
+**1. The mailbox is a purchase, and it is not the one they have.** Nearly every small business runs accounts
+payable as a shared mailbox, and a shared mailbox cannot sign in at all: Microsoft keeps sign-in blocked on
+the associated account and its password is system-generated, while delegated OAuth needs one interactive
+sign-in to mint a refresh token. So intake needs a **licensed regular mailbox**. Say that in the quote. A
+client who discovers a licence line item after installation has been told, not sold to.
+
+**2. The app registration is theirs, and it cannot be moved later.** There is no supported move of an app
+registration between tenants. A service principal in their tenant pointing at an app object in ours is the
+disqualified design: they cannot rotate the secret, cannot change the redirect URI, and deleting their service
+principal does not stop our app object existing. Create it in their tenant on day one.
+
+**3. The alert address is theirs.** Ask which address should receive a fault alert, and write it into their
+configuration file. An alert that routes to us reintroduces the dependency the whole design removes, and it
+does it at the moment they most need to act without us. `check-config` refuses a recipient on our domain.
+
+**4. The quiet period.** Ask how often invoices normally arrive and set `intake.quiet_hours` from the answer.
+A plumber in February and a landscaper in February are different deployments, and a floor set too tight is a
+floor somebody turns off.
+
+**The one-page document you must produce.** Before you leave, hand over the app name, the client ID, the
+object ID, the single permission granted, the mailbox it reads, the name of the person who consented, and the
+date. Entra keeps audit records for 180 days on a Business Standard licence, so in eight months the tenant
+will not be able to answer "did a vendor ever have access" and that page will be the only thing that can.
+
+## 13l.2. Install it in this order
+
+**Run the checks before the first poll rather than after.** Every refusal names the component and the reason,
+and finding out that the mailbox is a shared mailbox is cheap at the configuration step and expensive after
+an hour of debugging a credential.
+
+1. Take the mailbox, the app registration, the consent, and the refresh token from the client's
+   administrator. Nothing else: no tenant role, no guest account, no standing access.
+2. Put the credential in the client's own store at mode 0600. The reader refuses anything a second account
+   can read, so a file written with a default umask fails loudly at the first poll.
+3. Write the configuration and run `check-config`, then `cord-check`. Cord-check is the one that matters for
+   us leaving: it asserts that all five components are the client's and that the only two hosts this service
+   can reach are Microsoft's.
+4. Run `migrate`, then one `fetch`, and read the output rather than the exit code.
+5. Run `verify-manifest` after the next ingestion cycle. The hash intake recorded and the hash in
+   `ingest_manifest` must be the same number, and that equality is the requirement.
+6. Put `fetch` on a timer and `monitor` on a second timer. `monitor` is what notices that `fetch` has
+   stopped producing, so it must not run from the same loop.
+7. Run `enumerate-reach` once, so there is a baseline of what the credential could reach on the day it was
+   installed. Run it monthly after that.
+
+## 13l.3. The two silent failures, and why the monitoring is not optional
+
+**A revoked scope and a diverting mail rule look exactly like a quiet week.** The credential authenticates,
+the read succeeds, and nothing arrives. Error logging reports nothing in either case, which is why every "we
+log exceptions" answer fails this requirement.
+
+The heartbeat and the volume floor are the only things that catch them. **Both timers are part of the
+installation, not an upsell.** A deployment with the poller and no monitor is a deployment where the client
+finds out from a supplier asking why nobody paid.
+
+**The licence case is different and worth knowing.** A mailbox whose licence has been pulled returns HTTP
+403 while the credential keeps working. The connector classifies it, so the alert names the licence in plain
+language rather than showing a code. It is still caught by the floor as well, because the alert path itself
+can be broken.
+
+## 13l.4. Rehearse the rotation while you are still there
+
+**Do this on the day you install it, not on the day you leave.** Replace the client secret in their app
+registration, write the new value into their store, and watch the next poll use it. Nothing needs restarting,
+because the credential is read at the point of use and nothing caches it.
+
+    python3 services/intake/intake.py fetch --config /etc/oi-intake/intake.yaml
+
+The rehearsal is the point. It proves the client's administrator can do the one scheduled maintenance item
+without us, and it is the step that fails if somebody ever "optimises" the credential into a module-level
+cache. Re-run it after any change to `services/intake/secretstore.py`.
+
+## 13l.5. The exit
+
+**Nothing has to be given back, because we never held anything.** That is the design, and the exit procedure
+is short for that reason. What is left is to prove it.
+
+1. **Remove our access.** Delete the guest account, or let the relationship expire, or remove the role
+   assignment. Verify in Entra under *Roles and administrators* and *External identities*.
+2. **Have the client rotate the secret** and put the new value in their own store. A rotation we never see is
+   the strongest available proof that our copy is dead.
+3. **Re-mint the refresh token**, or delete the grant and re-grant it, which invalidates every outstanding
+   refresh token for that client and user.
+4. **Enumerate and export.** Run the two enumeration commands in the research report section 6.2 and save the
+   output to a file the client keeps. **Do this before the 180-day audit window closes over the evidence**,
+   which is the step people miss.
+5. **Prove we are not on the box.** No vendor SSH key, no vendor VPN client, no vendor monitoring agent.
+6. **Record it.** Date, actor, command output, in a document the client keeps.
+
+**Then run the acceptance test on their deployment.** `BIZ-INDEPENDENT-001` says the test is that you can cut
+every cord and have it pass, and the only version of that which means anything is the one run on the client's
+box with our access gone.
+
+## 13l.6. What this stage cannot prove yet
+
+**No Microsoft tenant has been contacted by this repository.** The tenant is simulated for the tests and the
+acceptance run, so every claim about the credential, the consent and the mailbox is verified against
+Microsoft's documented contract rather than against Microsoft. The first real deployment closes that and
+nothing else does.
+
+**Office Inference's own tenant ids are not in the code.** `config.VENDOR_TENANT_IDS` in
+`services/intake/config.py` is empty, so `cord-check` catches an app registration in a tenant that differs
+from the deployment's and not one that consistently names our tenant everywhere. The rule is written and
+tested; the two values are missing. They belong in this repository only if the business decides they do, and
+the manual says the same thing rather than leaving it to be discovered.
+
+
+# Stage 13m: the workflow engine, and the crash you have to cause yourself
+
+**Goal:** run a six-step workflow, stop it at the gate, finish it after an approval, and prove that a process
+killed between a state change and its record leaves neither behind.
+
+**Why this stage exists.** Everything else in this system records what it did after the fact. This is the one
+piece where the record and the thing recorded are the same write, and it is the reason the engine is ours
+rather than something adopted. You cannot check that property by reading the code, because the property is
+about what a transaction does when a process dies in the middle of it. You have to kill something.
+
+## 13m.1. Run the probe first, and read what it does not say
+
+```
+cd /opt/oi-core
+bash scripts/probe.sh workflow_probe.py
+```
+
+Expected: thirteen rights held. One of them, `ATOMIC`, starts a child process, sends it `SIGKILL` at the
+instant between the state write and the chain write, and then reads Postgres. If the two writes are in one
+transaction, the job is still `queued` with no step rows and no chain rows. If somebody ever moves the state
+write outside the unit, `ATOMIC` reports the job `running` with a step row and no chain row, which is the gap
+this engine exists to close.
+
+**A skip is not a pass.** If the probe prints `FAILED ... no database credentials`, it tested nothing. The
+probe needs the deployment's `rendered/env`, and `scripts/probe.sh` is what supplies it.
+
+## 13m.2. Cause the crash by hand, once
+
+The probe does this for you, and it is worth doing once so you know what you are looking at. The engine writes
+each state change with:
+
+```python
+with store.conn.transaction():          # a real transaction, on the store's own connection
+    store.put(job)                      # the state change
+    store.append(job_id, "step", {...}) # the event, numbered in the same transaction
+    chain.record(cursor, ...)           # the chain row
+```
+
+Kill the process between the second line and the third and Postgres rolls back all three, because the
+connection died inside an open transaction. Nothing has to remember to be careful.
+
+```
+# The probe's own kill child, on a job id the probe left behind:
+docker run --rm --network ai-net --user "$(id -u):$(id -g)" -v /opt/oi-core:/w -w /w \
+  --env-file rendered/env --entrypoint python oi-core/session:local \
+  /w/tests/fixtures/workflow_probe.py --kill-child <job_id>
+echo "exit code $? (137 is SIGKILL, which is what you want)"
+```
+
+Then read the database rather than the process's opinion of it:
+
+```
+docker exec postgres psql -U oicore -d oicore -tAc \
+  "select state from jobs where job_id = '<job_id>'"
+docker exec postgres psql -U oicore -d oicore -tAc \
+  "select count(*) from job_steps where job_id = '<job_id>'"
+docker exec postgres psql -U oicore -d oicore -tAc \
+  "select count(*) from audit_events where payload @> '{\"job_id\": \"<job_id>\"}'"
+```
+
+Expected: `queued`, `0`, `0`. **Any other combination is the defect the engine exists to prevent**, and the one
+that matters is a non-zero chain count against a state that never moved.
+
+## 13m.3. Watch a workflow stop at the gate
+
+The invoice plan is six steps and the fourth is the gate.
+
+```
+docker exec postgres psql -U oicore -d oicore -c \
+  "select name, state from job_steps where job_id = '<job_id>' order by attempt"
+```
+
+Expected: `read_message`, `extract_fields` and `draft_action` all `succeeded`, `approval` `running`, and **no
+rows at all for `post_entry` or `close_out`**. That last part is the check. A gate that only changes a label
+would leave the work already done and saying it was waiting.
+
+The job holds two things while it waits: `pending_action_digest`, which the route checks when somebody
+decides, and `pending_action`, which is the words behind the hash. A decision screen that shows only a digest
+is asking somebody to approve something they cannot read.
+
+## 13m.4. Approve it, and watch the resume not repeat anything
+
+```
+# The probe's RESUMED right does this; by hand, the route is:
+curl -s -X POST http://api:8088/jobs/<job_id>/approvals \
+  -H 'X-OI-Session: <session>' -H 'Content-Type: application/json' \
+  -d '{"session": "<session>", "decision": "approve", "action_digest": "<the digest>"}'
+```
+
+Then re-read the step rows. Expected: `post_entry` and `close_out` each have **exactly one** row. A resume
+that repeats work shows two, and the position is derived from the succeeded rows rather than kept in a cursor,
+which is what makes that impossible.
+
+## 13m.5. Read what the chain says the job did
+
+```
+docker exec postgres psql -U oicore -d oicore -tAc \
+  "select payload->>'step', payload->>'step_state' from audit_events \
+    where payload @> '{\"job_id\": \"<job_id>\"}' order by id"
+```
+
+Every step has rows and every row names the job. Then verify the chain itself, which is the check that catches
+a row written outside the one writer:
+
+```
+docker exec -it postgres bash -c 'cd /app && python3 audit.py export --out /app/exports/check'
+docker exec -it postgres bash -c 'cd /app && python3 audit.py verify /app/exports/check/audit-events.jsonl'
+```
+
+Expected: `chain intact`. **If it reports a break on rows nobody touched**, something wrote the chain with its
+own definition of the hash, and there is only one.
+
+## 13m.6. What this stage cannot prove
+
+**The engine is not wired into the HTTP routes yet.** `POST /jobs` still runs the C4 one-step executor, and the
+gate is reachable from the probe and the tests rather than from a browser. The loop handover is a change to
+`services/api/app.py`, which belongs to another owner and is requested rather than made. Until it lands, a
+workflow cannot be started over HTTP, and the Review screen has nothing to review.
+
+**Restarting the runner is not restarting the service.** The probe kills a runner process and resumes from the
+database, which is the stronger test of durability: resume depends on the row and not on the process. It is not
+the same sentence as `docker restart api`, and this stage will not pretend it is.
+
+**A step abandoned at its deadline may still be running.** A Python thread inside a blocking call cannot be
+killed. The engine stops waiting, the job reaches a terminal state, and the row says the step was stopped
+rather than that the work was undone. If the far side of that call later completes, it completes.
+
+**Exactly-once holds inside our transaction and is a promise about a key outside it.** An effect we write
+ourselves cannot be duplicated. An effect that leaves the process is deduplicable because the key does not move
+between attempts, and the record shows what the far side said. A far side that ignores the key can still
+duplicate, and no amount of engine design changes that.
+
+
 # Stage 14: onboarding a second client's corpus
 
 **Goal:** add a corpus to a deployment that is already holding one, without disturbing it.

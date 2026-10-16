@@ -264,6 +264,9 @@ class Store:
         self.outbox = self.state_dir / "outbox"
         self.dsn = dsn
         self._mirror = mirror
+        # An injected mirror is a test's stand-in and has no psycopg to wrap jsonb with, so the wrapper is
+        # optional rather than assumed. A deployment sets it when it opens the real connection.
+        self._jsonb = (lambda value: value) if mirror is not None else None
 
     # -- reading ------------------------------------------------------------------------------------------
 
@@ -357,7 +360,7 @@ class Store:
         values = []
         for column in COLUMNS:
             value = entry[column]
-            if isinstance(value, (list, dict)):
+            if isinstance(value, (list, dict)) and self._jsonb is not None:
                 value = self._jsonb(value)
             values.append(value)
         with self._mirror.cursor() as cur:

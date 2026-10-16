@@ -14,6 +14,7 @@ as a forward. Two messages, two `Message-ID`s, byte-identical attachments.
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -206,3 +207,75 @@ def test_a_different_invoice_is_not_a_duplicate(tenant):
     _, store, _ = run_fetch(config_path)
     hashes = {row["content_sha256"] for row in store.entries() if row["status"] == "deposited"}
     assert len(hashes) >= 4, "distinct invoices must keep distinct hashes"
+
+
+# --------------------------------------------------------------------------- the record and the table
+
+def test_the_record_and_the_table_agree_on_every_column():
+    """`provenance.COLUMNS` and `schema/001_intake_events.sql`, read rather than trusted to match.
+
+    A record whose keys and whose table drift apart writes a row with a column missing, and nobody finds out
+    until an auditor asks for a field that was never stored. The SQL is parsed rather than imported, because
+    the file is the thing Postgres sees.
+    """
+    sql = (ROOT / "services" / "intake" / "schema" / "001_intake_events.sql").read_text()
+    body = re.search(r"create table if not exists intake_events \((.*?)\n\);", sql, re.S)
+    assert body, "the create table statement was not found, so this test would pass on an empty file"
+
+    columns = []
+    for line in body.group(1).splitlines():
+        line = line.split("--")[0].strip()
+        if line:
+            columns.append(line.split()[0])
+
+    assert columns == list(provenance.COLUMNS), (
+        f"the table is missing {set(provenance.COLUMNS) - set(columns)} and has "
+        f"{set(columns) - set(provenance.COLUMNS)} that the record does not write")
+
+
+def test_the_postgres_mirror_is_built_from_the_same_column_list(tmp_path):
+    """The insert statement is exercised against a stand-in connection.
+
+    What this proves: the statement names every column the record holds, in the record's order, with one
+    parameter each. What it does not prove: that Postgres accepts the DDL. There is no database in this suite,
+    and the acceptance run on a deployment is where that half is covered.
+    """
+    class Cursor:
+        def __init__(self):
+            self.statements = []
+
+        def execute(self, sql, params=None):
+            self.statements.append((sql, params))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    class Connection:
+        def __init__(self):
+            self.cursor_object = Cursor()
+
+        def cursor(self):
+            return self.cursor_object
+
+    connection = Connection()
+    store = provenance.Store(tmp_path / "state", mirror=connection)
+    record = provenance.build_record(
+        deployment_id="d", mailbox="ap@acmetool.example", folder="Inbox", channel="graph",
+        message_id="<x@supplier.example>", provider_id=None, received_at="2026-10-16T10:00:00Z",
+        observed_at="2026-10-16T10:00:05Z",
+        sender={"header_from": "billing@supplier.example", "envelope_from": "bounce@supplier.example",
+                "reply_to": None, "auth": {"spf": "pass", "dkim": "pass", "dmarc": "pass"},
+                "allowlisted": True, "aligned": True, "verdict": "trusted", "reasons": []},
+        content_scan={"signals": [{"name": "conceal"}]}, raw_message_sha256="0" * 64, deposit_row=None,
+        duplicate_of=None, credential={}, filename="invoice.pdf", media_type="application/pdf",
+        content_sha256="1" * 64, bytes_=99)
+    store.append(record)
+
+    statement, params = connection.cursor_object.statements[0]
+    assert "insert into intake_events" in statement
+    assert statement.count("%s") == len(provenance.COLUMNS) == len(params)
+    for column in provenance.COLUMNS:
+        assert column in statement, f"{column} is missing from the insert"

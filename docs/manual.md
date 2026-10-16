@@ -64,6 +64,7 @@ of 13 because they are operations like the rest of it.
 **Part 3c, the client app (phase C4)**
 
 13i. The client app
+13l. Invoice intake, and the four ways it goes quiet
 
 **Part 4, changing things**
 16. The manifest, field by field
@@ -4414,6 +4415,396 @@ the record.
 
 **A denial is stored with no reason.** The route is treating the reason as optional for all three decisions.
 Only an approval may omit it.
+
+
+## 13l. Invoice intake, and the four ways it goes quiet
+
+**What this is for.** A client's suppliers send invoices to an address the client already uses. This section
+turns that mailbox into documents in the system: the attachment lands under the documents root, and a row
+records who sent it, which message it came from, when it arrived and the sha256 of its bytes. The workflow
+takes it from there. Nothing here approves anything, sends anything, or reads anything but one mailbox.
+
+**Where it sits.** `services/intake/`, a tool rather than a service. It runs when a timer calls it and exits.
+The seam to the workflow is one file in an outbox and the hash inside it.
+
+**The reading behind it** is `docs/research/email-intake/handover-owned-email-intake.md`. Three findings in
+that report decide the shape of this page, and the first one is a purchase order rather than a setting.
+
+### The mailbox has to be settled before anything else
+
+**A shared mailbox cannot be used at all.** Microsoft's shared-mailbox documentation says sign-in on the
+associated user account should be blocked and kept blocked, and that the account has a system-generated
+password nobody knows. Delegated OAuth needs one interactive sign-in to mint the refresh token, so a shared
+mailbox is not a slower path, it is no path. What it forces instead is application permission, and
+application `Mail.Read` reads every mailbox in the tenant.
+
+Most small businesses run their accounts payable inbox as a shared mailbox, because that is what a shared
+mailbox is for. **So the first conversation with a client is that they need one licensed regular mailbox for
+intake**, named something like `ap@client.com` with a display name that says what it is for. It is a
+recurring licence cost and it belongs in the quote, not in a support ticket three weeks after installation.
+
+**Delegated `Mail.Read` is the only permission used here.** It reads the signed-in user's mail and needs no
+Exchange RBAC grant, no management scope and no PowerShell. Application permission is refused by name,
+because the Exchange scope that is meant to limit it is *additive to the Entra grant* rather than a
+replacement for it. An administrator who completes three of the four steps has built something that looks
+scoped and is not, and Microsoft's own worked example of that mistake ends with an app that can read
+everything.
+
+### What the client's administrator does, once
+
+About twenty minutes in the Entra admin center. The app registration is created **in the client's tenant**,
+because there is no supported way to move one afterwards.
+
+1. **Create the mailbox** as a licensed regular user. Do not use a shared mailbox.
+2. **App registrations > New registration.** Name it for the system, single tenant, redirect URI type Web.
+3. **API permissions > Microsoft Graph > Delegated**: add `Mail.Read` and `offline_access`. Nothing else.
+   Do not add `Mail.ReadWrite`, `Mail.Send`, or `Mail.Read` as an application permission.
+4. **Grant admin consent.** The green check should appear beside both permissions.
+5. **Certificates & secrets.** A client secret is what this build reads; copy the **Value**, not the Secret
+   ID, and put the expiry date in somebody's calendar. A certificate is better and is not yet supported by
+   this build, which refuses it rather than pretending.
+6. **Record the identifiers** from *Enterprise applications*, not from *App registrations*, because the two
+   pages show different values: the Application (client) ID and the Object ID.
+7. **Complete one interactive sign-in as the mailbox** so a refresh token exists to hand to the installer.
+8. **Add the mailbox to any Conditional Access exclusion.** A policy requiring MFA on all users stops an
+   unattended flow, and it is the highest-probability silent killer because somebody enables it for reasons
+   that have nothing to do with intake.
+9. **Give the installer nothing else.** No tenant role, no guest account, no standing access.
+
+**Write this down and give it to the client.** The app name, the client ID, the object ID, the one
+permission granted, the mailbox it reads, the name of the person who consented, and the date. One page.
+
+**Why one page matters more than it sounds.** Entra keeps audit records for 180 days on a Business Standard
+licence. If somebody asks in eight months whether a supplier's vendor ever had access, the tenant no longer
+knows. That page is the answer, and it is a deliverable rather than documentation debt.
+
+### Install it
+
+```
+cd /opt/oi-core
+cp services/intake/intake.example.yaml /etc/oi-intake/intake.yaml
+$EDITOR /etc/oi-intake/intake.yaml
+install -m 0600 /path/to/credential.json /etc/oi-intake/credential.json
+```
+
+Edit six things in the configuration: `client.domains`, `identity.tenant_id` and the app's `client_id`,
+`mailbox.address`, `secret_store.path`, `intake.documents_root` and `intake.state_dir`, and
+`alerts.recipients`. Every value is the client's. The file says so at the top and the check below enforces it.
+
+### 13l.1 Check the configuration and cut the cord, before the first poll
+
+```
+python3 services/intake/intake.py check-config --config /etc/oi-intake/intake.yaml
+python3 services/intake/intake.py cord-check --config /etc/oi-intake/intake.yaml
+```
+
+You should see the five components with `client` beside each, then:
+
+```
+     ok   host allowlist      login.microsoftonline.com, graph.microsoft.com
+     ok   a host we control is refused before a socket is opened
+     ok   no licence server, update check or telemetry in the configuration
+no cord
+```
+
+**Two commands rather than one because they answer different questions.** `check-config` asks whether this
+deployment is set up right. `cord-check` asks whether anything in it still resolves to Office Inference,
+which is `BIZ-INDEPENDENT-001` and is the difference between a client who can take the system over and a
+client who cannot. The second one proves its network claim by making a request to a host we control and
+being refused, so the control is demonstrated rather than read.
+
+**If either refuses, read the message.** Every refusal names the component and the reason. `check-config`
+reports all the problems it finds in one run rather than stopping at the first, because a configuration with
+four mistakes in it should take one pass rather than four.
+
+### 13l.2 The first poll
+
+```
+python3 services/intake/intake.py migrate --dsn "$DATABASE_URL"
+python3 services/intake/intake.py fetch --config /etc/oi-intake/intake.yaml
+```
+
+`fetch` reads the mailbox once and exits. It writes one row per attachment: `deposited` for a document it has
+not seen, `duplicate` for content it already holds, and `already` for a message it read on an earlier poll.
+
+**A first poll looks back fourteen days**, which is bounded on purpose. A mailbox with five years of history
+in it should not be ingested on the day the connector is switched on.
+
+**Put it on a timer** once the output looks right:
+
+```
+python3 services/intake/intake.py watch --config /etc/oi-intake/intake.yaml
+```
+
+`watch` polls on `intake.poll_seconds` and writes a heartbeat on every success. Prefer the timer to the loop
+on a box that reboots: a timer restarts itself and a loop does not.
+
+### 13l.3 What the record holds, and how to read it
+
+```
+python3 services/intake/intake.py status --config /etc/oi-intake/intake.yaml
+python3 services/intake/intake.py verify-manifest --config /etc/oi-intake/intake.yaml --dsn "$DATABASE_URL"
+```
+
+`status` counts what is there and when the record last moved. `verify-manifest` compares the hash intake
+recorded with the hash the ingestion worker put in `ingest_manifest` for the same file. **That comparison is
+the requirement**, not a nicety: a row that names a document whose hash the rest of the system disagrees
+with is a note about a file rather than evidence about a document. A relpath the worker has not reached yet
+prints `pending`, which is normal until the next ingestion cycle.
+
+The row lives in two places. The journal is `<state_dir>/intake-events.jsonl` on the client's own disk, and
+it is the record of record, because it survives a database restore and needs no driver to read. The Postgres
+mirror exists so the row can be joined to everything else, and `intake_events` is created by `migrate`.
+
+### 13l.4 The second channel: a share, polled
+
+```
+python3 services/intake/intake.py watch-folder --config /etc/oi-intake/intake.yaml
+```
+
+Point `intake.share` at the folder the scanner or the office manager already uses. **This connector polls,
+and it is not an implementation preference.** `inotify(7)` says it plainly: it "does not catch remote events
+that occur on network filesystems", and applications "must fall back to polling the filesystem to catch such
+events". A scanner writing into a share is a remote writer, so an event-driven connector works on a
+developer's laptop and misses every real arrival.
+
+Two consequences worth knowing when you look at the output:
+
+* A file is taken only after two consecutive scans agree on its size and mtime, so a scanner that is still
+  writing a large PDF does not become half a document.
+* The watermark is the content hash, never mtime. `rsync`, a scanner and a plain copy all preserve or reset
+  timestamps, so a file dropped in with last year's date is taken on this scan.
+
+A folder arrival has no sender, so it is recorded as `marked` rather than trusted, with the reason named.
+
+### 13l.5 The four ways it goes quiet
+
+```
+python3 services/intake/intake.py monitor --config /etc/oi-intake/intake.yaml
+```
+
+Run this from cron or a systemd timer, not from the poller. Its whole job is to notice that the poller is not
+producing. It prints `no alert` when the deployment is healthy and one line per problem otherwise.
+
+**Three of the four produce no error at all**, which is why this command exists rather than a log check:
+
+| What happened | What the connector sees | What catches it |
+|---|---|---|
+| The scope was revoked | A working credential and an empty folder | The volume floor |
+| A mail rule diverts invoices | A working credential and an empty folder | The volume floor |
+| The mailbox licence was pulled | A 403 with a healthy token | The classification, and the floor as well |
+| The connector stopped | Nothing, because nothing ran | The heartbeat |
+
+The first two are indistinguishable from a quiet week from inside the connector, so the signal has to be the
+absence of arrivals rather than the presence of a fault. Every successful poll writes a heartbeat, and the
+monitor alerts when the newest one is older than three poll intervals.
+
+**Set `intake.quiet_hours` against the client's real rhythm.** A plumber in February and a landscaper in
+February are not the same deployment, and a floor set too tight is a floor somebody turns off.
+
+**Alerts go to the addresses in `alerts.recipients`, and they must be the client's.** A recipient on a domain
+we control is refused by `check-config`, because an alert that routes to us reintroduces the dependency the
+whole design removes and does it at the moment the client most needs to act without us. Delivery is either an
+outbox file the client's own monitoring picks up, or their own SMTP relay, set by `alerts.transport`.
+
+### 13l.6 What to check monthly, and what to do when something breaks
+
+```
+python3 services/intake/intake.py enumerate-reach --config /etc/oi-intake/intake.yaml
+```
+
+Run this monthly. It makes six requests and reports what came back: the client's mailbox reached, and a
+second mailbox, the directory, the user profile and another Microsoft service all refused. **It enumerates
+rather than asserting the granted permission**, because a scope that was widened by a leftover Entra grant
+still reads as `delegated` in the configuration.
+
+**A failure message names the action, not the code.** You will never see `AADSTS65001` in an alert. You will
+see "the permission to read `ap@acmetool.example` has been withdrawn. An administrator can grant it again
+from the app registration's permissions page." The mapping is in `services/intake/graph.py` and the six
+conditions it covers are consent revoked, a token idle past ninety days, sessions revoked, a Conditional
+Access policy, an expired client secret, and the application removed from the directory.
+
+**There is one thing to diarise.** If the deployment uses a client secret, put its expiry date in the
+client's calendar. A certificate removes the item entirely and this build does not support one yet. Nothing
+else needs a schedule: if the connector keeps polling, the refresh token never expires, because Microsoft
+issues a fresh one on every use and the connector writes it back to the client's store.
+
+### 13l.7 Try it on a box with no client
+
+The acceptance run proves all ten register rows without a Microsoft tenant and without a database. It uses a
+simulated tenant that implements the delegated-permission semantics from Microsoft's documentation, which is
+faithful to the contract and is not the contract.
+
+```
+python3 tests/fixtures/intake_acceptance.py
+```
+
+The five commands that need neither a tenant nor a database, against a scratch directory:
+
+```
+mkdir -p /tmp/oi-demo/documents /tmp/oi-demo/state /tmp/oi-demo/share
+python3 - <<'PY'
+import pathlib, yaml
+config = yaml.safe_load(pathlib.Path("services/intake/intake.example.yaml").read_text())
+config["intake"]["documents_root"] = "/tmp/oi-demo/documents"
+config["intake"]["state_dir"] = "/tmp/oi-demo/state"
+config["intake"]["share"] = "/tmp/oi-demo/share"
+config["secret_store"]["path"] = "/tmp/oi-demo/credential.json"
+pathlib.Path("/tmp/oi-demo/intake.yaml").write_text(yaml.safe_dump(config, sort_keys=False))
+# A stand-in for the scanner, so the folder connector has something to take.
+pathlib.Path("/tmp/oi-demo/share/demo-invoice.pdf").write_bytes(
+    b"%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R/Amount 1450.00>>\n%%EOF\n")
+PY
+
+python3 services/intake/intake.py check-config --config /tmp/oi-demo/intake.yaml
+python3 services/intake/intake.py cord-check --config /tmp/oi-demo/intake.yaml
+python3 services/intake/intake.py watch-folder --config /tmp/oi-demo/intake.yaml --iterations 3 --poll-seconds 1
+python3 services/intake/intake.py status --config /tmp/oi-demo/intake.yaml
+python3 services/intake/intake.py monitor --config /tmp/oi-demo/intake.yaml
+```
+
+`check-config`, `cord-check`, `status` and `monitor` need no network at all. `watch-folder` reads a directory
+and touches nothing else. `fetch`, `watch` and `enumerate-reach` need the client's mailbox, and `migrate` and
+`verify-manifest` need a database.
+
+### 13l.8 What this page cannot prove
+
+**The tenant is real on a client's deployment and simulated here.** Everything about the credential, the
+tenant, the app registration and the mailbox is verified against Microsoft's documented contract rather than
+against Microsoft. The first real deployment is where that changes, and the runbook step names which half of
+each row that run closes.
+
+**No Microsoft tenant was contacted in the making of this section.** There is no client tenant available to
+this repository, so the acceptance run uses `tests/fixtures/intake_env.py`. It is a faithful model of a
+`Mail.Read` delegated token, and a model is not the service.
+
+**Postgres is not exercised.** The suite has no database, so the mirror's insert statement is checked against
+a stand-in connection and the schema is checked against the record's column list. `verify-manifest` needs a
+real database and has not been run here.
+
+**A real SMB or NFS share is not exercised.** The polling mechanism is proved, including that the connector
+holds no inotify descriptor while it runs. The network filesystem itself is the client's, and the run over
+one is a deployment step.
+
+**Office Inference's own tenant ids are not recorded in the code.** `config.VENDOR_TENANT_IDS` is empty, so
+the check catches an app registration in a tenant that differs from the deployment's rather than one that
+consistently names our tenant. The rule is written and tested; only the two values are missing, and they
+belong in this repository only if the business decides they do.
+
+
+## 13m. The workflow engine, and the transaction that makes the record true
+
+A workflow here is a job with several steps. One of them turns an invoice into an entry, another stops and asks
+a person to approve it, and the rest run only after they have. Nothing about that is unusual. What is unusual
+is the thing underneath it.
+
+### The record and the state change are one write
+
+Every state change and the chain row that describes it go into **one transaction**. If the process dies
+between them, neither is there. There is no window in which a job is `running` with no row saying who moved
+it, because there is no window.
+
+**This is why the engine is ours rather than an off-the-shelf one.** Every engine you can buy or download sits
+outside our transaction and tells us what happened afterwards, over a webhook or a callback. That is not a
+shortcoming of any particular product. It is what a separate process can do, and it means the gap is
+unclosable from where it sits. The question a client's auditor asks about this system is whether we can show
+what it did. The answer has to be a chain row that cannot disagree with the state it describes.
+
+The mechanics are four lines. `store.conn.transaction()` opens a real transaction on the same connection the
+job store already uses, and `store.put`, `store.append` and the chain writer all run inside it.
+
+### A plan is a list of steps and nothing else
+
+`services/workflow/plans.py` holds the plans this deployment can run. The invoice one is six entries: read the
+message, extract the fields, draft the entry, **approve**, post it, close out. A step is a name and a function.
+It gets the input, what the steps before it produced, a deadline and a key, and it returns data.
+
+**A step cannot touch the database.** That is deliberate. Effects come back as values and the engine writes
+them, which is the only arrangement in which an effect and the row that records it are the same transaction. A
+step that reached for a connection would reopen the gap the engine exists to close.
+
+### The gate
+
+The gate is a step with no work behind it. When the engine reaches it, the job stops in `awaiting_approval`
+and holds two things: a digest of the exact content being approved, and the words behind the digest. The
+digest is what the route checks when somebody decides. The words are what the screen shows, because a screen
+that displays a hash and a button is asking somebody to approve something they cannot read.
+
+**The gate is reachable only from `running`.** A job that has never run cannot be waiting to approve something
+it has not produced, and the state machine refuses the shortcut.
+
+### Resuming, and why the position is not stored
+
+A step that ran has a row in `job_steps` saying so. The engine's position is therefore the first plan step with
+no succeeded row. Nothing else is needed, and nothing else is kept: a cursor column would be a second answer to
+"how far did this get", and the two would disagree the first time a step was retried.
+
+The consequence a client cares about: **a resumed run does not repeat work it already did.** Each step after
+the gate has exactly one row, whether the run was interrupted by a restart, an approval, or a person going home
+for the evening.
+
+A job waiting at a gate is not spending its time budget. The clock starts when the engine takes the job and
+stops when it gives it back, so a job does not fail because somebody took lunch.
+
+### Failures: typed, bounded, and said once
+
+**A failed step carries a cause, not a sentence.** `unreadable_invoice` is a value the interface can branch on
+and an operator can count. Prose in that field cannot be either.
+
+**Nothing runs after a failure.** The loop returns, and the step after the failing one has no row at all. A
+test that asserted only the failure would pass on a workflow that ran to the end and failed at the last
+hurdle, so the check is the absence of the later row.
+
+**A step that hangs is stopped.** A step is given a deadline and is expected to respect it, and the engine
+also stops waiting from outside, because a callable blocked on a socket that never answers does not run its own
+timeout. The job reaches a terminal state inside the bound either way. What the engine cannot do is free the
+blocked thread, and the record says the step was stopped rather than pretending the work was undone.
+
+### An effect happens once
+
+Whether that promise can be kept depends on where the effect happens, and the record distinguishes the two
+cases.
+
+An effect **inside the transaction**, meaning a row the engine writes, is exactly-once by construction. A kill
+between the effect and the state change rolls back both, and the retry applies it once.
+
+An effect **outside it** cannot be made exactly-once by us, and an engine that claims otherwise is claiming a
+property of somebody else's system. What the engine does is hand the far side a key that is **stable across
+every attempt**, derived from the job and the step and never from the attempt number, and record what the far
+side reported. The retry is then deduplicable, and the record shows how many times the effect was applied
+rather than how many times the step ran. An engine that keyed the effect by the attempt number would duplicate
+it on the first retry, and the duplicate would look exactly like working code.
+
+### Run it
+
+```
+cd /opt/oi-core
+bash scripts/probe.sh workflow_probe.py
+```
+
+Expected: thirteen rights held, one of which kills a process on purpose.
+
+### If it breaks
+
+**A step has no chain row.** The state write is outside the unit. Look for a `store.put` that is not inside
+`with self.units()`.
+
+**A resumed job repeats a step.** The position is being taken from something other than the succeeded step
+rows, or a step that already succeeded ran again.
+
+**A job never leaves `running`.** The deadline loop is not bounding the step, or a worker thread is holding the
+unit's transaction open. A transaction held open by an abandoned thread is the failure to look for.
+
+**The far side applied the effect twice.** The key moved between attempts.
+
+**Every approval after a restart is refused as `approval_drift`.** `pending_action_digest` is not surviving the
+store round trip.
+
+### Extending it
+
+C6 replaces the plan, not the engine. A tool loop is a step whose function calls a model several times; the
+loop, the transaction, the gate, the budgets and the record stay where they are. That separation is why the
+interface does not need rewriting when the work changes.
 
 
 ## 21. Troubleshooting
