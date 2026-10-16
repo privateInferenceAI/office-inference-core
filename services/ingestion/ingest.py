@@ -127,7 +127,7 @@ DEFAULT_DOCUMENTS_ROOT = Path(os.environ.get("INGEST_DOCUMENTS_ROOT", "/document
 # did not bump this, so the cycle skipped all four documents, the new write path never ran, and the acceptance
 # probe found an empty chunk_index with no error anywhere. Nothing was wrong with the code: the corpus had
 # simply been ingested under rules that did not include the new store. v3 is that bump.
-PAYLOAD_VERSION = "payload-v4"
+PAYLOAD_VERSION = "payload-v5"
 
 # **What the worker will look at, and it is loaded rather than written here.**
 #

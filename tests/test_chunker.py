@@ -259,7 +259,7 @@ def test_a_single_item_larger_than_the_budget_is_split_not_appended():
 def test_splitting_happens_at_sentence_boundaries():
     """A citation that quotes half a sentence reads as a misquote, so a split lands between sentences."""
     paragraph = "The rate is 67 cents per mile. " * 60
-    pieces = chunker.split_oversized(paragraph, [], 1, {})
+    pieces = chunker.split_oversized(paragraph, 1, {})
     assert len(pieces) > 1
     for piece in pieces[:-1]:
         assert piece.rstrip().endswith("."), f"split mid-sentence: {piece[-40:]!r}"
@@ -312,3 +312,129 @@ def test_a_document_with_pages_is_not_marked_nominal():
     chunks = chunker.chunk_document(split_schedule_document(), "doc", "sha")
     for chunk in chunks:
         assert chunk.page_is_nominal is False
+
+
+# --------------------------------------------------------------------------- the heading is content
+
+def scan_document(title: str, body: list[str]) -> dict:
+    """A scanned page's shape: a title line, then the body, and nothing else.
+
+    This is what OCR returns for an invoice, and it is the case that exposed the defect. The identifiers a
+    person searches for -- the supplier, the invoice number -- live in the title line and appear nowhere
+    else in the document, so a heading treated as structure is a document with no identity.
+    """
+    texts = [{"self_ref": "#/texts/0", "label": "title", "text": title, "level": 1,
+              "prov": [{"page_no": 1, "bbox": {"l": 60, "t": 740, "b": 700}}]}]
+    texts += [{"self_ref": f"#/texts/{i + 1}", "label": "text", "text": line,
+               "prov": [{"page_no": 1, "bbox": {"l": 60, "t": 690 - i * 40, "b": 660 - i * 40}}]}
+              for i, line in enumerate(body)]
+    return {
+        "pages": {"1": {}},
+        "body": {"children": [{"$ref": t["self_ref"]} for t in texts]},
+        "texts": texts,
+        "tables": [],
+    }
+
+
+def test_a_fact_that_exists_only_in_the_title_is_in_the_chunk_text():
+    """**The test that was missing, and the defect it would have caught.**
+
+    `page_texts` treats an item labelled `title` or `section_header` as structure, so the line becomes a
+    `headings` breadcrumb and never content. The breadcrumb travels into the vector payload's `headings`
+    field, and **neither retrieval arm reads that field**: the embedding is of `chunk.text` and the lexical
+    index is of `payload["text"]`.
+
+    Measured on a real scan before the fix: the OCR returned
+    `HALLORAN MECHANICAL LTD INVOICE 2026-0417` correctly, the payload carried it, and `chunk_index` held
+    zero rows matching `HALLORAN` and zero matching `2026-0417` against four matching the amount that
+    happened to sit in the body. **The invoice could not be found by its own number.**
+    """
+    document = scan_document("HALLORAN MECHANICAL LTD INVOICE 2026-0417",
+                             ["Site: Lake Kayla pumping station",
+                              "Total due: 4,218.50"])
+    chunks = chunker.chunk_document(document, "company/scan.png", "sha")
+    prose = [c for c in chunks if c.kind == "prose"]
+    assert prose, "the scan produced no prose chunk"
+    joined = "\n".join(c.text for c in prose)
+    assert "HALLORAN" in joined, "the supplier name is not searchable"
+    assert "2026-0417" in joined, "the invoice number is not searchable"
+    assert "4,218.50" in joined, "the body must still be there"
+
+
+def test_a_section_header_reaches_the_chunks_under_it():
+    """The same defect on an ordinary document, which is most of them.
+
+    A generated record has one title and four section headers out of fourteen text items; a contract in the
+    corpus has sixty section headers out of a hundred and twenty-one. Every one of those lines was structure
+    and none of it was searchable.
+    """
+    texts = [
+        {"self_ref": "#/texts/0", "label": "title", "text": "Planned maintenance schedule: Lake Kayla",
+         "level": 1, "prov": [{"page_no": 1, "bbox": {"l": 0, "t": 800, "b": 780}}]},
+        {"self_ref": "#/texts/1", "label": "section_header", "text": "Boiler", "level": 2,
+         "prov": [{"page_no": 1, "bbox": {"l": 0, "t": 760, "b": 740}}]},
+        {"self_ref": "#/texts/2", "label": "text", "text": "Last attended on 12 April 2026.",
+         "prov": [{"page_no": 1, "bbox": {"l": 0, "t": 730, "b": 710}}]},
+    ]
+    document = {"pages": {"1": {}}, "tables": [],
+                "body": {"children": [{"$ref": t["self_ref"]} for t in texts]},
+                "texts": texts}
+    joined = "\n".join(c.text for c in chunker.chunk_document(document, "doc", "sha"))
+    assert "Boiler" in joined, "a section header is not searchable"
+    assert "Planned maintenance schedule" in joined, "the document title is not searchable"
+
+
+def test_the_heading_path_is_the_one_the_chunk_opens_under():
+    """One prefix per chunk, not per item: a chunk that runs past a new section belongs to the one it began in.
+
+    The alternative -- re-prefixing mid-chunk -- would put two section names in one retrievable passage and
+    make the citation's breadcrumb disagree with its own text.
+    """
+    texts = [
+        {"self_ref": "#/texts/0", "label": "section_header", "text": "First", "level": 1,
+         "prov": [{"page_no": 1, "bbox": {"l": 0, "t": 800, "b": 780}}]},
+        {"self_ref": "#/texts/1", "label": "text", "text": "Under the first heading.",
+         "prov": [{"page_no": 1, "bbox": {"l": 0, "t": 770, "b": 750}}]},
+        {"self_ref": "#/texts/2", "label": "section_header", "text": "Second", "level": 1,
+         "prov": [{"page_no": 2, "bbox": {"l": 0, "t": 800, "b": 780}}]},
+        {"self_ref": "#/texts/3", "label": "text", "text": "Under the second heading.",
+         "prov": [{"page_no": 2, "bbox": {"l": 0, "t": 770, "b": 750}}]},
+    ]
+    document = {"pages": {"1": {}, "2": {}}, "tables": [],
+                "body": {"children": [{"$ref": t["self_ref"]} for t in texts]},
+                "texts": texts}
+    chunks = [c for c in chunker.chunk_document(document, "doc", "sha") if c.kind == "prose"]
+    assert len(chunks) == 2, "the two pages must not share a chunk"
+    assert chunks[0].text.startswith("First"), chunks[0].text[:40]
+    assert chunks[1].text.startswith("Second"), chunks[1].text[:40]
+    assert "Second" not in chunks[0].text, "a chunk carries the heading it opened under and no other"
+
+
+def test_a_document_with_no_headings_is_unchanged():
+    """The regression guard for every document that has no headings at all.
+
+    The prefix is added when there is a heading path and skipped when there is not, so a plain text file
+    produces exactly the text it produced before. Without this the fix would quietly prepend an empty line to
+    every chunk of every document.
+    """
+    texts = [{"self_ref": f"#/texts/{i}", "label": "text", "text": f"Sentence number {i}.",
+              "prov": [{"page_no": 1, "bbox": {"l": 0, "t": 700 - i * 20, "b": 680 - i * 20}}]}
+             for i in range(3)]
+    document = {"pages": {"1": {}}, "tables": [],
+                "body": {"children": [{"$ref": t["self_ref"]} for t in texts]},
+                "texts": texts}
+    chunks = chunker.chunk_document(document, "doc", "sha")
+    assert chunks, "a document with no headings must still chunk"
+    assert chunks[0].text == "Sentence number 0.\n\nSentence number 1.\n\nSentence number 2."
+
+
+def test_the_headings_field_still_carries_the_path_for_the_citation():
+    """The fix adds the heading to the text; it does not remove it from the field the citation panel reads.
+
+    Both are wanted. The text is what search sees; the field is what a citation displays as its breadcrumb,
+    and a change that made search work by emptying the breadcrumb would trade one visible thing for another.
+    """
+    document = scan_document("HALLORAN MECHANICAL LTD INVOICE 2026-0417", ["Total due: 4,218.50"])
+    chunk = next(c for c in chunker.chunk_document(document, "doc", "sha") if c.kind == "prose")
+    assert chunk.headings == ["HALLORAN MECHANICAL LTD INVOICE 2026-0417"]
+    assert chunk.text.startswith("HALLORAN MECHANICAL LTD INVOICE 2026-0417")

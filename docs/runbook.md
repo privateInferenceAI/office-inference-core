@@ -1516,6 +1516,94 @@ for it uses a page of 800-token prose, which is what a real schedule's dense pag
 - A fee reported as appearing in a page chunk as well as the table: the body-children walk is not
   excluding table references, and the same figures now sit in two retrievable places.
 
+### 3.5b The heading is content, or it is nowhere
+
+**Goal.** A fact that exists only in a heading is findable. A scanned invoice is retrievable by its own
+invoice number and its supplier's name.
+
+**Why this is a step of its own and not a note in 3.5.** Step 3.5 built the chunker and its tests pass. The
+defect is not in the table rules it was checked against, it is in what the prose path does with a line
+docling calls a heading, and the tests could not see it because they asked about tables.
+
+**What was wrong.** `page_texts` treats an item labelled `title` or `section_header` as structure. It appends
+the text to a `headings` breadcrumb and does not let it become a content item:
+
+```
+if label in ("section_header", "title"):
+    headings = headings[: max(0, level - 1)] + [text]
+    continue          # <- the text never becomes content
+```
+
+The breadcrumb then travels into the vector payload's `headings` field, and **neither retrieval arm reads
+that field.** The embedding is of `chunk.text`; the lexical index is of `payload["text"]`. So every heading in
+every document was preserved in the one place nothing queries.
+
+**How it was found, and why nothing did find it earlier.** It surfaced while proving that scanned images now
+upload. OCR returned the invoice correctly and the answer still said the document was not there:
+
+```
+chunk_index rows matching 'HALLORAN'                 0
+chunk_index rows matching '2026-0417'                0
+chunk_index rows matching '4,218.50'  (in the body)  4
+
+Qdrant payload: headings: ['HALLORAN MECHANICAL LTD INVOICE 2026-0417']
+                text:     'Site: Lake Kayla pumping station ...'
+```
+
+The invoice number and the supplier were in the payload and unsearchable. **The document was indexed, the OCR
+was perfect, and the invoice could not be found by its own number.**
+
+**Scale, because a scan is the small case.** A generated record in the corpus has one title and four section
+headers out of fourteen text items. A contract has sixty section headers out of a hundred and twenty-one.
+Half of the structure of a contract was unsearchable, and no page said so.
+
+**The fix, one place.** `emit()` in `_group_prose`, which is where a chunk's text is assembled:
+
+```
+body = "\n\n".join(buffer)
+prefix = " > ".join(headings).strip()
+return current_page, (f"{prefix}\n{body}" if prefix else body), first_bbox, headings
+```
+
+One prefix per chunk, and it is the path in force where the chunk opens. A chunk that runs past a new section
+belongs to the section it began in, which is also what its citation breadcrumb says.
+
+**The table path already did exactly this**, which is what makes it an inconsistency rather than a choice.
+`serialise_table` prepends the same `" > ".join(headings)` and its docstring records why: the research
+measured a deterministic heading prefix plus caption beating generated keywords on page accuracy, 67.38
+against 46.10. Prose never got it.
+
+**Two version constants, and both are load-bearing.** The chunking rules changed, so `CHUNKER_VERSION` goes to
+`chunker-v2` and every chunk id changes with it. What a payload means changed, so `PAYLOAD_VERSION` goes to
+`payload-v5` and every document is re-derived on the next cycle rather than skipped as unchanged. **A fix
+without the second one reaches nothing**: the manifest would see identical bytes and skip every file.
+
+**Do this on a fresh corpus, or accept the re-embed.** The text of every chunk changes, so every vector
+changes. On the reference instance a full re-ingest of 10,026 documents is about 1h36m at four documents in
+flight. Applying it before a first ingest costs nothing extra; applying it afterwards costs that.
+
+**Verify.**
+
+```
+python3 -m pytest tests/test_chunker.py -q -k "heading or title_is_in_the_chunk_text"
+bash scripts/probe.sh interface_probe.py
+```
+
+Then ask for a value that exists only in a heading. On the fixture corpus that is the scanned invoice:
+`What is the total due on invoice 2026-0417 from Halloran Mechanical?` It must come back citing the scan. If
+it does not, check that the re-ingest happened rather than a skip: a cycle that reports `skipped 10026` has
+not re-derived anything.
+
+**If it breaks.**
+
+- Every heading unsearchable and `chunk_index` has no rows matching the title: the payload version did not
+  bump, so the worker skipped every file as unchanged. Clear the manifest or bump the version.
+- A citation showing two section names in its breadcrumb: the prefix is being applied per item rather than per
+  chunk. It belongs in `emit()`, which runs once per chunk.
+- An empty first line on every chunk: the prefix is being added when `headings` is empty. It is skipped when
+  the path is empty, and `test_a_document_with_no_headings_is_unchanged` is what holds that.
+
+
 ### 3.6 The fixture corpus and the question set
 
 **Goal.** Real business documents to measure against, with the licence for each read at the source, and a
@@ -1761,8 +1849,13 @@ chunker's version, because a payload change does not change a chunk's text or it
 re-parse for every labelling fix would hide the difference between the two.
 
 **Bump it when the meaning of a payload field changes**, and the next cycle re-derives the whole corpus
-once. That costs a re-parse of everything, which for this corpus is about ten minutes and for a client's is
-the price of not serving labels the code no longer produces.
+once. **Measured: 10,026 documents in 1h36m at four documents in flight.** For a client's corpus it is the
+price of not serving content the code no longer produces.
+
+**A rules change needs the other constant too.** A payload bump alone is right when a stored field's meaning
+moves and the chunk text does not. When the chunking rules themselves change, the text changes with them,
+`CHUNKER_VERSION` moves to `chunker-v2`, and a payload bump that arrived without it would reach nothing at
+all: the manifest would see identical bytes and skip every file. Step 3.5b is that case.
 
 **Repairing a record written under an older rule.** A manifest row records a decision that was made by
 whatever code wrote it, and code changes. The first corpus run left two contract exhibits recorded as

@@ -821,23 +821,31 @@ items:
     tier: [cloud, office, hosted]
     phase: C2
     verify: >-
-      a scanned invoice is retrievable by its own invoice number and supplier name, both of which appear only
-      in the line docling labels as the document title
-    status: owed
+      a chunk's text carries the heading path it opened under, so a scanned invoice is retrievable by its own
+      invoice number and supplier name, both of which appear only in the line docling labels as the title
+    status: verified
     note: >-
-      FOUND 2026-10-16, NOT FIXED. `chunker.page_texts` treats an item labelled `title` or `section_header` as
-      structure rather than content: it appends the text to a `headings` breadcrumb and continues, so the line
-      never becomes body text. The breadcrumb travels into the vector payload's `headings` field, and NEITHER
-      RETRIEVAL ARM READS THAT FIELD -- the embedding is of `chunk.text` and the lexical index is of
-      `payload["text"]` -- so the heading is preserved where nothing can find it. Measured on a rendered scan
-      of an invoice: OCR returns `HALLORAN MECHANICAL LTD INVOICE 2026-0417` correctly, the payload carries it
-      in `headings`, and chunk_index holds 0 rows matching `HALLORAN` and 0 matching `2026-0417`, against 4
-      rows matching the amount that happens to sit in the body. A user asking for the invoice by number or by
-      supplier gets nothing, while the document is indexed and the OCR is perfect. The general form is worse
-      than the scan: any document whose identifying line is a title loses it from search. The fix is a
-      decision rather than a patch, because including headings in the embedded text changes every chunk's
-      vector and needs a payload version bump and a full re-embed, while adding them to the lexical arm alone
-      fixes exact-identifier search for a fraction of the cost and leaves the vector arm blind.
+      VERIFIED 2026-10-16. `chunker.page_texts` treated an item labelled `title` or `section_header` as
+      structure: it appended the text to a `headings` breadcrumb and did not let it become content. The
+      breadcrumb travelled into the vector payload's `headings` field, and NEITHER RETRIEVAL ARM READ THAT
+      FIELD -- the embedding is of `chunk.text` and the lexical index is of `payload["text"]` -- so every
+      heading was preserved exactly where nothing could find it. Measured on a rendered scan of an invoice
+      whose title line is `HALLORAN MECHANICAL LTD INVOICE 2026-0417`: the OCR was correct, the payload
+      carried the line, and `chunk_index` held zero rows matching either `HALLORAN` or `2026-0417` against
+      four matching the amount that happened to sit in the body. The invoice could not be found by its own
+      number, and the document was indexed. The general form was worse than the scan: a generated record has
+      one title and four section headers out of fourteen text items, and a contract in the corpus has sixty
+      section headers out of a hundred and twenty-one, all of them unsearchable.
+      THE TABLE PATH ALREADY DID THIS, which is what makes it an inconsistency rather than a choice:
+      `serialise_table` prepends the same `" > ".join(headings)` and its docstring records why, citing the
+      research that a deterministic prefix plus caption beat generated keywords on page accuracy, 67.38
+      against 46.10. Prose never got it. The fix is in `emit()` in `_group_prose`: one prefix per chunk, the
+      path in force where the chunk opens, so a chunk that runs past a new section belongs to the section it
+      began in. `split_oversized` additionally took a `headings` argument and never read it, which is the
+      same defect in miniature, and it is removed rather than left behind.
+      `CHUNKER_VERSION` is `chunker-v2` and `PAYLOAD_VERSION` is `payload-v5`, so every document is
+      re-derived and re-embedded on the next cycle. Five tests, three of which fail with the prefix removed
+      and say which fact stopped being searchable.
 
 
   # ---------------------------------------------------------------- inference and serving

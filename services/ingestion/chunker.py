@@ -56,7 +56,7 @@ TOKENS_PER_WORD = 1.35
 # Bumped when any rule above changes, because it is part of every chunk id: a chunker change makes new
 # ids for the same document, which is what forces a deliberate re-embed rather than a silent mix of
 # two chunkings in one collection.
-CHUNKER_VERSION = "chunker-v1"
+CHUNKER_VERSION = "chunker-v2"
 
 _WORD = re.compile(r"\S+")
 
@@ -534,7 +534,7 @@ def chunk_document(document: dict, doc_id: str, source_sha256: str,
     return chunks
 
 
-def split_oversized(text: str, headings: list[str], page_no: int, bbox: dict) -> list[str]:
+def split_oversized(text: str, page_no: int, bbox: dict) -> list[str]:
     """A passage too large for the budget, cut at sentence boundaries.
 
     Why a hard ceiling rather than a preference. Three constraints, all of them engineering rather than
@@ -550,6 +550,11 @@ def split_oversized(text: str, headings: list[str], page_no: int, bbox: dict) ->
 
     Sentences rather than characters, because a citation that quotes half a sentence reads as a
     misquote.
+
+    **It used to take a `headings` argument and never read it.** The heading is prepended once by the caller,
+    to the chunk as a whole rather than to each piece of it, so the parameter was dead. It is removed rather
+    than kept: a parameter that looks like it preserves something and does nothing with it is the shape of the
+    defect this change exists to fix, and leaving one behind for tidiness would be leaving the pattern in.
     """
     sentences = re.split(r"(?<=[.!?])\s+", text)
     pieces: list[str] = []
@@ -586,9 +591,32 @@ def _group_prose(items: list[tuple[int, str, dict, list[str]]]) -> Iterable[tupl
     first_bbox = items[0][2]
 
     def emit() -> tuple[int, str, dict, list[str]]:
+        """The buffered prose, with the heading path in front of it.
+
+        **The heading is content, and this is where that was wrong.** `page_texts` treats an item docling
+        labels `title` or `section_header` as structure: it appends the text to a breadcrumb and does not let
+        it become a content item. The breadcrumb then travels into the chunk's `headings` field, and **neither
+        retrieval arm reads that field** -- the embedding is of `chunk.text` and the lexical index is of
+        `payload["text"]` -- so the heading was preserved exactly where nothing could find it.
+
+        Measured on a scanned invoice whose title line is `HALLORAN MECHANICAL LTD INVOICE 2026-0417`: the OCR
+        was perfect, the payload carried the line, and `chunk_index` held zero rows matching either `HALLORAN`
+        or `2026-0417` against four matching the amount that happened to sit in the body. **The invoice could
+        not be found by its own number.** The same applied to every section header in every document.
+
+        **The table path already did this**, which is what makes it an inconsistency rather than a choice:
+        `serialise_table` prepends the same `" > ".join(headings)` and its docstring records why, citing the
+        research that a deterministic prefix plus caption beat generated keywords on page accuracy, 67.38
+        against 46.10. Prose simply never got it.
+
+        One prefix per chunk rather than one per item, because the heading in force is the one where the
+        chunk opens: a chunk that runs past a new section belongs to the section it started in.
+        """
         # bbox_start is the first item's box and bbox_end the last, which is what a citation needs: the
         # span on the page, not a box drawn around the union of everything.
-        return current_page, "\n\n".join(buffer), first_bbox, headings
+        body = "\n\n".join(buffer)
+        prefix = " > ".join(headings).strip()
+        return current_page, (f"{prefix}\n{body}" if prefix else body), first_bbox, headings
 
     for page_no, text, bbox, item_headings in items:
         if page_no != current_page:
@@ -603,7 +631,7 @@ def _group_prose(items: list[tuple[int, str, dict, list[str]]]) -> Iterable[tupl
         if estimate_tokens(text) > MAX_TOKENS:
             # Too big on its own, so it cannot be fixed by where the boundary falls. Split it, and do
             # not start a new chunk with the leftovers if one is already open.
-            for piece in split_oversized(text, headings, page_no, bbox):
+            for piece in split_oversized(text, page_no, bbox):
                 if estimate_tokens("\n\n".join(buffer + [piece])) > MAX_TOKENS and buffer:
                     yield emit()
                     buffer, first_bbox, headings = [], bbox, item_headings

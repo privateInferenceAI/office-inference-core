@@ -757,9 +757,14 @@ Three things make the worker redo a document it has already seen, and they are d
 | The record claims success with no chunks behind it | A false claim, re-ingested without being asked |
 
 The second is the one to reach for when stored data looks wrong after a code change, and it is a code
-edit rather than a command. `PAYLOAD_VERSION` is `payload-v4` today, and bumping it re-derives the whole
-corpus on the next cycle. For the fixture corpus that is about ten minutes; for a client's it is the price
-of not serving labels the code no longer produces.
+edit rather than a command. `PAYLOAD_VERSION` is `payload-v5` today, and bumping it re-derives the whole
+corpus on the next cycle. **Measured: 10,026 documents in 1h36m at four documents in flight.** For a client's
+corpus it is the price of not serving content the code no longer produces.
+
+**And there is a second edit that sometimes has to go with it.** When the chunking *rules* change, a chunk's
+text changes and so does its id, which means `CHUNKER_VERSION` in `services/ingestion/chunker.py` moves too.
+Bumping only the payload version in that case reaches nothing: the manifest sees identical bytes, skips every
+file, and the fix never arrives. Step 3.5b is that case, and it raised both.
 
 **Do not reach for `PAYLOAD_VERSION` when the collection contract has moved.** Those are different faults
 with different fixes: the contract is the model and its preprocessing, and a mismatch there is refused
