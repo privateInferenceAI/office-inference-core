@@ -1604,6 +1604,46 @@ not re-derived anything.
   the path is empty, and `test_a_document_with_no_headings_is_unchanged` is what holds that.
 
 
+### 3.5c The deployed image is built from the source it claims
+
+**Goal.** No service is running code older than the source it was built from.
+
+**Why this is a step.** On 2026-10-16 a teardown cleared every index, reported its stores by name, and
+**left all 10,033 client documents on disk.** The code that removes them had been in `main` since 13 October.
+The image was built before it and never rebuilt, and nothing noticed: `git status` was clean, `git rev-list
+HEAD..origin/main` said zero, and every command ran without complaint. A client asking for their data
+destroyed would have received a signed destruction record and kept their documents.
+
+**The gap is not that bug, it is that a pull without a rebuild is invisible.** The box also reported itself
+current while being five commits behind, because its `origin/main` ref was three days stale and nothing had
+fetched. So the check does both: fetch, then compare.
+
+```
+cd /opt/oi-core
+git fetch origin
+git rev-list --count HEAD..origin/main      # the number that lies without a fetch
+bash scripts/check_images_current.sh        # exits non-zero on any stale image
+```
+
+**Expected output.** `HEAD` matching `origin/main`, `actually behind 0`, and one line per service ending
+`All 10 images are at least as new as their source.` Ten, not five: the script passes `--profile tools`, and
+its first version did not — it checked five, reported all current, and said nothing about `retention`, which
+was the one that had broken.
+
+**It is a tripwire, not a proof.** It compares each image's build time against the last commit touching that
+service's source. A rebuild with no source change is harmless and unflagged; an image built from a dirty
+working tree is flagged current when it is not.
+
+**If it breaks.**
+
+- `STALE` on a service you have just changed: rebuild. `docker compose -f deploy/office/compose/docker-compose.yml
+  --env-file rendered/env --profile tools build <service>` then `up -d <service>`.
+- `STALE` on a service you have not changed: the image predates a commit that did change it. Rebuild and
+  expect behaviour to move, because it will.
+- A service reported `NOT BUILT`: the image name in the resolved compose file has no local image. Build it.
+- Every image current and the deployment still behaving like old code: check `git rev-parse HEAD` against
+  `origin/main` by hand. A fetch that did not run makes the whole comparison meaningless.
+
 ### 3.6 The fixture corpus and the question set
 
 **Goal.** Real business documents to measure against, with the licence for each read at the source, and a
