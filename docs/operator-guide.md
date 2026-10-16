@@ -2564,6 +2564,35 @@ piece where the record and the thing recorded are the same write, and it is the 
 rather than something adopted. You cannot check that property by reading the code, because the property is
 about what a transaction does when a process dies in the middle of it. You have to kill something.
 
+## 13m.0. The text to send, before you blame the extractor
+
+**Do this first, because getting it wrong reads as a broken feature.** The plan extracts four fields with
+patterns, and text that does not match them fails as `unreadable_invoice`. An agent that sends something it
+believes is an invoice, sees that failure, and goes looking for a bug in the extractor is looking in the wrong
+place — the extractor refused on purpose.
+
+```
+From: accounts@ferguson.example
+Subject: Invoice INV-2026-0417
+
+Total 4210.00 due 2026-11-15 from Ferguson Mechanical Ltd.
+```
+
+| Field | Pattern | Required |
+|---|---|---|
+| total | `\btotal\s+([0-9][0-9,]*(?:\.[0-9]{1,2})?)` | yes |
+| vendor | `\bfrom\s+([^\s,;]+)` | yes |
+| due | `\bdue\s+([0-9]{4}-[0-9]{2}-[0-9]{2})` | no |
+| reference | `\b([A-Z]{2,}-[0-9]{4}-[0-9]{3,})\b` | no |
+
+**A typed refusal rather than a default, and that is the point.** An invoice whose total could not be read is
+not an invoice for zero, and carrying on with a zero would post an entry nobody approved the shape of. The
+refusal is the feature working.
+
+**Pattern-matched rather than model-extracted for now, deliberately.** A model reads any phrasing and also
+invents a total when the document has none, which is the failure the refusal exists to prevent. Widening this
+belongs with the intake work, where the document arrives as a file rather than as text somebody typed.
+
 ## 13m.1. Run the probe first, and read what it does not say
 
 ```

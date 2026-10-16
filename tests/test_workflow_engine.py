@@ -221,6 +221,9 @@ def test_a_job_that_succeeded_carries_no_reason_for_having_ended():
     assert store.get(job.job_id).outcome_reason == "paused_by_operator", (
         "the pause is what puts a reason on the job, and without it this test proves nothing")
 
+    # The `resume` action does both halves: it moves the job out of `paused`, and only then can the engine
+    # drive it. Calling the engine on a paused job is a no-op by design.
+    jobs.resume(store.get(job.job_id), store)
     job = runner.resume(store.get(job.job_id))
     assert job.state == jobs.SUCCEEDED
     assert job.outcome_reason == "", (

@@ -4391,6 +4391,36 @@ credential and the workstation is often shared, so a later statement by a named 
 than evidence about the original act. The C7 work makes that boundary visible and dated. It does not make old
 approvals verified, and nothing should promise otherwise.
 
+### What to actually send it
+
+**The plan reads a message, not an invoice description, and this is the step that costs everybody an hour.**
+`invoice_intake`'s first real step extracts four fields from the text with patterns, and a job whose text does
+not match them fails as `unreadable_invoice` — correctly, because an invoice whose total could not be read is
+not an invoice for zero.
+
+```
+From: accounts@ferguson.example
+Subject: Invoice INV-2026-0417
+
+Total 4210.00 due 2026-11-15 from Ferguson Mechanical Ltd.
+```
+
+| Field | Pattern | What it looks for |
+|---|---|---|
+| total | `\btotal\s+([0-9][0-9,]*(?:\.[0-9]{1,2})?)` | the words "total" then a number |
+| vendor | `\bfrom\s+([^\s,;]+)` | the word "from" then one word |
+| due | `\bdue\s+([0-9]{4}-[0-9]{2}-[0-9]{2})` | "due" then an ISO date |
+| reference | `\b([A-Z]{2,}-[0-9]{4}-[0-9]{3,})\b` | uppercase letters, a dash, a date, a dash, digits |
+
+**A total and a vendor are required and the other two are not.** Failing to match reads as a document problem
+rather than a code problem, which is why this table is here: an agent that gets `unreadable_invoice` on text it
+believes is an invoice will look for a bug in the extractor, and the extractor is doing what it was told.
+
+**Deliberately pattern-matched rather than model-extracted, for now.** A model would read any phrasing and
+would also invent a total when the document did not carry one, which is the failure the typed refusal exists
+to prevent. Widening the patterns is a change to the plan and belongs with the intake work, where the
+document arrives as a file rather than as text somebody typed.
+
 ### Run it
 
 ```

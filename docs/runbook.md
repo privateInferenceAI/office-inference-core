@@ -4758,9 +4758,9 @@ close. The mutation was reverted before the run above; the `ok` line is the same
 **What this step cannot prove, said plainly.** The probe kills a *runner* process, not the API service. That
 is the stronger test of durability, because resume depends on the row and not on the process, but it is not
 the same sentence as "restart the service" and the runbook will not pretend it is. The service-level restart
-belongs to step 6.2, and **it has not been done**: the engine is wired into `services/api/app.py` and the
-manifest now declares the task, but the API runs from a built image that mounts none of that source, so the
-path needs a rebuild and a restart before a browser can reach a gate. Step 6.2 says exactly how far that goes.
+belongs to step 6.2, **and on 2026-10-16 it was done**: the api image was rebuilt, the service was restarted
+while a job waited at the gate, and the job finished after an approval over HTTP. That took four fixes to
+paths that had never run, and 6.2 names all four.
 
 **This step found that WF-ENGINE-001 was not achievable as written.** The register row asked for a property
 that the deployed architecture could not have: with the chain written through a subprocess, no transaction
@@ -4832,6 +4832,36 @@ docker exec postgres psql -U oicore -d oicore -tAc \
 OI_TEST_DATABASE_URL=<a database of your own> python3 -m pytest tests/test_workflow_chain.py -q
 ```
 
+**And the sequence the register actually writes, which is four commands and one restart.** The engine is
+wired into the API and the manifest declares the task, so this is the whole thing from outside:
+
+```
+# 1. rebuild, because the API runs from an image that mounts none of its own source
+cd /opt/oi-core && oi build api && oi up -d api
+
+# 2. a session for a subject the registry declares, then start the workflow
+oi --profile tools run --rm session mint --dev --subject <a declared subject> --role viewer > /tmp/mint.out
+awk '/^token/{print $2}' /tmp/mint.out > /tmp/tok
+#    POST /jobs {"session": <tok>, "task": "invoice_intake", "input": "INV-2026-0417 from … total 4210.00 …"}
+#    -> 200, state=awaiting_approval, four steps, a digest and a pending_action
+
+# 3. restart the service while it waits
+docker restart api
+
+# 4. approve, quoting the digest the job is holding
+#    POST /jobs/{job_id}/approvals {"session": <tok>, "decision": "approve", "action_digest": "<digest>"}
+#    -> 200, state=succeeded, six steps, each exactly one row
+```
+
+Expected: the job survives the restart with its digest intact, and the approval route — not the probe —
+finishes the run.
+
+**Two things in that sequence are not obvious and both cost somebody an afternoon.** `POST /jobs` needs a
+*session in the body*, not only in the header, and the subject has to be one the deployment's registry
+declares, because a subject is refused rather than defaulted. And the API mounts only `rendered/`, `audit.py`
+and `assertion.py`, so an `app.py` change is invisible until `oi build api` runs — a restart alone reloads the
+old image and looks exactly like a fix that did not work.
+
 Expected: `GATED` and `RESUMED` held, the approval summaries say the person was not identified and never name
 the claimed subject, and the post-gate steps have one row each.
 
@@ -4873,32 +4903,81 @@ The fix is the route's, and it is to pass `outcome="ok"` and let the decision li
 `payload -> approval -> decision`, which is where `build_payload` puts it and where both the view and
 `describe()` read it. 6.0 said this route had never run end to end; this is what was waiting there.
 
-**What this step cannot prove, said plainly, and the second half changed on 2026-10-16.**
+**What this step could not prove when it was written, and proved on 2026-10-16.**
 
 The probe restarts the *runner*, not the API service container. Restarting the runner is the stronger test of
 durability, because resume depends on the row and not on the process, but it is not the sentence the register
 writes, and the runbook will not swap one for the other.
 
-**The wiring landed, and the path is still unreachable.** `services/api/app.py` now imports the engine, builds
-a runner with `_workflow_runner`, passes `workflow.budgets_for(task)` at job creation, and drives
-`runner.resume` after an approve and after the `resume` action. So the three edits this step asked for are in.
+**Then the service-level restart was done, and this is what it looked like.** The engine was wired into
+`services/api/app.py`, the manifest declared `invoice_intake` with `needs_approval: true`, the api image was
+rebuilt and the service restarted — after which a workflow ran over HTTP for the first time in this phase:
 
-**The manifest followed, and the path is still undeployed.** `manifests/dev-cloud.yaml` now declares
-`invoice_intake` with `needs_approval: true`, which is the task this plan is for, so `POST /jobs` will accept it
-once that manifest is rendered onto a deployment. It has not been rendered onto the box, and **rendering it
-would not be enough on its own**: the `api` service builds `oi-core/api:local` from `services/api/Dockerfile`
-and mounts only `rendered/`, `audit.py` and `assertion.py` into `/app`, so the handover needs the image rebuilt
-and the service restarted before any of it runs. That is a deployment action, it would put an uncommitted
-manifest in front of a client-facing service, and this step did not take it.
+```
+$ POST /jobs  {"task": "invoice_intake", "input": "INV-2026-0417 from accounts@ferguson.example total 4210.00 USD due 2026-11-15"}
+POST /jobs -> HTTP 200
+  {"attempts": 4, "job_id": "178e4523057540b3bb87d569852c93c9", "state": "awaiting_approval", "terminal": false}
+  steps: [('read_message', 'succeeded'), ('extract_fields', 'succeeded'), ('draft_action', 'succeeded'), ('approval', 'running')]
+  digest: sha256:5b480b869b4bbb02f…
+  pending_action: {"body": "{…\"amount_minor\": 421000…}", "kind": "ledger.post" ...}
 
-**So the service-level restart was not done, and it is the one thing this step set out to prove.** What is
-proved is the same property one level down: the job is written, the connection is closed, a second connection
-reloads it with its digest and its action intact, the decision is applied and the run finishes with one row per
-post-gate step. The difference between that and `docker restart api` is real and is written down rather than
-blurred: a restart also exercises the image, the mounted manifest and the lifespan hook, and none of those
-three has been through this path.
+$ docker restart api
+--- after docker restart api ---
+awaiting_approval | digest=sha256:5b480b869b4bbb0
 
-**A second known gap, and it is a decision rather than an omission.** `jobs.result` has no column, so a job
+$ POST /jobs/178e4523…/approvals  {"decision": "approve", "action_digest": "sha256:5b480b869b4bbb02f…"}
+POST /jobs/{id}/approvals -> HTTP 200
+  {"attempts": 6, "job_id": "178e4523057540b3bb87d569852c93c9", "state": "succeeded", "terminal": true}
+  steps: [('read_message', 'succeeded'), ('extract_fields', 'succeeded'), ('draft_action', 'succeeded'), ('approval', 'succeeded'), ('post_entry', 'succeeded'), ('close_out', 'succeeded')]
+```
+
+And the record it left, read out of the database afterwards:
+
+```
+job row     : succeeded | reason=(none) | digest=(cleared)
+step rows   : 1 read_message … 6 close_out, one row each, all succeeded
+chain       : 14 row(s) naming the job, 7 distinct step(s)
+approval row: event_type=approval | outcome=ok | decision=approve | assurance=unverified
+              | name=probe-staff@officeinference.com
+feed        : Approved at 2026-10-16T18:18:25+00:00 under the viewer role. The person who decided was not
+              identified: sign-in is not enabled on this deployment, so the system cannot verify who acted.
+verify      : ok /check/audit-events.jsonl: 176 event(s), chain intact
+```
+
+**The last two lines are UI-FEED-001 fixed and rendering live.** The sentence names no person, says which role
+the decision is attributable to, and says what the system does not know.
+
+**Three defects sat on this path, and none of them could be found without running it.** 6.0 wrote that the
+route had never run end to end; this is what was waiting there.
+
+- **The decision was written into `outcome`.** `audit_events.outcome` is constrained to `ok`, `denied`,
+  `error` and `pending`, and the route passed `approve`. The insert raised `CheckViolation` *after*
+  `jobs.decide()` had committed, so the client got a 500 and the job resumed with no record of who approved
+  it. The fix passes `ok` and leaves the decision in `payload -> approval -> decision`, where both readers
+  already look for it.
+- **The approvals route was shadowed by the wildcard.** `/jobs/{job_id}/{action}` was declared *before*
+  `/jobs/{job_id}/approvals`, and Starlette matches in declaration order, so `approvals` arrived as an action
+  and was correctly refused with `bad_action`. **The route had never run, for any decision.** A contract check
+  cannot see this: `docs/openapi.json` lists both paths and passes, because a schema is generated from the
+  route table and does not know which entry wins a match. Only a request with a valid session can tell them
+  apart.
+- **`PostgresStore.get()` returned no steps at all.** Its steps list was built from a cursor whose result set a
+  later `execute` — the one computing `events_through` — had replaced, so every job read back from the durable
+  store had no history. The engine derives its position from those rows, so the symptom was
+  `the step row for read_message attempt 1 is missing`: a sentence about the engine, from a defect in the
+  store. It sent two people to look at the wrong file, and it is why `POST /jobs` answered 500.
+
+**And a fourth, found by reading the job row rather than the traceback.** A workflow paused and then resumed
+to completion carried `outcome_reason = "paused_by_operator"` on a `succeeded` job. `jobs.transition` only
+ever sets that field, and it is documented as the reason a job ended *in the case that it did not succeed*.
+The engine now clears it on success, and `test_a_job_that_succeeded_carries_no_reason_for_having_ended` fails
+without that line.
+
+**All four are the same shape: a path that had never been executed.** The suite is green through every one of
+them, because the memory store takes a different branch and the contract check reads a schema rather than a
+match. `tests/test_store_parity.py` is the answer to the store half of that shape.
+
+**A known gap, and it is a decision rather than an omission.** `jobs.result` has no column, so a job
 that succeeds **after a resume** reads back from `GET /jobs/{id}` with an empty result. The answer is in the
 `done` event, which is readable and is the record; the job row is not. The owner's decision on 2026-10-16 was
 not to add the column, on the grounds that it is a schema change for a screen detail. It is written here so

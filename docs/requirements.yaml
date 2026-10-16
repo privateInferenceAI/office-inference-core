@@ -1290,11 +1290,17 @@ items:
       the gate each have exactly one row, so a resumed run does not repeat work it already did.
     status: verified
     note: >-
-      Verified 2026-10-16, `docs/runbook.md` step 6.2. The probe writes the job, closes the connection,
-      reloads it in a second connection with `pending_action_digest` intact, approves, and resumes;
-      `post_entry` and `close_out` each have exactly one row. `pending_action_digest` was on the dataclass
-      and in neither the INSERT nor the SELECT, so every approval after a restart would have been refused as
-      drift; migration 021 adds the column.
+      Verified 2026-10-16, `docs/runbook.md` step 6.2, **at the service level**. `POST /jobs` started
+      `invoice_intake` over HTTP and it stopped at the gate; `docker restart api` ran while it waited and the
+      job came back `awaiting_approval` with its digest intact; `POST /jobs/{id}/approvals` then finished it:
+      `succeeded`, six steps, each exactly one row, and the chain verifies (176 events, intact). Two engine-
+      level probes cover the same property without a service: the probe's `RESUMED` right closes the
+      connection and reloads in a second one, and `test_workflow_chain.py` counts one row per post-gate step.
+      `pending_action_digest` was on the dataclass and in neither the INSERT nor the SELECT, so every approval
+      after a restart would have been refused as drift; migration 021 adds the column. **Getting here took
+      four fixes to paths that had never run** — the decision written into the constrained `outcome` column,
+      the approvals route shadowed by `/jobs/{job_id}/{action}`, `PostgresStore.get()` returning no steps, and
+      a stale `outcome_reason` on a succeeded job. None of the four was visible to a green suite.
 
   - id: WF-FAIL-001
     title: A failed step is recorded with its cause and the workflow does not continue past it
