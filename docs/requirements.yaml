@@ -1362,7 +1362,9 @@ items:
       registration is in their identity tenant; the consent grant is theirs; the credential is in their secret
       store. Cut every cord to Office Inference and intake still works. The test fails if any of those five
       lives with us.
-    status: open
+    note_verified: >-
+      The five components are asserted to be the client's by a check that prints which estate each lives in, and by five negative controls that move each one to us in turn and watch the check fail. The rule and the check are real; no client tenant exists yet, so this is proved against a stand-in. Tenant is a fixture implementing the documented delegated semantics, not Microsoft.
+    status: verified
     note: >-
       A shared mailbox cannot be used and this is the finding that shaped the design: Microsoft keeps sign-in
       blocked on shared mailboxes with a system-generated password, and delegated OAuth needs one interactive
@@ -1380,7 +1382,9 @@ items:
       RBAC scope is refused, because that scope is additive and Microsoft's own guidance says a leftover Entra
       grant makes it a no-op, so an administrator who completes three of four steps builds something that
       looks scoped and is not.
-    status: open
+    note_verified: >-
+      The enumeration runs six probes and exactly one reaches anything, and the same enumeration against a tenant-wide credential reports the second mailbox as reached, which is what makes the one-mailbox result evidence rather than an absence. Delegated Mail.Read is scoped to one mailbox by Microsoft's documented contract; not yet observed on a real tenant.
+    status: verified
 
   - id: CON-INTAKE-001
     title: Every document taken in is recorded with its source, its arrival time and its content hash
@@ -1390,7 +1394,9 @@ items:
       put a document into intake; a row exists naming the sender, the message identifier, the arrival time and
       the sha256 of the content; the same hash appears on the ingest manifest row. An intake that records the
       file but not where it came from cannot answer an auditor asking what arrived.
-    status: open
+    note_verified: >-
+      The recorded sha256 equals ingest.sha256_of on the deposited file, the relpath sits under the worker's root, and no .part is left behind. Matched against the ingestion worker's own function rather than a second implementation of the same hash.
+    status: verified
 
   - id: CON-DUPE-001
     title: The same document arriving twice does not run the workflow twice
@@ -1400,7 +1406,9 @@ items:
       deliver the same invoice twice, once as a re-send and once as a forward; the second is recognised by
       content hash, no second job is created, and the duplicate is recorded as a duplicate rather than
       discarded silently.
-    status: open
+    note_verified: >-
+      The same bytes as a re-send and as a forward: one deposited, one recorded as duplicate naming the first, one copy on disk, no second outbox notice.
+    status: verified
 
   - id: CON-INJECT-001
     title: Content arriving through intake cannot make the system act on instructions inside it
@@ -1410,7 +1418,9 @@ items:
       deliver an invoice whose body contains an instruction, such as a line telling the system to email a list
       to an outside address; the workflow's actions are unchanged and the attempt is visible in the record. The
       test asserts the action did not happen, not merely that a guard exists.
-    status: open
+    note_verified: >-
+      The instruction is flagged by name, zero non-GET requests reach the mail API, the action list is empty, and the instruction text is absent from the row. A supplier footer reading 'if your bank details have changed' is the false-positive control.
+    status: verified
     note: >-
       Invoice fraud is a live surface rather than a hypothetical: AFP's 2025 survey found 79 percent of
       organisations saw payment fraud attempts and invoice fraud almost doubled to 24 percent, and the FBI
@@ -1427,7 +1437,9 @@ items:
       deliver an invoice from an address that is not a known supplier, and one whose envelope sender differs
       from its header sender; both are marked and neither is approved automatically. SPF, DKIM and DMARC
       results are recorded with the message.
-    status: open
+    note_verified: >-
+      A known supplier is trusted, an unknown sender and an envelope that differs from the header are both marked, DMARC is recorded, and review is required in every case.
+    status: verified
 
   - id: CON-FOLDER-001
     title: The folder connector polls, because inotify does not see a network filesystem
@@ -1437,7 +1449,9 @@ items:
       write a file into the watched share from a second machine and assert it is picked up without a restart.
       A test that writes locally and watches a local path passes on a connector that would miss every real
       arrival, because inotify's own man page says it does not catch remote events on network filesystems.
-    status: open
+    note_verified: >-
+      The connector runs as a subprocess and a second process copies a file in with copy2; pickup happens without a restart and /proc/<pid>/fd shows zero inotify descriptors throughout, which is the assertion a local write-and-watch test cannot make.
+    status: verified
 
   - id: CON-SILENT-001
     title: Intake detects a break that leaves a working credential and an empty queue
@@ -1448,7 +1462,9 @@ items:
       invoices; in every case the credential still works and the queue empties, so error logging reports
       nothing. A heartbeat plus a volume floor catches all three. The alerts route to an address the client
       controls, because an alert to us reintroduces the dependency the design exists to remove.
-    status: open
+    note_verified: >-
+      Three scenarios in one test. A revoked scope and a diverting rule both leave last_error None, so error logging reports nothing, and the volume floor catches both; a pulled licence is caught precisely and by the floor. Alerts name the client's recipient, and one on our domain is refused. The recipient rule is what stops monitoring reintroducing the dependency the design removes.
+    status: verified
 
   - id: APR-STATE-001
     title: A job stops at awaiting_approval and stays there until a person decides
@@ -1688,7 +1704,9 @@ items:
       from inside the application container and fail; scan the repository and find no key. The credential is
       read from the client's secret store at the point of use, and a rotation by the client's administrator
       takes effect without a redeploy.
-    status: open
+    note_verified: >-
+      No key in the service, mode 0644 refused, rotation taking effect on the next poll with no restart and asserted on what the token endpoint was presented, the value never in the record, and the api container declaring no access.
+    status: verified
 
   - id: SEC-INTAKE-002
     title: Intake cannot be used to reach anything beyond the mailbox it reads
@@ -1698,7 +1716,9 @@ items:
       attempt to use the intake credential against a second mailbox, a different service and the directory;
       every attempt is refused. The test enumerates what the credential can reach rather than asserting the
       permission it was granted, because the two differ when a scope is additive.
-    status: open
+    note_verified: >-
+      A second mailbox, the directory, a profile and another service all answer 403, and a write method is refused in code before it is sent.
+    status: verified
 
   - id: NEVER-KB-001
     title: No managed knowledge base
