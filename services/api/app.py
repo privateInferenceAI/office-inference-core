@@ -771,7 +771,13 @@ async def create_job(request: Request):
         **budgets)
     store = STATE["jobs"]
     _run_or_resume(job, store)
-    return JSONResponse(job.to_dict(include_result=True), status_code=200)
+    # **Re-read before answering, because both executors advance the job in the store and not in this
+    # object.** The C4 path mutates the instance it is given; the engine reloads the row before each step, so
+    # the `job` in this frame stays at whatever it was when it was created. Returning it unchanged showed a
+    # client `queued` with no steps for a job that was actually at the gate with four behind it — the
+    # response contradicting the record, which is the one thing this interface must never do. The store is
+    # the truth and the response is read back from it.
+    return JSONResponse((store.get(job.job_id) or job).to_dict(include_result=True), status_code=200)
 
 
 @app.get("/jobs/{job_id}", responses={
