@@ -755,7 +755,12 @@ items:
     title: Every suffix the worker accepts is a format the parser actually reads
     tier: [cloud, office, hosted]
     phase: C2
-    verify: a file of each accepted suffix is ingested and answerable, and any format the parser cannot read is either fixed or removed from the accepted set
+    verify: >-
+      a file of each accepted suffix is ingested and answerable, AND for every format the parser
+      advertises in its own FormatToExtensions, the pipeline either accepts it or names it as
+      excluded with a reason and how that was decided. Measured by
+      `bash scripts/check_parser_formats.sh`, which asks the deployed parser what it reads and
+      fails on any format nobody has decided
     status: verified
     note: >-
       VERIFIED 2026-10-13 against the deployed store, BY FINDING A FORMAT THAT FAILED IT. `.rtf` is in the worker's
@@ -791,6 +796,49 @@ items:
       compound binary format rather than RFC 822 and whether the parser reads it is unverified, and adding a suffix to
       that set is a promise that files with it are ingested.
     status: verified
+
+  - id: RET-SILENT-001
+    title: A file in the documents folder is either indexed or reported, never silently ignored
+    tier: [cloud, office, hosted]
+    phase: C2
+    verify: >-
+      a file whose format the worker does not read appears in the cycle's output with its name, in both the
+      human summary and the JSON, and the count reaches the state file the healthcheck reads
+    status: verified
+    note: >-
+      VERIFIED 2026-10-16. An unsupported format used to be dropped inside `discover` with no count, no log
+      line and no error: the file was in the client's folder, absent from every search, and nothing anywhere
+      said so. For a product whose promise is that a client's documents are searchable that is the worst
+      available outcome, because the only way to discover it is to look for something and not find it.
+      `discover` now returns what it refused, the cycle prints the count and the first twenty names, and the
+      count travels through as_counts() into the run record. Operating-system debris is excluded from the
+      count on purpose: a number that includes a shortcut is a number an operator learns to ignore, and the
+      number is the point. The test fixtures are .msg, .vsd and .accdb, which are formats a small business
+      genuinely holds and this pipeline genuinely does not read.
+
+  - id: RET-HEAD-001
+    title: A fact that appears only in a heading is retrievable
+    tier: [cloud, office, hosted]
+    phase: C2
+    verify: >-
+      a scanned invoice is retrievable by its own invoice number and supplier name, both of which appear only
+      in the line docling labels as the document title
+    status: owed
+    note: >-
+      FOUND 2026-10-16, NOT FIXED. `chunker.page_texts` treats an item labelled `title` or `section_header` as
+      structure rather than content: it appends the text to a `headings` breadcrumb and continues, so the line
+      never becomes body text. The breadcrumb travels into the vector payload's `headings` field, and NEITHER
+      RETRIEVAL ARM READS THAT FIELD -- the embedding is of `chunk.text` and the lexical index is of
+      `payload["text"]` -- so the heading is preserved where nothing can find it. Measured on a rendered scan
+      of an invoice: OCR returns `HALLORAN MECHANICAL LTD INVOICE 2026-0417` correctly, the payload carries it
+      in `headings`, and chunk_index holds 0 rows matching `HALLORAN` and 0 matching `2026-0417`, against 4
+      rows matching the amount that happens to sit in the body. A user asking for the invoice by number or by
+      supplier gets nothing, while the document is indexed and the OCR is perfect. The general form is worse
+      than the scan: any document whose identifying line is a title loses it from search. The fix is a
+      decision rather than a patch, because including headings in the embedded text changes every chunk's
+      vector and needs a payload version bump and a full re-embed, while adding them to the lexical arm alone
+      fixes exact-identifier search for a fraction of the cost and leaves the vector arm blind.
+
 
   # ---------------------------------------------------------------- inference and serving
   - id: INF-ROLE-001
