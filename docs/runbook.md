@@ -6042,9 +6042,9 @@ cd /opt/oi-core && bash /opt/oic-ui/scripts/check-contract.sh /opt/oi-core/docs/
 
 Expected: the review tests name the four rows; the browser rung asserts the full body is in the document before
 the approve control is enabled, that the mixed queue offers no bulk action, and that the empty queue renders a
-sentence rather than a blank panel or a spinner. **And the contract check exits 1 today**, because the app's
-copy of the contract is behind the core's: the lines below are what it prints, and the paragraph after them
-says which side the fix is on.
+sentence rather than a blank panel or a spinner. **And the contract check passes**, because the app's copy of
+the contract caught up with the core's: the lines below are what it prints, and the paragraph after them says
+what the check looked like while it failed.
 
 **Run, and the output pasted here.** Same session as 6.5, no deployment and no token.
 
@@ -6071,26 +6071,23 @@ states its scope and why `GET /approvals` is the route this screen is built for.
 
 ```
 $ bash /opt/oic-ui/scripts/check-contract.sh /opt/oi-core/docs/openapi.json
-FAILED: docs/openapi.json differs from /opt/oi-core/docs/openapi.json
-        the app is built against the file, so this is a client that will call the wrong thing
-        paths in the core: /activity, /approvals, /ask, /ask/stream, /documents/{doc_id}, /health, /jobs,
-        /jobs/{job_id}, /jobs/{job_id}/approvals, /jobs/{job_id}/events, /jobs/{job_id}/{action}, /tasks
-        paths in this repo: /activity, /ask, /ask/stream, /health, /jobs, /jobs/{job_id},
-        /jobs/{job_id}/events, /jobs/{job_id}/{action}, /tasks
+OK    the app's contract matches /opt/oi-core/docs/openapi.json
+      12 path(s): /activity, /approvals, /ask, /ask/stream, /documents/{doc_id}, /health, /jobs,
+      /jobs/{job_id}, /jobs/{job_id}/approvals, /jobs/{job_id}/events, /jobs/{job_id}/{action}, /tasks
+      25 model(s)
 ```
 
-**The check fails, and the fix is in the other repository.** The core's `docs/openapi.json` now publishes
-`/approvals`, `/documents/{doc_id}` and the three job fields `Job.to_dict()` has always sent
-(`pending_action`, `pending_action_digest`, `events_through`); the app's copy was last regenerated before them,
-and the app is compiled against its own copy. Regenerating that copy is a change in `oic-ui` and is being made
-there. Until it lands, this check is the honest statement that the two repositories are three routes apart, and
-the app's `tests/contract.test.ts` allowance list is the thing that must shrink with it.
+**The check failed for a day, and the fix was in the other repository.** The core's `docs/openapi.json`
+published `/approvals`, `/documents/{doc_id}` and the three job fields `Job.to_dict()` has always sent
+(`pending_action`, `pending_action_digest`, `events_through`) while the app's copy was last regenerated before
+them, and the app compiles against its own copy. `oic-ui` regenerated that copy at `bcffdae` and shrank its
+`tests/contract.test.ts` allowance list with it, and the run above is the one that says so.
 
 **The paragraph this replaces had it backwards, and that is worth recording.** It said the three job fields
 were absent from the published document and that the gap could not be closed from here. They were absent from
 the *committed file* while the service had been serving them, which `scripts/fetch_openapi.py --check` caught
 the moment it was run: the file had 11 paths against the service's 12. Regenerated and verified on 2026-10-16
-at twelve paths and twenty-six schemas.
+at twelve paths and twenty-five schemas.
 
 **The twelve paths are not ten, and the whole-set comparison is what keeps it that way.** `tests/contract.test.ts`
 compares the whole path set rather than a subset, so a route added on the service side and not on the client

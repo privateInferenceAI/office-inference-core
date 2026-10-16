@@ -4648,12 +4648,12 @@ cd /opt/oi-core
 bash /opt/oic-ui/scripts/check-contract.sh /opt/oi-core/docs/openapi.json
 ```
 
-**That command exits 1 today, and the reason is the app's copy rather than the service.** The core's contract
-publishes twelve paths and the three job fields `pending_action`, `pending_action_digest` and `events_through`;
-the app's copy was last regenerated before them, and the app is compiled against its own copy. Refreshing that
-copy is a change in the app's repository, so this check is the honest statement that the two repositories are
-three routes apart until it lands. The script's default path assumes the two checkouts are siblings, which on
-the deployment they are not, so the core's contract is passed explicitly; the guide's stage 13i.1 has the
+**That command passes, as of 2026-10-16, and it printed `FAILED` for a day before that.** The app's copy of the
+contract was three routes behind the service while the app was compiled against its own copy, and `oic-ui`
+regenerated it at `bcffdae`. Both repositories now publish twelve paths, twenty-five schemas and the three job
+fields `pending_action`, `pending_action_digest` and `events_through`. The script's default path assumes the
+two checkouts are siblings, which on the deployment they are not, so the core's contract is passed explicitly;
+the guide's stage 13i.1 has the
 `--live` form that compares the copy against the running service in a container.
 
 ### If it breaks
