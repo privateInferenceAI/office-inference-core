@@ -4306,6 +4306,116 @@ Three lines, and each proves something different: `200` from `/` is the bundle, 
 - **A different identity provider** replaces the token field with whatever the provider needs. Everything above
   it reads `GET /activity` and the answer payloads, and neither knows how a session was established.
 
+## 13j. Approvals, and what the record is allowed to claim
+
+An approval is the one artifact in this system that a client reads and believes without checking, because
+checking it means doing the work again. Everything in this section exists so the record is exactly as strong
+as the evidence behind it.
+
+### The three decisions
+
+A job that reaches a gate stops and waits. Somebody with the right access approves it, denies it, or asks for
+changes.
+
+| Decision | Needs a reason | What happens |
+|---|---|---|
+| Approve | no | the job resumes where it stopped, not from the beginning |
+| Deny | **yes** | the job ends. The work does not happen |
+| Ask for changes | **yes** | the job ends, and the next run is told what to do differently |
+
+**A denial without a reason is refused rather than stored blank.** A blank reason cannot be told apart from
+somebody who chose not to give one, and the reason is the part the next run learns from.
+
+### The record says who asked, and what the system does not know
+
+Real sign-in arrives at C7. Until then a session is a token that maps to a role, and the honest description
+of what this system knows is *somebody holding this token asked for this*. The record says that, in those
+words.
+
+```
+identity: {
+  assurance: "unverified",
+  basis: "session_token",
+  claimed_subject: "dana",
+  claimed_role: "staff"
+}
+```
+
+**The fields are prefixed `claimed_` rather than `subject_`.** The caveat lives in the field name, where a
+screen or an export cannot drop it by leaving out a paragraph.
+
+**Two rules make `assurance` safe, and both fail quietly if they are dropped.** A value the reader does not
+recognise becomes `unverified`, never something stronger, so a typo or an old schema cannot claim a
+verification that never happened. And the display reads assurance **from the record**, never from the live
+session, so an act from last week does not show today's assurance beside it. That second rule is the same
+argument the session table already makes about permissions: a permission read live at comparison time is a
+permission that has since moved.
+
+### The sentence a client reads
+
+Not *"Approved by Dana at 2:14pm"*, and not *"A person approved an action"* either. The true sentence is:
+
+> Approved at 2:14pm under the executive role. The person who approved was not identified: sign-in is not
+> enabled yet.
+
+The second of those false sentences is the one the activity feed rendered until C5, and it asserted something
+the system had not established.
+
+### Why 21 CFR Part 11 matters here
+
+Section 11.100(b) makes identity verification a **precondition** to an electronic signature existing rather
+than later hardening. The FDA's 2003 enforcement discretion relaxed validation, audit trails and record
+retention, and **kept the signature rules**. So the one corner of Part 11 this feature sits closest to was
+never softened.
+
+Section 11.50 wants a printed name, a timestamp and the meaning of the signature. **This records two of
+three honestly**, and no wording fixes the third. The record marks the name absent with the reason stated,
+because a null with a reason tells the reader the record looked, and an absent field invites them to assume
+it does not carry names at all.
+
+### Approving a draft that changed
+
+Every gate holds a hash of the exact thing it is waiting to have approved. A decision quotes that hash back.
+
+**If the content changed while somebody was reading it, the decision is refused** with `409
+approval_drift` and both hashes. That is not a theoretical case: a retry can rewrite a draft in the window
+between the screen rendering and the button being pressed. Without the check the record would say somebody
+approved something, and what they actually saw was a different draft.
+
+### What an approval can never do
+
+**It cannot upgrade an old approval's assurance.** Every approval made before C7 stays `unverified`
+permanently, plus one appended statement about which account held the session. The token was a bearer
+credential and the workstation is often shared, so a later statement by a named person is a new claim rather
+than evidence about the original act. The C7 work makes that boundary visible and dated. It does not make old
+approvals verified, and nothing should promise otherwise.
+
+### Run it
+
+```
+cd /opt/oi-core
+bash scripts/probe.sh job_probe.py
+docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
+  -v /opt/oi-core:/w -w /w --entrypoint python oi-core/session:local \
+  /w/scripts/fetch_openapi.py --check
+```
+
+### If it breaks
+
+**The screen says a person approved.** Something is rendering `claimed_subject` without the basis. The
+record is honest and the display is not, and the display is what the client reads.
+
+**`verify_chain` reports a break on rows nobody touched.** The approval went into the `approval` column,
+which is outside the canonical hash string, so the row's hash covers something the row does not. It belongs
+in `payload`, which `payload_sha256` already covers.
+
+**An old approval's wording changes when a session changes.** Assurance is being read live instead of from
+the record.
+
+**A denial is stored with no reason.** The route is treating the reason as optional for all three decisions.
+Only an approval may omit it.
+
+
 ## 21. Troubleshooting
 
 Every item below is something that actually happened, with what it looked like and what fixed it.

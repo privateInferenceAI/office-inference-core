@@ -2240,6 +2240,103 @@ own, because two separate assertions both pass while the responses differ.
 | **The task registry in the manifest** | Six task names were hardcoded in Python, so no client could discover, label or describe them | `GET /tasks`, and the app's Do screen |
 | **The app itself** | Ask, Do, Activity. It holds no model key and no database credential | the browser suite, ten tests |
 
+# Stage 13j: the approval gate, and the sentence you are not allowed to write
+
+This is the stage where the product makes a promise it cannot yet keep, and the work is to say so rather
+than to sound confident.
+
+**Why this stage exists at all.** C4 built `awaiting_approval` into the state machine and nothing ever
+reached it. C5 is the first writer, which means two defects in the audit path were still cheap to fix when
+this started and will not be later. Everything about the approval record is easier to get right now than at
+any point after a client has one.
+
+## 13j.1. Understand what the system does not know
+
+Before writing anything, be clear about the gap. Real sign-in is C7. Today a session is a bearer token that
+maps to a role, and **a role is not a person**.
+
+The FDA's own Data Integrity guidance puts it plainly: shared or group accounts *"do not conform with the
+part 211 and 212 requirements for actions, such as second person review, to be attributable to a specific
+individual."* An approval is a second-person review. So the honest record says the approver was not
+identified, and the dishonest one says a person did it.
+
+**The temptation is real and it is worth naming.** Every screen wants a name. A name makes the interface feel
+finished. A record that says "the person who approved was not identified" looks like a bug to somebody who
+has not read this page, and the pressure to write the friendlier sentence will come from someone who means
+well.
+
+## 13j.2. Drive a job to the gate
+
+The gate is only reachable from `running`. A freshly created job is `queued`, and the machine **refuses**
+`queued -> awaiting_approval`, which is correct: a job that never ran cannot be waiting to approve something
+it has not produced. This caught a test helper during the build, and the machine was right.
+
+```
+cd /opt/oi-core
+bash scripts/probe.sh job_probe.py
+```
+
+Expected: seven rights held. The probe drives the C4 one-step executor, so it does **not** reach the gate
+yet, and it says so rather than reporting a green that means nothing.
+
+## 13j.3. Read a record, and check the four things
+
+Fetch an approval and look at it. There are four things to check and each has a test that fails if it stops
+being true.
+
+1. **`assurance` is `unverified`**, and an unknown value in that field resolves **downward**. Try it: write
+   `PROOFED` into a row and confirm the reader reports `unverified`. Resolving upward would let a typo claim
+   a verification that never happened.
+2. **`printed_name` is null with the reason beside it**, not absent.
+3. **The sentence names no person.** Read the rendered text and confirm `claimed_subject` does not appear in
+   it while the basis is a session.
+4. **A denial with no reason is refused.** Send one and confirm a `400` that names what was missing, rather
+   than a stored blank.
+
+## 13j.4. Break the drift check on purpose
+
+Fetch a job waiting at the gate, note its `pending_action_digest`, then change what it is waiting about and
+submit the old digest.
+
+Expected: `409` with `kind: approval_drift` and **both** digests in the body. A screen that gets this can
+re-render and ask again. A screen that got a `400` would be told its request was malformed, which is false:
+the request was fine and the world moved.
+
+**Why this matters more than it looks.** Without the digest an approval says somebody approved something, and
+the link to what can be re-pointed afterwards by anything that can edit a job row. With it, the thing
+approved and the thing recorded are the same thing or the route refuses.
+
+## 13j.5. Confirm the record is inside the chain
+
+This is the check that would have caught a real defect, and it is worth running by hand once.
+
+```
+docker exec postgres psql -U oicore -d oicore -tAc \
+  "select payload->'approval'->'identity'->>'assurance' from audit_events where event_type = 'approval'"
+```
+
+Then verify the chain. **The record must be in `payload`**, which `payload_sha256` covers, and not in the
+`audit_events.approval` column, which is outside the canonical string. That column is a jsonb field with an
+approval event type and it is not among the eighteen fields the canonical hash function takes, so a value
+written there can be edited by hand while every chain check passes.
+
+**It is the identical defect migration 013 was written to close for the redaction columns**, and 013's own
+comment states the consequence: a field the chain does not cover is a field that can be rewritten while every
+check passes, and the check would report the record intact. That defect was found before C5 became the first
+writer. It will not be this cheap again.
+
+## 13j.6. What to take from it
+
+**A record is a claim, and a claim has to be true.** The whole stage is one idea applied four times: say what
+you know, say what you do not, and make the second impossible to drop by accident. The `claimed_` prefix, the
+downward resolution, the null with a reason, and the drift check are four ways of writing the same sentence.
+
+**And the limit is part of the record.** You cannot upgrade a historical approval's assurance. Every
+approval made before real sign-in exists stays unverified permanently, and the C7 work makes that boundary
+visible rather than making the old records stronger. Building that deliberately is the difference between a
+record that ages well and one somebody has to explain.
+
+
 # Stage 14: onboarding a second client's corpus
 
 **Goal:** add a corpus to a deployment that is already holding one, without disturbing it.
