@@ -34,12 +34,16 @@ GRAPH = "https://graph.microsoft.com/v1.0"
 TOKEN_TEMPLATE = "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
 GRAPH_SCOPE = "https://graph.microsoft.com/Mail.Read offline_access"
 
-# The fields a message needs for provenance and for the sender decision, and nothing else. `body` is absent
-# on purpose: the message body is content rather than provenance, it is the field most likely to carry an
-# instruction, and the columns below are the ones an auditor asks for.
+# The fields a message needs for provenance and for the sender decision.
+#
+# **`bodyPreview` is not enough, and that is the one selection here worth arguing about.** It is capped at
+# 255 characters, so an instruction placed below the fold is invisible to a scan that reads only the preview.
+# The full `body` is selected, scanned, and then **not stored**: the record keeps the signals that fired and
+# a hash of what matched, never the text. Reading the whole body and keeping none of it is the difference
+# between a scan that works and a scan that works on the messages the sender did not think about.
 MESSAGE_SELECT = ",".join([
     "id", "internetMessageId", "subject", "from", "sender", "replyTo", "toRecipients",
-    "receivedDateTime", "hasAttachments", "internetMessageHeaders", "bodyPreview",
+    "receivedDateTime", "hasAttachments", "internetMessageHeaders", "bodyPreview", "body",
 ])
 
 # How far back a first poll looks when the deployment has no watermark yet. Bounded, because a mailbox with

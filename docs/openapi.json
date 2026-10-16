@@ -1698,6 +1698,96 @@
         "summary": "Get Job"
       }
     },
+    "/jobs/{job_id}/approvals": {
+      "post": {
+        "description": "Approve, deny, or ask for changes on a job that is waiting.\n\n**This is the one route in the product where a wrong record is worse than a missing one**, because a\nclient reads an approval and believes it. Three things follow from that and each is here rather than in a\nconvention.\n\n* **The decision is refused unless the job is actually waiting.** A decision on a running job would\n  produce a record of an approval nobody was asked for.\n* **The decision quotes the content it is about.** `action_digest` has to match what the job is holding,\n  so a draft that changed between the screen rendering and the button being pressed is refused rather than\n  silently approved. That is `approval_drift` and it is a real case, not a theoretical one: a retry can\n  rewrite a draft in that window.\n* **The record says what the system does not know.** The identity object carries `unverified` and the\n  Part 11 manifestation marks the printed name absent with the reason stated. See `approvals.py`.",
+        "operationId": "decide_job_jobs__job_id__approvals_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            },
+            "description": "the job after the decision"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "not one of the three decisions, or a denial or change request with no reason"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "no session"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "the request supplied its own authority"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "no such job"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "**the job is not waiting for a decision**, or the decision names different content from what is waiting. The second is `approval_drift` and it means the draft changed while somebody was reading it."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decide Job"
+      }
+    },
     "/jobs/{job_id}/events": {
       "get": {
         "description": "The numbered log, replayed from where the caller stopped.",
