@@ -62,6 +62,10 @@ EXPECTED_PATHS = {
     # outlives the job. Folding it into `{action}` would put a path segment where a payload belongs, and the
     # payload is the part that has to be right. See runbook 6.0.
     "/jobs/{job_id}/approvals",
+    # **The queue, which is not `/jobs?state=awaiting_approval`.** A job is readable by the person who started
+    # it, which is right for a history and wrong for a queue: an approval exists for whoever reviews it, and
+    # the Review screen is built behind a single `loadQueue()` waiting for this path.
+    "/approvals",
     # **Reading the document behind a citation.** The chips on the Ask screen name the documents an answer
     # came from, and until this path existed they were spans: a person could see that an answer rested on the
     # travel policy and could not read the travel policy. The id carries slashes, hence the path parameter.

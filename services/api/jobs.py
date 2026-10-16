@@ -285,6 +285,18 @@ class MemoryStore:
     def get(self, job_id: str) -> Optional[Job]:
         return self.jobs.get(job_id)
 
+    def pending_approval(self) -> list[Job]:
+        """Every job waiting at a gate, oldest first.
+
+        **A method rather than a filter over a list-everything, and `list-everything` should not exist.** A
+        deployment accumulates jobs forever, and a caller wanting the handful at a gate must not be handed
+        the whole history to sift. Both implementations answer the same question, which is what stops the
+        memory path and the durable path disagreeing about what is waiting — the shape that has now bitten
+        four times in one phase.
+        """
+        return sorted((j for j in self.jobs.values() if j.state == AWAITING_APPROVAL),
+                      key=lambda j: j.created_at)
+
     def append(self, job_id: str, event: str, data: dict) -> int:
         seq = len(self.events.get(job_id, [])) + 1
         self.events.setdefault(job_id, []).append(
@@ -409,14 +421,22 @@ class PostgresStore:
                        duration_ms
                   from job_steps where job_id = %s order by attempt
                 """, (job_id,))
-            # The cursor, read in the same round trip as the steps rather than as a second query a caller
-            # has to remember. A job with no events is 0, which is the same as "start from the beginning".
+            # **The rows are read before the next execute, and that ordering is the whole fix.**
+            # `cur.fetchall()` reads the result set of the MOST RECENT execute. Putting the `max(seq)` query
+            # between the steps query and this list left it reading the cursor's one-row result set with that
+            # row already taken by `fetchone()`, so `steps` was always empty on the durable path. A job read
+            # back from the store had no steps, the engine could not find the row it had just written, and
+            # `POST /jobs` answered 500 on the first workflow ever started over HTTP.
+            #
+            # The intent in the comment below was right — one round trip rather than two queries a caller has
+            # to remember — and the second query is what ate the first query's rows.
+            step_rows = cur.fetchall()
             cur.execute("select coalesce(max(seq), 0) from job_events where job_id = %s", (job_id,))
             through = int((cur.fetchone() or [0])[0])
 
             steps = [Step(step_id=r[0], job_id=job_id, attempt=r[1], name=r[2], state=r[3],
                           failure_kind=r[4], failure_detail=r[5], retryable=r[6], lane=r[7],
-                          model=r[8], duration_ms=r[9]) for r in cur.fetchall()]
+                          model=r[8], duration_ms=r[9]) for r in step_rows]
         return Job(job_id=row[0], deployment_id=row[1], subject=row[2], actor_role=row[3],
                    roots=frozenset(row[4] or []), credential_sha256=row[5], task=row[6], input=row[7],
                    state=row[8], outcome_reason=row[9], time_budget_s=row[10],
@@ -425,6 +445,21 @@ class PostgresStore:
                    finished_at=float(row[14]) if row[14] is not None else None,
                    data_class=row[15], pending_action_digest=row[16] or "",
                    pending_action=dict(row[17] or {}), events_through=through, steps=steps)
+
+    def pending_approval(self) -> list[Job]:
+        """Every job waiting at a gate, oldest first.
+
+        **A method rather than a filter over a list-everything, and `list-everything` should not exist.** A
+        deployment accumulates jobs forever, and a caller wanting the handful at a gate must not be handed
+        the whole history to sift. Both implementations answer the same question, which is what stops the
+        memory path and the durable path disagreeing about what is waiting — the shape that has now bitten
+        four times in one phase.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "select job_id from jobs where state = %s order by created_at", (AWAITING_APPROVAL,))
+            ids = [r[0] for r in cur.fetchall()]
+        return [j for j in (self.get(i) for i in ids) if j is not None]
 
     def append(self, job_id: str, event: str, data: dict) -> int:
         """Write one event and assign its number in the same statement that inserts it.

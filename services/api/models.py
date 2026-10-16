@@ -329,6 +329,20 @@ class Job(BaseModel):
                     "zero, which is what the live view had to do")
 
 
+class ApprovalQueue(BaseModel):
+    """What `/approvals` returns: the gates this session may decide on.
+
+    **A named model rather than a bare object**, for the reason `TaskList` gives below: a client reading a
+    field out of an unnamed response is reading a shape nothing publishes.
+
+    `count` is carried as well as the list because it is the number a screen shows, and a screen that counts
+    the array it was given is one refactor away from counting the page.
+    """
+
+    approvals: list[Job]
+    count: int
+
+
 class TaskList(BaseModel):
     """What `/tasks` returns. A named model rather than a bare object, because a client that reads a field out
     of an unnamed response is reading a shape nothing publishes, and the app's contract test can only hold the

@@ -780,6 +780,53 @@ async def create_job(request: Request):
     return JSONResponse((store.get(job.job_id) or job).to_dict(include_result=True), status_code=200)
 
 
+@app.get("/approvals", responses={
+    200: {"model": contract.ApprovalQueue,
+          "description": "the jobs at a gate that this session may decide on, newest first"},
+    401: {"model": contract.Refusal, "description": "no session"},
+})
+async def approval_queue(request: Request):
+    """Everything waiting for a decision that this session is permitted to make.
+
+    **Why this is not `GET /jobs?state=awaiting_approval`.** A job is readable by the person who started it,
+    which is the right rule for a history and the wrong one for a queue: an approval exists for whoever
+    REVIEWS it, and in a small business that is routinely somebody other than the person who asked. A queue
+    built from the jobs a screen started can only ever show a client their own requests, which is not a queue
+    at all — it is a list of things they are waiting on, and the Review screen was built behind
+    `loadQueue()` in the app precisely so it could switch to this.
+
+    **The permission rule, stated rather than implied.** The queue is scoped by access roots: a job appears if
+    the roots it carries are a subset of the roots this session holds. That is the same comparison the
+    retrieval boundary already makes everywhere else, so an approval is never offered to a session that could
+    not have read the material the decision is about. **Roots, not `subject`**, because the subject rule
+    answers "who asked" and this question is "who may decide".
+
+    **What it deliberately does not decide.** Whether a particular person is the right approver for a
+    particular task. Every session holding the roots sees every gate in them, and separation of duties — the
+    person who drafted it may not approve it — is a policy this deployment does not yet express. Recorded
+    here so it is a known limit rather than an assumption, and it belongs with the identity work.
+    """
+    session, refusal = _session_for(request)
+    if refusal:
+        return refusal
+
+    mine = session.permit().roots
+    store = STATE["jobs"]
+    waiting = []
+    for job in store.pending_approval():
+        if job.deployment_id != DEPLOYMENT_ID:
+            continue
+        if not set(job.roots or ()) <= set(mine):
+            continue
+        waiting.append(job)
+
+    # Newest first, and by the time they reached the gate rather than when they were created: a queue is read
+    # from the top and the thing that has been waiting longest is the thing somebody should look at.
+    waiting.sort(key=lambda j: (j.created_at, j.job_id), reverse=True)
+    return JSONResponse({"approvals": [j.to_dict(include_result=False) for j in waiting],
+                         "count": len(waiting)}, status_code=200)
+
+
 @app.get("/jobs/{job_id}", responses={
     200: {"model": contract.Job, "description": "the job, its attempts, and its result"},
     401: {"model": contract.Refusal, "description": "no session"},

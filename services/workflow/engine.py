@@ -431,7 +431,8 @@ class Runner:
                           _stopped=lambda: self._cancelled(job.job_id))
 
             retry_of = attempt - 1 if attempt_run > 1 else None
-            self._write(live.job_id, self._started_body(spec, attempt, retry_of),
+            started_step_id = uuid.uuid4().hex
+            self._write(live.job_id, self._started_body(spec, attempt, retry_of, started_step_id),
                         events=[(EV_STEP, {"step": spec.name, "step_state": jobs.RUNNING,
                                            "attempt": attempt, "retry_of": retry_of})],
                         tool_name=spec.name)
@@ -439,6 +440,19 @@ class Runner:
             live = self.store.get(job.job_id)
             if live.state in jobs.TERMINAL:
                 return live
+            # **The row written one transaction ago has to be readable, or the store is the fault and not the
+            # engine.** This engine reads a job back between every pair of writes and derives its position from
+            # the step rows, so a store that writes a row and does not return it makes the engine look like it
+            # cannot find its own work. That happened: `PostgresStore.get()` built its steps list from a cursor
+            # whose result set a later query had replaced, and the symptom was `the step row for read_message
+            # attempt 1 is missing` — a sentence about the engine, from a defect in the store. The check costs
+            # one comparison and turns that class of fault into a sentence that names the right component.
+            if not any(step.step_id == started_step_id for step in live.steps):
+                raise WorkflowError(
+                    f"the store returned no row for {spec.name} attempt {attempt}, one transaction after it "
+                    f"was written. The engine derives a job's position from its step rows, so a store that does "
+                    f"not return the rows it accepted cannot drive a workflow. This is a store fault: check "
+                    f"that reading a job back returns the steps that were written to it.")
 
             result = self._invoke(spec, run)
             if result.ok or not result.retryable or attempt_run >= max(1, spec.attempts) \
@@ -448,9 +462,9 @@ class Runner:
             # makes "let it fail four times" visible rather than a claim, and it carries the same effect key.
         raise WorkflowError(f"the retry loop for {spec.name} ended without a result, which cannot happen")
 
-    def _started_body(self, spec: StepSpec, attempt: int, retry_of):
+    def _started_body(self, spec: StepSpec, attempt: int, retry_of, step_id: str):
         def body(unit, fresh):
-            fresh.steps.append(jobs.Step(step_id=uuid.uuid4().hex, job_id=fresh.job_id, attempt=attempt,
+            fresh.steps.append(jobs.Step(step_id=step_id, job_id=fresh.job_id, attempt=attempt,
                                         name=spec.name, state=jobs.RUNNING))
             return {"stage": "workflow", "job_id": fresh.job_id, "task": fresh.task, "step": spec.name,
                     "step_state": jobs.RUNNING, "attempt": attempt, "retry_of": retry_of,
