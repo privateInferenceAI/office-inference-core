@@ -11,6 +11,7 @@ passes on an engine that runs one step and reports success.
 """
 from __future__ import annotations
 
+import copy
 import json
 import socket
 import sys
@@ -204,6 +205,27 @@ def test_a_paused_job_is_left_where_it_is():
 
 
 # --------------------------------------------------------------------------- failures
+
+
+def test_a_job_that_succeeded_carries_no_reason_for_having_ended():
+    """**`outcome_reason` is "why it ended, in the case that it did not succeed".**
+
+    `jobs.transition` only ever sets it, so a workflow paused and then resumed to completion kept
+    `paused_by_operator` on a `succeeded` job. Found by reading a job row after the first live run on a
+    deployment, where it is the field next to the state and the first thing a client renders.
+    """
+    job, store, runner = invoice()
+    job = runner.start(job)
+    jobs.decide(job, store, "approve", job.pending_action_digest)
+    jobs.pause(store.get(job.job_id), store)
+    assert store.get(job.job_id).outcome_reason == "paused_by_operator", (
+        "the pause is what puts a reason on the job, and without it this test proves nothing")
+
+    job = runner.resume(store.get(job.job_id))
+    assert job.state == jobs.SUCCEEDED
+    assert job.outcome_reason == "", (
+        f"a succeeded job still says {job.outcome_reason!r}, which is a reason for an ending that did not "
+        f"happen")
 
 
 def test_a_failed_step_is_typed_and_no_later_step_has_a_row():
@@ -407,6 +429,45 @@ def test_the_invoice_plan_refuses_a_message_it_cannot_read_rather_than_guessing(
 
 
 # --------------------------------------------------------------------------- the unit of work
+
+
+def test_a_store_that_drops_the_step_row_fails_with_a_sentence_naming_the_store():
+    """**The shape of the `4a972cc` defect, without a database.**
+
+    `PostgresStore.get()` built its steps list from a cursor whose result set a later query had replaced, so
+    every job read back from the durable store had no steps. The engine's position is derived from those rows,
+    so the symptom was `the step row for read_message attempt 1 is missing` — a sentence about the engine, from
+    a defect in the store, and it sent two people to look at the wrong file.
+
+    This store accepts a step row and never returns it. The engine must say so in those words rather than
+    reporting a missing row as its own problem.
+    """
+    class ForgetfulStore(jobs.MemoryStore):
+        """Writes everything, returns a job with no steps — the durable defect, made portable."""
+
+        def get(self, job_id):
+            job = super().get(job_id)
+            if job is None:
+                return None
+            thin = copy.deepcopy(job)
+            thin.steps = []
+            return thin
+
+    store = ForgetfulStore()
+    job = jobs.new_job(deployment_id="oi-test", subject="dana", actor_role="staff", roots={"company"},
+                       credential_sha256="a" * 64, task="forgetful", input="x",
+                       attempt_budget=4, time_budget_s=30)
+    store.put(job)
+    plan = workflow.Plan(name="forgetful", steps=(
+        workflow.StepSpec(name="first", run=lambda run: workflow.StepResult(output={"ok": True})),
+    ))
+    with pytest.raises(workflow.WorkflowError) as raised:
+        workflow.runner_for(store, plan).start(job)
+
+    message = str(raised.value)
+    assert "store" in message.lower(), f"a store fault must name the store. The engine said: {message}"
+    assert "workflow" not in message.lower() or "store" in message.lower(), (
+        "the message must read as a store fault rather than as the engine losing its own work")
 
 
 def test_the_memory_unit_rolls_back_everything_it_wrote_when_the_body_raises():

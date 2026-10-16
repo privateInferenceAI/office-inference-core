@@ -110,7 +110,8 @@ def test_the_two_stores_agree_on_everything_a_caller_reads(durable):
     whose result set a later `execute` had replaced: the memory store returned two steps, the durable one
     returned none, and every durable read of a job was therefore a job with no history.
     """
-    from_memory = observable(jobs.MemoryStore().get(write_one(jobs.MemoryStore())))
+    memory = jobs.MemoryStore()
+    from_memory = observable(memory.get(write_one(memory)))
     from_durable = observable(durable.get(write_one(durable)))
 
     differences = {key: (from_memory[key], from_durable[key])
@@ -191,21 +192,30 @@ def test_events_through_never_claims_more_than_exists(durable):
 def test_pending_approval_answers_the_same_question_in_both_stores(durable):
     """The queue the Review screen reads: the newest method, and the same shape as the oldest.
 
-    Two jobs waiting, one running and one finished. Both stores must return the waiting ones and must not hand
-    back the whole history for a caller to sift.
+    **Scoped to the jobs this test made.** The first version asserted a total count, and on a database that the
+    probes and the chain tests had already written to it reported 41 waiting jobs against the memory store's 2 —
+    a failure about the test's assumption rather than about the store. A shared table means a test may only
+    make claims about rows it created.
     """
     memory = jobs.MemoryStore()
-    for store in (memory, durable):
+    made: dict[str, tuple] = {}
+    for name, store in (("memory", memory), ("durable", durable)):
+        ids = {jobs.AWAITING_APPROVAL: [], jobs.RUNNING: [], jobs.SUCCEEDED: []}
         for state in (jobs.RUNNING, jobs.AWAITING_APPROVAL, jobs.AWAITING_APPROVAL, jobs.SUCCEEDED):
             job = jobs.new_job(deployment_id="store-parity", subject="dana", actor_role="staff",
                                roots={"company"}, credential_sha256="b" * 64, task="invoice_intake",
                                input="queue", attempt_budget=7, time_budget_s=130)
             job.state = state
             store.put(job)
+            ids[state].append(job.job_id)
+        made[name] = (store, ids)
 
-    waiting = [job.job_id for job in memory.pending_approval()]
-    waiting_durable = [job.job_id for job in durable.pending_approval()]
-    assert len(waiting) == 2 and len(waiting_durable) == 2, (
-        f"the queue is not the waiting jobs: memory={len(waiting)}, durable={len(waiting_durable)}")
-    assert all(durable.get(job_id).state == jobs.AWAITING_APPROVAL for job_id in waiting_durable), (
-        "the durable queue handed back a job that is not waiting")
+    for name, (store, ids) in made.items():
+        queue = {job.job_id for job in store.pending_approval()}
+        assert set(ids[jobs.AWAITING_APPROVAL]) <= queue, (
+            f"the {name} queue left out a job that is waiting at a gate")
+        assert not (set(ids[jobs.RUNNING]) | set(ids[jobs.SUCCEEDED])) & queue, (
+            f"the {name} queue handed back a job that is not waiting, which is a screen asking somebody to "
+            f"decide something that is already decided")
+        assert all(store.get(job_id).state == jobs.AWAITING_APPROVAL for job_id in queue), (
+            f"the {name} queue returned a job whose state is not awaiting_approval")

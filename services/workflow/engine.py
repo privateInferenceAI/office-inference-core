@@ -389,6 +389,7 @@ class Runner:
     def _finish(self, job):
         """Every step is done. Only reachable when a run was interrupted between the last step and the state."""
         def body(unit, fresh):
+            fresh.outcome_reason = ""
             jobs.transition(fresh, jobs.SUCCEEDED)
             return {"stage": "workflow", "job_id": fresh.job_id, "task": fresh.task,
                     "plan": self.plan.name, "step_state": jobs.SUCCEEDED, "step": ""}
@@ -488,6 +489,12 @@ class Runner:
                                     "state": effect.state if fresh_row else "already_applied"})
                 if final:
                     fresh.result = result.output
+                    # **A job that succeeded has no reason for having ended, and a stale one is a lie a
+                    # client reads.** `outcome_reason` is documented as "why it ended, in the case that it
+                    # did not succeed", and `jobs.transition` only ever sets it. A workflow paused and then
+                    # resumed to completion carried `paused_by_operator` on a `succeeded` job — found by
+                    # reading a job row after the first live run, where it is the field beside the state.
+                    fresh.outcome_reason = ""
                     jobs.transition(fresh, jobs.SUCCEEDED)
                 return {"stage": "workflow", "job_id": fresh.job_id, "task": fresh.task,
                         "step": spec.name, "step_state": jobs.SUCCEEDED, "attempt": attempt,

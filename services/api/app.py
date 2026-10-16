@@ -875,52 +875,6 @@ async def job_events(job_id: str, request: Request):
     return EventSourceResponse(replay(), headers={"X-Accel-Buffering": "no", "Cache-Control": "no-store"})
 
 
-@app.post("/jobs/{job_id}/{action}", responses={
-    200: {"model": contract.Job, "description": "the job after the action"},
-    400: {"model": contract.Refusal, "description": "an action that is not pause, resume or cancel"},
-    401: {"model": contract.Refusal, "description": "no session"},
-    404: {"model": contract.Refusal, "description": "no such job"},
-    409: {"model": contract.Refusal, "description": "**a transition the machine refuses**, named. Resuming "
-                                                   "a cancelled job is the one this exists for."},
-})
-async def control_job(job_id: str, action: str, request: Request):
-    """Pause, resume, or cancel.
-
-    **The refusal is the feature.** A handler that assigned the state directly would happily resume a
-    cancelled job, and the record would then describe work that happened after somebody stopped it.
-    """
-    session, refusal = _session_for(request)
-    if refusal:
-        return refusal
-    job = _find_job(job_id, session)
-    if job is None:
-        return JSONResponse({"error": "no such job", "kind": "not_found"}, status_code=404)
-
-    store = STATE["jobs"]
-    try:
-        if action == "pause":
-            jobs_module.pause(job, store)
-        elif action == "resume":
-            jobs_module.resume(job, store)
-            # A resumed multi-step job continues through the engine rather than the C4 one-step executor.
-            plan = workflow_module.plan_for(job.task)
-            if plan is not None:
-                _workflow_runner(store, plan).resume(job)
-        elif action == "cancel":
-            jobs_module.cancel(job, store)
-        else:
-            return JSONResponse({"error": f"'{action}' is not an action on a job. The three are pause, "
-                                          "resume and cancel.", "kind": "bad_action"}, status_code=400)
-    except jobs_module.TransitionRefused as refused:
-        return JSONResponse({"error": str(refused), "kind": "transition_refused",
-                             "was": refused.was, "wanted": refused.wanted}, status_code=409)
-
-    audit("tool_call", session.subject, session.role, "ok",
-          {"stage": "job", "job_id": job.job_id, "task": job.task, "state": job.state, "action": action,
-           }, tool=job.task)
-    return JSONResponse(job.to_dict(include_result=True), status_code=200)
-
-
 @app.post("/jobs/{job_id}/approvals", responses={
     200: {"model": contract.Job, "description": "the job after the decision"},
     400: {"model": contract.Refusal,
@@ -949,17 +903,23 @@ async def decide_job(job_id: str, request: Request):
     * **The record says what the system does not know.** The identity object carries `unverified` and the
       Part 11 manifestation marks the printed name absent with the reason stated. See `approvals.py`.
     """
-    session, refusal = _session_for(request)
+    # **The body is read before the session is resolved, and that ordering was the whole bug.** A client
+    # POSTing a decision carries the token in the JSON body, exactly as `POST /jobs` does, and
+    # `_session_for(request)` alone looks only in the header and the query string. Resolving first meant every
+    # approval answered **401 while `GET /jobs/{id}` on the same session answered 200** — a route that looked
+    # like an authentication problem and was a sequencing one. It is the last of four defects on the path that
+    # had never run, and the only one that hid behind a plausible status code.
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "no JSON body", "kind": "no_input"}, status_code=400)
+
+    session, refusal = _session_for(request, body)
     if refusal:
         return refusal
     job = _find_job(job_id, session)
     if job is None:
         return JSONResponse({"error": "no such job", "kind": "not_found"}, status_code=404)
-
-    try:
-        body = await request.json()
-    except Exception:
-        return JSONResponse({"error": "no JSON body", "kind": "no_input"}, status_code=400)
 
     decision = str(body.get("decision") or "").strip()
     reason = str(body.get("reason") or "")
@@ -1010,7 +970,9 @@ async def decide_job(job_id: str, request: Request):
         if plan is not None:
             _workflow_runner(store, plan).resume(job)
 
-    return JSONResponse(job.to_dict(include_result=True), status_code=200)
+    # Re-read, for the same reason `POST /jobs` does: the engine advances the job in the store and not in this
+    # object, so returning it unchanged would show a client the state before the work it just authorised.
+    return JSONResponse((store.get(job.job_id) or job).to_dict(include_result=True), status_code=200)
 
 
 def _generate(session, permit, model: str, question: str, passages: list, budget=None):
@@ -1123,6 +1085,63 @@ def _backoff(attempt: int, retry_after: str | None) -> float:
         except ValueError:
             pass
     return min(2.0 ** attempt * 0.25, 2.0) * (0.5 + random.random())
+
+
+# **Declared AFTER `/approvals`, and the ordering is load-bearing rather than cosmetic.** Starlette matches
+# routes in declaration order, so this wildcard captures `/jobs/{id}/approvals` as `action="approvals"` when it
+# comes first, and the handler then correctly refuses an action it does not know. The approvals route was
+# unreachable that way and had never run once, for any decision.
+#
+# **Nothing else could see it.** `docs/openapi.json` lists both paths, the contract check passes, and every
+# assertion passes, because a schema is generated from the route table and does not know which entry wins a
+# match. Earlier probes got a 401 for a missing session, which is what this handler returns too, so the
+# wildcard's answer looked like the approvals route answering. **Only a request carrying a valid session can
+# tell the two apart**, and until C5 nothing had ever sent one.
+@app.post("/jobs/{job_id}/{action}", responses={
+    200: {"model": contract.Job, "description": "the job after the action"},
+    400: {"model": contract.Refusal, "description": "an action that is not pause, resume or cancel"},
+    401: {"model": contract.Refusal, "description": "no session"},
+    404: {"model": contract.Refusal, "description": "no such job"},
+    409: {"model": contract.Refusal, "description": "**a transition the machine refuses**, named. Resuming "
+                                                   "a cancelled job is the one this exists for."},
+})
+async def control_job(job_id: str, action: str, request: Request):
+    """Pause, resume, or cancel.
+
+    **The refusal is the feature.** A handler that assigned the state directly would happily resume a
+    cancelled job, and the record would then describe work that happened after somebody stopped it.
+    """
+    session, refusal = _session_for(request)
+    if refusal:
+        return refusal
+    job = _find_job(job_id, session)
+    if job is None:
+        return JSONResponse({"error": "no such job", "kind": "not_found"}, status_code=404)
+
+    store = STATE["jobs"]
+    try:
+        if action == "pause":
+            jobs_module.pause(job, store)
+        elif action == "resume":
+            jobs_module.resume(job, store)
+            # A resumed multi-step job continues through the engine rather than the C4 one-step executor.
+            plan = workflow_module.plan_for(job.task)
+            if plan is not None:
+                _workflow_runner(store, plan).resume(job)
+        elif action == "cancel":
+            jobs_module.cancel(job, store)
+        else:
+            return JSONResponse({"error": f"'{action}' is not an action on a job. The three are pause, "
+                                          "resume and cancel.", "kind": "bad_action"}, status_code=400)
+    except jobs_module.TransitionRefused as refused:
+        return JSONResponse({"error": str(refused), "kind": "transition_refused",
+                             "was": refused.was, "wanted": refused.wanted}, status_code=409)
+
+    audit("tool_call", session.subject, session.role, "ok",
+          {"stage": "job", "job_id": job.job_id, "task": job.task, "state": job.state, "action": action,
+           }, tool=job.task)
+    return JSONResponse(job.to_dict(include_result=True), status_code=200)
+
 
 @app.post("/ask/stream", responses={
     200: {
