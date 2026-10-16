@@ -8,19 +8,23 @@ Where something is not built yet, it says so rather than leaving you to discover
 
 **About the examples.** Every command output in this manual is real, taken from a development deployment.
 They were captured at different moments in that deployment's life — most of C1's in the days around
-2026-10-11, and the C2 pages re-captured on 2026-10-13 after a review found five of them quoting a state
-the deployment had left behind. So the event ids, counts and hashes do not agree between sections, and one
-section may show a state that a later purge removed. Read the shape and the wording, not the arithmetic.
-On your deployment the numbers will be your own, which is the point of a hash chain.
+2026-10-11, the C2 pages re-captured on 2026-10-13 after a review found five of them quoting a state
+the deployment had left behind, and the C5 pages on 2026-10-16. So the event ids, counts and hashes do not
+agree between sections, and one section may show a state that a later purge removed. Read the shape and the
+wording, not the arithmetic. On your deployment the numbers will be your own, which is the point of a hash
+chain.
 
-**Status when this was written:** phases C1 and C2 complete. The system runs, answers through a
+**Status when this was written:** phases C1 to C5 complete. The system runs, answers through a
 gateway, records what it did, ships that record off the machine, and can prove the record was not
 altered. It reads a client's documents: ingestion, hybrid retrieval, citation verification, access
-control, egress redaction and retention are sections 13a to 13f, and the assistant API and its routing are 13g and 13h.
+control, egress redaction and retention are sections 13a to 13f, and the assistant API and its routing are
+13g and 13h. It has a client application (13i), an approval gate whose record is honest about the identity
+it cannot verify (13j), two screens built on that record (13k), an email intake connector (13l), and a
+workflow engine that writes the state change and its chain row in one transaction (13m).
 
 Sections 1 to 25 are ordered by when they were written rather than by what a reader needs first, so
-the six C2 pages sit between section 20 and the troubleshooting part rather than beside the audit
-section they are numbered next to. The contents below lists them where they are.
+the appendix pages (13a to 13m) sit between section 20 and the troubleshooting part rather than beside the
+audit section they are numbered next to. The contents below lists them where they are.
 
 ---
 
@@ -64,7 +68,13 @@ of 13 because they are operations like the rest of it.
 **Part 3c, the client app (phase C4)**
 
 13i. The client app
+
+**Part 3d, approvals, workflows and the first connector (phase C5)**
+
+13j. Approvals, and what the record is allowed to claim
+13k. The two screens a person watches work on
 13l. Invoice intake, and the four ways it goes quiet
+13m. The workflow engine, and the transaction that makes the record true
 
 **Part 4, changing things**
 16. The manifest, field by field
@@ -4076,6 +4086,10 @@ written into the page as though it worked.
 **What it is for.** The interface a person in a business actually uses. Ask a question and get an answer with
 its sources. Start a piece of work and watch it happen. Read back what happened afterwards.
 
+**Where its code is.** The app is a repository of its own, and this manual writes that checkout as `<oic-ui>`.
+On this deployment it is `/opt/oic-ui`, cloned by the guide's stage 13i.1; the core's checkout is `/opt/oi-core`.
+A path with `<oic-ui>` in it is on the box, not on your workstation.
+
 **Where it runs.** Its own container on the internal network, port 8080, **with no published port on purpose**,
 for the same reason the API has none. A deployment puts whatever it likes in front; publishing one here would be
 the debug port this project has already paid for once. To look at it from a workstation, forward the port over
@@ -4115,13 +4129,18 @@ no database credential, and it does not know which model answered. That is what 
 retrieval stack and the runtime change underneath without a rewrite here, so it is worth defending when the
 first tempting shortcut appears.
 
-### The three screens, and why there are three
+### The screens, and why each is there
 
 | Screen | What it is | What is behind it |
 |---|---|---|
 | **Ask** | one question, one cited answer, streamed so the first words appear while the rest is written | `POST /ask/stream`, falling back to `POST /ask` |
 | **Do** | the work this deployment can be run, and what happened when it ran | `GET /tasks`, `POST /jobs`, `GET /jobs/{id}` |
+| **Job** | one run, watched: the work is the progress indicator and a stalled job looks stalled | `GET /jobs/{id}`, then `GET /jobs/{id}/events` |
+| **Review** | the decisions waiting for somebody, with the content on screen before the control is offered | `GET /approvals`, and `POST /jobs/{id}/approvals` |
 | **Activity** | the audit chain in plain language, filterable, with each row openable | `GET /activity` |
+
+**The last two arrived with the agentic pack and are described together in section 13k.** They are the two
+screens a person watches work on, and everything either of them shows is read back out of the record.
 
 **Do appears only when the deployment declares tasks.** That is not a UI setting: the app reads `GET /tasks`,
 which reads the manifest. A client without the agentic pack sees no Do screen at all, because a menu of things
@@ -4354,12 +4373,19 @@ permission that has since moved.
 
 ### The sentence a client reads
 
-Not *"Approved by Dana at 2:14pm"*, and not *"A person approved an action"* either. The true sentence is:
+Not *"Approved by Dana at 2:14pm"*, and not *"A person approved an action"* either. The sentence the system
+prints is `approvals.describe()`, and this is it, verbatim apart from the timestamp and the role:
 
-> Approved at 2:14pm under the executive role. The person who approved was not identified: sign-in is not
-> enabled yet.
+> Approved at 2026-10-16T18:18:25+00:00 under the viewer role. The person who decided was not identified:
+> sign-in is not enabled on this deployment, so the system cannot verify who acted.
 
-The second of those false sentences is the one the activity feed rendered until C5, and it asserted something
+Three things in it are load-bearing. It says **decided** rather than approved, because the same sentence has
+to render a denial and a change request. It names the **role** the decision is attributable to, which is what
+the record actually establishes. And it states the reason the name is missing, in the words
+`services/api/approvals.py` holds as `UNVERIFIED_REASON`, so the sentence cannot drift from the record it
+describes.
+
+The second of the false sentences is the one the activity feed rendered until C5, and it asserted something
 the system had not established.
 
 ### Why 21 CFR Part 11 matters here
@@ -4412,6 +4438,13 @@ Total 4210.00 due 2026-11-15 from Ferguson Mechanical Ltd.
 | due | `\bdue\s+([0-9]{4}-[0-9]{2}-[0-9]{2})` | "due" then an ISO date |
 | reference | `\b([A-Z]{2,}-[0-9]{4}-[0-9]{3,})\b` | uppercase letters, a dash, a date, a dash, digits |
 
+**The first three patterns are compiled with `re.IGNORECASE` and the fourth is not.** That is why the block
+above sends `Total` and `4210.00` where the table writes `total`: any casing matches for total, vendor and
+due. The reference pattern is uppercase-only on purpose, because `INV-2026-0417` is what an invoice number
+looks like and a lowercase one is prose rather than an identifier. A reader who sends `total 4210.00 due
+2026-11-15 from Ferguson` matches all four; a reader who sends `inv-2026-0417` matches three and gets an
+empty `reference`, which is not an error because that field is not required.
+
 **A total and a vendor are required and the other two are not.** Failing to match reads as a document problem
 rather than a code problem, which is why this table is here: an agent that gets `unreadable_invoice` on text it
 believes is an invoice will look for a bug in the extractor, and the extractor is doing what it was told.
@@ -4420,6 +4453,40 @@ believes is an invoice will look for a bug in the extractor, and the extractor i
 would also invent a total when the document did not carry one, which is the failure the typed refusal exists
 to prevent. Widening the patterns is a change to the plan and belongs with the intake work, where the
 document arrives as a file rather than as text somebody typed.
+
+### Start a job, and watch it stop at the gate
+
+The API publishes no port, so every command that talks to it runs in a container on `ai-net`. Two commands:
+one mints a session, the other starts the job and prints what the job is doing.
+
+```
+cd /opt/oi-core
+
+# 1. A session. The subject has to be one this deployment declares, and rendered/access.json lists them.
+TOKEN=$(oi run --rm session mint --dev --subject probe-staff@officeinference.com --role viewer --json \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+
+# 2. Start invoice_intake. The input is the message above, flattened onto one line: the plan reads the
+#    text, so the line breaks of an email header are not what it is looking for.
+docker run --rm --network ai-net curlimages/curl -sS -X POST http://api:8088/jobs \
+  -H 'Content-Type: application/json' \
+  -d "{\"session\":\"$TOKEN\",\"task\":\"invoice_intake\",\"input\":\"INV-2026-0417 from accounts@ferguson.example Total 4210.00 due 2026-11-15\"}" \
+  | python3 -c 'import json,sys; j=json.load(sys.stdin); print("state ", j["state"]); print("job_id", j["job_id"]); print("digest", j.get("pending_action_digest","")); print("steps ", " | ".join(s["name"]+" "+s["state"] for s in j["steps"]))'
+```
+
+Expected, from a run on 2026-10-16:
+
+```
+state  awaiting_approval
+job_id 178e4523057540b3bb87d569852c93c9
+digest sha256:5b480b869b4bbb02f…
+steps  read_message succeeded | extract_fields succeeded | draft_action succeeded | approval running
+```
+
+**A job that lands at the gate stops there and stays there until somebody decides.** The role you minted is
+recorded on the job, the digest is what a decision has to quote, and the four steps are one per row in
+`job_steps`. Section 13k is what a person sees while it waits; section 13m is the engine underneath, and the
+command that finishes the run after an approval.
 
 ### Run it
 
@@ -4430,6 +4497,11 @@ docker run --rm --network ai-net --user "$(id -u):$(id -g)" \
   -v /opt/oi-core:/w -w /w --entrypoint python oi-core/session:local \
   /w/scripts/fetch_openapi.py --check
 ```
+
+Expected: `job_probe.py` reports its rights and none regresses, and the contract check prints the twelve
+paths the service serves, `/jobs/{job_id}/approvals` among them, and exits 0. The second command has to run
+on the docker network because it fetches `http://api:8088`, and that name resolves only there; on the host it
+fails with a name resolution error, which reads like a broken service and is a command in the wrong place.
 
 ### If it breaks
 
@@ -4536,14 +4608,25 @@ inside JSX is a rule nobody can check; a rule about an exported function is one 
 
 ### Where the Review queue comes from
 
-`GET /approvals` returns the pending decisions for the session's role, and it is the route the screen is built
-for. A queue derived from the jobs one browser started cannot show an approval to the person whose job it is to
-approve them, which is the entire point of the screen.
+`GET /approvals` returns the jobs waiting at a gate that this session may decide on, newest first, and it is the
+route the screen is built for. A queue derived from the jobs one browser started cannot show an approval to the
+person whose job it is to approve them, which is the entire point of the screen.
 
-**The service does not serve that route yet.** Until it does, the app reads the jobs this browser remembers and
-keeps those in `awaiting_approval`, and the screen states that scope in the sentence above the list rather than
-implying it is the whole queue. An empty queue and a missing route are different facts, and only one of them
-means *nothing is waiting*.
+**The route scopes by access roots, not by role and not by subject.** A job appears if the roots it carries are
+a subset of the roots the session holds, which is the same comparison the retrieval boundary makes everywhere
+else. Roots rather than subject because the subject answers *who asked*, and this question is *who may decide*:
+in a small business the person who approves an invoice is routinely somebody other than the person who started
+the job.
+
+**It does not decide who the right approver is.** Every session holding the roots sees every gate in them, so
+the person who drafted a job may approve it. Separation of duties is a policy this deployment does not yet
+express, and the route records that as a known limit rather than an assumption.
+
+**The route exists, and the app does not call it yet.** `loadQueue()` in `app/src/queue.ts` is the one place
+that decides where a queue comes from, and today it re-reads the jobs this browser remembers and keeps those in
+`awaiting_approval`. That is a strictly smaller answer, and the screen states its scope in the sentence above
+the list rather than implying it is the whole queue. An empty queue and a missing route are different facts, and
+only one of them means *nothing is waiting*.
 
 ### Run it
 
@@ -4652,27 +4735,84 @@ knows. That page is the answer, and it is a deliverable rather than documentatio
 
 ### Install it
 
+Two directories have to exist before the tool will run, and neither does on a fresh box: `/etc/oi-intake`, which
+holds the client's configuration and their credential, and the state directory the record is written to.
+
 ```
 cd /opt/oi-core
-cp services/intake/intake.example.yaml /etc/oi-intake/intake.yaml
-$EDITOR /etc/oi-intake/intake.yaml
-install -m 0600 /path/to/credential.json /etc/oi-intake/credential.json
+
+# Owned by the account that runs the tool. The tool creates state_dir itself when it can, but a path Docker
+# creates for a missing mount belongs to root, and then the first write fails with a permission error that
+# reads like a code defect (runbook A.2b).
+sudo install -d -m 0700 -o "$USER" /etc/oi-intake
+sudo install -d -m 0700 -o "$USER" /var/lib/oi-intake
+
+sudo cp services/intake/intake.example.yaml /etc/oi-intake/intake.yaml
+sudoedit /etc/oi-intake/intake.yaml
+
+# The credential. `secretstore.write` is the reader's own writer, so the mode it sets (0600) and the mode
+# the reader enforces are one fact rather than two that agree today.
+~/venv/bin/python - <<'PY'
+import sys
+sys.path.insert(0, "services/intake")
+import secretstore
+secretstore.write("/etc/oi-intake/credential.json", {
+    "client_id":     "<the app registration's Application (client) ID>",
+    "tenant_id":     "<the client's tenant id>",
+    "refresh_token": "<from the one interactive sign-in as the mailbox>",
+    "client_secret": "<the client secret Value, when this build uses one>",
+})
+PY
 ```
 
-Edit six things in the configuration: `client.domains`, `identity.tenant_id` and the app's `client_id`,
-`mailbox.address`, `secret_store.path`, `intake.documents_root` and `intake.state_dir`, and
-`alerts.recipients`. Every value is the client's. The file says so at the top and the check below enforces it.
+**What `credential.json` holds, and it is the whole shape.** Three keys are required and the reader refuses the
+file without any of them: `client_id`, `tenant_id` and `refresh_token`. Two are optional: `client_secret`, and
+`certificate_path` for a certificate this build refuses rather than pretends to support. Nothing else in the
+file is read.
+
+**No command in this repository mints that file, and that is not an oversight.** Its one secret is the refresh
+token, and a refresh token exists only after a single interactive sign-in by the client's administrator as the
+mailbox — a step that cannot be automated on a machine that has never been signed into. That sign-in is the
+producer; `secretstore.write` above is what puts the result on disk in the shape and mode the reader demands.
+
+**Every value in the configuration is the client's, and these are the ones a new deployment has to change.**
+`deployment_id`; `client.name` and `client.domains`; `identity.tenant_id`, the app's `display_name`, `client_id`
+and `tenant_id`, and the consent's `tenant_id`; `mailbox.address`; `secret_store.path`;
+`intake.documents_root`, `intake.root`, `intake.state_dir` and `intake.share`; `intake.allowlist` and
+`reach.second_mailbox`; and `alerts.recipients` with the SMTP block when `alerts.transport` is `smtp`.
+`intake.quiet_hours` and `intake.volume_floor` come from the client's real invoice rhythm rather than from the
+defaults. The file says so at the top and the check below enforces it.
 
 ### 13l.1 Check the configuration and cut the cord, before the first poll
 
 ```
-python3 services/intake/intake.py check-config --config /etc/oi-intake/intake.yaml
-python3 services/intake/intake.py cord-check --config /etc/oi-intake/intake.yaml
+~/venv/bin/python services/intake/intake.py check-config --config /etc/oi-intake/intake.yaml
+~/venv/bin/python services/intake/intake.py cord-check --config /etc/oi-intake/intake.yaml
 ```
 
-You should see the five components with `client` beside each, then:
+`check-config` prints the path, the deployment and the five components with the owner each declares. On the
+example configuration, with the credential path in it:
 
 ```
+ok   /etc/oi-intake/intake.yaml
+     deployment acme-2026, client Acme Tool & Die
+     intake address     client   ap@acmetool.example
+     mailbox            client   ap@acmetool.example (regular_user, exchange_online)
+     app registration   client   AP Invoice Intake in tenant 00000000-0000-0000-0000-000000000000
+     consent grant      client   granted by client in tenant 00000000-0000-0000-0000-000000000000
+     credential         client   /etc/oi-intake/credential.json
+```
+
+`cord-check` prints the same five with a mark beside each, then the three checks that are about the network
+rather than about a component, and then `no cord`:
+
+```
+ok   Acme Tool & Die (acme-2026)
+     ok   intake address     client   ap@acmetool.example
+     ok   mailbox            client   ap@acmetool.example (regular_user, exchange_online)
+     ok   app registration   client   AP Invoice Intake in tenant 00000000-0000-0000-0000-000000000000
+     ok   consent grant      client   granted by client in tenant 00000000-0000-0000-0000-000000000000
+     ok   credential         client   /etc/oi-intake/credential.json
      ok   host allowlist      login.microsoftonline.com, graph.microsoft.com
      ok   a host we control is refused before a socket is opened
      ok   no licence server, update check or telemetry in the configuration
@@ -4691,31 +4831,63 @@ four mistakes in it should take one pass rather than four.
 
 ### 13l.2 The first poll
 
+`migrate` applies intake's own table and `fetch` reads the mailbox. Neither runs from the host shell: the
+compose file assembles `DATABASE_URL` for containers, so the variable the host has is empty and
+`--dsn "$DATABASE_URL"` there is `--dsn ""`. Run them in a container on the deployment's network, which is
+where the variable is set and where `postgres` resolves.
+
 ```
-python3 services/intake/intake.py migrate --dsn "$DATABASE_URL"
-python3 services/intake/intake.py fetch --config /etc/oi-intake/intake.yaml
+cd /opt/oi-core
+
+# The table. intake has a Dockerfile of its own and no compose service yet, so the run names an image that
+# carries what the tool imports: a YAML parser and the Postgres driver. `eval` is that image on this box.
+oi run --rm --entrypoint sh -v /opt/oi-core:/w:ro -w /w eval -c \
+  'python /w/services/intake/intake.py migrate --dsn "$DATABASE_URL"'
+
+# The poll. It needs the network and the client's four paths, and nothing from the database.
+oi run --rm --entrypoint sh -v /opt/oi-core:/w:ro -w /w \
+  -v /etc/oi-intake:/etc/oi-intake:ro \
+  -v <intake.documents_root>:<intake.documents_root> \
+  -v <intake.state_dir>:<intake.state_dir> \
+  eval -c 'python /w/services/intake/intake.py fetch --config /etc/oi-intake/intake.yaml'
 ```
 
-`fetch` reads the mailbox once and exits. It writes one row per attachment: `deposited` for a document it has
-not seen, `duplicate` for content it already holds, and `already` for a message it read on an earlier poll.
+**`fetch` prints one JSON object for the poll and exits — one object, not a line per message.** Two of its keys
+count messages and five count attachments:
+
+| Key | Counts | Means |
+|---|---|---|
+| `messages_seen`, `no_attachment` | messages | what the folder listing returned, and how many of those carried no attachment |
+| `attachments` | attachments | how many the messages carried in total |
+| `deposited` | attachments | a document intake has not seen. **This is the one that writes a row and deposits a file** |
+| `duplicates` | attachments | content it already holds under a different message. It writes a row with `duplicate_of` pointing at the first, and deposits nothing |
+| `already` | attachments | an attachment on a message read on an earlier poll. **It writes no row at all**, which is why a second poll can report `already: 4` and leave the record the same size |
+| `marked` | attachments | the deposited ones whose sender verdict was `marked` rather than `trusted`. It is a count of a verdict, not a fourth outcome |
+| `last_error` | — | null on a clean poll, or the classified failure the heartbeat recorded |
 
 **A first poll looks back fourteen days**, which is bounded on purpose. A mailbox with five years of history
 in it should not be ingested on the day the connector is switched on.
 
-**Put it on a timer** once the output looks right:
+**Put `fetch` on a timer** once the output looks right. The unit runs `fetch` and not `watch`: a timer restarts
+itself and a loop does not, and every successful poll writes the heartbeat the monitor reads either way.
 
 ```
-python3 services/intake/intake.py watch --config /etc/oi-intake/intake.yaml
-```
+# what the timer runs
+~/venv/bin/python services/intake/intake.py fetch --config /etc/oi-intake/intake.yaml
 
-`watch` polls on `intake.poll_seconds` and writes a heartbeat on every success. Prefer the timer to the loop
-on a box that reboots: a timer restarts itself and a loop does not.
+# the same poll in a loop on intake.poll_seconds, for a session where you are watching by hand
+~/venv/bin/python services/intake/intake.py watch --config /etc/oi-intake/intake.yaml
+```
 
 ### 13l.3 What the record holds, and how to read it
 
 ```
-python3 services/intake/intake.py status --config /etc/oi-intake/intake.yaml
-python3 services/intake/intake.py verify-manifest --config /etc/oi-intake/intake.yaml --dsn "$DATABASE_URL"
+~/venv/bin/python services/intake/intake.py status --config /etc/oi-intake/intake.yaml
+
+# Same container and the same reason as 13l.2: the DSN exists inside the network and not on the host.
+oi run --rm --entrypoint sh -v /opt/oi-core:/w:ro -w /w \
+  -v /etc/oi-intake:/etc/oi-intake:ro eval -c \
+  'python /w/services/intake/intake.py verify-manifest --config /etc/oi-intake/intake.yaml --dsn "$DATABASE_URL"'
 ```
 
 `status` counts what is there and when the record last moved. `verify-manifest` compares the hash intake
@@ -5382,17 +5554,18 @@ is explained.
 | C1 | The record: gateway, keys and budgets, the hash-chained audit record, export and anchoring | **Built.** Sections 11 to 14 |
 | C2 | Reading documents: Docling ingestion with OCR and tables, Qdrant, embeddings and reranking, hybrid search, and the verifier that checks every citation | **Built.** Sections 13a to 13f |
 | C3 | The assistant API: sessions, roles from tokens, streaming, retries, a degraded mode when the provider throttles, and routing that keeps a one-way data boundary | **Built.** Sections 13g and 13h |
-| C4 | The client application: Ask, Do, Review, Activity | Not built |
-| C5 | Workflows and the first connector, with an approval gate | Not built |
+| C4 | The client application: Ask, Do, Review, Activity | **Built.** Section 13i |
+| C5 | Workflows and the first connector, with an approval gate | **Built.** Sections 13j to 13m |
 | C6 | The agent runtime and the MCP gateway | Not built |
 | C7 | Ingress, TLS, identity, and the Terraform that creates a client's account | Not built |
 | C8 | Alarms, backups, a restore drill, the sixty golden questions, vulnerability scanning, drift reporting | Not built |
 | C9 | The demonstration | Not built |
 
-**What exists today, said plainly.**the data-class gate refuses a request whose content may not reach a remote model**What does not exist, and this is the honest gap.** There is no user interface. **The assistant API does
-exist** — one endpoint in front of every capability, with sessions, streaming, a data-class gate and a
-degraded answer when the model will not answer — and sections 13g and 13h document it. **Section 13b
-documents the retrieval function underneath it**, which is the developer's path for looking at retrieval on
-its own rather than through a question. What is missing is anything a person sits in front of: the client
-application is C4 and the workflows are C5. So a client application can be written against this today, and a
-person cannot yet use it without one.
+**What exists today, said plainly.** The data-class gate refuses a request whose content may not reach a
+remote model. **What does not exist, and this is the honest gap.** There is no sign-in: a session is a token
+minted by a development command, so the record can say which role acted and cannot say which person did.
+There is no ingress and no TLS, so the API publishes no port and every client reaches it from inside the
+deployment's network. There is no backup, no restore drill and no alarm set. **Everything else on the list
+above is built**, and each phase's page says what it could not prove when it was written: the client
+application is 13i, the approval gate and its record are 13j and 13k, the email intake connector is 13l, and
+the workflow engine is 13m.
