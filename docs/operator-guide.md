@@ -2486,9 +2486,24 @@ the run says so, because a record telling a client their data is gone while cont
 worst kind of false claim. The fix is at deployment time, not here: a `hash` content mode never stores
 content, so there is nothing to leave behind.
 
-**`destroy-all` does not delete the client's documents from disk.** Their folder is theirs; deleting the
-copies the system holds is what this does. If the contract requires the corpus removed as well, that is a
-separate, deliberate act, and it is not this command.
+**`destroy-all` deletes the client's documents from disk, and this paragraph said the opposite until
+2026-10-16.** The behaviour changed in `bfe6968`, forty-seven minutes after the paragraph was written, and
+twenty later edits to this file did not revisit it. **Read the correction rather than the history: the files
+go.** The command removes every file under the documents root, and the reasoning is in `retention.py`: a
+teardown is the end of the contract, the client has asked for their data to be gone, and a teardown that
+cleared every index and left the documents sitting in their folder is the same defect as a retention period
+that only hid a file. The record names the store as `documents` under the verb `deleted`.
+
+**So the folder is not a backup, and an operator who wants the indexes cleared before a re-ingest must move
+the files first.** That is the mistake this paragraph would have caused: read the old claim, destroy the
+indexes expecting the corpus to survive, and lose the only copy. If the intent is to re-ingest, copy the
+documents somewhere outside the root before running this.
+
+**And it cannot clear everything, so it will usually report `complete: false` and exit 1.** The audit table is
+append-only and the hash chain covers the stored payload, so content in there is not destroyed by this run or
+by any later one; the record reports how many rows still hold content under `still_stored` and says so in a
+note. That is the command telling the truth rather than a failure to fix. A deployment whose answers must be
+destroyable keeps content out of the chain with a `hash` content mode, which is a deployment-time decision.
 
 ## 15b. The destruction record
 
