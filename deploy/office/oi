@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# `oi` — the short form of every compose command this deployment documents.
+#
+# **Why this exists, and it is not convenience.** The documentation referred to `oi` more than a hundred
+# times -- `oi run`, `oi build`, `oi ps`, `oi up`, `oi restart` -- and **`oi` did not exist.** Not on the box,
+# not in the repository, not as an alias. Every one of those commands failed with `command not found`, and
+# the one that mattered is the procedure for updating a deployment:
+#
+#     cd /opt/oi-core
+#     git pull
+#     oi build audit keys
+#
+# That is how the retention image came to be running code from before 13 October while `main` had the fix.
+# A teardown on that deployment cleared every index, wrote a destruction record, and left all 10,033 client
+# documents on disk, because the code that removes them was in the repository and not in the image. The step
+# that would have rebuilt it could not be run.
+#
+# The project has met this before. The C4 notes record a probe runner that "could not work as printed" and
+# call it the third time a reviewer hit one. A documented command that cannot run is worse than no
+# documentation, because it converts a missing step into a step somebody believes they performed.
+#
+# So this is the wrapper the documents already assume. It knows the compose file, the rendered environment
+# and which verbs need the tools profile, because those are the three things a person gets wrong by hand and
+# the reason the short form exists at all.
+#
+#     oi build api              build one service
+#     oi build audit keys       build several, including tools
+#     oi up -d api              start one
+#     oi run --rm audit anchor  run a tool
+#     oi ps                     what is running
+#     oi logs -f api            follow a log
+#     oi restart api            bounce one
+#
+# Anything not listed is passed to `docker compose` with the same file and environment, so
+# `oi exec postgres psql -U oicore` works without this script knowing what `exec` is.
+set -euo pipefail
+
+# Resolve the repository root from this script's own location, following symlinks, so `oi` works when it is
+# symlinked into /usr/local/bin. `readlink -f` is the whole reason the install line is a symlink rather than a
+# copy: a copy drifts the moment the repository is pulled.
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+REPO="$(cd "$(dirname "$SELF")/../.." && pwd)"
+
+COMPOSE="${OI_COMPOSE:-$REPO/deploy/office/compose/docker-compose.yml}"
+ENVFILE="${OI_ENV:-$REPO/rendered/env}"
+
+VERB="${1:-}"
+if [ -z "$VERB" ] || [ "$VERB" = "help" ] || [ "$VERB" = "--help" ] || [ "$VERB" = "-h" ]; then
+  sed -n '3,32p' "$SELF" | sed 's/^# \?//'
+  exit 0
+fi
+shift
+
+if [ ! -f "$COMPOSE" ]; then
+  echo "oi: no compose file at $COMPOSE" >&2
+  echo "    This script expects to live in the repository, at deploy/office/oi." >&2
+  exit 2
+fi
+if [ ! -f "$ENVFILE" ]; then
+  # The rendered environment holds the generated secrets. Without it compose substitutes empty strings and
+  # starts a database with no password, which fails in a way that reads like a broken image.
+  echo "oi: no rendered environment at $ENVFILE" >&2
+  echo "    Run the render step for this deployment first; compose reads its variables from there." >&2
+  exit 2
+fi
+
+# **The tools profile is per-verb, and the split is deliberate.** `audit`, `keys`, `retention`, `session` and
+# `eval` are one-shot commands behind the `tools` profile, so building, running or listing them needs the
+# profile enabled. `up` must NOT enable it: these services have no long-running command, and `up` with the
+# profile on would start containers whose job is a single command that has already finished.
+case "$VERB" in
+  build|run|ps|logs|images|config)
+    PROFILE=(--profile tools)
+    ;;
+  *)
+    PROFILE=()
+    ;;
+esac
+
+exec docker compose -f "$COMPOSE" --env-file "$ENVFILE" "${PROFILE[@]}" "$VERB" "$@"
