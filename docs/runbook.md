@@ -4603,13 +4603,25 @@ identified: sign-in is not enabled yet."*
 
 ```
 cd /opt/oi-core
-bash scripts/probe.sh jobs_probe.py
-python3 scripts/fetch_openapi.py --check
+bash scripts/probe.sh job_probe.py        # the C4 job interface, which this step must not have broken
+python3 scripts/fetch_openapi.py --check  # the contract, including the new path
 python3 -m pytest tests/ -q
 ```
 
-Expected: the contract check lists `/jobs/{job_id}/approvals` among the paths, the probe drives a job to the
-gate, approves it, and finds the approval inside the hash chain rather than beside it.
+Expected: `job_probe.py` reports its rights and none regresses, and the contract check names
+`/jobs/{job_id}/approvals` among the paths it verified.
+
+**What this step cannot yet prove, said plainly.** The probe drives the C4 one-step executor, and **that
+executor never reaches the gate**, because reaching it needs a multi-step run and the engine is the next
+piece. So the approval route is verified here for its shape, its refusals and its presence in the contract,
+and its end-to-end path is verified by the workflow piece. A page that claimed otherwise would be describing
+a test that does not exist.
+
+**The probe name was wrong when this step was first written**, and it is worth recording how it was caught.
+The page said `jobs_probe.py` and the file is `job_probe.py`, so the documented command failed with no such
+file. Step 4 of the four activities, following your own page, is what found it, within the hour. This project
+has now hit a documented command that cannot run four times, and each one was found by somebody running it
+rather than reading it.
 
 **If it breaks.**
 
