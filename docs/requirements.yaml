@@ -1758,6 +1758,374 @@ items:
       A second mailbox, the directory, a profile and another service all answer 403, and a write method is refused in code before it is sent.
     status: verified
 
+  # ---- C6: the agent runtime and the MCP gateway --------------------------------------------
+  # The design is docs/decisions/0002-agent-topology.md, written 2026-10-09 and never naming C6: one
+  # runtime per deployment, no swarms (NEVER-SWARM-001), sub-agents with hierarchical ownership, and
+  # two modes. C6 replaces the plan, not the engine, so the transaction, the gate, the event log and
+  # the approval route are C5's and are reused rather than rebuilt.
+  # Every row is subject to BIZ-INDEPENDENT-001 unless its note says otherwise. The exit criterion is
+  # an agent task with a sub-agent and a human checkpoint, from build-plan.md and build-brief.md.
+  # The gateway is chosen and not yet deployed. ContextForge is named in build-plan.md and
+  # build-brief.md; nothing has run it, measured it or put a connector behind it. Every MCP- row below
+  # will therefore be proved against a stand-in connector unless a real one exists in the client's
+  # estate, and that limit belongs on the rows rather than in a reader's assumption.
+
+  - id: AG-LOOP-001
+    title: An agent task runs a loop of steps, each of which may call tools, and every step is a row in the record
+    tier: [cloud, hosted, office]
+    phase: C6
+    verify: >-
+      run an agent definition that needs at least three tool calls; the task has one job row, a step row
+      per step, and a chain row naming the task id for every step and every tool call, and verify_chain
+      passes afterwards. A tool call with no step row, or a step row with no chain row, fails. The run is
+      bounded by the job's existing time and attempt budgets rather than by the model deciding to stop.
+    status: open
+    note: >-
+      The loop is the one thing a workflow plan cannot express, and it is the only part of the engine C6
+      replaces. The unit of work is C5's: the state change, the event and the chain row in one
+      transaction, so a kill between them leaves neither present.
+
+  - id: AG-CHECKPOINT-001
+    title: A task run survives a restart mid-task and resumes from its last recorded step
+    tier: [cloud, hosted, office]
+    phase: C6
+    verify: >-
+      kill the runtime between two steps of an agent task; restart it; the run continues from the first
+      step without a succeeded row, no step that already ran runs again, and the record shows the resume.
+      A run that starts its work over, and a resume with no checkpoint row, both fail.
+    status: open
+    note: >-
+      C5's engine derives position from the succeeded step rows rather than a cursor column, and C6
+      inherits that. The row exists because "it resumed" and "it started over and nobody noticed" look
+      identical from outside the record.
+
+  - id: AG-MODES-001
+    title: Conversational mode and task mode are separate budgets, and a conversational turn cannot become a long run
+    tier: [cloud, hosted, office]
+    phase: C6
+    verify: >-
+      a conversational turn returns inside the conversational deadline and offers no approval gate; a task
+      run may exceed that deadline and stops at a gate. A conversational request that produces a task-mode
+      run, and a task run that inherits the conversational deadline, both fail.
+    status: open
+    note: >-
+      0002-agent-topology.md: two modes inside one runtime, with different prompts, timeouts and model
+      roles. The interface already has the two verbs, Ask and Do, so this row is what keeps a slow task
+      from being refused as a slow question and a question from holding a task's budget.
+
+  - id: AG-RUNTIME-001
+    title: One agent runtime per deployment, holding the sessions, the tool policy and the audit path
+    tier: [cloud, hosted, office]
+    phase: C6
+    verify: >-
+      the deployment runs one runtime service; every definition's runs land in one job store, one event log
+      and one policy document; and a manifest that declares a second runtime is refused by validation
+      rather than deployed. The test fails if two processes can both claim a task, or if a definition's
+      runs appear in a second store.
+    status: open
+    note: >-
+      0002: exactly one runtime, because a second one means a second audit path, a second policy and two
+      places for a bug to hide. What varies per deployment is definitions (0 to 6) and concurrent runs
+      (1 to 5), not runtimes.
+
+  - id: AG-QUEUE-001
+    title: Several definitions run at once inside one runtime, and concurrency is a queue setting
+    tier: [cloud, hosted, office]
+    phase: C6
+    verify: >-
+      start more runs than the configured concurrency; the extra runs wait in queued rather than being
+      refused or run past the limit, every accepted run has a job row from the moment it is accepted, and
+      its position is readable. A run that is accepted and then lost, and a runtime that ignores the
+      limit, both fail.
+    status: open
+    note: >-
+      0002's third reason for one runtime: concurrency is a queue setting, not another service. The job
+      state machine already has queued, so this row is what stops a busy deployment from becoming a second
+      deployment.
+
+  - id: AG-CONTEXT-001
+    title: A long run's context stays inside the model's window, and what left it is recorded
+    tier: [cloud, hosted, office]
+    phase: C6
+    verify: >-
+      run a task whose tool results exceed the model's window; the prompt stays under the configured
+      ceiling, the run completes, and the chain says what was summarised or dropped and when. A run that
+      truncates without recording it fails.
+    status: open
+    note: >-
+      Item 3 of 0002's list of what a long job needs. The record matters because the first question after a
+      wrong answer is whether the model saw the material, and a silent truncation is indistinguishable
+      from a model that ignored it.
+
+  - id: AG-VERIFY-001
+    title: A run establishes that it worked before it reports success
+    tier: [cloud, hosted, office]
+    phase: C6
+    verify: >-
+      an agent definition whose last step checks the run's own outcome; a run whose check fails ends failed
+      with a typed cause, and the step after the check has no row. A run that reports success because the
+      model described the work it intended to do fails the row.
+    status: open
+    note: >-
+      Item 4 of 0002's list. The failure this rules out is the confident summary, which reads exactly like a
+      completed task in every screen and every record field except the one that says it failed.
+
+  - id: AG-CHILD-READS-001
+    title: No sub-agent performs a side effect; every action belongs to the parent
+    tier: [cloud, hosted, office]
+    phase: C6
+    verify: >-
+      give a child a brief whose only completion path is a tool with a side effect; the tool is refused for
+      the child or absent from its scope, the parent performs the action after the child returns, and no
+      chain row records a side effect against a child span. The test asserts the absence at the child,
+      because a system where both can act passes a test that only checks the parent acted.
+    status: open
+    note: >-
+      Rule 1 of six in 0002, and the load-bearing one: children read, parents act, so approvals and
+      irreversibility have exactly one owner. A child that can send an email makes the approval gate
+      advisory, because the gate cannot see inside a child's run.
+
+  - id: AG-CHILD-RETURN-001
+    title: A sub-agent returns facts with citations rather than prose
+    tier: [cloud, hosted, office]
+    phase: C6
+    verify: >-
+      a child's return is a structured record whose facts each name the source they came from, and the
+      parent's later step cites one of them; a child returning free text with no sources fails. The parent's
+      action names the return it used.
+    status: open
+    note: >-
+      Rule 3 of six. It is also what keeps the parent's context bounded, which is the reason sub-agents
+      exist: a parent that has to re-read a transcript has paid for the child twice.
+
+  - id: AG-CHILD-BUDGET-001
+    title: A sub-agent has its own budget, and overspending it stops the child rather than the deployment
+    tier: [cloud, hosted, office]
+    phase: C6
+    verify: >-
+      give a child a token budget and a wall-clock budget; a child that exceeds either is stopped with a
+      typed cause, the parent continues or fails by its own rule, and the record carries the child's spend.
+      A child's spend that does not appear in the parent's total fails, because an untraceable bill is the
+      failure this row exists for.
+    status: open
+    note: >-
+      Rule 4 of six. Child spend counts against the deployment's budgets. A sub-agent that costs nothing to
+      start is a sub-agent that gets used instead of a cheaper search.
+
+  - id: AG-CHILD-DEPTH-001
+    title: Depth is one; a sub-agent cannot spawn a sub-agent
+    tier: [cloud, hosted, office]
+    phase: C6
+    verify: >-
+      a child that attempts to spawn a grandchild is refused with a cause naming the depth limit, and the
+      attempt is recorded. The test fails if a third-level span exists anywhere in the record.
+    status: open
+    note: >-
+      Rule 5 of six, and the line between sub-agents and the swarms NEVER-SWARM-001 rules out. A tree of
+      unknown depth is where "what did the system do" stops having an answer a person can follow.
+
+  - id: AG-GATE-001
+    title: A tool call with an irreversible effect stops for approval, quoting the exact call it is about
+    tier: [cloud, hosted, office]
+    phase: C6
+    verify: >-
+      an agent task whose step would send an email or post an entry stops at awaiting_approval with a digest
+      over the exact tool call, meaning the tool name and its arguments; assert nothing was sent, approve
+      quoting the digest, and assert it was applied exactly once; then change one argument and assert the
+      decision is refused with 409 approval_drift. The test asserts the absence before approval, because a
+      test that only checks the send afterwards passes on a system that sends twice.
+    status: open
+    note: >-
+      APR-IRREVERSIBLE-001 extended from workflow steps to tool calls, and it reuses C5's gate rather than
+      adding a second one: same digest, same route, same record. A tool call can do damage a workflow step
+      never could, which is why the gate is the point of the phase rather than a feature of it.
+
+  - id: AG-SEAM-001
+    title: An agent task is a job, using the same store, event log, approval route and pause, resume and cancel actions
+    tier: [cloud, hosted, office]
+    phase: C6
+    verify: >-
+      start an agent task, pause it, resume it and cancel it through the C5 routes; each action leaves the
+      same rows a workflow leaves, and a decision on its gate goes through POST /jobs/{job_id}/approvals
+      with no agent-specific route. A second state machine, a second approvals path or a second event log
+      fails the row.
+    status: open
+    note: >-
+      Manual 13i says pause, resume and cancel are the seam C6's multi-step executor plugs into, and manual
+      13m says C6 replaces the plan and not the engine. The row is here so the seam is used rather than
+      re-implemented, which is the cheaper mistake to make at the start of a phase.
+
+  - id: AG-DEFS-001
+    title: Agent definitions come from the packs the client bought, and an undeclared task is refused by name
+    tier: [cloud, hosted, office]
+    phase: C6
+    verify: >-
+      a deployment with no agentic pack exposes no definitions and POST /jobs refuses the task by name; a
+      deployment with the pack lists each definition with the role that answers it and the tools it may use.
+      A task that runs without a declared definition fails.
+    status: open
+    note: >-
+      0002 gives 0 to 6 definitions depending on the pack, so an office build with Document Chat and
+      Workflows has one runtime with nothing to run. That is the correct outcome, and the refusal is what
+      makes it visible rather than a menu of things that cannot work.
+
+  - id: MCP-REGISTRY-001
+    title: Tools are declared per deployment, and an undeclared tool is refused by name
+    tier: [cloud, hosted, office]
+    phase: C6
+    verify: >-
+      call a tool the deployment does not declare; the refusal names the tool and says it is not declared
+      for this deployment, the refusal is recorded, and the connector sees no request. The set the registry
+      reports and the set the manifest declares are equal, and a tool present in one and absent from the
+      other fails.
+    status: open
+    note: >-
+      Silently unavailable is the failure this rules out. A model that cannot see a tool answers from memory
+      instead, and nothing in the run says so.
+
+  - id: MCP-CREDS-001
+    title: Each connector has its own credential, held in the client's store and absent from the image, the environment and the record
+    tier: [cloud, hosted, office]
+    phase: C6
+    verify: >-
+      rotate one connector's credential; the next call uses the new value with no redeploy, the old value
+      fails, neither value appears in the record or in a container environment, and a store file another
+      account can read is refused. The same shape as SEC-CON-001, per connector.
+    status: open
+    note: >-
+      One shared credential for every connector makes tool-level policy unenforceable in practice, because
+      every connector can then do everything the credential reaches. The gateway is ContextForge, decided in
+      build-plan.md and build-brief.md; the credentials stay the client's.
+
+  - id: MCP-POLICY-001
+    title: Tool-level policy is enforced at the gateway, before the connector is reached
+    tier: [cloud, hosted, office]
+    phase: C6
+    verify: >-
+      a session whose role does not hold a tool's policy gets a refusal, the connector receives no request,
+      asserted by counting requests at the connector rather than by reading the refusal, and the refusal is
+      recorded with the tool and the reason. A policy that lives only in the prompt the model sees fails.
+    status: open
+    note: >-
+      system-design.md's one place where tools are registered, scoped and logged. The prompt is a
+      convenience for the model and the gateway is the control. C5 paid for this distinction once already,
+      when a route that existed and passed every schema check had never run.
+
+  - id: MCP-OWNED-001
+    title: The MCP gateway and every connector live in the client's estate, and tool calls keep working when we are gone
+    tier: [cloud, office]
+    phase: C6
+    verify: >-
+      every connector endpoint and the gateway are in the client's accounts or tenants; a gateway or
+      connector endpoint we operate is refused by a check of the same kind intake's cord-check makes; and
+      with every hostname we control blocked at the resolver, a tool call still completes. The test fails if
+      any C6 component lives with us.
+    status: open
+    note: >-
+      BIZ-INDEPENDENT-001 applied to C6, and the same reasoning that killed the hosted intake address in C5:
+      a client who takes the system over cannot depend on a registry we run. **The tier is cloud and office
+      rather than all three, and that is the limit stated plainly**: Standard Cloud Hosted runs in our
+      account by definition, so this row constrains the components that are the client's wherever the stack
+      sits, and it does not pretend a hosted deployment is independent of us.
+
+  - id: MCP-EGRESS-001
+    title: A tool call that carries client content off the machine is gated by the data class and recorded
+    tier: [cloud, hosted, office]
+    phase: C6
+    verify: >-
+      with the frontier lane off, a remote tool called for a regulated data class is refused and the
+      connector sees no request; with the lane on, the call is allowed only after the existing egress gate
+      has seen it, and the record carries what left and the redaction summary. A remote tool call that
+      reaches a third party with regulated material and no gate fails.
+    status: open
+    note: >-
+      The rule SEC-REDACT-001 and the egress gate already apply to model calls, extended to tools, because a
+      connector is a second door out of the building. For the office build this is the product's defining
+      constraint rather than a compliance option.
+
+  - id: AUD-TOOL-001
+    title: Every tool call is in the chain, and every chain row traces to a tool call
+    tier: [cloud, hosted, office]
+    phase: C6
+    verify: >-
+      run a task that calls tools, then count what the connector saw and what the chain holds; the two
+      agree. Each row carries the tool, the connector, a digest of the arguments, the outcome, the duration
+      and the session, and verify_chain passes. A call with no row, and a row with no call, both fail.
+    status: open
+    note: >-
+      C5's AUD-WF-001 makes this claim for a workflow's own steps; this is the same claim one layer out,
+      where a third party enters the system. The digest is of the arguments rather than the arguments
+      themselves, so a credential or a client's document is not copied into the record twice.
+
+  - id: AUD-SPAN-001
+    title: Every sub-agent span sits under its parent task id, with its brief, its tools and its result
+    tier: [cloud, hosted, office]
+    phase: C6
+    verify: >-
+      after a run with two children, the chain holds the spawn, the brief, every tool call and the return
+      for each child, all addressable from the parent task id, and verify_chain passes. A child span with no
+      parent row, and a parent row naming a child that has no span, both fail.
+    status: open
+    note: >-
+      Rule 6 of six, and the difference between a sub-agent and a swarm: control never leaves the parent and
+      neither does the record. It is what lets a client ask what a run did and get one answer rather than a
+      transcript per child.
+
+  - id: AUD-CHECKPOINT-001
+    title: A checkpoint is a chain row, and a resume from one is recorded
+    tier: [cloud, hosted, office]
+    phase: C6
+    verify: >-
+      resume a run from a checkpoint; the chain holds the checkpoint row naming the step position it
+      recorded, the steps after it chain from it, and verify_chain passes. A resume that leaves no row, and
+      a checkpoint naming a position the step rows contradict, both fail.
+    status: open
+    note: >-
+      The checkpoint is the artifact that separates "the run continued" from "the run started over", and it
+      is the row a support call reads first.
+
+  - id: AUD-MODEL-001
+    title: Every model call the runtime makes is addressable by the task and step that caused it
+    tier: [cloud, hosted, office]
+    phase: C6
+    verify: >-
+      run a task with several model calls; each call appears in the gateway's spend log and is copied into
+      the chain with the task id and the step, and a model call that cannot be traced to a task fails. A
+      runtime that reaches a model without going through the gateway fails the row.
+    status: open
+    note: >-
+      The gateway is the enforcement point for models, budgets and the data class, so the runtime cannot
+      hold a second model client. This is also where the cost of a long run becomes visible per task rather
+      than per deployment.
+
+  - id: SEC-AGENT-001
+    title: A sub-agent cannot hold authority its parent lacks, and a spawn that asks for more is refused
+    tier: [cloud, hosted, office]
+    phase: C6
+    verify: >-
+      spawn a child naming a tool the parent does not hold; the spawn is refused with a cause naming the
+      tool and the attempt is recorded. Then give a child a strict subset of the parent's tools and assert
+      a call outside it is refused where the call is made rather than discouraged in the child's brief. A
+      child whose scope is enforced only by its instructions fails the row.
+    status: open
+    note: >-
+      Rule 2 of six. If a child can do more than its parent, the parent's policy is not the deployment's
+      policy, and the difference is invisible in every screen that shows what the parent may do.
+
+  - id: SEC-MCP-001
+    title: The gateway refuses a call that carries no session the deployment would accept
+    tier: [cloud, hosted, office]
+    phase: C6
+    verify: >-
+      call the gateway with a connector credential and no session, with an expired session, and with a role
+      supplied in the call's body; all three are refused and recorded. A tool call that reaches a connector
+      without a session row fails.
+    status: open
+    note: >-
+      The same guard SEC-APR-001 and SEC-AUTH-001 place on the API, repeated at the gateway because a tool
+      call does not always pass through the API. Two places making one claim is a cost, and the alternative
+      is a second door with a different lock.
+
   - id: NEVER-KB-001
     title: No managed knowledge base
     tier: [cloud, hosted]
