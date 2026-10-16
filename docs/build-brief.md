@@ -451,7 +451,7 @@ fails when an item has no phase or no verification. **The build is not done whil
 
 | # | Blocker |
 |---|---|
-| 1 | **n8n's Sustainable Use License.** It does not clearly permit deploying n8n into a client's building as part of a paid build. Get it in writing or replace it with Windmill, Temporal, or small services we own |
+| ~~1~~ | ~~**n8n's Sustainable Use License.**~~ **Closed 2026-10-16: not a blocker.** Anthony's call, and it is his to make. C5 is not gated on it. Worth knowing what was decided rather than only that it was: the licence question is settled by the business owner deciding it does not stop the build, not by anything having been obtained in writing. If a client ever asks for the grant, it does not exist yet. |
 | 2 | **Anthropic models and the AWS BAA.** Does Bedrock's Anthropic access sit inside the AWS BAA for PHI, or need a separate agreement? Ask AWS in writing before the first medical proposal. If the answer is no, the medical lineup is the 58 ON_DEMAND models |
 | 3 | **Legal citations need counsel.** The HIPAA, SEC 17a-4, FERPA, and CMMC references came from secondary sources because the primary sites block automated reads |
 | 4 | **Two pricing soft spots:** Compliant Cloud at 22 percent year-one margin and In-Office entry at 12 percent |

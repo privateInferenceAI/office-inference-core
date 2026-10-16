@@ -398,7 +398,7 @@ The 5,000 USD of Activate credits covers the demo box for years. Do not optimise
 
 | # | Blocker | Why it stops things |
 |---|---|---|
-| 1 | **n8n's Sustainable Use License** | It does not clearly permit deploying n8n into a client's building as part of a paid build. Get it in writing or replace it with Windmill, Temporal, or small services we own. Blocks the workflow pack |
+| ~~1~~ | ~~**n8n's Sustainable Use License**~~ | **Closed 2026-10-16: not a blocker.** Anthony's call, and it is his to make. C5 is not gated on it. Worth knowing what was decided rather than only that it was: the licence question is settled by the business owner deciding it does not stop the build, not by anything having been obtained in writing. If a client ever asks for the grant, it does not exist yet. |
 | 2 | **Anthropic models and the AWS BAA** | Whether Bedrock's Anthropic access sits inside the AWS BAA for PHI or needs a separate agreement. Ask AWS in writing before the first medical proposal. If the answer is no, the medical lineup becomes Nova plus DeepSeek |
 | 3 | **Legal citations need counsel** | The HIPAA, SEC 17a-4, FERPA, and CMMC references came from secondary sources because the primary sites block automated reads. Do not put them in a client document unread by a lawyer |
 | 4 | **Compliant Cloud pricing is soft** | 22 percent year-one margin at 35,000. Go to 45,000, or narrow to one compliance framework for the first client |
