@@ -160,8 +160,16 @@ def main(argv=None) -> int:
             big.remove(p)
         if p in remaining:
             remaining.remove(p)
+    # **Every large file nobody picked goes to the remainder, and the first version lost them.** The
+    # remainder was built from the leftover *small* files only, so 1,577 files over ten megabytes -- 47 GB --
+    # were assigned to no group and left sitting in the source folder. The run reported success and moved
+    # 236,519 of 238,095 files. A file in no group is a file that gets missed, and the count that would have
+    # caught it is the one nobody adds up by hand.
+    remaining.extend(big)
     if remaining:
         groups[20] = remaining
+    assert sum(len(v) for v in groups.values()) == len(files), (
+        f"assignment lost files: {sum(len(v) for v in groups.values())} of {len(files)}")
 
     print()
     print(f"  {'group':<9}{'files':>9}{'size':>9}{'chunks':>12}  largest file")
