@@ -1548,7 +1548,12 @@ items:
       a pending approval for a drafted email shows the recipient, the subject and the full body, and the reason
       it was drafted. A browser test asserts the body is present in the document before the approve control is
       enabled, so a screen that offers approval before showing the content fails.
-    status: open
+    status: verified
+    note: >-
+      Verified 2026-10-16 in oic-ui. tests/review.test.tsx records the document at every mutation and asserts the
+      earliest frame containing an enabled Approve control already carries the recipient, the subject and the full
+      body, so the ordering claim is checked rather than the end state. It also asserts a record carrying only a
+      digest offers no decision at all. e2e/review.spec.ts asserts the same in a browser.
 
   - id: UI-REVIEW-002
     title: Approve, deny and ask-for-changes are all reachable and their result is visible
@@ -1557,7 +1562,12 @@ items:
     verify: >-
       three browser tests, one per control, each asserting the job leaves awaiting_approval and the screen
       reflects the decision without a manual refresh.
-    status: open
+    status: verified
+    note: >-
+      Verified 2026-10-16 in oic-ui. Three browser tests in e2e/review.spec.ts, one per control, each asserting
+      the request carries the decision and the digest it quotes, the job leaves awaiting_approval, and the queue
+      reflects it with no manual refresh. tests/review.test.tsx covers the same three and adds the 409
+      approval_drift branch, which re-reads and asks again rather than reporting a generic failure.
 
   - id: UI-REVIEW-003
     title: Bulk approval exists only for items the system can show are identical, and it states the count
@@ -1566,7 +1576,12 @@ items:
     verify: >-
       five identical approvals offer one action naming five; a queue of five different items offers none. The
       test asserts the absence on the mixed queue, which is the half that matters.
-    status: open
+    status: verified
+    note: >-
+      Verified 2026-10-16 in oic-ui. e2e/review.spec.ts offers one control naming five when five items hold the
+      same digest and states the rule, and asserts the ABSENCE of any batch control and of the word identical on a
+      queue of five different digests. tests/review.test.tsx asserts both halves and adds the case of equal
+      digests with no readable content, which offers none.
     note: >-
       The evidence says assume rubber-stamping: Graphite's data on merged pull requests found 46 percent
       approved with no comment at all and 65 percent with three words or fewer, and that is engineers
@@ -1581,7 +1596,12 @@ items:
       a browser test on a deployment with no approvals asserts a sentence explaining that nothing is waiting,
       not a blank panel and not a spinner that never stops. Review was deliberately left out of C4 for this
       reason, so the screen that finally ships must not repeat the fault.
-    status: open
+    status: verified
+    note: >-
+      Verified 2026-10-16 in oic-ui. e2e/review.spec.ts and tests/review.test.tsx assert the sentence 'Nothing is
+      waiting for a decision.' on an empty queue, that the reading state has gone, and that no spinner element
+      exists. The unreadable case renders separately, because a job that cannot be read back is not the same fact
+      as a job that is not waiting.
 
   - id: UI-LIVE-001
     title: A running job shows its steps as they happen, in a sentence rather than a step identifier
@@ -1591,7 +1611,12 @@ items:
       start a multi-step job and assert each step's line appears while the job is still running, and that the
       line is a sentence a non-technical reader understands. Two levels of disclosure and no more, because
       beyond two users get lost.
-    status: open
+    status: verified
+    note: >-
+      Verified 2026-10-16 in oic-ui. tests/jobSentences.test.ts asserts a step name becomes a sentence with no
+      underscore, no bare generated identifier, a leading capital and an end mark, across the names a workflow
+      actually uses. tests/live.test.tsx asserts the line appears while the job is running, and e2e/live.spec.ts
+      asserts two levels and no more with the second closed by default and the stop control at level one.
     note: >-
       The most useful practitioner evidence is LukeW's February 2026 account of shipping agentic interfaces:
       his team built deep progressive disclosure, pulled back, and concluded the agent's work should serve as
@@ -1609,7 +1634,12 @@ items:
       refresh the browser mid-run; the view returns to the same job with the steps already recorded, none
       missing and none invented. Render the complete screen from the job first and derive the stream cursor
       from it, so the connection is never the only copy of progress.
-    status: open
+    status: verified
+    note: >-
+      Verified 2026-10-16 in oic-ui. e2e/live.spec.ts reloads the browser mid-run and asserts the steps already
+      recorded come back, none missing and none invented. tests/live.test.tsx captures the DOM at the instant the
+      EventSource is constructed and asserts the complete screen was already drawn, that the cursor came from
+      events_through, and that a replayed frame is not shown twice.
 
   - id: UI-LIVE-003
     title: A job that has stopped progressing looks stalled rather than working
@@ -1619,7 +1649,12 @@ items:
       freeze the worker mid-job; the view stops claiming progress within the staleness window and says the job
       has not reported since a stated time. A heartbeat does not solve this on its own, because a keep-alive
       comment is invisible to a reader by design, so only a real event changes what the screen says.
-    status: open
+    status: verified
+    note: >-
+      Verified 2026-10-16 in oic-ui. e2e/live.spec.ts waits out the real 45 second window and asserts 'No progress
+      reported.' with the time the job last reported; the window is not shortened for the test.
+      tests/live.test.tsx asserts the same over a short window and that a real event clears the line. The route's
+      keep-alive is a comment line that never reaches the component, so it cannot reset the clock.
 
   - id: UI-FEED-001
     title: No sentence in the interface asserts something the record does not know
