@@ -361,6 +361,28 @@
         "title": "Answer",
         "type": "object"
       },
+      "ApprovalQueue": {
+        "description": "What `/approvals` returns: the gates this session may decide on.\n\n**A named model rather than a bare object**, for the reason `TaskList` gives below: a client reading a\nfield out of an unnamed response is reading a shape nothing publishes.\n\n`count` is carried as well as the list because it is the number a screen shows, and a screen that counts\nthe array it was given is one refactor away from counting the page.",
+        "properties": {
+          "approvals": {
+            "items": {
+              "$ref": "#/components/schemas/Job"
+            },
+            "title": "Approvals",
+            "type": "array"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "approvals",
+          "count"
+        ],
+        "title": "ApprovalQueue",
+        "type": "object"
+      },
       "BudgetReport": {
         "description": "What the deadline did, recorded on every degraded answer.\n\n**`threshold` is null when no threshold tripped**, and that is the honest value: a budget refusal is\nnot a timeout, and recording one as a threshold would blur the three the design distinguishes.",
         "properties": {
@@ -1381,6 +1403,35 @@
           }
         },
         "summary": "Activity"
+      }
+    },
+    "/approvals": {
+      "get": {
+        "description": "Everything waiting for a decision that this session is permitted to make.\n\n**Why this is not `GET /jobs?state=awaiting_approval`.** A job is readable by the person who started it,\nwhich is the right rule for a history and the wrong one for a queue: an approval exists for whoever\nREVIEWS it, and in a small business that is routinely somebody other than the person who asked. A queue\nbuilt from the jobs a screen started can only ever show a client their own requests, which is not a queue\nat all \u2014 it is a list of things they are waiting on, and the Review screen was built behind\n`loadQueue()` in the app precisely so it could switch to this.\n\n**The permission rule, stated rather than implied.** The queue is scoped by access roots: a job appears if\nthe roots it carries are a subset of the roots this session holds. That is the same comparison the\nretrieval boundary already makes everywhere else, so an approval is never offered to a session that could\nnot have read the material the decision is about. **Roots, not `subject`**, because the subject rule\nanswers \"who asked\" and this question is \"who may decide\".\n\n**What it deliberately does not decide.** Whether a particular person is the right approver for a\nparticular task. Every session holding the roots sees every gate in them, and separation of duties \u2014 the\nperson who drafted it may not approve it \u2014 is a policy this deployment does not yet express. Recorded\nhere so it is a known limit rather than an assumption, and it belongs with the identity work.",
+        "operationId": "approval_queue_approvals_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalQueue"
+                }
+              }
+            },
+            "description": "the jobs at a gate that this session may decide on, newest first"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "no session"
+          }
+        },
+        "summary": "Approval Queue"
       }
     },
     "/ask": {

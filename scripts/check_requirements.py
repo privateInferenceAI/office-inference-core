@@ -34,6 +34,43 @@ def main() -> int:
     data = yaml.safe_load(path.read_text()) or {}
     items = data.get("items") or []
     problems: list[str] = []
+
+    # **A duplicate key is a row that quietly lost half of itself.** `yaml.safe_load` keeps the last
+    # occurrence and says nothing. Three C5 rows carried a `note` holding their verification evidence and a
+    # second `note` that overwrote it, **PyYAML reported no problem, and this script printed "register is
+    # well formed"** — a check passing on a record that had lost content, which is the failure this file
+    # exists to prevent.
+    #
+    # The parsed mapping cannot show what was dropped, so the document is walked with a loader that refuses a
+    # repeated key and names the line.
+    class _Strict(yaml.SafeLoader):
+        pass
+
+    def _no_duplicates(loader, node, deep=False):
+        seen = set()
+        for key_node, _ in node.value:
+            key = loader.construct_object(key_node, deep=deep)
+            if key in seen:
+                raise yaml.constructor.ConstructorError(
+                    None, None,
+                    f"duplicate key {key!r} in one mapping; the later value silently replaces the earlier "
+                    f"one, which is how three rows lost their evidence notes",
+                    key_node.start_mark)
+            seen.add(key)
+        return yaml.SafeLoader.construct_mapping(loader, node, deep=deep)
+
+    _Strict.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _no_duplicates)
+    # **`YAMLError`, not `ConstructorError`.** PyYAML marks up a failing constructor into a `MarkedYAMLError`
+    # on the way out, so catching the narrower class let the refusal escape as a traceback instead of a
+    # finding — the check fired and the report crashed. A check whose failure mode is a crash tells a reader
+    # nothing about the register.
+    try:
+        yaml.load(path.read_text(), Loader=_Strict)
+    except yaml.YAMLError as exc:
+        mark = getattr(exc, "problem_mark", None)
+        where = f" (line {mark.line + 1})" if mark is not None else ""
+        problems.append(f"{getattr(exc, 'problem', None) or exc}{where}")
+
     seen: set[str] = set()
 
     for index, item in enumerate(items, start=1):

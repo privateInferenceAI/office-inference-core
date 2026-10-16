@@ -1276,7 +1276,6 @@ items:
       with an exception. This row was not achievable before the build: `cmd_record` opened its own
       connection, so the audit row was always a separate transaction. `services/audit/audit.py` now has
       `insert_event(cur, ...)`.
-    note: >-
       Same-transaction is the reason the engine is ours rather than adopted. Every off-the-shelf engine sits
       outside our transaction and reports by webhook, so a crash between the business write and the audit write
       leaves a gap in the artifact a client may ask to verify.
@@ -1588,7 +1587,6 @@ items:
       same digest and states the rule, and asserts the ABSENCE of any batch control and of the word identical on a
       queue of five different digests. tests/review.test.tsx asserts both halves and adds the case of equal
       digests with no readable content, which offers none.
-    note: >-
       The evidence says assume rubber-stamping: Graphite's data on merged pull requests found 46 percent
       approved with no comment at all and 65 percent with three words or fewer, and that is engineers
       reviewing peers. Bulk approval is therefore a stated rule with a count rather than a checkbox column,
@@ -1623,7 +1621,6 @@ items:
       underscore, no bare generated identifier, a leading capital and an end mark, across the names a workflow
       actually uses. tests/live.test.tsx asserts the line appears while the job is running, and e2e/live.spec.ts
       asserts two levels and no more with the second closed by default and the stop control at level one.
-    note: >-
       The most useful practitioner evidence is LukeW's February 2026 account of shipping agentic interfaces:
       his team built deep progressive disclosure, pulled back, and concluded the agent's work should serve as
       the progress indicator rather than sitting beside a spinner. One finding cuts against instinct: a CHI 26
