@@ -327,18 +327,27 @@ class PostgresStore:
                 """
                 insert into jobs (job_id, deployment_id, subject, actor_role, access_roots,
                                   credential_sha256, task, input, state, outcome_reason, time_budget_s,
-                                  attempt_budget, created_at, started_at, finished_at, data_class)
-                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, to_timestamp(%s), %s, %s, %s)
+                                  attempt_budget, created_at, started_at, finished_at, data_class,
+                                  pending_action_digest)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, to_timestamp(%s), %s, %s, %s,
+                        coalesce(%s, ''))
                 on conflict (job_id) do update set
                   state = excluded.state,
                   outcome_reason = excluded.outcome_reason,
                   started_at = excluded.started_at,
-                  finished_at = excluded.finished_at
+                  finished_at = excluded.finished_at,
+                  -- **In the update as well as the insert, and that half is load-bearing.** An approval
+                  -- clears the digest, and a job that carried the old value forward would be one whose
+                  -- next gate could be satisfied by a decision made about the previous one. A column
+                  -- written only on insert is a column that never changes, which is the opposite of what
+                  -- this one is for.
+                  pending_action_digest = excluded.pending_action_digest
                 """,
                 (job.job_id, job.deployment_id, job.subject, job.actor_role,
                  json.dumps(sorted(job.roots)), job.credential_sha256 or None, job.task, job.input, job.state,
                  job.outcome_reason or None, job.time_budget_s, job.attempt_budget, job.created_at,
-                 _ts(job.started_at), _ts(job.finished_at), job.data_class))
+                 _ts(job.started_at), _ts(job.finished_at), job.data_class,
+                 job.pending_action_digest or None))
             for step in job.steps:
                 cur.execute(
                     """
@@ -362,7 +371,7 @@ class PostgresStore:
                 select job_id, deployment_id, subject, actor_role, access_roots, coalesce(credential_sha256, ''),
                        task, input, state, coalesce(outcome_reason, ''), time_budget_s, attempt_budget,
                        extract(epoch from created_at), extract(epoch from started_at),
-                       extract(epoch from finished_at), data_class
+                       extract(epoch from finished_at), data_class, coalesce(pending_action_digest, '')
                   from jobs where job_id = %s
                 """, (job_id,))
             row = cur.fetchone()
@@ -384,7 +393,7 @@ class PostgresStore:
                    attempt_budget=row[11], created_at=float(row[12]),
                    started_at=float(row[13]) if row[13] is not None else None,
                    finished_at=float(row[14]) if row[14] is not None else None,
-                   data_class=row[15], steps=steps)
+                   data_class=row[15], pending_action_digest=row[16] or "", steps=steps)
 
     def append(self, job_id: str, event: str, data: dict) -> int:
         """Write one event and assign its number in the same statement that inserts it.

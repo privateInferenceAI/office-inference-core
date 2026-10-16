@@ -181,6 +181,57 @@ def cmd_migrate(args) -> int:
 
 # --------------------------------------------------------------------------- record
 
+def insert_event(cur, *, event_type, actor, actor_role, deployment_id, data_class, outcome,
+                 tool=None, model=None, request_id=None, stored_payload=None, payload_sha256=None,
+                 prompt_sha256=None, completion_sha256=None, redaction_count=0, redactions=None,
+                 unverified_card_shapes=0, egress_allowed=None, approval=None) -> dict:
+    """Write one event on a caller's cursor, so the row shares their transaction.
+
+    **Why this takes a cursor, and it is the whole point.** `cmd_record` opens its own connection and the
+    assistant API reaches it through `subprocess.run`, so every audit row was committed in a transaction of
+    its own. That is fine for a record of what happened and wrong for a record that must not be able to
+    disagree with the thing it describes: a crash between the state change and the audit write left a job
+    whose row said one thing and whose history said another, and nothing could detect it.
+
+    **WF-ENGINE-001 is the requirement this satisfies.** A step's state change and its audit row are now one
+    transaction, so either both are present or neither is. Code we own can do that; every off-the-shelf
+    workflow engine reports over a webhook from outside the transaction, which is the reason the engine is
+    ours rather than adopted.
+
+    **The hash definition is not duplicated by this.** `audit_row_canonical` and the `audit_events_chain`
+    trigger remain the only places that decide what a row hash covers. This function writes values; it does
+    not compute the chain. A second implementation of the chain would be a second answer to what the record
+    means, which is what `cmd_record`'s own comment forbids.
+
+    `approval` is accepted because the CLI has a flag for it, and **C5 does not use it.** That column is a
+    jsonb field with an approval event type and it is not among the eighteen fields the canonical function
+    takes, so a value written there can be edited by hand while every chain check passes. It is the defect
+    migration 013 closed for the redaction columns and it is recorded as AUD-APPROVAL-001. The approval
+    record belongs in `stored_payload`, which `payload_sha256` covers.
+    """
+    cur.execute("""
+        insert into audit_events
+          (event_type, actor, actor_role, deployment_id, data_class, outcome,
+           tool, model, request_id, approval, payload_sha256, payload,
+           prompt_sha256, completion_sha256,
+           redaction_count, redactions, unverified_card_shapes, egress_allowed)
+        values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        returning id, ts_iso, row_hash""",
+        (event_type, actor, actor_role, deployment_id, data_class,
+         outcome, tool, model, request_id,
+         Jsonb(approval) if approval is not None else None, payload_sha256,
+         Jsonb(stored_payload) if stored_payload is not None else None,
+         prompt_sha256, completion_sha256,
+         redaction_count, Jsonb(redactions) if redactions is not None else None,
+         unverified_card_shapes, egress_allowed))
+    row = cur.fetchone()
+    return {"id": row[0], "ts_iso": row[1], "row_hash": row[2],
+            "payload_sha256": payload_sha256,
+            "prompt_sha256": prompt_sha256, "completion_sha256": completion_sha256,
+            "redaction_count": redaction_count, "redactions": redactions,
+            "egress_allowed": egress_allowed}
+
+
 def cmd_record(args) -> int:
     # An actor is an identity, not a word someone types, and there are exactly two ways to have one.
     #
@@ -264,27 +315,16 @@ def cmd_record(args) -> int:
     egress_allowed = None if args.egress_allowed is None else args.egress_allowed == "true"
 
     with connect() as conn, conn.cursor() as cur:
-        cur.execute("""
-            insert into audit_events
-              (event_type, actor, actor_role, deployment_id, data_class, outcome,
-               tool, model, request_id, approval, payload_sha256, payload,
-               prompt_sha256, completion_sha256,
-               redaction_count, redactions, unverified_card_shapes, egress_allowed)
-            values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            returning id, ts_iso, row_hash""",
-            (args.type, args.actor, args.actor_role, args.deployment_id, args.data_class,
-             args.outcome, args.tool, args.model, args.request_id,
-             Jsonb(approval) if approval is not None else None, payload_sha,
-             Jsonb(stored_payload) if stored_payload is not None else None,
-             prompt_sha, completion_sha,
-             redaction_count, Jsonb(redactions) if redactions is not None else None,
-             args.unverified_card_shapes, egress_allowed))
-        row = cur.fetchone()
-    print(json.dumps({"id": row[0], "ts_iso": row[1], "row_hash": row[2],
-                      "payload_sha256": payload_sha, "content_mode": mode,
-                      "prompt_sha256": prompt_sha, "completion_sha256": completion_sha,
-                      "redaction_count": redaction_count, "redactions": redactions,
-                      "egress_allowed": egress_allowed}, indent=2))
+        written = insert_event(
+            cur, event_type=args.type, actor=args.actor, actor_role=args.actor_role,
+            deployment_id=args.deployment_id, data_class=args.data_class, outcome=args.outcome,
+            tool=args.tool, model=args.model, request_id=args.request_id,
+            stored_payload=stored_payload, payload_sha256=payload_sha,
+            prompt_sha256=prompt_sha, completion_sha256=completion_sha,
+            redaction_count=redaction_count, redactions=redactions,
+            unverified_card_shapes=args.unverified_card_shapes, egress_allowed=egress_allowed,
+            approval=approval)
+    print(json.dumps({**written, "content_mode": mode}, indent=2))
     return 0
 
 

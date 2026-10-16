@@ -1,0 +1,100 @@
+# An intake configuration, annotated. Copy it, change the values, and keep it with the deployment.
+#
+# **Every value in this file belongs to the client.** Nothing here resolves to infrastructure Office
+# Inference operates, and `intake.py cord-check` refuses the file if anything does. That is the whole reason
+# the file is theirs: when the cords are cut, this is what is left, and it has to be enough on its own.
+#
+# The domains, the tenant, the mailbox and the alert address are the five things a person would need to run
+# this without us, and `check-config` prints them as a table with the owner beside each.
+manifest_version: 1
+deployment_id: acme-2026
+
+client:
+  name: Acme Tool & Die
+  # The only domains an address in this file may use. An intake address, a mailbox and an alert recipient are
+  # all checked against this list, so a value that is ours fails here rather than in production.
+  domains: [acmetool.example]
+
+identity:
+  tenant_id: 00000000-0000-0000-0000-000000000000        # the client's own Entra tenant
+  app:
+    display_name: AP Invoice Intake
+    client_id: 11111111-1111-1111-1111-111111111111
+    tenant_id: 00000000-0000-0000-0000-000000000000      # must equal identity.tenant_id
+    registered_by: client
+    sign_in_audience: AzureADMyOrg
+  consent:
+    granted_by: client
+    tenant_id: 00000000-0000-0000-0000-000000000000
+  permission:
+    # delegated is the only value this service will run. Application Mail.Read reaches every mailbox in the
+    # tenant, and the Exchange scope that limits it is additive to the Entra grant, so an administrator who
+    # completes three of four steps builds something that looks scoped and is not.
+    type: delegated
+    # Two scopes. A third one is refused by name, with the reason.
+    scopes: [Mail.Read, offline_access]
+
+mailbox:
+  address: ap@acmetool.example
+  # regular_user is the only value this service will run. A shared mailbox cannot sign in at all: Microsoft
+  # keeps sign-in blocked on the associated account and its password is system-generated, and delegated OAuth
+  # needs one interactive sign-in to mint the refresh token. This is a licence the client buys, so it belongs
+  # in the quote rather than in a support ticket after installation.
+  kind: regular_user
+  licence: exchange_online
+  folder: Inbox
+  # Whether the mailbox is addressed by its user principal name or by an immutable id. A UPN change breaks
+  # the first, which is why the choice is written down.
+  address_by: userPrincipalName
+
+secret_store:
+  # The client's store, on the client's box. Intake is given the path and reads it at the point of use, so a
+  # rotation takes effect on the next poll rather than on the next deploy.
+  owner: client
+  path: /etc/oi-intake/credential.json
+  mode: "0600"
+
+graph:
+  # The only two hosts this service may reach, and they are Microsoft's. A different value here is refused.
+  login_host: login.microsoftonline.com
+  api_host: graph.microsoft.com
+
+intake:
+  documents_root: /srv/oi-core/documents
+  # The top-level folder the invoice lands under, which is the access label the ingestion worker derives.
+  # invoices under `company` are readable by everyone holding that label, which is what a client expects an
+  # invoice to be.
+  root: company
+  state_dir: /var/lib/oi-intake
+  poll_seconds: 120
+  # How many consecutive scans must agree on a file's size and mtime before it is taken. 2 is the floor and
+  # the default: a scanner writing a large PDF is still writing it on the first scan.
+  settle_scans: 2
+  # The second channel. A share the client already uses, polled rather than watched.
+  share: /mnt/ap-drop
+  # Longer than this with no arrival is a fault rather than a slow month.
+  quiet_hours: 36
+  volume_floor:
+    expected_per_day: 6
+    decline_days: 7
+    decline_fraction: 0.8
+  # The supplier domains whose invoices are expected. Verification proves a message came from where it says;
+  # this says whether that place is a supplier.
+  allowlist: [acmetool.example, supplier.example, mailing-house.example]
+
+reach:
+  # A second mailbox in the same tenant, used by `enumerate-reach` to prove the credential cannot read it.
+  # Name a real one: a probe against an invented address proves nothing about a tenant.
+  second_mailbox: someone.else@acmetool.example
+
+alerts:
+  # An address the client controls. An alert to us reintroduces the dependency the design exists to remove,
+  # and it does it at the moment the client most needs to act without us.
+  recipients: [office.manager@acmetool.example]
+  # outbox writes the alert to <state_dir>/alerts for the client's own monitoring. smtp mails it through the
+  # client's own relay, which is configured below.
+  transport: outbox
+  smtp:
+    host: mail.acmetool.example
+    port: 25
+    from: intake@acmetool.example

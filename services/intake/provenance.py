@@ -135,6 +135,20 @@ def intake_id_for(*, message_id: str, filename: str, content_sha256: str) -> str
     return "in-" + hashlib.sha256(material).hexdigest()[:20]
 
 
+def final_name(filename: str, index: int = 0) -> str:
+    """The name a deposit will use, before the deposit happens.
+
+    Separate from `deposit` because the row's `intake_id` is derived from the filename, and the id has to be
+    known *before* the decision to deposit. Two attachments called `invoice.pdf` on one message are numbered,
+    so the second does not overwrite the first and both get stable ids.
+    """
+    name = safe_name(filename)
+    if not index:
+        return name
+    stem, dot, suffix = name.rpartition(".")
+    return f"{stem or name}-{index + 1}{dot}{suffix}" if dot else f"{name}-{index + 1}"
+
+
 def deposit(*, documents_root: Path, root: str, received_at: str, message_id: str,
             filename: str, content: bytes, index: int = 0) -> Deposit:
     """Write the bytes under the documents root and hash the file that landed."""
@@ -142,10 +156,7 @@ def deposit(*, documents_root: Path, root: str, received_at: str, message_id: st
     day = (received_at or datetime.now(timezone.utc).isoformat())[:10]
     message_key = hashlib.sha256((message_id or "unknown").encode()).hexdigest()[:8]
 
-    name = safe_name(filename)
-    if index:
-        stem, dot, suffix = name.rpartition(".")
-        name = f"{stem or name}-{index + 1}{dot}{suffix}" if dot else f"{name}-{index + 1}"
+    name = final_name(filename, index)
 
     target_dir = documents_root / root / "intake" / day / message_key
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -186,20 +197,23 @@ def build_record(*, deployment_id: str, mailbox: str | None, folder: str | None,
                  received_at: str, observed_at: str, sender: dict, content_scan: dict,
                  raw_message_sha256: str, deposit_row: Deposit | None,
                  duplicate_of: str | None, credential: dict, filename: str,
-                 media_type: str) -> dict:
+                 media_type: str, content_sha256: str | None = None,
+                 bytes_: int | None = None, unreadable_by_ingest: bool | None = None) -> dict:
     """One row, whether or not the content is new.
 
     A duplicate carries the hash and the sender of the copy that arrived, and points at the first. That is
-    what makes "it arrived twice" provable rather than asserted.
+    what makes "it arrived twice" provable rather than asserted. **A duplicate has no `relpath`**, because it
+    deposited nothing; its identity is the hash and the row it points at.
 
     **The mailbox is a parameter rather than something read off the configuration**, and the folder connector
     is why. A file that appeared in a share did not arrive at a mailbox, and a record that named one because
     the configuration happened to have one would be a record that lies about where the document came from.
     """
     status = "duplicate" if duplicate_of else "deposited"
+    digest = deposit_row.content_sha256 if deposit_row else content_sha256
     record = {
         "intake_id": intake_id_for(message_id=message_id or "", filename=filename,
-                                   content_sha256=(deposit_row.content_sha256 if deposit_row else "")),
+                                   content_sha256=digest or ""),
         "deployment_id": deployment_id,
         "channel": channel,
         "mailbox": mailbox,
@@ -217,12 +231,12 @@ def build_record(*, deployment_id: str, mailbox: str | None, folder: str | None,
         "verdict": sender.get("verdict"),
         "verdict_reasons": sender.get("reasons", []),
         "allowlisted": sender.get("allowlisted"),
-        "content_sha256": deposit_row.content_sha256 if deposit_row else None,
-        "bytes": deposit_row.bytes if deposit_row else None,
+        "content_sha256": digest,
+        "bytes": deposit_row.bytes if deposit_row else bytes_,
         "relpath": deposit_row.relpath if deposit_row else None,
         "filename": filename,
         "media_type": media_type,
-        "unreadable_by_ingest": deposit_row.unreadable_by_ingest if deposit_row else None,
+        "unreadable_by_ingest": deposit_row.unreadable_by_ingest if deposit_row else unreadable_by_ingest,
         "raw_message_sha256": raw_message_sha256,
         "duplicate_of": duplicate_of,
         "status": status,

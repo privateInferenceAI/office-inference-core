@@ -175,10 +175,16 @@ def describe(record: dict) -> str:
     when = (approval.get("part11_11_50_manifestation") or {}).get("signed_at") or ""
     role = identity.get("claimed_role") or "an unknown role"
 
+    # **A lookup rather than `capitalize() + "d"`, which produced `Request_changesd`.** The suffix trick
+    # works for approve and deny and fails on the third decision, and it failed in the one string a client
+    # reads. A mapping is the same length and cannot be wrong about a word.
+    past = {"approve": "Approved", "deny": "Denied", "request_changes": "Changes requested"}
+    said = past.get(decision, decision.replace("_", " ").capitalize())
+
     if resolve_assurance(identity.get("assurance")) == ASSURANCE_UNVERIFIED:
         # No name. Not even the claimed one, because a sentence a client reads should not present an
         # unverified claim in the position where a verified name would sit.
-        return (f"{decision.capitalize()}d at {when} under the {role} role. The person who decided was not "
+        return (f"{said} at {when} under the {role} role. The person who decided was not "
                 f"identified: {UNVERIFIED_REASON}.")
 
-    return f"{decision.capitalize()}d at {when} by {identity.get('claimed_subject')} ({role})."
+    return f"{said} at {when} by {identity.get('claimed_subject')} ({role})."

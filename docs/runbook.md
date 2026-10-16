@@ -4643,6 +4643,215 @@ command that cannot run five times, and every one was found by somebody running 
   record. It must be read from the record.
 
 
+### 6.1 The engine, and the transaction the state change shares with its record
+
+**Goal.** A job with more than one step runs to a terminal state, and every step it takes has a row in the
+chain written **in the same transaction as the state change**. Kill the process between the two writes and
+neither is present.
+
+**Why the engine is ours rather than adopted, said once and precisely.** Every off-the-shelf engine sits
+outside our transaction and reports what happened afterwards, by webhook or by callback. That is not a
+limitation of any particular product; it is what a separate process can do. A crash between the business
+write and the audit write then leaves a gap in the one artifact a client may ask to verify, and no amount of
+configuration closes it. The requirement is the transaction, so the engine has to be inside it.
+
+**What already exists, and is not rewritten.** `services/api/jobs.py` holds the state machine, the event log,
+the budgets, `TERMINAL` and both stores. C5 adds a loop that has more than one step; it does not replace the
+machine underneath it.
+
+**What C4 could not do.** `jobs.run()` writes the state with `store.put(job)` and then writes the chain row
+through `audit(...)`, which shells out to `services/audit/audit.py`. That tool opens its own connection, so
+those are two transactions in two processes. **The engine piece was blocked on that, and nobody had noticed
+until this step was written down.** `cmd_record` now writes its row through `insert_event(cur, ...)`, which
+takes a caller's cursor, and `cmd_record` calls it, so there is still one INSERT statement and still one
+definition of the hash.
+
+**What is added.**
+
+| File | What it is |
+|---|---|
+| `services/workflow/engine.py` | the loop: position, gate, budgets, cancellation, one transaction per unit |
+| `services/workflow/plans.py` | the plans this deployment can run, and the action a gate holds |
+| `services/workflow/chain.py` | the call into the one audit writer, on the engine's cursor |
+
+**The one idea, and it is four lines.**
+
+```
+with store.conn.transaction():          # psycopg3 begins a real transaction even in autocommit mode
+    store.put(job)                      # the state change
+    store.append(job_id, EV_STEP, ...)  # the event, numbered in the same transaction
+    chain.insert_event(store.conn.cursor(), ...)   # the chain row, same eighteen columns
+```
+
+Commit at the end. A `SIGKILL` anywhere inside leaves the connection for Postgres to reap, and it rolls back
+all three writes. `store.put` and `store.append` are the same functions the rest of the system uses, so the
+job row is written in one place. Nothing about the chain moves: the hash is computed by the
+`audit_events_chain` trigger from `audit_row_canonical`, and that stays the single definition.
+
+**Where the position lives.** Nowhere new. A step that has run has a `job_steps` row with its name and
+`state = 'succeeded'`, so the engine's position is the first plan step without one. A resumed run therefore
+cannot repeat work it already recorded, and there is no cursor table to fall out of step with the work.
+
+**Verify.**
+
+```
+cd /opt/oi-core
+bash scripts/probe.sh workflow_probe.py
+python3 -m pytest tests/test_workflow_engine.py -q
+```
+
+Expected: the probe reports `RUNS`, `RECORDED` and `ATOMIC` held. `ATOMIC` is the one that matters: it starts
+a job in a child process, kills that process with `SIGKILL` at the moment between the state write and the
+chain write, and then reads the database. The step's row is absent, the job's state is the one before the
+step, and the chain has no row for it. Either both are present or neither is.
+
+**What this step cannot prove, said plainly.** The probe kills a *runner* process, not the API service. That
+is the stronger test of durability, because resume depends on the row and not on the process, but it is not
+the same sentence as "restart the service" and the runbook will not pretend it is. The service-level restart
+is step 6.2's, and it needs the API to drive the engine, which is a separate change in `services/api/app.py`.
+
+**This step found that WF-ENGINE-001 was not achievable as written.** The register row asked for a property
+that the deployed architecture could not have: with the chain written through a subprocess, no transaction
+spanned both writes at any level of care. The row is unchanged and the code moved, which is the direction
+that is allowed.
+
+**If it breaks.**
+
+- **`ATOMIC` reports the chain row present and the state unchanged**: the state write committed before the
+  kill, so it is not in the same transaction. Look for a `store.put()` outside the `with` block.
+- **`RECORDED` counts fewer rows than steps**: a path writes the state without the chain row. That is the
+  defect the row exists for, not a flake.
+- **The probe reports `ATOMIC` skipped**: it found no database, and a skipped right is not a held one.
+- **`verify_chain` breaks on rows nobody touched**: something wrote the chain with its own canonical string.
+  There is one definition and it is in the database.
+
+
+### 6.2 The gate, the resume across a restart, and the sentence the feed may write
+
+**Goal.** A workflow stops at an approval gate, survives the process that was running it, and finishes after
+somebody approves it. The steps after the gate each have exactly one row. And the chain's own rendering of an
+approval stops asserting a person nobody identified.
+
+**Why the gate is a step and not a fourth action.** `awaiting_approval` has been in the machine since C4 and
+this is its first writer. The gate is reached from `running`, never from `queued`: a job that has never run
+cannot be waiting to approve something it has not produced. The machine refuses that transition and it is
+right to.
+
+**What the gate holds.** The engine computes the digest over the drafted action's content and calls
+`jobs.request_approval`, which writes the digest before the transition. There is no window in which the state
+says waiting and the digest is empty. The action itself goes into the gate's event, so the Review screen has
+the words behind the hash rather than only the hash.
+
+**The resume, which is the part that has to survive.** The job row carries `pending_action_digest`, and
+without it in the store a job that came back after a restart would have an empty digest and every approval
+would be refused as drift. **That was the state of the tree when this step was written**: the field was on
+the dataclass and in neither the INSERT nor the SELECT. Migration `021` adds the column; the store writes it
+on insert *and on update*, because an approval clears it and a column written only on insert never changes.
+
+**A resumed run must not repeat what it already did.** The position comes from the succeeded `job_steps` rows,
+so a step that completed before the gate is not run again. The register asks for "exactly one row" per
+post-gate step, and that is what the probe counts.
+
+**`UI-FEED-001`, which lands here because this is the first approval anyone can read.** `audit_feed` rendered
+an approval as `'a person ' || outcome || ' an action'`, which asserts a person the system has not
+identified. Migration `022` replaces the view's approval branch with one that reads the record and falls back
+to the honest sentence for any value it does not recognise. **The design document's suggested expression
+reads `payload -> 'identity'` and the record nests identity at `payload -> 'approval' -> 'identity'**, so
+that expression would never find it and would silently take the honest branch for every row, including
+verified ones. Fail-safe, invisible, and wrong. Migration `022` reads the path the record actually has, and a
+test compares the view's sentence against `approvals.describe()` for all three decisions so the two cannot
+drift apart in silence.
+
+**Verify.**
+
+```
+cd /opt/oi-core
+bash scripts/probe.sh workflow_probe.py
+docker exec postgres psql -U oicore -d oicore -tAc \
+  "select summary from audit_feed where event_type = 'approval' order by id desc limit 3"
+python3 -m pytest tests/test_workflow_gate.py tests/test_workflow_feed.py -q
+```
+
+Expected: `GATED` and `RESUMED` held, the approval summaries say the person was not identified and never name
+the claimed subject, and the post-gate steps have one row each.
+
+**What this step cannot prove, said plainly.** The probe restarts the *runner*, not the API service container.
+The engine is not yet wired into `POST /jobs`, `POST /jobs/{id}/approvals` or the `resume` action, because
+those routes belong to `services/api/app.py`. Until they are wired, a workflow cannot be started over HTTP
+and the gate is reachable only from the probe and the tests. That wiring is a change to another owner's file
+and is requested rather than made.
+
+**If it breaks.**
+
+- **Every approval after a restart is refused as `approval_drift`**: `pending_action_digest` is not surviving
+  the store round trip. Check the column exists and that the `on conflict do update set` carries it.
+- **A post-gate step has two rows**: the position is being taken from something other than the succeeded step
+  rows, or a step that already succeeded was run again.
+- **The feed names the person**: the approval branch is reading `claimed_subject` without the assurance, or
+  reading the wrong path. Both fail the same way, and the second looks like it works.
+- **The feed says an identified person approved when nobody did**: the assurance path resolved upward. An
+  unknown value must land in the honest branch, never in the other one.
+
+
+### 6.3 A typed cause, a bounded step, and an effect that happens once
+
+**Goal.** Three failure properties, each with a test that fails if it stops being true: a failed step is
+recorded with a typed cause and **nothing after it runs**; a step that hangs is stopped and the job reaches a
+terminal state in bounded time; and a retried step does not repeat an effect it already had.
+
+**Why "nothing after it runs" is the harder half.** A test that asserts only the failure passes on a workflow
+that ran to the end and failed at the last hurdle. The probe asserts the *absence* of a row for every step
+after the failing one, which is a different assertion and the one the register asks for.
+
+**Why the timeout is enforced twice.** A step callable receives a deadline and is expected to honour it, and
+the engine also enforces it from outside, because a callable that blocks on a socket that never answers does
+not run its own timeout. The engine runs the step in a worker thread and stops waiting at the deadline, so
+the *job* reaches a terminal state within the bound whether or not the step cooperated. **What that cannot do
+is free the blocked thread**, and the runbook will not claim otherwise: a step abandoned at its deadline keeps
+its socket until the far side closes it or the process exits. The failure is typed `step_timeout` either way,
+and the record says the step was stopped rather than that the work was undone.
+
+**Why an effect needs a key rather than a rule.** Exactly-once is a property of a transaction. An effect
+outside our transaction cannot be made exactly-once by us; what we can do is give it a key that is **stable
+across attempts** and record it, so the far side can dedupe and the record can show how many times the effect
+was applied rather than how many times the step ran. An engine that keys the effect by the attempt number
+duplicates it on the first retry, and that is the defect this row is for.
+
+The probe tests it by failing a step *after* its external effect and before its state write, then letting it
+retry. The far side counts applications, not calls, and the count is one.
+
+**And the transactional case is structural.** An effect the engine writes itself goes into
+`workflow_effects` in the same transaction as the step's state change, so a kill between the two rolls back
+both and the retry applies it once. That case needs no key discipline because it has no window.
+
+**Verify.**
+
+```
+cd /opt/oi-core
+bash scripts/probe.sh workflow_probe.py
+python3 -m pytest tests/test_workflow_failure.py -q
+```
+
+Expected: `TYPED`, `BOUNDED` and `IDEMPOTENT` held. `TYPED` reports the failing step's kind with no later row;
+`BOUNDED` reports the elapsed time against the bound; `IDEMPOTENT` reports the far side's application count
+as one against a call count of two.
+
+**What this step cannot prove, said plainly.** The timeout test uses a real listening socket that accepts a
+connection and never answers, which is the shape the register names. It does not test a provider that stops
+sending mid-stream, which is a different failure with its own handling in the request path and its own probe.
+
+**If it breaks.**
+
+- **A later step has a row after a failure**: the loop is continuing past the failure. The job's terminal
+  state hides it, because a job that failed at step five still ends `failed`.
+- **The job never reaches terminal**: the watchdog is not bounding the step, or the worker thread holds the
+  unit's transaction open. A transaction held open by an abandoned thread is the failure mode to look for.
+- **The far side applied the effect twice**: the key is derived from the attempt rather than from the job and
+  the step. It must be the same key on every attempt.
+- **The effect row and the state change disagree after a kill**: the effect was written outside the unit's
+  transaction. Inside it, a kill cannot separate them.
+
+
 ### 6.4 The email intake connector
 
 **Goal.** An invoice arrives in the client's own AP mailbox and becomes a document in the system with a

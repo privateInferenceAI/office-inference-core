@@ -1,0 +1,55 @@
+# The intake connector: read one mailbox the client owns, deposit what is in it, record where it came from.
+#
+# A tool rather than a service, like the audit sink and the session tool: it runs when called and exits. A
+# timer calls it, or the connector's own watch loop does. It publishes no port, and standing rule 4 says
+# nothing publishes a port except ingress.
+build: .
+packs: [core]
+depends_on: [database]
+ports: {}
+healthcheck:
+  # Not a port check. The connector has no listener, and the thing that can go wrong quietly is that it stops
+  # reading, so the health signal is the heartbeat the monitor reads rather than a socket that answers.
+  command: python3 /app/intake.py monitor --config /etc/oi-intake/intake.yaml
+  interval_seconds: 300
+gpu:
+  required: false
+# The record names senders, subjects and message identifiers, and it holds hashes rather than content. That is
+# internal business correspondence about a client's suppliers, which is why the row is `internal` rather than
+# `public` and why the body is never stored.
+data_class: internal
+config_schema:
+  poll_seconds:
+    type: integer
+    default: 120
+    description: >-
+      How often the mailbox is read. A minute or two is right for one mailbox: webhook subscriptions need a
+      public HTTPS endpoint the client would have to expose, and they add a second expiring thing to monitor.
+  settle_scans:
+    type: integer
+    default: 2
+    description: >-
+      How many consecutive scans must agree on a file's size and mtime before the folder connector takes it.
+      The floor is 2; a scanner writing a large PDF is still writing it on the first scan.
+  quiet_hours:
+    type: integer
+    default: 36
+    description: >-
+      How long with no arrival is a fault rather than a slow month. Configuration rather than a constant,
+      because a plumber in February and a landscaper in February have different rhythms.
+  volume_floor:
+    type: object
+    default: {expected_per_day: 6, decline_days: 7, decline_fraction: 0.8}
+    description: >-
+      The second silent-failure check. A drop against the previous window catches a mail rule diverting
+      invoices, which leaves a working credential and a connector that reports no error at all.
+substrate:
+  cloud:
+    notes: >-
+      The same tool, reading the same mailbox, with the client's own tenant and their own app registration.
+      The cloud build adds nothing here: Graph is reached over the internet either way, and the credential
+      lives on the client's box either way.
+  office:
+    notes: >-
+      The same tool. On an appliance the state directory and the documents root are local disk rather than a
+      mount, and the folder connector becomes the interesting channel because the scanner is in the building.
