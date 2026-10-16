@@ -70,6 +70,41 @@ for entry in "${SERVICES[@]}"; do
 done
 
 echo
+echo "== and is each RUNNING container on its current image =="
+# **The image check above is not enough, and this was proved the hard way.** An image can be rebuilt and the
+# container left on the old one: `docker compose up -d` recreates a container only when it decides to, and a
+# build that moves the tag does not move the container. The first version of this script checked images only,
+# reported `All 10 images are at least as new as their source`, and every locally-built container was running
+# an older build than the tag it was named after. That is the same defect the script exists to catch, one
+# level down: a check that answers a different question than the one that matters.
+running_stale=0
+for entry in "${SERVICES[@]}"; do
+  name="${entry%%$'\t'*}"
+  container=$(docker ps --filter "name=^${name}$" --format '{{.ID}}' 2>/dev/null)
+  [ -z "$container" ] && continue
+  image=$(docker compose -f "$COMPOSE" --env-file "$ENVF" --profile tools config --format json 2>/dev/null \
+          | python3 -c "import json,sys; print(json.load(sys.stdin)['services'].get('$name',{}).get('image',''))" 2>/dev/null)
+  [ -z "$image" ] && continue
+  tag=$(docker image inspect "$image" --format '{{.Id}}' 2>/dev/null || echo "")
+  [ -z "$tag" ] && continue
+  on_it=$(docker inspect "$container" --format '{{.Image}}' 2>/dev/null || echo "")
+  if [ "$tag" = "$on_it" ]; then
+    printf "  %-14s %-26s running the current image\n" "$name" "$image"
+  else
+    printf "  %-14s %-26s RUNNING AN OLDER BUILD  container %s  tag %s\n" \
+      "$name" "$image" "${on_it:7:12}" "${tag:7:12}"
+    running_stale=$((running_stale+1))
+  fi
+done
+
+echo
+if [ "$running_stale" -gt 0 ]; then
+  echo "** $running_stale container(s) are running an older build than their image tag.**"
+  echo "   Rebuild, then recreate so the containers actually move:"
+  echo "     docker compose -f $COMPOSE --env-file $ENVF --profile tools build"
+  echo "     docker compose -f $COMPOSE --env-file $ENVF --profile tools up -d --force-recreate"
+  exit 1
+fi
 if [ "$stale" -gt 0 ]; then
   echo "** $stale image(s) are older than the source they build from.**"
   echo "   Rebuild before trusting anything they do:"
