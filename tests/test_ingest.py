@@ -1221,3 +1221,36 @@ def test_a_single_chunk_the_service_cannot_tokenize_fails_loudly(monkeypatch):
     monkeypatch.setattr(ingest, "_post", always_422)
     with pytest.raises(RuntimeError, match="single chunk"):
         ingest.count_tokens(ingest.Services(), ["a" * 10])
+
+
+def test_embedding_batches_are_bounded_by_tokens_as_well_as_count(monkeypatch):
+    """The service caps a request by tokens, and sixteen measured chunks can still exceed it. The batch is
+    chosen from the measured counts, so the request never crosses the cap and a document does not fail one
+    batch at a time."""
+    class FakeChunk:
+        def __init__(self, tokens: int) -> None:
+            self.text = "x"
+            self.token_count = tokens
+
+    monkeypatch.setattr(ingest, "EMBED_BATCH", 16)
+    monkeypatch.setattr(ingest, "EMBED_TOKEN_BUDGET", 1000)
+    batches = list(ingest.embedding_batches([FakeChunk(400) for _ in range(6)]))
+    assert [len(batch) for batch in batches] == [2, 2, 2]
+    assert sum(len(batch) for batch in batches) == 6
+
+
+def test_an_embedding_batch_over_the_service_cap_is_halved(monkeypatch):
+    """A 422 on an embedding request means the batch is too large, not that the document is bad."""
+    calls: list[int] = []
+
+    def fake_post(url, body, timeout, method="POST"):
+        texts = body["inputs"]
+        calls.append(len(texts))
+        if len(texts) > 2:
+            raise urllib.error.HTTPError(url, 422, "Unprocessable Entity", {}, None)
+        return [[0.1, 0.2] for _ in texts]
+
+    monkeypatch.setattr(ingest, "_post", fake_post)
+    vectors = ingest.embed_texts(ingest.Services(), ["a", "b", "c", "d", "e"])
+    assert len(vectors) == 5
+    assert any(size > 2 for size in calls), "the refusal has to be exercised"

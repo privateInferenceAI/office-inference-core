@@ -47,6 +47,11 @@ from identifiers import extract as identify  # noqa: E402
 # promises a knob the code does not read is a lie told in documentation, and this project has already paid
 # for one of those on the parser options.
 EMBED_BATCH = int(os.environ.get("INGEST_EMBED_BATCH", "16"))
+# The token budget for one embedding request, for the same reason the tokenizer has one: TEI caps a request at
+# `--max-batch-tokens` and refuses a larger batch with a 422. Counting chunks was enough when a chunk could be any
+# size; now that every chunk is measured against a 512-token ceiling, sixteen of them can still exceed 8,192 with
+# their special tokens, so the batch is bounded by the measured counts as well as by the count.
+EMBED_TOKEN_BUDGET = int(os.environ.get("INGEST_EMBED_TOKEN_BUDGET", "7000"))
 
 # **How many documents are prepared at once, and why this is the fix rather than more hardware.**
 #
@@ -522,6 +527,26 @@ def _contract_change_allowed() -> bool:
     return (os.environ.get("EMBED_CONTRACT_ALLOW_CHANGE", "").strip().lower() in ("1", "true", "yes"))
 
 
+def embedding_batches(chunks: list) -> Iterable[list]:
+    """Chunks in embedding requests bounded by both the count and the measured token total.
+
+    A chunk counted as one unit is not a unit of work: the service caps a request by tokens, and a chunk car
+    carry up to its budget. The measured count travels on the chunk (`token_count`), and the chunks that predate
+    the measurement fall back to the estimate, which is only used for batching and never to decide a size.
+    """
+    batch: list = []
+    tokens = 0
+    for chunk in chunks:
+        count = getattr(chunk, "token_count", None) or estimate_tokens(chunk.text)
+        if batch and (len(batch) >= EMBED_BATCH or tokens + count > EMBED_TOKEN_BUDGET):
+            yield batch
+            batch, tokens = [], 0
+        batch.append(chunk)
+        tokens += count
+    if batch:
+        yield batch
+
+
 def embed_texts(services: Services, texts: list[str]) -> list[list[float]]:
     """Vectors for a batch of chunks, from whichever embedding endpoint answers.
 
@@ -536,18 +561,7 @@ def embed_texts(services: Services, texts: list[str]) -> list[list[float]]:
         if not path:
             continue
         try:
-            if path == "/v1/embeddings":
-                payload = _post(f"{services.embed_url}{path}",
-                                {"input": texts, "model": "bge-m3"}, services.timeout)
-                vectors = [item["embedding"] for item in payload.get("data", [])]
-            else:
-                payload = _post(f"{services.embed_url}{path}",
-                                {"inputs": [f"{services.passage_prefix}{text}" for text in texts]},
-                                services.timeout)
-                vectors = payload if isinstance(payload, list) else payload.get("data", [])
-            if vectors and isinstance(vectors[0], list):
-                services.embed_path = path
-                return vectors
+            return _embed_split(services, path, texts)
         except urllib.error.HTTPError as exc:
             last_error = exc
             continue
@@ -557,6 +571,44 @@ def embed_texts(services: Services, texts: list[str]) -> list[list[float]]:
     # dead-lettered during a concurrent run that provoked the embedding service's load shedding. Chaining
     # keeps both the message a person reads and the type the classifier needs.
     raise RuntimeError(f"no embedding endpoint answered. Last error: {last_error}") from last_error
+
+
+def _embed_split(services: Services, path: str, texts: list[str]) -> list[list[float]]:
+    """One embedding path, halving a batch the service refuses for size.
+
+    A 422 means the batch is over the service's token cap, not that the endpoint is wrong or the document is
+    bad, so the split is retried on the same path. A single text still refused is the invariant violated with
+    truncation off, and it says that rather than reading as a parsing problem (`RET-CHUNK-001`).
+    """
+    try:
+        return _embed_on_path(services, path, texts)
+    except urllib.error.HTTPError as exc:
+        if exc.code != 422:
+            raise
+        if len(texts) == 1:
+            raise RuntimeError(
+                "the embedding service refused a single chunk. With truncation off that means the chunk is past "
+                "the model's input limit, which is the invariant the measured post-condition exists to hold "
+                "(RET-CHUNK-001).") from exc
+        middle = len(texts) // 2
+        return _embed_split(services, path, texts[:middle]) + _embed_split(services, path, texts[middle:])
+
+
+def _embed_on_path(services: Services, path: str, texts: list[str]) -> list[list[float]]:
+    """One embedding request on one known path, in the shape that path takes."""
+    if path == "/v1/embeddings":
+        payload = _post(f"{services.embed_url}{path}",
+                        {"input": texts, "model": "bge-m3"}, services.timeout)
+        vectors = [item["embedding"] for item in payload.get("data", [])]
+    else:
+        payload = _post(f"{services.embed_url}{path}",
+                        {"inputs": [f"{services.passage_prefix}{text}" for text in texts]},
+                        services.timeout)
+        vectors = payload if isinstance(payload, list) else payload.get("data", [])
+    if not vectors or not isinstance(vectors[0], list):
+        raise RuntimeError(f"the embedding service answered on {path} with no vectors")
+    services.embed_path = path
+    return vectors
 
 
 def _get_vector_size(services: Services) -> int:
@@ -870,8 +922,7 @@ def ingest_document(services: Services, document: Document, content_sha256: str,
 
     points: list[dict] = []
     _embed_started = time.monotonic()
-    for start in range(0, len(chunks), EMBED_BATCH):
-        batch = chunks[start:start + EMBED_BATCH]
+    for batch in embedding_batches(chunks):
         vectors = embed_texts(services, [chunk.text for chunk in batch])
         if len(vectors) != len(batch):
             raise RuntimeError(
