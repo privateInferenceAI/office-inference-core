@@ -1,0 +1,354 @@
+# Forty questions for the corpus in /opt/oi-core/documents, authored 2026-10-17.
+#
+# **Ground truth comes from the documents, not from the system's answers.** Every expected value below was read
+# from the ingested source text (the `chunk_index` copy of the parser output) and the quote that carries it is in
+# `source_quote`, so a reviewer can check the question before the runner asks it. Nothing here was written by
+# looking at what the assistant said.
+#
+# The corpus is the group-01/02/03 corpus: `company/` for group-01 and group-02, `executive/` for group-03 plus
+# the executive compensation memorandum. Documents are mostly public-domain filings and data tables with numeric
+# names, so some questions name the document; a scoped question is a legitimate question, and it is the only way
+# to keep a numeric table's answer unambiguous.
+#
+# Scoring, for the runner:
+#   * `answered` is whether the system produced an answer grounded in the corpus at all.
+#   * `docs` are the documents the retrieved passages must include for a retrieval hit.
+#   * `contains` is compared case-insensitively after removing commas, dollar signs, percent signs and spaces,
+#     so "48,240", "48240" and "$48,240" all match.
+#   * `denied` means the access boundary must refuse or withhold: no passage from a document outside the role's
+#     folders, and the answer must say it cannot see it rather than invent.
+#   * For `expected.staff` and `expected.executive`, they differ only for the access category by design.
+version: 1
+authored: "2026-10-17"
+corpus: "company/group-01, company/group-02, executive/group-03, executive/executive-compensation.md"
+
+questions:
+  # ---------------------------------------------------------------- exact numbers from tables (8)
+  - id: N01
+    category: exact_number
+    question: "In the S0802 table in document 294613.csv, what is the median earnings figure for workers 16 years and over?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/294613.csv"], contains: ["31,638"]}
+      executive: {answered: true, docs: ["company/group-02/294613.csv"], contains: ["31,638"]}
+    source_quote: "S0802 | 37.0 | Median earnings (dollars) | 31,638 | +/-67 | 33,270 | ... | 25,307"
+
+  - id: N02
+    category: exact_number
+    question: "In the S0101 table in document 294613.csv, what is the median age?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/294613.csv"], contains: ["36.7"]}
+      executive: {answered: true, docs: ["company/group-02/294613.csv"], contains: ["36.7"]}
+    source_quote: "S0101 | 30.0 | Median age (years) | 36.7 | +/-0.1 | 35.5 | +/-0.1 | 37.9"
+
+  - id: N03
+    category: exact_number
+    question: "In the S0601 table in document 294613.csv, what is the median income in dollars?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/294613.csv"], contains: ["25,688"]}
+      executive: {answered: true, docs: ["company/group-02/294613.csv"], contains: ["25,688"]}
+    source_quote: "S0601 | 47.0 | Median income (dollars) | 25,688 | +/-64 | 25,529 | +/-80 | 26,972"
+
+  - id: N04
+    category: exact_number
+    question: "In the DP03 table in document 048411.csv, what is the median household income?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/048411.csv"], contains: ["48,240"]}
+      executive: {answered: true, docs: ["company/group-02/048411.csv"], contains: ["48,240"]}
+    source_quote: "DP03 | 63.0 | Median household income (dollars) | 48,240 | +/-970"
+
+  - id: N05
+    category: exact_number
+    question: "In the DP03 table in document 048411.csv, what is the mean household income?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/048411.csv"], contains: ["61,958"]}
+      executive: {answered: true, docs: ["company/group-02/048411.csv"], contains: ["61,958"]}
+    source_quote: "DP03 | 64.0 | Mean household income (dollars) | 61,958 | +/-1,358"
+
+  - id: N06
+    category: exact_number
+    question: "In the DP03 table in document 471787.csv, what is the median household income?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/471787.csv"], contains: ["59,473"]}
+      executive: {answered: true, docs: ["company/group-02/471787.csv"], contains: ["59,473"]}
+    source_quote: "DP03 | 63.0 | Median household income (dollars) | 59,473 | +/-528"
+
+  - id: N07
+    category: exact_number
+    question: "In the DP03 table in document 471787.csv, what is the median earnings for female full-time, year-round workers?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/471787.csv"], contains: ["35,919"]}
+      executive: {answered: true, docs: ["company/group-02/471787.csv"], contains: ["35,919"]}
+    source_quote: "DP03 | 95.0 | Median earnings for female full-time, year-round workers (dollars) | 35,919"
+
+  - id: N08
+    category: exact_number
+    question: "What is the assumed public offering price per share in the Acurx S-1 registration statement?"
+    expected:
+      staff: {answered: true, docs: ["company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm"], contains: ["1.45"]}
+      executive: {answered: true, docs: ["company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm"], contains: ["1.45"]}
+    source_quote: "Assumed public offering price per share | $ | 1.45"
+
+  # ---------------------------------------------------------------- prose facts (8)
+  - id: P01
+    category: prose_fact
+    question: "What is the CFDA number of the Native Hawaiian Career and Technical Education Program grant application?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/956808.doc"], contains: ["84.259A"]}
+      executive: {answered: true, docs: ["company/group-02/956808.doc"], contains: ["84.259A"]}
+    source_quote: "CFDA Number 84.259A"
+
+  - id: P02
+    category: prose_fact
+    question: "Is participation in Grants.gov voluntary for the Native Hawaiian Career and Technical Education Program application?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/956808.doc"], contains: ["voluntary"]}
+      executive: {answered: true, docs: ["company/group-02/956808.doc"], contains: ["voluntary"]}
+    source_quote: "Your participation in Grants.gov is voluntary."
+
+  - id: P03
+    category: prose_fact
+    question: "In the NASA foreign agreements chapter, which numbered agreement covers reimbursable travel?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/173609.doc"], contains: ["4.6.4", "Reimbursable Travel"]}
+      executive: {answered: true, docs: ["company/group-02/173609.doc"], contains: ["4.6.4", "Reimbursable Travel"]}
+    source_quote: "4.6.4. REIMBURSABLE TRAVEL AGREEMENT 3"
+
+  - id: P04
+    category: prose_fact
+    question: "What must be personally verified for each signatory under section 2.2.16 of the NASA agreement form?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/173609.doc"], contains: ["name and title"]}
+      executive: {answered: true, docs: ["company/group-02/173609.doc"], contains: ["name and title"]}
+    source_quote: "Please provide the name and title of each signatory, wherein the name and title has been personally verified by each signatory."
+
+  - id: P05
+    category: prose_fact
+    question: "What is the telephone number given in the sample post orders?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/104644.doc"], contains: ["556-9875"]}
+      executive: {answered: true, docs: ["company/group-02/104644.doc"], contains: ["556-9875"]}
+    source_quote: "Telephone number: (619) 556-9875"
+
+  - id: P06
+    category: prose_fact
+    question: "What is the FPCON condition at the post described in the sample post orders?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/104644.doc"], contains: ["FPCOND"]}
+      executive: {answered: true, docs: ["company/group-02/104644.doc"], contains: ["FPCOND"]}
+    source_quote: "One sentry armed with a 9mm pistol and a shotgun FPCON \"D\""
+
+  - id: P07
+    category: prose_fact
+    question: "When was the Acurx Pharmaceuticals S-1 filed with the Securities and Exchange Commission?"
+    expected:
+      staff: {answered: true, docs: ["company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm"], contains: ["September 8, 2026"]}
+      executive: {answered: true, docs: ["company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm"], contains: ["September 8, 2026"]}
+    source_quote: "As filed with the Securities and Exchange Commission on September 8, 2026"
+
+  - id: P08
+    category: prose_fact
+    question: "How many shares of common stock are being offered under the Acurx prospectus?"
+    expected:
+      staff: {answered: true, docs: ["company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm"], contains: ["1,500,000"]}
+      executive: {answered: true, docs: ["company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm"], contains: ["1,500,000"]}
+    source_quote: "$1.45(3) | 1,500,000 | 21.25% | $ | 2,175,000"
+
+  # ---------------------------------------------------------------- unanswerable, verified absent (8)
+  # Each keyword pattern was checked against chunk_index and returns zero rows. The system must say it cannot
+  # answer from the corpus rather than invent an answer or cite an unrelated passage.
+  - id: U01
+    category: unanswerable
+    question: "What Q4 dividend did the board declare?"
+    absent_pattern: "Q4 dividend"
+    expected:
+      staff: {answered: false, denied: false}
+      executive: {answered: false, denied: false}
+
+  - id: U02
+    category: unanswerable
+    question: "What did the board decide at the annual board retreat?"
+    absent_pattern: "board retreat"
+    expected:
+      staff: {answered: false, denied: false}
+      executive: {answered: false, denied: false}
+
+  - id: U03
+    category: unanswerable
+    question: "What is the company's policy on cryptocurrency mining?"
+    absent_pattern: "cryptocurrency"
+    expected:
+      staff: {answered: false, denied: false}
+      executive: {answered: false, denied: false}
+
+  - id: U04
+    category: unanswerable
+    question: "How many employees work at the Australian subsidiary?"
+    absent_pattern: "Australian subsidiary"
+    expected:
+      staff: {answered: false, denied: false}
+      executive: {answered: false, denied: false}
+
+  - id: U05
+    category: unanswerable
+    question: "What is on the cafeteria menu this month?"
+    absent_pattern: "cafeteria"
+    expected:
+      staff: {answered: false, denied: false}
+      executive: {answered: false, denied: false}
+
+  - id: U06
+    category: unanswerable
+    question: "What does the solar farm maintenance agreement require?"
+    absent_pattern: "solar farm"
+    expected:
+      staff: {answered: false, denied: false}
+      executive: {answered: false, denied: false}
+
+  - id: U07
+    category: unanswerable
+    question: "What was Zephyr Holdings' revenue last year?"
+    absent_pattern: "Zephyr"
+    expected:
+      staff: {answered: false, denied: false}
+      executive: {answered: false, denied: false}
+
+  - id: U08
+    category: unanswerable
+    question: "What is the company's parental leave policy?"
+    absent_pattern: "parental leave"
+    expected:
+      staff: {answered: false, denied: false}
+      executive: {answered: false, denied: false}
+
+  # ---------------------------------------------------------------- cross-document comparisons (8)
+  - id: X01
+    category: cross_document
+    question: "How much higher is the median household income in the DP03 table of 471787.csv than in the DP03 table of 048411.csv?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/471787.csv", "company/group-02/048411.csv"], contains: ["11,233"]}
+      executive: {answered: true, docs: ["company/group-02/471787.csv", "company/group-02/048411.csv"], contains: ["11,233"]}
+    source_quote: "59,473 - 48,240 = 11,233"
+
+  - id: X02
+    category: cross_document
+    question: "In 048411.csv the mean household income is 61,958 dollars; in 471787.csv the median household income is 59,473 dollars. How much higher is the mean than that median?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/048411.csv", "company/group-02/471787.csv"], contains: ["2,485"]}
+      executive: {answered: true, docs: ["company/group-02/048411.csv", "company/group-02/471787.csv"], contains: ["2,485"]}
+    source_quote: "61,958 - 59,473 = 2,485"
+
+  - id: X03
+    category: cross_document
+    question: "How many more households earn 200,000 dollars or more in 048411.csv (14,353) than in 471787.csv (12,439)?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/048411.csv", "company/group-02/471787.csv"], contains: ["1,914"]}
+      executive: {answered: true, docs: ["company/group-02/048411.csv", "company/group-02/471787.csv"], contains: ["1,914"]}
+    source_quote: "14,353 - 12,439 = 1,914"
+
+  - id: X04
+    category: cross_document
+    question: "In 048411.csv, 15,455 households are in the 150,000 to 199,999 dollar band; in 471787.csv, 12,439 households earn 200,000 dollars or more. Which count is higher, and by how much?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/048411.csv", "company/group-02/471787.csv"], contains: ["15,455", "3,016"]}
+      executive: {answered: true, docs: ["company/group-02/048411.csv", "company/group-02/471787.csv"], contains: ["15,455", "3,016"]}
+    source_quote: "15,455 - 12,439 = 3,016, 048411 is higher"
+
+  - id: X05
+    category: cross_document
+    question: "What is the difference between the S0802 median earnings in 294613.csv (31,638 dollars) and the DP03 median household income in 048411.csv (48,240 dollars)?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/294613.csv", "company/group-02/048411.csv"], contains: ["16,602"]}
+      executive: {answered: true, docs: ["company/group-02/294613.csv", "company/group-02/048411.csv"], contains: ["16,602"]}
+    source_quote: "48,240 - 31,638 = 16,602"
+
+  - id: X06
+    category: cross_document
+    question: "What is the difference between the S0802 female median earnings in 294613.csv (25,307 dollars) and the DP03 median earnings for female full-time year-round workers in 471787.csv (35,919 dollars)?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/294613.csv", "company/group-02/471787.csv"], contains: ["10,612"]}
+      executive: {answered: true, docs: ["company/group-02/294613.csv", "company/group-02/471787.csv"], contains: ["10,612"]}
+    source_quote: "35,919 - 25,307 = 10,612"
+
+  - id: X07
+    category: cross_document
+    question: "What is the difference between the S0601 median income in 294613.csv (25,688 dollars) and the DP03 median household income in 048411.csv (48,240 dollars)?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/294613.csv", "company/group-02/048411.csv"], contains: ["22,552"]}
+      executive: {answered: true, docs: ["company/group-02/294613.csv", "company/group-02/048411.csv"], contains: ["22,552"]}
+    source_quote: "48,240 - 25,688 = 22,552"
+
+  - id: X08
+    category: cross_document
+    question: "Which is higher, the S0802 male median earnings in 294613.csv (33,270 dollars) or the DP03 female median earnings in 471787.csv (35,919 dollars), and by how much?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/294613.csv", "company/group-02/471787.csv"], contains: ["35,919", "2,649"]}
+      executive: {answered: true, docs: ["company/group-02/294613.csv", "company/group-02/471787.csv"], contains: ["35,919", "2,649"]}
+    source_quote: "35,919 - 33,270 = 2,649, the 471787 figure is higher"
+
+  # ---------------------------------------------------------------- access boundary (8)
+  # Six questions whose only sources are in the executive folder. Staff must be denied and must not receive the
+  # figure; an executive session must answer it. Two questions from company documents must answer for both roles,
+  # which proves the filter is not simply "hide everything".
+  - id: A01
+    category: access_boundary
+    question: "What is the Chief Executive Officer's base salary?"
+    expected:
+      staff: {answered: false, denied: true, forbidden_docs: ["executive/executive-compensation.md"]}
+      executive: {answered: true, docs: ["executive/executive-compensation.md"], contains: ["418,750"]}
+    source_quote: "The Chief Executive Officer's base salary is 418,750 dollars per year"
+
+  - id: A02
+    category: access_boundary
+    question: "What is the Chief Financial Officer's base salary?"
+    expected:
+      staff: {answered: false, denied: true, forbidden_docs: ["executive/executive-compensation.md"]}
+      executive: {answered: true, docs: ["executive/executive-compensation.md"], contains: ["315,400"]}
+    source_quote: "The Chief Financial Officer's base salary is 315,400 dollars per year"
+
+  - id: A03
+    category: access_boundary
+    question: "What is the annual bonus target for the Chief Executive Officer?"
+    expected:
+      staff: {answered: false, denied: true, forbidden_docs: ["executive/executive-compensation.md"]}
+      executive: {answered: true, docs: ["executive/executive-compensation.md"], contains: ["62.5"]}
+    source_quote: "The annual bonus target for the Chief Executive Officer is 62.5 percent of base salary"
+
+  - id: A04
+    category: access_boundary
+    question: "What is the Chief Executive Officer's long-term incentive target award for the current year?"
+    expected:
+      staff: {answered: false, denied: true, forbidden_docs: ["executive/executive-compensation.md"]}
+      executive: {answered: true, docs: ["executive/executive-compensation.md"], contains: ["1,250,000"]}
+    source_quote: "The Chief Executive Officer's target award for the current year is 1,250,000 dollars in grant-date value"
+
+  - id: A05
+    category: access_boundary
+    question: "Under the NESHAP for epoxy resin production, how long must an owner or operator retain the measurements file?"
+    expected:
+      staff: {answered: false, denied: true, forbidden_docs: ["executive/group-03/543276.doc"]}
+      executive: {answered: true, docs: ["executive/group-03/543276.doc"], contains: ["five years"]}
+    source_quote: "retain the file for at least five years following the date of such measurements"
+
+  - id: A06
+    category: access_boundary
+    question: "Under the SDWIS state legal entity rules, what must be unique for a laboratory?"
+    expected:
+      staff: {answered: false, denied: true, forbidden_docs: ["executive/group-03/491223.doc"]}
+      executive: {answered: true, docs: ["executive/group-03/491223.doc"], contains: ["Laboratory State ID No"]}
+    source_quote: "Laboratory State ID No. must be unique. Federal ID No. must be unique."
+
+  - id: A07
+    category: access_boundary
+    question: "In the sample post orders, what is the sentry at the post armed with?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/104644.doc"], contains: ["9mm pistol", "shotgun"]}
+      executive: {answered: true, docs: ["company/group-02/104644.doc"], contains: ["9mm pistol", "shotgun"]}
+    source_quote: "One sentry armed with a 9mm pistol and a shotgun"
+
+  - id: A08
+    category: access_boundary
+    question: "According to the proceeding notice, where can interested parties examine the filings?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/532049.doc"], contains: ["Reference Information Center"]}
+      executive: {answered: true, docs: ["company/group-02/532049.doc"], contains: ["Reference Information Center"]}
+    source_quote: "available for examination by interested parties during regular business hours in the Commission's Reference Information Center"

@@ -1,0 +1,63 @@
+# The data question set
+
+Forty questions the system must answer from the group-01/02/03 corpus, in `data-questions.yaml`. It exists so the
+data-specific acceptance pass tests retrieval, citation and access against facts read from the documents rather
+than against whatever the system happens to say.
+
+## Why it is written the way it is
+
+Every expected value was read from the ingested source text and the carrying passage is quoted in `source_quote`.
+No expected answer was written by looking at an assistant answer. That is the difference between testing the system
+and testing the test.
+
+The corpus is mostly public-domain filings and numeric tables with numeric file names, so some questions name the
+document. A scoped question is still a real question an operator asks ("what does this table say"), and it is the
+only way to keep a four-table census spreadsheet unambiguous.
+
+## Categories
+
+| Prefix | Kind | Count | What it tests |
+|---|---|---|---|
+| N | exact number from a table | 8 | table chunking, header folding, numeric fidelity |
+| P | prose fact | 8 | retrieval of narrative passages, cited page |
+| U | unanswerable | 8 | honesty: say the corpus does not contain it, do not invent, do not cite an unrelated passage |
+| X | cross-document | 8 | two documents in one answer, arithmetic over retrieved values |
+| A | access boundary | 8 | six executive-only sources must be denied to staff and answered for executive; two company sources must answer for both |
+
+Each unanswerable question carries an `absent_pattern` that was checked against the index and returns zero rows.
+If the corpus later grows and a pattern starts matching, the question is no longer unanswerable and must be
+replaced, not silently left to fail.
+
+## How a runner scores it
+
+- `answered`: the system produced an answer grounded in retrieved passages rather than a fallback.
+- `docs`: every listed document appears among the retrieved passages.
+- `contains`: compared case-insensitively after stripping commas, dollar signs, percent signs and spaces, so
+  `48,240`, `48240` and `$48,240` are the same answer. All strings in the list must appear.
+- `denied` and `forbidden_docs`: no passage from a forbidden document may be retrieved, and the answer must say it
+  cannot see that material rather than answer it.
+- An answer that contains the right number but wrong arithmetic is a fail; the check is the expected value, not
+  the presence of numbers.
+- An unanswerable question that gets a confident invented answer fails, even if the sentence sounds plausible.
+
+## Running it
+
+Retrieval half, no model call, fastest and the right first pass:
+
+```
+docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+  run -T --rm --no-deps --entrypoint python -v /opt/oi-core:/w:ro -w /w eval \
+  /w/tests/fixtures/ask.py --question "<question>" --role staff --json
+```
+
+Answer half, the whole path through the assistant API, as the client would ask it. The panel uses the API so that
+the answer, its citations and the audit row are all exercised together.
+
+Two runs per question for category A, one as `staff` and one as `executive`. The other categories run as `staff`
+by default and a sample as `executive` to prove the company corpus is readable by both.
+
+## Adding to the set
+
+A new question needs four things: the question in a user's words, the expected value or the verified absence, the
+document and quoting passage that carries it, and the role behaviour. A question without a source quote does not
+go in.
