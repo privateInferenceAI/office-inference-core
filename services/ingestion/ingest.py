@@ -451,21 +451,65 @@ def _ocr_ran(parsed: dict, confidence: dict | None = None) -> bool:
     return False
 
 
-def count_tokens(services: Services, texts: list[str]) -> list[int]:
-    """The served embedding model's own token count for each text.
+# TEI caps a `/tokenize` request at `--max-batch-tokens` (8,192 here) and refuses a larger batch with a 422.
+# The cap is on the whole batch, not per text, and the worker measures a whole document at once, so a request
+# has to be split before it is sent. The budget below is bytes rather than estimated tokens: at the worst
+# measured ratio (1.33 bytes/token on a CSV ledger) 7,000 bytes is about 5,300 tokens, inside the cap with room
+# for the tokenizer's special tokens. The 422 is also handled by halving, because a ratio that moves is not a
+# reason to fail a document.
+TOKENIZE_BATCH_BYTES = 7_000
 
-    **Why this is a call and not an estimate.** `chunker.estimate_tokens` is a whitespace-word estimate that
-    measured 2.8x to 3.2x low on two table samples and returns one token for a run with no whitespace, so it
-    cannot be the thing that decides a chunk fits. TEI serves the tokenizer the vectors are built with at
-    `/tokenize`; one call carries a batch. A deployment whose embedding service cannot answer this cannot
-    enforce the invariant, so the failure is loud rather than silently estimated (`RET-CHUNK-001`).
-    """
+
+def _tokenize(services: Services, texts: list[str]) -> list[int]:
     payload = _post(f"{services.embed_url}/tokenize", {"inputs": texts}, services.timeout)
     if not isinstance(payload, list) or len(payload) != len(texts):
         raise RuntimeError(
             f"the embedding service did not tokenize {len(texts)} text(s); got {type(payload).__name__}. "
             "The measured chunk post-condition needs its tokenizer, and an estimate is not a measurement.")
     return [len(tokens) for tokens in payload]
+
+
+def _tokenize_one_batch(services: Services, texts: list[str]) -> list[int]:
+    try:
+        return _tokenize(services, texts)
+    except urllib.error.HTTPError as exc:
+        if exc.code != 422:
+            raise
+        if len(texts) == 1:
+            raise RuntimeError(
+                "the embedding service refused to tokenize a single chunk. The chunk is past the model's input "
+                "limit even with truncation off, which is the invariant this measurement exists to enforce "
+                "(RET-CHUNK-001).") from exc
+        middle = len(texts) // 2
+        return _tokenize_one_batch(services, texts[:middle]) + _tokenize_one_batch(services, texts[middle:])
+
+
+def count_tokens(services: Services, texts: list[str]) -> list[int]:
+    """The served embedding model's own token count for each text.
+
+    **Why this is a call and not an estimate.** `chunker.estimate_tokens` is a whitespace-word estimate that
+    measured 2.8x to 3.2x low on two table samples and returns one token for a run with no whitespace, so it
+    cannot be the thing that decides a chunk fits. TEI serves the tokenizer the vectors are built with at
+    `/tokenize`, and it caps the total tokens per request, so the texts are sent in byte-bounded batches. A
+    deployment whose embedding service cannot answer this cannot enforce the invariant, so the failure is loud
+    rather than silently estimated (`RET-CHUNK-001`).
+    """
+    batches: list[list[str]] = []
+    current: list[str] = []
+    size = 0
+    for text in texts:
+        length = len(text.encode("utf-8"))
+        if current and size + length > TOKENIZE_BATCH_BYTES:
+            batches.append(current)
+            current, size = [], 0
+        current.append(text)
+        size += length
+    if current:
+        batches.append(current)
+    counts: list[int] = []
+    for batch in batches:
+        counts.extend(_tokenize_one_batch(services, batch))
+    return counts
 
 
 def _contract_change_allowed() -> bool:

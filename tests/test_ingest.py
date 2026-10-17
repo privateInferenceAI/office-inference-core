@@ -16,6 +16,7 @@ than inferred.
 from __future__ import annotations
 
 import sys
+import urllib.error
 from pathlib import Path
 
 import pytest
@@ -1184,3 +1185,39 @@ def test_a_wrapped_404_is_not_retried():
             raise RuntimeError(f"wrapped: {exc}") from exc
     except RuntimeError as wrapped:
         assert not ingest.is_transient(wrapped)
+
+
+# ---------------------------------------------------------------- the tokenizer batches for the post-condition
+
+def test_the_tokenizer_splits_batches_under_the_services_cap(monkeypatch):
+    """TEI refuses a `/tokenize` request over `--max-batch-tokens` with a 422, and the worker measures a whole
+    document at once. The measurement has to split the list, and a refusal has to halve rather than fail the
+    document, or the documents with the most chunks — the ones the post-condition exists for — are the ones
+    that cannot be ingested."""
+    calls: list[list[int]] = []
+
+    def fake_post(url, body, timeout, method="POST"):
+        texts = body["inputs"]
+        calls.append([len(text) for text in texts])
+        if len(texts) > 5:
+            raise urllib.error.HTTPError(url, 422, "Unprocessable Entity", {}, None)
+        return [[{"id": 0} for _ in range(len(text) // 4)] for text in texts]
+
+    monkeypatch.setattr(ingest, "_post", fake_post)
+    texts = ["y" * 800 for _ in range(20)]
+    counts = ingest.count_tokens(ingest.Services(), texts)
+    assert counts == [200] * 20
+    # Every text is tokenized exactly once by a request that succeeded; the refused attempts are retried.
+    assert sum(len(call) for call in calls if len(call) <= 5) == 20
+    assert any(len(call) > 5 for call in calls), "the simulated refusal has to be exercised"
+
+
+def test_a_single_chunk_the_service_cannot_tokenize_fails_loudly(monkeypatch):
+    """One chunk past the model's limit with truncation off is the invariant violated, and it has to name that
+    rather than read as a document parsing problem."""
+    def always_422(url, body, timeout, method="POST"):
+        raise urllib.error.HTTPError(url, 422, "Unprocessable Entity", {}, None)
+
+    monkeypatch.setattr(ingest, "_post", always_422)
+    with pytest.raises(RuntimeError, match="single chunk"):
+        ingest.count_tokens(ingest.Services(), ["a" * 10])
