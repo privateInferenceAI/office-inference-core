@@ -463,6 +463,10 @@ def _ocr_ran(parsed: dict, confidence: dict | None = None) -> bool:
 # for the tokenizer's special tokens. The 422 is also handled by halving, because a ratio that moves is not a
 # reason to fail a document.
 TOKENIZE_BATCH_BYTES = 7_000
+# **A byte budget alone is not a batch bound.** Many short chunks (a table's row entries are the common case) fit
+# hundreds into 7,000 bytes, and the service also caps the number of inputs per request; a request over that cap
+# is a 422 and a halving retry for every such document. Sixteen is the same bound the embedding batch uses.
+TOKENIZE_BATCH_TEXTS = int(os.environ.get("INGEST_TOKENIZE_BATCH", "16"))
 
 
 def _tokenize(services: Services, texts: list[str]) -> list[int]:
@@ -504,7 +508,7 @@ def count_tokens(services: Services, texts: list[str]) -> list[int]:
     size = 0
     for text in texts:
         length = len(text.encode("utf-8"))
-        if current and size + length > TOKENIZE_BATCH_BYTES:
+        if current and (size + length > TOKENIZE_BATCH_BYTES or len(current) >= TOKENIZE_BATCH_TEXTS):
             batches.append(current)
             current, size = [], 0
         current.append(text)

@@ -1207,9 +1207,16 @@ def test_the_tokenizer_splits_batches_under_the_services_cap(monkeypatch):
     texts = ["y" * 800 for _ in range(20)]
     counts = ingest.count_tokens(ingest.Services(), texts)
     assert counts == [200] * 20
+    first_calls = list(calls)
+    # Short texts must not bypass the byte budget: hundreds fit in 7,000 bytes and the service caps inputs too.
+    monkeypatch.setattr(ingest, "TOKENIZE_BATCH_TEXTS", 4)
+    calls.clear()
+    counts = ingest.count_tokens(ingest.Services(), ["short"] * 10)
+    assert len(counts) == 10
+    assert all(len(call) <= 4 for call in calls)
     # Every text is tokenized exactly once by a request that succeeded; the refused attempts are retried.
-    assert sum(len(call) for call in calls if len(call) <= 5) == 20
-    assert any(len(call) > 5 for call in calls), "the simulated refusal has to be exercised"
+    assert sum(len(call) for call in first_calls if len(call) <= 5) == 20
+    assert any(len(call) > 5 for call in first_calls), "the simulated refusal has to be exercised"
 
 
 def test_a_single_chunk_the_service_cannot_tokenize_fails_loudly(monkeypatch):
