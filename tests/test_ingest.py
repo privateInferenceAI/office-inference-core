@@ -15,6 +15,7 @@ than inferred.
 """
 from __future__ import annotations
 
+import json
 import sys
 import urllib.error
 from pathlib import Path
@@ -1317,3 +1318,46 @@ def test_the_byte_budget_splits_before_the_count_does(monkeypatch):
     ingest.upsert_points(ingest.Services(), points)
     assert len(calls) > 1
     assert [p["id"] for batch in calls for p in batch] == [p["id"] for p in points]
+
+
+def test_rejected_documents_become_a_worklist(tmp_path):
+    """A dead letter has to be a file a person can find, not a row somebody has to know to query."""
+    class FakeManifest:
+        def failed_documents(self):
+            return [
+                {"relpath": "company/broken.xls", "root": "company", "bytes": 12288,
+                 "failure_count": 2, "failure_kind": "permanent",
+                 "last_error": "RuntimeError: the parser failed: cannot open the document",
+                 "updated_at": "2026-10-17T09:00:00"},
+                {"relpath": "company/retrying.csv", "root": "company", "bytes": 100,
+                 "failure_count": 0, "failure_kind": "transient", "last_error": "HTTP Error 429",
+                 "updated_at": "2026-10-17T09:00:00"},
+            ]
+
+    report = ingest.write_rejected_report(FakeManifest(), tmp_path)
+    assert len(report["rejected"]) == 1
+    assert len(report["retrying"]) == 1
+
+    rows = (tmp_path / "rejected.csv").read_text(encoding="utf-8").splitlines()
+    assert rows[0].startswith("relpath")
+    assert "company/broken.xls" in rows[1]
+    assert "cannot open the document" in rows[1]
+    assert "company/retrying.csv" not in (tmp_path / "rejected.csv").read_text(encoding="utf-8")
+
+    payload = json.loads((tmp_path / "rejected.json").read_text(encoding="utf-8"))
+    assert payload["generated_at"]
+    assert payload["rejected"][0]["relpath"] == "company/broken.xls"
+    assert payload["retrying"][0]["relpath"] == "company/retrying.csv"
+
+
+def test_the_worklist_exists_even_when_nothing_was_rejected(tmp_path):
+    """An absent file and a list of zero are different facts, so the file is always written."""
+    class FakeManifest:
+        def failed_documents(self):
+            return []
+
+    report = ingest.write_rejected_report(FakeManifest(), tmp_path)
+    assert report["rejected"] == []
+    header = (tmp_path / "rejected.csv").read_text(encoding="utf-8").strip().splitlines()
+    assert header[0].startswith("relpath")
+    assert len(header) == 1

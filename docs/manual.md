@@ -1833,7 +1833,14 @@ character for character — all fifteen suffixes, and the case flag.
   their bytes change. `docker exec ingestion python3 /app/ingest.py --status` names them.
 
 Tell the client which files were skipped and why before saying the corpus is loaded. An ignored `.doc` is a
-fact they should hear from you rather than discover when a question about it has no answer.
+fact they should hear from you rather than discover when a question about it has no answer. **The worker writes
+that list to `${OI_ROOT}/rejected/` on the host at the end of every cycle:** `rejected.csv` is the worklist, one
+row per file the worker has given up on, with its size, the reason and when it last failed, and `rejected.json`
+carries the same plus the files still being retried. Create that directory when the deployment is built and make
+it writable by the worker's uid (10001), because a worklist nobody can write is worse than no promise of one. A
+rejected file that is replaced or fixed re-enters the queue on its own when its bytes change; to retry one whose
+bytes have not changed, `docker exec ingestion python3 /app/ingest.py --clear-failures <relpath>`, or run the
+same file with `--rejected` to refresh the list on demand.
 
 **Four: run one question per root and read the answer.** This is the acceptance test for a corpus, and it
 takes two minutes. It catches a corpus laid out under the wrong root, a parser that cannot read the

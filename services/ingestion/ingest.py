@@ -19,6 +19,7 @@ a client's index.
 from __future__ import annotations
 
 import hashlib
+import csv
 import json
 import os
 import re
@@ -109,6 +110,16 @@ def is_transient(exc: BaseException) -> bool:
 # Where the last cycle's result is written, for the healthcheck to read. A worker with no listening socket
 # cannot be asked whether it is well, so it records the answer instead.
 STATE_PATH = Path(os.environ.get("INGEST_STATE_PATH", "/state/last-cycle.json"))
+
+# **Where a rejected document becomes a worklist rather than a row.** A dead letter lives in the manifest, which
+# is durable and invisible: a table nobody queries is not a list a person can act on. This directory is mounted
+# from the host, so the operator finds two files there without knowing SQL or the container's layout:
+# `rejected.csv` is the worklist (file name, size, reason, when it last failed) and `rejected.json` also carries
+# the retrying documents. A file that is replaced or fixed re-enters the queue because its bytes changed;
+# `--clear-failures <relpath>` retries one whose bytes have not.
+REJECTED_DIR = Path(os.environ.get("INGEST_REJECTED_DIR", "/state/rejected"))
+REJECTED_FIELDS = ("relpath", "root", "bytes", "failure_count", "failure_kind", "last_error",
+                   "updated_at")
 
 # The root a deployment's documents live under. Named so the guard above can tell "the deployment's folder"
 # from "some subset somebody pointed a measurement at".
@@ -1373,12 +1384,13 @@ class PostgresManifest(Manifest):
         """
         with self.connection.cursor() as cur:
             cur.execute("""
-                select relpath, failure_count, failure_kind, last_error
+                select relpath, root, bytes, failure_count, failure_kind, last_error, updated_at
                 from ingest_manifest
                 where coalesce(failure_count, 0) > 0 or failure_kind is not null
                 order by relpath""")
-            return [{"relpath": row[0], "failure_count": row[1], "failure_kind": row[2],
-                     "last_error": row[3]} for row in cur.fetchall()]
+            return [{"relpath": row[0], "root": row[1], "bytes": row[2], "failure_count": row[3],
+                     "failure_kind": row[4], "last_error": row[5], "updated_at": row[6]}
+                    for row in cur.fetchall()]
 
     def unresolved_duplicates(self) -> list[dict]:
         with self.connection.cursor() as cur:
@@ -1727,6 +1739,34 @@ def build_manifest(dsn: str | None) -> Manifest:
         return MemoryManifest()
 
 
+def write_rejected_report(manifest, directory: Path = REJECTED_DIR) -> dict:
+    """Write the documents the pipeline has given up on where a person can find and act on them.
+
+    Called at the end of every cycle and by `--rejected`. The CSV is the worklist an operator reads or hands to a
+    client: name, size, why it failed, when it last failed. The JSON also carries the retrying documents, so a
+    dashboard or a later API has the full picture without parsing the CSV.
+    """
+    records = manifest.failed_documents()
+    rejected = [record for record in records
+                if (record.get("failure_count") or 0) >= MAX_FAILURES]
+    retrying = [record for record in records
+                if (record.get("failure_count") or 0) < MAX_FAILURES]
+    directory.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "rejected": rejected,
+        "retrying": retrying,
+    }
+    (directory / "rejected.json").write_text(
+        json.dumps(payload, indent=2, default=str) + "\n", encoding="utf-8")
+    with (directory / "rejected.csv").open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=REJECTED_FIELDS, extrasaction="ignore")
+        writer.writeheader()
+        for record in rejected:
+            writer.writerow({field: record.get(field) for field in REJECTED_FIELDS})
+    return payload
+
+
 def record_cycle(result: CycleResult) -> None:
     """Write the cycle's outcome where something other than a log can read it.
 
@@ -1795,6 +1835,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="compare every indexed document against every other and record the pairs worth "
                              "a look. Needed because detection otherwise runs only when a file arrives, so a "
                              "corpus that predates the check is never examined.")
+    parser.add_argument("--rejected", action="store_true",
+                        help="write and print the rejected-documents worklist (dead letters, with reasons)")
     parser.add_argument("--failures", action="store_true",
                         help="every document that has failed, with the reason and whether it is still "
                              "being retried. Reads the manifest rather than the last cycle, so a "
@@ -1825,6 +1867,22 @@ def main(argv: list[str] | None = None) -> int:
         print()
         print("A pair is recorded, never acted on. Resolve each with --supersede A --by B, or")
         print("--distinct A if they are genuinely two documents. --versions lists what is outstanding.")
+        return 0
+
+    if args.rejected:
+        shown = build_manifest(os.environ.get("DATABASE_URL"))
+        try:
+            report = write_rejected_report(shown)
+        except OSError as exc:  # noqa: BLE001
+            print(f"could not write the rejected-documents list: {exc}")
+            return 1
+        path = REJECTED_DIR / "rejected.csv"
+        print(f"rejected worklist: {path}")
+        print(f"  {len(report['rejected'])} dead-lettered, {len(report['retrying'])} retrying")
+        for record in report["rejected"]:
+            reason = " ".join(str(record.get("last_error") or "").split())[:200]
+            print(f"  {record['relpath']}  ({record.get('bytes')} bytes)")
+            print(f"    {reason}")
         return 0
 
     if args.failures:
@@ -1973,6 +2031,13 @@ def main(argv: list[str] | None = None) -> int:
     if not args.dry_run:
         manifest.finish_run(run_id, result.as_counts())
         record_cycle(result)
+        try:
+            rejected = write_rejected_report(manifest)
+            if rejected["rejected"]:
+                print(f"  {len(rejected['rejected'])} rejected file(s) are listed in "
+                      f"{REJECTED_DIR / 'rejected.csv'} for a person to deal with")
+        except OSError as exc:  # noqa: BLE001 - a records problem must not fail an ingestion
+            print(f"could not write the rejected-documents list: {exc}")
 
     if args.json:
         print(json.dumps({"seen": result.seen, "new": result.new, "changed": result.changed,

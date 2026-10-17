@@ -242,12 +242,18 @@ services:
       # The staging fix that would let a quiet cycle and a bulk load use different settings is RET-INGEST-002.
       INGEST_CONCURRENCY: "1"
       INGEST_EMBED_TOKEN_BUDGET: "7000"
+      # Where the rejected-documents worklist is written. Mounted from the host below, so an operator opens
+      # rejected/rejected.csv next to the deployment rather than querying a manifest table.
+      INGEST_REJECTED_DIR: /rejected
       INGEST_MAX_FAILURES: "2"
       INGEST_STATE_PATH: /state/last-cycle.json
     volumes:
       # Read-only. This worker never writes to a client's documents, and a mount that cannot be written to
       # is the cheapest way to keep that true.
       - ${OI_ROOT}/documents:/documents:ro
+      # The rejected-documents worklist. Must exist and be writable by uid 10001; the manual's ingest step
+      # creates it. A rejected file that nobody can see is the failure this mount exists to prevent.
+      - ${OI_ROOT}/rejected:/rejected
       # The cycle record the healthcheck reads. A named volume rather than a bind mount, because it is
       # this container's own state and nothing else has business reading it.
       - ingestion-state:/state
