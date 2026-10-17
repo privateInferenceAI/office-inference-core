@@ -704,6 +704,28 @@ items:
       than the payload contract implies. That joins per-page confidence as the second feature blocked on the
       same wire-format limit. RET-VERSION-001 and RET-DUPE-001 still sit on top of this: chunks carry no
       version column yet, so a superseded document is removed rather than superseded.
+
+  - id: RET-INGEST-002
+    title: A manual ingest cannot run beside the scheduled cycle, and a first bulk load cannot saturate the embedding service
+    tier: [cloud, hosted, office]
+    phase: C2
+    verify: >-
+      with the service timer armed, drop files into the documents root and trigger ingestion the way the page
+      documents; assert exactly one ingest worker exists at any moment, or that the documented trigger is one
+      that replaces the loop rather than joining it. Then load a few hundred documents in one go and assert the
+      cycle finishes with zero failures. A load that dead-letters documents because two workers shared one
+      embedding service fails the row.
+    status: open
+    note: >-
+      Found on 2026-10-16 while loading the group-01 and group-02 corpus. A manual `docker exec ... ingest.py`
+      ran beside the fifteen-minute service cycle, both workers loaded one embedding service, TEI answered
+      429, and 171 documents failed a pass with some dead-lettered. Recovered with the worker's own
+      `--clear-failures` and a single-writer pass at `INGEST_CONCURRENCY=1`. **Two changes are wanted and
+      neither is made, by the owner's decision on 2026-10-16:** the pages should say that the manual command
+      starts a second worker and name `oi restart ingestion` as the trigger that does not (a restart runs the
+      loop's first cycle and stays the only writer), and the default concurrency of four is too high for a
+      first bulk load. Recorded here rather than implemented, so it is not lost and not mistaken for done.
+
   - id: RET-VERSION-001
     title: A superseded document is not cited while its replacement exists
     tier: [cloud, office, hosted]
