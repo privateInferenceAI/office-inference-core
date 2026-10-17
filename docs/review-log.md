@@ -1133,3 +1133,32 @@ atomic tables as citation units, sentence-preferred splitting.
 The in-flight 29,092-point load was scrapped as a plausible-looking artifact, and the ingestion container is
 stopped. `RET-CHUNK-001` is opened, because a design rule that is not a register row has no test that fails when it
 stops being true. The research, the synthesis and the defect report are in `docs/research/chunking/`.
+
+
+## Retrieval chunking, the repair at work — 2026-10-17
+
+The three repairs landed and the corpus was rebuilt at chunker-v3. What the rebuild found that the tests could not
+is the part worth keeping.
+
+**A rebuild is a better test than a unit test, and it found four things.** The embedding batch was sized by chunk
+count, and sixteen measured chunks could still cross the service's token cap, so the service refused the request
+and the worker read that as "no endpoint answered": that alone failed 245 documents. The tokenizer batch had the
+same shape but worse, because a byte budget let hundreds of short spreadsheet chunks into one request. The
+character cut, the last rung of the fallback order, sized its slices from an average characters-per-token ratio and
+never measured the slice, which produced 43 chunks of 513 to 578 tokens against a 512 budget on a real document
+whose density changed inside the window. And the running API image still carried `chunker-v2`, so the read-side
+contract check refused every search on the v3 collection, which is exactly the hazard the client-reality review
+predicted; rebuilding the API fixed it.
+
+**The fixes, in the same order:** embedding requests bounded by the measured token counts and halved on a refusal;
+tokenizer requests capped by text count as well as bytes; the character cut measures each slice and shrinks it;
+a 429 is retried with growing backoff instead of failing the document, because load shedding is a pace rather than
+a fault; and the compose default for ingestion concurrency is two, because each request now sits near the batch
+token cap and a window of four fills the queue. The deeper pacing fix stays `RET-INGEST-002`.
+
+**Verified on the rebuilt index:** the boundary gate check passes (forbidden class refused on both endpoints, the
+permitted path answers), the job probe holds eight rights, the activity probe holds eight, staff asking the
+executive compensation question is denied and an executive session gets the memorandum first, no chunk over 512
+measured tokens exists in the index, the 756 KB unbroken run is 789 bounded chunks, and tables that did not fit are
+row groups carrying their identity and row range. `RET-CHUNK-001` is verified, the register row that would have
+caught this had it existed.
