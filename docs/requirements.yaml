@@ -550,6 +550,23 @@ items:
       not. OPEN DEPENDENCY: model_sha is null on this build, so the model revision is unverifiable and the contract
       records the null rather than omitting the field.
 
+  - id: RET-CHUNK-001
+    title: Every embedded chunk is measured against the embedding model's input limit, and a chunk over it is refused rather than truncated
+    tier: [cloud, hosted, office]
+    phase: C2
+    verify: >-
+      ingest a document whose text is one unbroken run and one whose table is larger than the limit; every emitted
+      chunk's token count, measured with the embedding model's own tokenizer, is at or under
+      min(contract.max_input_length, budget) minus the margin, or the document is dead-lettered with a typed
+      cause. No chunk is embedded with auto_truncate on, and a chunk that is silently truncated fails the row.
+    status: open
+    note: >-
+      The invariant the design stated and never enforced. Found on 2026-10-16 by loading a real corpus: 73 of 341
+      documents carried at least one chunk past the recorded 4,096-token embedding limit and were embedded as
+      their first tokens, and one 756 KB chunk assembled a prompt the provider refused. The rule lived in
+      docs/search-architecture.md stage 2 and in the chunker's docstring, which is why it shipped unenforced: a
+      design rule that is not a register row has no test that fails when it stops being true.
+
   - id: RET-RERANK-001
     title: Reranking improves answer quality inside the latency budget
     tier: [cloud, office, hosted]

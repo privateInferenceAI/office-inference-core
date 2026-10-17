@@ -1097,3 +1097,39 @@ workstation, 884 and 23 on the box with every skip named; the register at 145 it
 
 **The cap is reached and the panel stops here.** Each round found real defects and each round's findings were
 fixed and re-tested; a fourth round would be re-measuring fixes to a round that already passed.
+
+## Retrieval chunking, defect investigation — 2026-10-16
+
+**How it started.** Restoring a real corpus to the development deployment — `group-01` and `group-02` from the S3
+store, 341 documents — and asking one question end to end.
+
+**What it found, none of it the chunk size.** Five layers: the estimator is the wrong unit (`words × 1.35`; low by
+2.8x and 3.2x on measured table samples, 15x on a 40-row CSV, and 1 token for an unbroken 756 KB run); the prose
+splitter has no terminal rung; the table path emitted the whole serialised table with no size check, and the
+builder confirmed with `git log -S 'fits'` that "a table that fits is never split" was written as prose and never
+as code; the answer path had no cap and two prompt builders; and the verifier would have checked claims against the
+full passage once trimming began, while the reranker already scored only the first 8,000 characters. The
+consequence: **73 of 341 documents carried chunks past the recorded 4,096-token embedding limit and were embedded
+as their first tokens**, `auto_truncate` being true, and one prompt assembled at 228,326 estimated tokens was
+refused by the provider. Every API answer degraded.
+
+Found on the way and fixed separately: the gateway auth hook handed psycopg a `DATABASE_URL` that LiteLLM had
+rewritten with Prisma's pool parameters (`963a1ef`). And the two-writer ingest hazard is `RET-INGEST-002`.
+
+**The process, because the shape worked.** Six research agents, one angle each (the evidence, production systems,
+oversized elements, the answer side, this architecture, the 2025–2026 frontier); a synthesis; two adversarial
+reviewers — evidence: yes with fixes; client reality: yes with changes, eleven attacks; then the agent who built
+the chunker confirmed the diagnosis, answered the eight questions, and approved three repairs.
+
+**The decision, owner, 2026-10-16.** Repairs, not a redesign. (1) The post-condition is a measurement, not a number:
+every embedded text is measured with the embedding model's tokenizer and must fit
+`min(contract.max_input_length, budget)` minus a margin, on every emission path. (2) The citation unit is separated
+from the embedding unit: a whole table stays the citable object while bounded text is what gets embedded. (3)
+`auto_truncate` goes off, or ingestion refuses to run while it is true. Plus a hard cut behind the sentence split,
+the invariant as a test using the two files that broke it, `CHUNKER_VERSION` to v3, and a re-ingest into a new
+collection generation. **What must not weaken:** page ranges, zero or near-zero overlap, the deterministic prefix,
+atomic tables as citation units, sentence-preferred splitting.
+
+The in-flight 29,092-point load was scrapped as a plausible-looking artifact, and the ingestion container is
+stopped. `RET-CHUNK-001` is opened, because a design rule that is not a register row has no test that fails when it
+stops being true. The research, the synthesis and the defect report are in `docs/research/chunking/`.
