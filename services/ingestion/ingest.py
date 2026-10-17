@@ -579,7 +579,7 @@ def embedding_batches(chunks: list) -> Iterable[list]:
     batch: list = []
     tokens = 0
     for chunk in chunks:
-        count = getattr(chunk, "token_count", None) or estimate_tokens(chunk.text)
+        count = getattr(chunk, "token_count", None) or chunker.estimate_tokens(chunk.text)
         if batch and (len(batch) >= EMBED_BATCH or tokens + count > EMBED_TOKEN_BUDGET):
             yield batch
             batch, tokens = [], 0
@@ -957,14 +957,25 @@ def ingest_document(services: Services, document: Document, content_sha256: str,
     # **Timed here rather than around the call site**, because two of the four phases are inside this
     # function and splitting the measurement across two places is how the two halves drift.
     _t0 = time.monotonic()
-    parsed_result = parse_document(services, document.path, document.relpath)
-    _t1 = time.monotonic()
-    parsed = parsed_result["document"]
-    chunks = chunker.chunk_document(
-        parsed, doc_id=document.relpath, source_sha256=content_sha256,
-        count_tokens=lambda texts: count_tokens(services, texts))
-    _t2 = time.monotonic()
-    pages = len(parsed.get("pages") or {}) or None
+    # **Classified before parsing, because parsing is the cost the policy exists to avoid.** A multi-megabyte
+    # spreadsheet dump is a data set, not a document: it contributes one card naming it instead of thousands of
+    # near-identical row chunks. The rule lives in the chunker so a test can hold it, and this is where it acts.
+    dataset_note = chunker.dataset_reason(document.path)
+    if dataset_note:
+        size = document.path.stat().st_size
+        chunks = [chunker.dataset_chunk(relpath=document.relpath, source_sha256=content_sha256,
+                                        size=size, reason=dataset_note)]
+        parsed_result, parsed = {}, {}
+        _t1 = _t2 = time.monotonic()
+    else:
+        parsed_result = parse_document(services, document.path, document.relpath)
+        _t1 = time.monotonic()
+        parsed = parsed_result["document"]
+        chunks = chunker.chunk_document(
+            parsed, doc_id=document.relpath, source_sha256=content_sha256,
+            count_tokens=lambda texts: count_tokens(services, texts))
+        _t2 = time.monotonic()
+    pages = (len(parsed.get("pages") or {}) or None) if parsed else None
     if timings is not None:
         timings.parse_ms += (_t1 - _t0) * 1000
         timings.chunk_ms += (_t2 - _t1) * 1000
@@ -972,13 +983,13 @@ def ingest_document(services: Services, document: Document, content_sha256: str,
     # Per chunk rather than per document. A chunk that overlaps a page OCR read carries text that was
     # recognised from an image, and one that does not, does not. The document-level answer was a single
     # label for a mixed filing, which is the version that misleads a reader.
-    scanned = ocr_pages(parsed_result.get("confidence_pages"))
-    document_ocr = _ocr_ran(parsed, parsed_result.get("confidence"))
+    scanned = set() if dataset_note else ocr_pages(parsed_result.get("confidence_pages"))
+    document_ocr = False if dataset_note else _ocr_ran(parsed, parsed_result.get("confidence"))
     # The parser's confidence, which the citation verifier's confidence gate needs and which was previously
     # read for one boolean and discarded. It is DOCUMENT-level, and that is a bound rather than a choice:
     # docling-serve does not populate the per-page confidence map this release exposes, so a page whose digits
     # were misread cannot be told from one read cleanly. The gate is coarser than the architecture asks for.
-    confidence_score = (parsed_result.get("confidence") or {}).get("parse_score")
+    confidence_score = None if dataset_note else (parsed_result.get("confidence") or {}).get("parse_score")
 
     # Refuse to record a document that produced nothing. The first real corpus run wrote two contract
     # exhibits as zero chunks and reported success, which put two documents in the index that look
@@ -1739,6 +1750,44 @@ def build_manifest(dsn: str | None) -> Manifest:
         return MemoryManifest()
 
 
+def dataset_files(documents_root: Path) -> list[dict]:
+    """Every file the policy classifies as a data set, so the fact is visible and not silent."""
+    rows: list[dict] = []
+    if not documents_root.exists():
+        return rows
+    for path in sorted(documents_root.rglob("*")):
+        if not path.is_file():
+            continue
+        try:
+            reason = chunker.dataset_reason(path)
+        except OSError:
+            continue
+        if reason:
+            rows.append({"relpath": str(path.relative_to(documents_root)),
+                         "bytes": path.stat().st_size, "reason": reason})
+    return rows
+
+
+def write_dataset_report(documents_root: Path, directory: Path = REJECTED_DIR) -> dict:
+    """Write the data sets beside the rejected list: a file a person opens, not a rule they have to know.
+
+    A data set is not a failure, so it does not belong on the rejected worklist, but it is also not in the
+    document index and nobody would discover that from a search. One card is in the index and says so; this
+    file is the list the operator or the client can look over and decide to convert, query or leave alone.
+    """
+    rows = dataset_files(documents_root)
+    directory.mkdir(parents=True, exist_ok=True)
+    payload = {"generated_at": datetime.now(timezone.utc).isoformat(), "datasets": rows}
+    (directory / "datasets.json").write_text(
+        json.dumps(payload, indent=2, default=str) + "\n", encoding="utf-8")
+    with (directory / "datasets.csv").open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=("relpath", "bytes", "reason"))
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+    return payload
+
+
 def write_rejected_report(manifest, directory: Path = REJECTED_DIR) -> dict:
     """Write the documents the pipeline has given up on where a person can find and act on them.
 
@@ -1877,8 +1926,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"could not write the rejected-documents list: {exc}")
             return 1
         path = REJECTED_DIR / "rejected.csv"
+        datasets = write_dataset_report(Path(os.environ.get("DOCUMENTS_ROOT", "/documents")))
         print(f"rejected worklist: {path}")
         print(f"  {len(report['rejected'])} dead-lettered, {len(report['retrying'])} retrying")
+        print(f"  {len(datasets['datasets'])} data set(s) listed in {REJECTED_DIR / 'datasets.csv'}")
         for record in report["rejected"]:
             reason = " ".join(str(record.get("last_error") or "").split())[:200]
             print(f"  {record['relpath']}  ({record.get('bytes')} bytes)")
@@ -2036,8 +2087,12 @@ def main(argv: list[str] | None = None) -> int:
             if rejected["rejected"]:
                 print(f"  {len(rejected['rejected'])} rejected file(s) are listed in "
                       f"{REJECTED_DIR / 'rejected.csv'} for a person to deal with")
+            datasets = write_dataset_report(documents_root)
+            if datasets["datasets"]:
+                print(f"  {len(datasets['datasets'])} data set(s) are listed in "
+                      f"{REJECTED_DIR / 'datasets.csv'}; they are searchable only by their card")
         except OSError as exc:  # noqa: BLE001 - a records problem must not fail an ingestion
-            print(f"could not write the rejected-documents list: {exc}")
+            print(f"could not write the worklists: {exc}")
 
     if args.json:
         print(json.dumps({"seen": result.seen, "new": result.new, "changed": result.changed,

@@ -1545,6 +1545,13 @@ it is over; an oversized table becomes row groups that keep its `table_id`, tota
 range; and the embedding service runs with truncation off, so an oversized input fails loudly instead of becoming
 a prefix. `RET-CHUNK-001` is the row that keeps it true.
 
+**And a table has a size at which it stops being a document table.** At chunker-v4, a table over 5,000 rows emits
+no per-row entries and at most 200 bounded row groups plus a marker naming the omitted rows; a spreadsheet over
+2 MB or a text dump over 4 MB is classified as a data set before parsing and contributes one card instead of
+thousands of row chunks. This came from the 2026-10-17 corpus, where one 27,829-line dump appeared in 42 of 52
+baseline retrievals and displaced the documents holding the answers. The rule and its thresholds are in
+`services/ingestion/chunker.py`; `RET-TABLE-001` is the row, and the data suite is what measures the effect.
+
 **If it breaks.**
 
 - A test failing on row labelling: the column names are being paired with the wrong cells. This has now

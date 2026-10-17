@@ -590,3 +590,55 @@ def test_the_character_cut_verifies_each_slice_against_the_limit():
     assert len(pieces) > 1
     for piece in pieces:
         assert density_changes(piece) <= chunker.MAX_TOKENS
+
+
+# ---------------------------------------------------------------- the giant-table policy (chunker-v4)
+
+def big_table_document_rows(rows: int) -> dict:
+    """The same fixture as big_table_document, with the name the policy tests want."""
+    return big_table_document(rows=rows)
+
+
+def test_a_data_dump_table_has_no_row_entries_and_is_capped():
+    """Above the row cap a table is a data set inside a document: bounded groups, no row entries, and a marker
+    that says what is not searchable rather than dropping it silently."""
+    document = big_table_document_rows(6_000)
+    chunks = chunker.chunk_document(document, "doc", "sha", count_tokens=measured_counter)
+    row_chunks = [chunk for chunk in chunks if chunk.kind == "table_row"]
+    table_chunks = [chunk for chunk in chunks if chunk.kind == "table"]
+    markers = [chunk for chunk in chunks if chunk.kind == "table_marker"]
+
+    assert row_chunks == [], "a table over the row cap must not emit one entry per row"
+    assert len(table_chunks) <= chunker.MAX_TABLE_CHUNKS
+    assert len(markers) == 1, "the omitted rows have to be declared, not dropped"
+    marker = markers[0]
+    assert "5999 rows" in marker.text, marker.text[:200]
+    assert marker.row_start == table_chunks[-1].row_end + 1
+    assert marker.row_end == 5998
+    for chunk in table_chunks:
+        assert measured_counter([chunk.text])[0] <= chunker.MAX_TOKENS
+
+
+def test_an_ordinary_table_keeps_its_row_entries():
+    """The rule must not touch the tables a business actually searches."""
+    document = big_table_document_rows(80)
+    chunks = chunker.chunk_document(document, "doc", "sha", count_tokens=measured_counter)
+    assert len([chunk for chunk in chunks if chunk.kind == "table_row"]) == 79
+    assert len([chunk for chunk in chunks if chunk.kind == "table_marker"]) == 0
+
+
+def test_a_large_data_file_is_classified_as_a_dataset(tmp_path):
+    """The classification is type and size, made before parsing, so the expensive path is never entered."""
+    big = tmp_path / "ledger.csv"
+    big.write_bytes(b"a,b,c\n" * 400_000)
+    small = tmp_path / "policy.csv"
+    small.write_bytes(b"a,b,c\n" * 100)
+    assert chunker.dataset_reason(big), "a multi-megabyte spreadsheet is a data set"
+    assert chunker.dataset_reason(small) is None, "an ordinary spreadsheet is a document"
+
+    card = chunker.dataset_chunk(relpath="company/ledger.csv", source_sha256="sha",
+                                 size=big.stat().st_size, reason=chunker.dataset_reason(big))
+    assert card.kind == "dataset"
+    assert card.doc_id == "company/ledger.csv"
+    assert "Data set" in card.text and "ledger.csv" in card.text
+    assert card.page_start == card.page_end == 1

@@ -1842,6 +1842,16 @@ rejected file that is replaced or fixed re-enters the queue on its own when its 
 bytes have not changed, `docker exec ingestion python3 /app/ingest.py --clear-failures <relpath>`, or run the
 same file with `--rejected` to refresh the list on demand.
 
+**Tables and data files have a size rule, and it is deliberate.** A table up to 5,000 rows is indexed as a
+document table: each row gets its own retrieval entry, plus bounded group entries for the table as a whole. A
+table bigger than that is a data dump inside a document. It gets no per-row entries, at most 200 bounded group
+entries, and one marker chunk that names the table, its total row count and the rows that are indexed, so a
+citation can be honest about what is and is not searchable. Separately, a spreadsheet over 2 MB or a text dump
+over 4 MB is classified as a data set before it is parsed: it contributes one embeddable card naming it, it is
+not indexed page by page, and it is listed in `${OI_ROOT}/rejected/datasets.csv` beside the rejected list.
+Replacing the file, or deciding to convert it, is a human decision; asking questions of its contents needs the
+data query path. The thresholds live in `services/ingestion/chunker.py` and are tested there.
+
 **Four: run one question per root and read the answer.** This is the acceptance test for a corpus, and it
 takes two minutes. It catches a corpus laid out under the wrong root, a parser that cannot read the
 client's format, and a role map that does not match what was agreed:
