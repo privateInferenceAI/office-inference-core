@@ -31,7 +31,9 @@ replaced, not silently left to fail.
 ## How a runner scores it
 
 - `answered`: the system produced an answer grounded in retrieved passages rather than a fallback.
-- `docs`: every listed document appears among the retrieved passages.
+- `docs`: the documents that carry the answer. At least one must appear among the retrieved passages: the
+  census tables repeat across several CSV files, so a twin file with different numbers must not be treated as
+  the answer, which is why every table question is anchored on a value that appears in exactly one document.
 - `contains`: compared case-insensitively after stripping commas, dollar signs, percent signs and spaces, so
   `48,240`, `48240` and `$48,240` are the same answer. All strings in the list must appear.
 - `denied` and `forbidden_docs`: no passage from a forbidden document may be retrieved, and the answer must say it

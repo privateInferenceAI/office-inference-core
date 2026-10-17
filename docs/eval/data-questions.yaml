@@ -24,61 +24,63 @@ corpus: "company/group-01, company/group-02, executive/group-03, executive/execu
 
 questions:
   # ---------------------------------------------------------------- exact numbers from tables (8)
+  # Each question is anchored on a value that appears in exactly one document (checked against chunk_index), so a
+  # repeated table id in another file cannot send retrieval to a twin with different numbers.
   - id: N01
     category: exact_number
-    question: "In the S0802 table in document 294613.csv, what is the median earnings figure for workers 16 years and over?"
+    question: "In the census table that reports a median household income of 59,473 dollars, what is the mean household income?"
     expected:
-      staff: {answered: true, docs: ["company/group-02/294613.csv"], contains: ["31,638"]}
-      executive: {answered: true, docs: ["company/group-02/294613.csv"], contains: ["31,638"]}
-    source_quote: "S0802 | 37.0 | Median earnings (dollars) | 31,638 | +/-67 | 33,270 | ... | 25,307"
+      staff: {answered: true, docs: ["company/group-02/471787.csv"], contains: ["77,258"]}
+      executive: {answered: true, docs: ["company/group-02/471787.csv"], contains: ["77,258"]}
+    source_quote: "DP03 | 63.0 | Median household income (dollars) | 59,473 ... DP03 | 64.0 | Mean household income (dollars) | 77,258"
 
   - id: N02
     category: exact_number
-    question: "In the S0101 table in document 294613.csv, what is the median age?"
-    expected:
-      staff: {answered: true, docs: ["company/group-02/294613.csv"], contains: ["36.7"]}
-      executive: {answered: true, docs: ["company/group-02/294613.csv"], contains: ["36.7"]}
-    source_quote: "S0101 | 30.0 | Median age (years) | 36.7 | +/-0.1 | 35.5 | +/-0.1 | 37.9"
-
-  - id: N03
-    category: exact_number
-    question: "In the S0601 table in document 294613.csv, what is the median income in dollars?"
-    expected:
-      staff: {answered: true, docs: ["company/group-02/294613.csv"], contains: ["25,688"]}
-      executive: {answered: true, docs: ["company/group-02/294613.csv"], contains: ["25,688"]}
-    source_quote: "S0601 | 47.0 | Median income (dollars) | 25,688 | +/-64 | 25,529 | +/-80 | 26,972"
-
-  - id: N04
-    category: exact_number
-    question: "In the DP03 table in document 048411.csv, what is the median household income?"
-    expected:
-      staff: {answered: true, docs: ["company/group-02/048411.csv"], contains: ["48,240"]}
-      executive: {answered: true, docs: ["company/group-02/048411.csv"], contains: ["48,240"]}
-    source_quote: "DP03 | 63.0 | Median household income (dollars) | 48,240 | +/-970"
-
-  - id: N05
-    category: exact_number
-    question: "In the DP03 table in document 048411.csv, what is the mean household income?"
+    question: "In the census table that reports a median household income of 48,240 dollars, what is the mean household income?"
     expected:
       staff: {answered: true, docs: ["company/group-02/048411.csv"], contains: ["61,958"]}
       executive: {answered: true, docs: ["company/group-02/048411.csv"], contains: ["61,958"]}
-    source_quote: "DP03 | 64.0 | Mean household income (dollars) | 61,958 | +/-1,358"
+    source_quote: "DP03 | 63.0 | Median household income (dollars) | 48,240 ... DP03 | 64.0 | Mean household income (dollars) | 61,958"
+
+  - id: N03
+    category: exact_number
+    question: "In the census table that reports a median household income of 59,473 dollars, how many households earn 200,000 dollars or more?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/471787.csv"], contains: ["163,932"]}
+      executive: {answered: true, docs: ["company/group-02/471787.csv"], contains: ["163,932"]}
+    source_quote: "DP03 | 62.0 | $200,000 or more | 163,932 | +/-4,900 | 4.7"
+
+  - id: N04
+    category: exact_number
+    question: "In the census table that reports a median household income of 48,240 dollars, how many households earn 200,000 dollars or more?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/048411.csv"], contains: ["14,353"]}
+      executive: {answered: true, docs: ["company/group-02/048411.csv"], contains: ["14,353"]}
+    source_quote: "DP03 | 62.0 | $200,000 or more | 14,353 | +/-1,884 | 2.4"
+
+  - id: N05
+    category: exact_number
+    question: "In the census table that reports male median earnings of 33,270 dollars, what is the median earnings for women?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/294613.csv"], contains: ["25,307"]}
+      executive: {answered: true, docs: ["company/group-02/294613.csv"], contains: ["25,307"]}
+    source_quote: "S0802 | 37.0 | Median earnings (dollars) | 31,638 | +/-67 | 33,270 | +/-142 | 25,307"
 
   - id: N06
     category: exact_number
-    question: "In the DP03 table in document 471787.csv, what is the median household income?"
+    question: "In the census table that reports male median earnings of 33,270 dollars, what is the overall median earnings figure for workers 16 years and over?"
     expected:
-      staff: {answered: true, docs: ["company/group-02/471787.csv"], contains: ["59,473"]}
-      executive: {answered: true, docs: ["company/group-02/471787.csv"], contains: ["59,473"]}
-    source_quote: "DP03 | 63.0 | Median household income (dollars) | 59,473 | +/-528"
+      staff: {answered: true, docs: ["company/group-02/294613.csv"], contains: ["31,638"]}
+      executive: {answered: true, docs: ["company/group-02/294613.csv"], contains: ["31,638"]}
+    source_quote: "S0802 | 37.0 | Median earnings (dollars) | 31,638"
 
   - id: N07
     category: exact_number
-    question: "In the DP03 table in document 471787.csv, what is the median earnings for female full-time, year-round workers?"
+    question: "In the census table that reports 15,455 households in the 150,000 to 199,999 dollar band, what percentage of households is that?"
     expected:
-      staff: {answered: true, docs: ["company/group-02/471787.csv"], contains: ["35,919"]}
-      executive: {answered: true, docs: ["company/group-02/471787.csv"], contains: ["35,919"]}
-    source_quote: "DP03 | 95.0 | Median earnings for female full-time, year-round workers (dollars) | 35,919"
+      staff: {answered: true, docs: ["company/group-02/048411.csv"], contains: ["2.6"]}
+      executive: {answered: true, docs: ["company/group-02/048411.csv"], contains: ["2.6"]}
+    source_quote: "DP03 | 61.0 | $150,000 to $199,999 | 15,455 | +/-1,906 | 2.6"
 
   - id: N08
     category: exact_number
@@ -223,7 +225,7 @@ questions:
   # ---------------------------------------------------------------- cross-document comparisons (8)
   - id: X01
     category: cross_document
-    question: "How much higher is the median household income in the DP03 table of 471787.csv than in the DP03 table of 048411.csv?"
+    question: "How much higher is the median household income in the census table reporting 59,473 dollars than in the one reporting 48,240 dollars?"
     expected:
       staff: {answered: true, docs: ["company/group-02/471787.csv", "company/group-02/048411.csv"], contains: ["11,233"]}
       executive: {answered: true, docs: ["company/group-02/471787.csv", "company/group-02/048411.csv"], contains: ["11,233"]}
@@ -231,59 +233,59 @@ questions:
 
   - id: X02
     category: cross_document
-    question: "In 048411.csv the mean household income is 61,958 dollars; in 471787.csv the median household income is 59,473 dollars. How much higher is the mean than that median?"
+    question: "The census table reporting a median household income of 59,473 reports a mean household income of 77,258; the table reporting 48,240 reports 61,958. What is the difference between the two means?"
     expected:
-      staff: {answered: true, docs: ["company/group-02/048411.csv", "company/group-02/471787.csv"], contains: ["2,485"]}
-      executive: {answered: true, docs: ["company/group-02/048411.csv", "company/group-02/471787.csv"], contains: ["2,485"]}
-    source_quote: "61,958 - 59,473 = 2,485"
+      staff: {answered: true, docs: ["company/group-02/471787.csv", "company/group-02/048411.csv"], contains: ["15,300"]}
+      executive: {answered: true, docs: ["company/group-02/471787.csv", "company/group-02/048411.csv"], contains: ["15,300"]}
+    source_quote: "77,258 - 61,958 = 15,300"
 
   - id: X03
     category: cross_document
-    question: "How many more households earn 200,000 dollars or more in 048411.csv (14,353) than in 471787.csv (12,439)?"
+    question: "What is the difference between the median household income of 48,240 dollars and the S0802 median earnings of 31,638 dollars?"
     expected:
-      staff: {answered: true, docs: ["company/group-02/048411.csv", "company/group-02/471787.csv"], contains: ["1,914"]}
-      executive: {answered: true, docs: ["company/group-02/048411.csv", "company/group-02/471787.csv"], contains: ["1,914"]}
-    source_quote: "14,353 - 12,439 = 1,914"
+      staff: {answered: true, docs: ["company/group-02/048411.csv", "company/group-02/294613.csv"], contains: ["16,602"]}
+      executive: {answered: true, docs: ["company/group-02/048411.csv", "company/group-02/294613.csv"], contains: ["16,602"]}
+    source_quote: "48,240 - 31,638 = 16,602"
 
   - id: X04
     category: cross_document
-    question: "In 048411.csv, 15,455 households are in the 150,000 to 199,999 dollar band; in 471787.csv, 12,439 households earn 200,000 dollars or more. Which count is higher, and by how much?"
+    question: "What is the difference between the median household income of 48,240 dollars and the S0601 median income of 25,688 dollars?"
     expected:
-      staff: {answered: true, docs: ["company/group-02/048411.csv", "company/group-02/471787.csv"], contains: ["15,455", "3,016"]}
-      executive: {answered: true, docs: ["company/group-02/048411.csv", "company/group-02/471787.csv"], contains: ["15,455", "3,016"]}
-    source_quote: "15,455 - 12,439 = 3,016, 048411 is higher"
+      staff: {answered: true, docs: ["company/group-02/048411.csv", "company/group-02/294613.csv"], contains: ["22,552"]}
+      executive: {answered: true, docs: ["company/group-02/048411.csv", "company/group-02/294613.csv"], contains: ["22,552"]}
+    source_quote: "48,240 - 25,688 = 22,552"
 
   - id: X05
     category: cross_document
-    question: "What is the difference between the S0802 median earnings in 294613.csv (31,638 dollars) and the DP03 median household income in 048411.csv (48,240 dollars)?"
+    question: "What is the difference between the DP03 median earnings for female full-time year-round workers of 35,919 dollars and the S0802 female median earnings of 25,307 dollars?"
     expected:
-      staff: {answered: true, docs: ["company/group-02/294613.csv", "company/group-02/048411.csv"], contains: ["16,602"]}
-      executive: {answered: true, docs: ["company/group-02/294613.csv", "company/group-02/048411.csv"], contains: ["16,602"]}
-    source_quote: "48,240 - 31,638 = 16,602"
+      staff: {answered: true, docs: ["company/group-02/471787.csv", "company/group-02/294613.csv"], contains: ["10,612"]}
+      executive: {answered: true, docs: ["company/group-02/471787.csv", "company/group-02/294613.csv"], contains: ["10,612"]}
+    source_quote: "35,919 - 25,307 = 10,612"
 
   - id: X06
     category: cross_document
-    question: "What is the difference between the S0802 female median earnings in 294613.csv (25,307 dollars) and the DP03 median earnings for female full-time year-round workers in 471787.csv (35,919 dollars)?"
+    question: "Which is higher, the DP03 median earnings for female full-time workers of 35,919 dollars or the S0802 male median earnings of 33,270 dollars, and by how much?"
     expected:
-      staff: {answered: true, docs: ["company/group-02/294613.csv", "company/group-02/471787.csv"], contains: ["10,612"]}
-      executive: {answered: true, docs: ["company/group-02/294613.csv", "company/group-02/471787.csv"], contains: ["10,612"]}
-    source_quote: "35,919 - 25,307 = 10,612"
+      staff: {answered: true, docs: ["company/group-02/471787.csv", "company/group-02/294613.csv"], contains: ["35,919", "2,649"]}
+      executive: {answered: true, docs: ["company/group-02/471787.csv", "company/group-02/294613.csv"], contains: ["35,919", "2,649"]}
+    source_quote: "35,919 - 33,270 = 2,649, the DP03 figure is higher"
 
   - id: X07
     category: cross_document
-    question: "What is the difference between the S0601 median income in 294613.csv (25,688 dollars) and the DP03 median household income in 048411.csv (48,240 dollars)?"
+    question: "In the DP03 census tables, how many more households earn 200,000 dollars or more in the table reporting 163,932 such households than in the table reporting 14,353?"
     expected:
-      staff: {answered: true, docs: ["company/group-02/294613.csv", "company/group-02/048411.csv"], contains: ["22,552"]}
-      executive: {answered: true, docs: ["company/group-02/294613.csv", "company/group-02/048411.csv"], contains: ["22,552"]}
-    source_quote: "48,240 - 25,688 = 22,552"
+      staff: {answered: true, docs: ["company/group-02/471787.csv", "company/group-02/048411.csv"], contains: ["149,579"]}
+      executive: {answered: true, docs: ["company/group-02/471787.csv", "company/group-02/048411.csv"], contains: ["149,579"]}
+    source_quote: "163,932 - 14,353 = 149,579"
 
   - id: X08
     category: cross_document
-    question: "Which is higher, the S0802 male median earnings in 294613.csv (33,270 dollars) or the DP03 female median earnings in 471787.csv (35,919 dollars), and by how much?"
+    question: "In the DP03 census tables, how many more households are in the 150,000 to 199,999 dollar band in the table reporting 166,908 than in the table reporting 15,455?"
     expected:
-      staff: {answered: true, docs: ["company/group-02/294613.csv", "company/group-02/471787.csv"], contains: ["35,919", "2,649"]}
-      executive: {answered: true, docs: ["company/group-02/294613.csv", "company/group-02/471787.csv"], contains: ["35,919", "2,649"]}
-    source_quote: "35,919 - 33,270 = 2,649, the 471787 figure is higher"
+      staff: {answered: true, docs: ["company/group-02/471787.csv", "company/group-02/048411.csv"], contains: ["151,453"]}
+      executive: {answered: true, docs: ["company/group-02/471787.csv", "company/group-02/048411.csv"], contains: ["151,453"]}
+    source_quote: "166,908 - 15,455 = 151,453"
 
   # ---------------------------------------------------------------- access boundary (8)
   # Six questions whose only sources are in the executive folder. Staff must be denied and must not receive the
