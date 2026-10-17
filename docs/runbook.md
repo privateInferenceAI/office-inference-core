@@ -4571,16 +4571,22 @@ this needs no schema change and no new chain version.
 "identity": {
   "assurance": "unverified",
   "basis": "session_token",
-  "claimed_subject": "dana",
-  "claimed_role": "staff"
+  "claimed_subject": "probe-staff@officeinference.com",
+  "claimed_role": "viewer"
 },
 "part11_11_50_manifestation": {
   "printed_name": null,
   "name_absent_reason": "sign-in is not enabled on this deployment, so the system cannot verify who acted",
   "signed_at": "2026-10-16T16:20:00Z",
-  "meaning": "approved the action described by action_digest"
+  "meaning": "approve the action described by action_digest"
 }
 ```
+
+**Two values in that block are the ones the system writes and not a past tense of them.** The meaning is the
+decision verb the caller sent, so an approval reads `approve the action described by action_digest`, and the
+role is a session role: `viewer` is the one this deployment declares, while `staff` is a group in the access
+registry. A copy that said `approved` and `staff` was wrong twice in one block, and both were found by reading
+a real row.
 
 **Two rules make the assurance field work, and both are the kind that fail quietly.**
 
@@ -4913,8 +4919,9 @@ the variable the tests **skip with the reason and the command to start one**, wh
 a held one.
 
 **Run it, as it was on 2026-10-16.** The feed, read out of the view after the chain tests ran — **in the test
-database `OI_TEST_DATABASE_URL` points at, not on the deployment**, because the deployment has no approval row
-yet and this step is what will produce the first one. Three rows, one per decision, and the middle one is the
+database `OI_TEST_DATABASE_URL` points at, not on the deployment** — so the block shows all three decisions,
+including the verified branch this deployment cannot produce. When this step was written the deployment had no
+approval row; the sequence above is what produces them, and its feed renders the honest sentence. Three rows, one per decision, and the middle one is the
 case where the record says the identity was verified:
 
 ```
@@ -4928,10 +4935,14 @@ $ OI_TEST_DATABASE_URL=… ~/venv/bin/python -m pytest tests/test_workflow_chain
 ```
 
 The two English sentences are produced in two languages: the view assembles one in SQL and
-`approvals.describe()` assembles the other in Python. **Four of those fourteen tests compare them, for all
-three decisions**, because a sentence defined twice is a sentence that drifts. The comparison is the only
-thing holding them together, and it is why the view's fallback branch is written to match
-`describe()`'s rather than being independently reasonable.
+`approvals.describe()` assembles the other in Python. **Three of those fourteen tests compare them, one per
+decision, from a single parametrised test**, because a sentence defined twice is a sentence that drifts. The
+comparison is the only thing holding them together, and it is why the view's fallback branch is written to
+match `describe()`'s rather than being independently reasonable. **The fallback matches on the three decisions
+the route accepts and not beyond them**: the view uses Postgres `initcap`, which capitalises every word, where
+`describe()` uses Python's `capitalize`, which capitalises the first. A hand-written row carrying
+`request_changes_v2` renders `Request Changes V2` from the view and `Request changes v2` from the API. The
+route refuses any decision outside the three, so that difference needs a row written by hand to reach.
 
 **This step's first version named two test files that do not exist** — `tests/test_workflow_gate.py` and
 `tests/test_workflow_feed.py`. The tests are in `test_workflow_chain.py`. Found by following the page.
@@ -4971,6 +4982,11 @@ POST /jobs/{id}/approvals -> HTTP 200
   {"attempts": 6, "job_id": "178e4523057540b3bb87d569852c93c9", "state": "succeeded", "terminal": true}
   steps: [('read_message', 'succeeded'), ('extract_fields', 'succeeded'), ('draft_action', 'succeeded'), ('approval', 'succeeded'), ('post_entry', 'succeeded'), ('close_out', 'succeeded')]
 ```
+
+**Two of those lines are a labelled transcript rather than one command's output.** The restart line is
+`awaiting_approval | digest=sha256:5b480b869b4bbb0`, and the query behind it is `psql -tAc`, which prints
+`awaiting_approval|sha256:5b480b869b4bbb02f12ed…` with no spaces and no `digest=` label. The value is the
+digest the job is holding.
 
 And the record it left, read out of the database afterwards:
 
@@ -5034,6 +5050,9 @@ that a client seeing an empty result finds the explanation rather than a mystery
   reading the wrong path. Both fail the same way, and the second looks like it works.
 - **The feed says an identified person approved when nobody did**: the assurance path resolved upward. An
   unknown value must land in the honest branch, never in the other one.
+- **A finished job has a step row still `running`**: on a denial the gate's own row is left as it was, which is
+  recorded in guide 13m.3. It is not work in progress, and the job's state is what says whether anything is
+  happening.
 
 
 ### 6.3 A typed cause, a bounded step, and an effect that happens once
@@ -5296,6 +5315,13 @@ command and its output are below.
   ingestion worker accepts. Intake records `unreadable_by_ingest` on the row rather than reporting a deposit
   that never becomes a document.
 
+**One line of this run goes to stderr and the paste below is stdout.** It reads
+`mail failure: Authentication to ap@acmetool.example is working but the mailbox cannot be read. Check that its
+licence is still assigned, because a mailbox without one returns exactly this.` That is `CON-SILENT-001`'s
+pulled-licence scenario reporting itself through `intake.py`, it is the feature working rather than a failure,
+and the run still ends `10 PASS, 0 FAIL` and exits 0. `2>&1` puts it in the block if you want to see it where it
+happens, and a reader who meets it without this paragraph will debug a credential that is fine.
+
 **As it ran, on 2026-10-16.** Recorded on the deployment at `/opt/oi-core`, following manual section 13l.7 word
 for word. There is no client tenant and no database on this machine, so what follows is the acceptance run
 against the simulated tenant and the five commands that need neither. **`~/venv/bin/python`, not a bare
@@ -5474,10 +5500,9 @@ rather than an audit.
     ~/venv/bin/python services/intake/intake.py enumerate-reach --config /etc/oi-intake/intake.yaml
 
 **Expected.** `cord-check` prints the five components with `client` beside each and then `no cord` and exits
-0. `enumerate-reach` prints one row per probe: the client's own mailbox `reached`, a second mailbox
-`refused`, the directory `refused`, a different Microsoft service `refused`, and any other host
-`refused by the allowlist`, which is the control acting before the network rather than the tenant refusing
-after it.
+0. `enumerate-reach` prints one row per probe and there are six: the client's own mailbox `reached`, and then
+`refused` for a second mailbox, the directory, the signed-in user's profile, a different Microsoft service, and
+any other host, which the allowlist refuses before a socket is opened rather than the tenant refusing after it.
 
 **Verify.** `CON-OWNED-001` and `SEC-CON-001` are proved in `tests/test_intake_ownership.py`, including a
 negative control that moves each of the five components to us in turn and asserts the check fails.
@@ -5867,7 +5892,11 @@ in a component. `app/src/api.ts` gains `jobEvents()`, which is the only place an
 and the session travels as the `?session=` query parameter because a stock `EventSource` cannot set a header.
 That is why the route must not log its full URL.
 
-**Verify.**
+**Verify, from a workstation.**
+
+**These three commands need Node, and the deployment does not carry it.** `node`, `npm` and `npx` all answer
+`command not found` on the box, which round two's executor confirmed by running each of them there. Run them in
+a clone of the app on a workstation, with `npm ci` once first.
 
 ```
 cd /opt/oic-ui/app
@@ -5880,8 +5909,10 @@ npm test -- --run
 npx playwright test e2e/live.spec.ts
 ```
 
-**The app is a separate repository and `/opt/oic-ui` is its checkout on the deployment** (guide 13i.1); it is
-not on the core's machine at any other path. Check it is at the commit these screens were built from before
+**The app is a separate repository and `/opt/oic-ui` is its checkout on the deployment** (guide 13i.1), which is
+where the compose file builds the bundle from; it is not on the core's machine at any other path. Check it is at
+the commit these screens were built from before running the commands: `git -C /opt/oic-ui log --oneline -1`.
+That check is on the deployment and the three commands above are not. Check it is at the commit these screens were built from before
 running the commands: `git -C /opt/oic-ui log --oneline -1`.
 
 Expected: the unit suite passes with the live-view tests named, and the browser rung reports the refresh case,
@@ -5900,20 +5931,24 @@ catches until the screen renders nothing.
 
 ```
 $ npm test -- --run
- ✓ tests/jobSentences.test.ts (37 tests) 50ms
- ✓ tests/contract.test.ts (28 tests) 9ms
- ✓ tests/AnswerView.test.tsx (33 tests) 55ms
- ✓ tests/approvalSentences.test.ts (28 tests) 19ms
- ✓ tests/DocumentPanel.test.tsx (7 tests) 385ms
- ✓ tests/review.test.tsx (15 tests) 883ms
+ ✓ tests/contract.test.ts (28 tests) 12ms
+ ✓ tests/jobSentences.test.ts (37 tests) 37ms
+ ✓ tests/approvalSentences.test.ts (28 tests) 13ms
+ ✓ tests/AnswerView.test.tsx (33 tests) 53ms
+ ✓ tests/DocumentPanel.test.tsx (7 tests) 310ms
  ↓ tests/integration.test.ts (12 tests | 12 skipped)
- ✓ tests/live.test.tsx (12 tests) 2076ms
-     ✓ stops claiming progress within the window and says when it last reported  640ms
-     ✓ clears the stalled line when a real event arrives  710ms
+ ✓ tests/review.test.tsx (16 tests) 795ms
+ ✓ tests/live.test.tsx (12 tests) 1959ms
 
  Test Files  7 passed | 1 skipped (8)
-      Tests  160 passed | 12 skipped (172)
+      Tests  161 passed | 12 skipped (173)
 ```
+
+**The counts moved by one in round two, and the reason is worth the line.** The suite was red for a day:
+`bcffdae` refreshed the app's copy of the contract while `tests/contract.test.ts` still held the eleven-path
+list and the three-field allowance the copy had outgrown. Fixing that restored 160, and the manual's second
+rule for the Review screen (*approve is never the default*) had no test until the same round, which is the
+161st. **A pasted suite is a claim about a commit**, and this one now names 161 at the commit it was taken on.
 
 The twelve skips are the integration rung, which needs a live deployment and says so with the two commands that
 would make it run. A skip that printed nothing would be the failure this suite has already paid for once.
@@ -5928,6 +5963,10 @@ Running 4 tests using 1 worker
 
   4 passed (53.0s)
 ```
+
+**The four lines are trimmed for the page.** Playwright prints `✓  1 [chromium] › e2e/live.spec.ts:83:3 › the
+live view › a refresh mid-run comes back to the same job`, so the project, the file, the line and the describe
+block are dropped here. The names, the counts and the durations are what the command printed.
 
 The fourth line is the one worth looking at: it waits out the real 45 second window rather than a shortened one,
 so the number it proves is the number that ships. Running both specs together is thirteen tests and just under a
@@ -5952,7 +5991,9 @@ elsewhere.
   sequence number may reset the staleness clock.
 - **An event arrives and the screen does not change**: check the event name against what the route sends.
   `EV_STEP`, `EV_PROGRESS`, `EV_NOTICE` and `EV_DONE` are four different things and only some of them move the
-  step list.
+  step list. On the wire they are the lowercase names `step`, `progress`, `notice` and `done`: the constants are
+  `EV_`-prefixed in `services/api/jobs.py`, and an SSE frame carries `event: step`, so a filter on the constant
+  name matches nothing.
 - **`EventSource` never connects and the console shows a 401**: the session is being sent as a header. A stock
   `EventSource` cannot set one, so on this route the session is a query parameter.
 
@@ -6027,6 +6068,9 @@ test can read a module that a test cannot read out of JSX.
 
 **Verify.**
 
+**From a workstation, for the same reason as 6.5: the box carries no Node.** `npm ci` once in a clone of the
+app, then:
+
 ```
 cd /opt/oic-ui/app
 npm test -- --run
@@ -6077,11 +6121,14 @@ OK    the app's contract matches /opt/oi-core/docs/openapi.json
       25 model(s)
 ```
 
-**The check failed for a day, and the fix was in the other repository.** The core's `docs/openapi.json`
-published `/approvals`, `/documents/{doc_id}` and the three job fields `Job.to_dict()` has always sent
-(`pending_action`, `pending_action_digest`, `events_through`) while the app's copy was last regenerated before
-them, and the app compiles against its own copy. `oic-ui` regenerated that copy at `bcffdae` and shrank its
-`tests/contract.test.ts` allowance list with it, and the run above is the one that says so.
+**The check failed for a day, and the fix took two commits in the other repository.** The core's
+`docs/openapi.json` published `/approvals`, `/documents/{doc_id}` and the three job fields `Job.to_dict()` has
+always sent (`pending_action`, `pending_action_digest`, `events_through`) while the app's copy was last
+regenerated before them, and the app compiles against its own copy. `oic-ui` regenerated that copy at `bcffdae`
+and that commit changed one file. The allowance list in `tests/contract.test.ts` stayed behind, so the app's own
+suite went red on it, and round two's fidelity checker is what found that. The fix is in the app repository: the
+list was deleted rather than widened, which is what its own comment said to do when the fields landed. The check
+above is the one that says the two copies agree.
 
 **The paragraph this replaces had it backwards, and that is worth recording.** It said the three job fields
 were absent from the published document and that the gap could not be closed from here. They were absent from

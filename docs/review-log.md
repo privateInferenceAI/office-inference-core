@@ -969,3 +969,91 @@ lever if a client's onboarding ever becomes interactive rather than overnight.
     job_probe 7/7 + 1 skipped          interface_probe 8/8   stream_probe 4/4
     gate_check exit 0                  gate_check --jobs exit 0
     contract: 10 paths, matching       744 tests
+
+## C5 panel, round 1 — 2026-10-16
+
+**Scope.** C5 only: `docs/runbook.md` 6.0 to 6.6, `docs/manual.md` 13j to 13m, `docs/operator-guide.md` stage
+13m.0 to 13m.6. Three reviewers that did not write the work: an executor on the live box, a cold reader with no
+source and no git history, and a fidelity checker reading the claims against the source.
+
+**Verdicts. All three said no, and all three said the same thing.**
+
+> The behaviour C5 describes works. What does not work is the documentation of how to check it.
+
+**What the executor proved before it said no.** The whole HTTP path: `POST /jobs` reached the gate with four
+step rows and a digest, `docker restart api` left the job waiting with the digest intact, a wrong digest was
+refused with `409 approval_drift` and both hashes, a denial with no reason with `400 bad_decision`, an approval
+quoting the digest finished the run with six steps and one row each, and `audit verify` reported the chain
+intact. **It found no defect in the engine, the gate, the approval record, the intake connector or the two
+screens.** Everything it found was in the pages.
+
+**Thirty documentation findings.** The three that mattered most:
+
+- **No runnable command started an `invoice_intake` job.** The manual gave the text to send and never said where
+  to send it, so the phase's own walkthrough could not be started by a reader.
+- **The operator guide contradicted the runbook.** Stage 13m.6 said the engine was not wired into the HTTP
+  routes yet, while runbook 6.2 pasted it working. Same date, opposite claims.
+- **A client-facing sentence was quoted wrong in three of four places.** The system prints one sentence, and
+  three pages had their own version of it, each presented as the sentence.
+
+**Where the findings landed.** Fixed on `main` in `d52152a`, before round two ran.
+
+**Provenance, stated because it is a gap.** This entry is written from `docs/handover-c5.md` section 7, which is
+the only surviving account of the round. The reviewers' own reports were not filed under `docs/reviews/`, and
+the requirement in `AGENTS.md` that every round is recorded here was not met at the time. Round two is filed
+properly, and so is this paragraph.
+
+**One register correction came out of the handover itself.** It named the wrong eight open C5 rows: it said they
+were the intake connector's tenant gap, and the register showed them to be the approval set. The register is
+authoritative, and the handover was corrected at `7fcd3b5`.
+
+## C5 panel, round 2 — 2026-10-16
+
+**Scope and rules as round one**, run against `a6b0643` in this repository and `bcffdae` in `oic-ui`, on the live
+deployment. The three reports are filed under `docs/reviews/`, and the merged findings table with each finding's
+disposition is `docs/reviews/c5-round-2.md`.
+
+**Verdicts. Executor no, cold reader yes with a blocking finding, fidelity checker no.** They converged: the
+behaviour works and the pages' instructions for checking it did not.
+
+**The correction round one could not execute, executed.** Round one's "start a job" command had no execution
+behind it, deliberately, because running it writes to the deployment's chain. The executor ran it. Its output
+matches the page line for line, including the digest `sha256:5b480b869b4bbb02f…`, which is content-addressed and
+therefore identical on rerun. So C5's own walkthrough is now cleared by execution rather than by the route table,
+the registry and the contract.
+
+**Twenty-five findings, merged from three reports, and none of them a defect in the C5 behaviour.** No defect was
+found in the engine, the gate, the approval record, the intake connector or the two screens. What the round found
+was documentation, plus two app-repository defects in the tests that prove the documentation.
+
+- **Four pages now say where the app rungs run.** The box has no Node toolchain, and the pages had been telling a
+  reader to run `npm` in `/opt/oic-ui/app` and, eleven lines later, that the checkout is on the deployment and
+  nowhere else. The three commands exit 127 there.
+- **The app repository's suite is green again, at 161 passed.** `bcffdae` refreshed the contract copy and left the
+  test file's hard-coded path list and its three-field allowance behind; the test's own comment said to delete the
+  allowance when the fields landed. It was deleted rather than widened, and the manual's second Review rule
+  (*approve is never the default*) got the test it had been claiming, proved by mutation: adding `autoFocus` to
+  the control makes it fail.
+- **The extraction-pattern claims were corrected in three places**, and the correction is sharper than the
+  finding: an unmatched reference is not an empty field, because `extract_fields` leaves it empty and
+  `draft_action` substitutes the message's own id, so the entry a person approves carries sixteen hexadecimal
+  characters where an invoice number would be.
+- **The Part 11 block in runbook 6.0 was wrong in two values** — `approved` where the record writes `approve`, and
+  `staff` where the role is `viewer`. Both were found by reading a real row rather than the code.
+- **Counts and provenance:** the queue is scoped by deployment as well as by access roots; three of fourteen chain
+  tests compare the two sentences and not four; the view's fallback differs from `describe()` on multi-word input;
+  two Playwright pastes are trimmed and now say so; the acceptance run's stderr line is shown and explained; the
+  demo's scratch directory is removed first.
+- **The api image normalizes its own file modes**, and this deployment's checkout was normalized to the index.
+  `gate_check_run.sh` was dying with `PermissionError` because the image had inherited a restrictive umask from
+  the working tree, and the deployed api runs as root, which hid it.
+
+**Two findings were not fixed as code, and both say why in `docs/reviews/c5-round-2.md`.** A denied job leaves its
+gate step row `running` while the job is terminal: documented in guide 13m.3 and runbook 6.2, with the difference
+from cancellation named, because closing the row is a change to `jobs.decide()` that belongs beside C6's second
+caller of the gate. And the deployment's `documents` collection holds zero points with `documents/` empty, so
+every question answers `no_source`; that is what the boundary runner now trips over, and restoring the corpus from
+S3 is a deployment decision rather than a page fix.
+
+**Also closed while this round ran.** C6's register rows were written (25 rows, `phase: C6`), so a reader of the
+register alone can now see the phase is planned.

@@ -2161,13 +2161,13 @@ in the filter and the list is empty rather than partial: a partial answer to "sh
 ## 13i.5. The suite, in the order it runs
 
 ```
-# the app's own tests, from its checkout
+# the app's own tests, from a workstation clone of it: the deployment has no Node toolchain
 cd /opt/oic-ui/app
 npm ci
-npx vitest run                                  # 57: components, and the contract
+npx vitest run                                  # 172 collected: components, and the contract
 export OI_API_URL=http://127.0.0.1:18080 OI_TOKEN=$TOKEN
 npx vitest run tests/integration.test.ts        # 12: the app's client code, live
-npx playwright test                             # 10: a real browser, real flows
+npx playwright test                             # 23 collected: 13 pass, 10 skip without a deployment
 
 # the core's probes, from the deployment
 cd /opt/oi-core
@@ -2180,6 +2180,15 @@ bash tests/fixtures/gate_check_run.sh --jobs
 **Checkpoint.** Every one passes, and you have watched one of them fail. Pick any probe here, remove the control
 it tests, and confirm it goes red before you trust a green run. **A probe that cannot fail is not a probe**, and
 this project has shipped one of those before.
+
+**Two ways `gate_check_run.sh` fails without the gate being broken, both seen on 2026-10-16.** It starts a
+second API container as your user rather than as root, so a checkout written under a restrictive umask gives it
+files it cannot read and it dies with `PermissionError` on the first import or migration: normalize the checkout
+with `chmod -R a+rX`, and note that the api image now normalizes what it copies. And when the documents
+collection is empty, the probe's first request comes back `no_source` instead of reaching a model, so the runner
+reports `the service is not enforcing the class it was given`. Check the collection's point count before
+believing that sentence: an empty `documents/` directory and a collection with zero points both produce it, and
+both are a corpus that was never ingested rather than a boundary that leaks.
 
 **Two of these are not deterministic, and the guide should say so rather than promise a clean run.** The
 integration suite's PII test and this stage's check two both ask the model to repeat a reserved identifier, and
@@ -2725,8 +2734,10 @@ Total 4210.00 due 2026-11-15 from Ferguson Mechanical Ltd.
 
 **The first three are compiled with `re.IGNORECASE` and the reference is not.** `Total 4210.00` therefore
 matches the lowercase pattern above; `INV-2026-0417` has to be uppercase, because that is what an invoice
-number looks like. A reader who sends lowercase text and sees `reference` come back empty has matched the
-table and not found a bug.
+number looks like. A reader who sends lowercase text is not refused and does not see `reference` come back
+empty: `extract_fields` leaves it empty and `draft_action` substitutes the message's own id, so the entry carries
+sixteen hexadecimal characters where an invoice number would be. That is the value to distrust when it does not
+look like an invoice number, and the reference pattern above is the rule that decides which one you get.
 
 **And here is how to send it.** The plan runs from a job, the job is started over HTTP, and the API publishes
 no port, so both commands run on the deployment:
@@ -2774,8 +2785,10 @@ bash scripts/probe.sh workflow_probe.py
 Expected: thirteen rights held. One of them, `ATOMIC`, starts a child process, sends it `SIGKILL` at the
 instant between the state write and the chain write, and then reads Postgres. If the two writes are in one
 transaction, the job is still `queued` with no step rows and no chain rows. If somebody ever moves the state
-write outside the unit, `ATOMIC` reports the job `running` with a step row and no chain row, which is the gap
-this engine exists to close.
+write outside the unit, `ATOMIC` reports the job `running` with no step rows and no chain row, which is the gap
+this engine exists to close: the kill lands before any step row is written, so the moved job row with nothing in
+the chain is the whole of the evidence. The runbook's mutation record shows the line,
+`job row='running', 0 step row(s), 0 chain row(s)`.
 
 **A skip is not a pass.** If the probe prints `FAILED ... no database credentials`, it tested nothing. The
 probe needs the deployment's `rendered/env`, and `scripts/probe.sh` is what supplies it.
@@ -2831,6 +2844,12 @@ docker exec postgres psql -U oicore -d oicore -c \
 Expected: `read_message`, `extract_fields` and `draft_action` all `succeeded`, `approval` `running`, and **no
 rows at all for `post_entry` or `close_out`**. That last part is the check. A gate that only changes a label
 would leave the work already done and saying it was waiting.
+
+**On a denial the gate's own row stays `running`, and it is worth knowing before you read it.** The job reaches
+`failed` with `denied_at_the_gate` and the post-gate steps have no rows, which is the requirement; the gate row
+is left where it was, because it is the step that was interrupted rather than one that failed. A cancellation
+does mark its in-flight step `failed` with `cancelled_mid_step`. So a `running` row on a job that is not running
+is not work in progress, and the job's state is the thing to read.
 
 The job holds two things while it waits: `pending_action_digest`, which the route checks when somebody
 decides, and `pending_action`, which is the words behind the hash. A decision screen that shows only a digest

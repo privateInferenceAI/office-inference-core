@@ -4442,8 +4442,13 @@ Total 4210.00 due 2026-11-15 from Ferguson Mechanical Ltd.
 above sends `Total` and `4210.00` where the table writes `total`: any casing matches for total, vendor and
 due. The reference pattern is uppercase-only on purpose, because `INV-2026-0417` is what an invoice number
 looks like and a lowercase one is prose rather than an identifier. A reader who sends `total 4210.00 due
-2026-11-15 from Ferguson` matches all four; a reader who sends `inv-2026-0417` matches three and gets an
-empty `reference`, which is not an error because that field is not required.
+2026-11-15 from Ferguson` matches three of the four, and a reader who sends the reference in front matches
+all four: `INV-2026-0417 from accounts@ferguson.example total 4210.00 due 2026-11-15`.
+**An unmatched reference does not show up as an empty field, and that is the part that misleads.** The
+`extract_fields` step leaves `reference` empty, and `draft_action` then substitutes the message's own id, so
+the entry a person approves carries sixteen hexadecimal characters where the invoice number should be. The
+same text always gives the same value, so a reader cannot tell a fallback from a real reference by looking at
+it. The field is optional and nothing is refused either way.
 
 **A total and a vendor are required and the other two are not.** Failing to match reads as a document problem
 rather than a code problem, which is why this table is here: an agent that gets `unreadable_invoice` on text it
@@ -4466,8 +4471,10 @@ cd /opt/oi-core
 TOKEN=$(oi run --rm session mint --dev --subject probe-staff@officeinference.com --role viewer --json \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
 
-# 2. Start invoice_intake. The input is the message above, flattened onto one line: the plan reads the
-#    text, so the line breaks of an email header are not what it is looking for.
+# 2. Start invoice_intake. The input below is not the message above; it is the same facts on one line with
+#    the reference in front. The header's `From:` does not match `\bfrom\s+`, because the colon stops it, so
+#    the message above gives the vendor `Ferguson` while this line gives `accounts@ferguson.example`. Both
+#    reach the gate and they are different entries with different digests.
 docker run --rm --network ai-net curlimages/curl -sS -X POST http://api:8088/jobs \
   -H 'Content-Type: application/json' \
   -d "{\"session\":\"$TOKEN\",\"task\":\"invoice_intake\",\"input\":\"INV-2026-0417 from accounts@ferguson.example Total 4210.00 due 2026-11-15\"}" \
@@ -4597,10 +4604,15 @@ The Approve control carries one line above it, before anybody clicks:
 
 And the sentence a reader gets afterwards never names anybody while the basis is a session token:
 
-> Approved at 2:14pm under the executive role. The person who decided was not identified: sign-in is not
-> enabled on this deployment, so the system cannot verify who acted.
+> Approved at 2026-10-16T18:18:25+00:00 under the viewer role. The person who decided was not identified:
+> sign-in is not enabled on this deployment, so the system cannot verify who acted.
 
 The three decision words are `Approved`, `Denied` and `Changes requested`.
+
+**The timestamp is the recorded ISO value, and neither renderer produces a 12-hour clock.** The service writes
+`signed_at` into the sentence verbatim, and the app renders the same field with `toLocaleString()`, which is a
+locale string; `2:14pm` was an illustration of a format that does not exist in either. The role is a session
+role, so it is one the deployment declares rather than a group.
 
 **Every sentence the screen can produce lives in one module**, `app/src/approvalSentences.ts`, and the test
 calls every export with a record carrying a name and asserts the name does not come back. A rule about wording
@@ -4612,14 +4624,16 @@ inside JSX is a rule nobody can check; a rule about an exported function is one 
 route the screen is built for. A queue derived from the jobs one browser started cannot show an approval to the
 person whose job it is to approve them, which is the entire point of the screen.
 
-**The route scopes by access roots, not by role and not by subject.** A job appears if the roots it carries are
-a subset of the roots the session holds, which is the same comparison the retrieval boundary makes everywhere
-else. Roots rather than subject because the subject answers *who asked*, and this question is *who may decide*:
+**The route scopes by deployment and by access roots, and by neither role nor subject.** A job appears if it
+belongs to this deployment and the roots it carries are a subset of the roots the session holds, which is the
+same comparison the retrieval boundary makes everywhere else. The deployment condition never shows on an
+ordinary deployment: it appeared on this one because a probe writes jobs tagged `workflow-probe` into the same
+database, and of nineteen gates carrying `company` a `company` session was returned thirteen. Roots rather than subject because the subject answers *who asked*, and this question is *who may decide*:
 in a small business the person who approves an invoice is routinely somebody other than the person who started
 the job.
 
-**It does not decide who the right approver is.** Every session holding the roots sees every gate in them, so
-the person who drafted a job may approve it. Separation of duties is a policy this deployment does not yet
+**It does not decide who the right approver is.** Every session holding the roots sees every gate in them on
+this deployment, so the person who drafted a job may approve it. Separation of duties is a policy this deployment does not yet
 express, and the route records that as a known limit rather than an assumption.
 
 **The route exists, and the app does not call it yet.** `loadQueue()` in `app/src/queue.ts` is the one place
@@ -4630,7 +4644,10 @@ only one of them means *nothing is waiting*.
 
 ### Run it
 
-From the app repository, with no deployment and no token:
+**On a workstation with Node and a clone of the app, not on the deployment.** The box carries no `node`,
+`npm` or `npx`, so all three commands answer `command not found` there: `/opt/oic-ui` is the checkout the
+compose file builds the bundle from, which needs the sources rather than the toolchain. Run `npm ci` once in
+that checkout, then these three, with no deployment and no token:
 
 ```
 cd <oic-ui>/app
@@ -4969,7 +4986,9 @@ outbox file the client's own monitoring picks up, or their own SMTP relay, set b
 ```
 
 Run this monthly. It makes six requests and reports what came back: the client's mailbox reached, and a
-second mailbox, the directory, the user profile and another Microsoft service all refused. **It enumerates
+second mailbox, the directory, the signed-in user's profile, another Microsoft service, and a host we control
+all refused. The last one is refused by the allowlist before a socket is opened rather than by the tenant,
+which is the difference between a permission that is scoped and a request that never leaves. **It enumerates
 rather than asserting the granted permission**, because a scope that was widened by a leftover Entra grant
 still reads as `delegated` in the configuration.
 
@@ -4994,9 +5013,18 @@ faithful to the contract and is not the contract.
 ~/venv/bin/python tests/fixtures/intake_acceptance.py
 ```
 
-The five commands that need neither a tenant nor a database, against a scratch directory:
+**One line of that run goes to stderr and reads like a failure: it is the feature.**
+`mail failure: Authentication to ap@acmetool.example is working but the mailbox cannot be read. Check that its
+licence is still assigned, because a mailbox without one returns exactly this.` is the pulled-licence scenario
+of `CON-SILENT-001` reporting itself, and the run still ends `10 PASS, 0 FAIL` and exits 0. Add `2>&1` if you
+want it interleaved with the PASS lines.
+
+The five commands that need neither a tenant nor a database, against a scratch directory. **Remove the scratch
+directory first if it is left from an earlier run**: the demo is not idempotent, and a journal that already
+holds these bytes reports the file as already taken, so the second line the page highlights never appears.
 
 ```
+rm -rf /tmp/oi-demo
 mkdir -p /tmp/oi-demo/documents /tmp/oi-demo/state /tmp/oi-demo/share
 ~/venv/bin/python - <<'PY'
 import pathlib, yaml
