@@ -235,6 +235,11 @@ services:
       # cheaper than one that does. The deeper fix (pacing by stage, so a bulk load and a quiet cycle are not
       # the same setting) is RET-INGEST-002 and stays open.
       INGEST_CONCURRENCY: "2"
+      # **Half the service's batch token cap, so two concurrent requests batch together instead of one being
+      # shed.** At 7,000 tokens per request and a window of two, the service can only run one at a time and
+      # answers 429 to the other; the worker retries, but the retry is pure overhead. At 4,000 the two fit in
+      # one 8,192-token batch.
+      INGEST_EMBED_TOKEN_BUDGET: "4000"
       INGEST_MAX_FAILURES: "2"
       INGEST_STATE_PATH: /state/last-cycle.json
     volumes:
