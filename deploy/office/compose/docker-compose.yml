@@ -234,12 +234,14 @@ services:
       # answers 429; the worker now backs off and retries, but a window that does not provoke the queue is
       # cheaper than one that does. The deeper fix (pacing by stage, so a bulk load and a quiet cycle are not
       # the same setting) is RET-INGEST-002 and stays open.
-      INGEST_CONCURRENCY: "2"
-      # **Half the service's batch token cap, so two concurrent requests batch together instead of one being
-      # shed.** At 7,000 tokens per request and a window of two, the service can only run one at a time and
-      # answers 429 to the other; the worker retries, but the retry is pure overhead. At 4,000 the two fit in
-      # one 8,192-token batch.
-      INGEST_EMBED_TOKEN_BUDGET: "4000"
+      # **One, because a window of two is what provokes the 429.** A bulk load of large documents sends two
+      # near-cap requests at once; the embedding service sheds one, the retries expire and the document fails
+      # until the next cycle, then pays the parse cost again. That is how the 2026-10-17 corpus load spent its
+      # last hours: 66 large documents cycling between 429 and re-parse. One writer and a larger request per
+      # writer keeps the service fed without ever asking it for more than one batch at a time.
+      # The staging fix that would let a quiet cycle and a bulk load use different settings is RET-INGEST-002.
+      INGEST_CONCURRENCY: "1"
+      INGEST_EMBED_TOKEN_BUDGET: "7000"
       INGEST_MAX_FAILURES: "2"
       INGEST_STATE_PATH: /state/last-cycle.json
     volumes:
