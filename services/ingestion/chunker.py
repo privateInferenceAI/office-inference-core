@@ -603,9 +603,17 @@ def _char_cut(text: str, count_one, limit: int) -> list[str]:
         if count_one(rest) <= limit:
             pieces.append(rest)
             break
-        ratio = max(1.0, len(rest) / max(1, count_one(rest)))
+        measured = count_one(rest)
+        ratio = max(1.0, len(rest) / max(1, measured))
         take = max(1, int(limit * ratio * 0.9))
-        pieces.append(rest[:take])
+        piece = rest[:take]
+        # The ratio is an average and this is the boundary, so verify the slice itself. A run whose density
+        # changes inside the window produced pieces of 518 to 578 tokens on the real corpus; the invariant is
+        # measured, so the check is too.
+        while count_one(piece) > limit and take > 1:
+            take = max(1, int(take * 0.8))
+            piece = rest[:take]
+        pieces.append(piece)
         rest = rest[take:]
     return pieces
 

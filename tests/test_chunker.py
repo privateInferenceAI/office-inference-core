@@ -574,3 +574,19 @@ def test_sentence_boundaries_are_preferred_when_they_exist():
     assert len(pieces) > 1
     for piece in pieces[:-1]:
         assert piece.rstrip().endswith("."), f"split mid-sentence: {piece[-40:]!r}"
+
+
+def test_the_character_cut_verifies_each_slice_against_the_limit():
+    """The ratio is an average. At the boundary it can be wrong, and the real corpus produced pieces of 518 to
+    578 tokens from a run whose density changed inside the window; the cut has to measure each slice."""
+    def density_changes(text: str) -> int:
+        # The first 400 characters are expensive and the rest are nearly free, which is exactly the shape a
+        # single averaged ratio cannot bound.
+        if len(text) <= 400:
+            return len(text)
+        return 400 + (len(text) - 400) // 20
+
+    pieces = chunker.split_to_limit("z" * 6000, density_changes, chunker.MAX_TOKENS)
+    assert len(pieces) > 1
+    for piece in pieces:
+        assert density_changes(piece) <= chunker.MAX_TOKENS

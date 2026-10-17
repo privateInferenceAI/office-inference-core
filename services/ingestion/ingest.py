@@ -462,6 +462,28 @@ def _ocr_ran(parsed: dict, confidence: dict | None = None) -> bool:
 # measured ratio (1.33 bytes/token on a CSV ledger) 7,000 bytes is about 5,300 tokens, inside the cap with room
 # for the tokenizer's special tokens. The 422 is also handled by halving, because a ratio that moves is not a
 # reason to fail a document.
+# **Load shedding is a pace, not a fault.** TEI answers 429 when its queue is full, and the worker read that as a
+# document failure: a corpus load at high concurrency dead-lettered 171 documents this way on 2026-10-16, and the
+# overnight v3 rebuild lost 245 more. A retry with a short backoff turns the same pressure into patience.
+LOAD_SHED_RETRIES = int(os.environ.get("INGEST_LOAD_SHED_RETRIES", "4"))
+LOAD_SHED_BACKOFF_SECONDS = float(os.environ.get("INGEST_LOAD_SHED_BACKOFF", "1.0"))
+
+
+def _retry_load_shedding(action, describe: str):
+    """Run one request, waiting and retrying while the embedding service says it is too busy."""
+    for attempt in range(1, LOAD_SHED_RETRIES + 1):
+        try:
+            return action()
+        except urllib.error.HTTPError as exc:
+            if exc.code != 429 or attempt == LOAD_SHED_RETRIES:
+                raise
+            wait = LOAD_SHED_BACKOFF_SECONDS * (2 ** (attempt - 1))
+            print(f"  {describe} was shed by the embedding service; waiting {wait:.1f}s "
+                  f"(attempt {attempt} of {LOAD_SHED_RETRIES})")
+            time.sleep(wait)
+    raise RuntimeError(f"{describe} never ran")
+
+
 TOKENIZE_BATCH_BYTES = 7_000
 # **A byte budget alone is not a batch bound.** Many short chunks (a table's row entries are the common case) fit
 # hundreds into 7,000 bytes, and the service also caps the number of inputs per request; a request over that cap
@@ -480,7 +502,7 @@ def _tokenize(services: Services, texts: list[str]) -> list[int]:
 
 def _tokenize_one_batch(services: Services, texts: list[str]) -> list[int]:
     try:
-        return _tokenize(services, texts)
+        return _retry_load_shedding(lambda: _tokenize(services, texts), "tokenize")
     except urllib.error.HTTPError as exc:
         if exc.code != 422:
             raise
@@ -585,7 +607,7 @@ def _embed_split(services: Services, path: str, texts: list[str]) -> list[list[f
     truncation off, and it says that rather than reading as a parsing problem (`RET-CHUNK-001`).
     """
     try:
-        return _embed_on_path(services, path, texts)
+        return _retry_load_shedding(lambda: _embed_on_path(services, path, texts), "embed")
     except urllib.error.HTTPError as exc:
         if exc.code != 422:
             raise

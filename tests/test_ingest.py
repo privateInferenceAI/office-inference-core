@@ -1261,3 +1261,22 @@ def test_an_embedding_batch_over_the_service_cap_is_halved(monkeypatch):
     vectors = ingest.embed_texts(ingest.Services(), ["a", "b", "c", "d", "e"])
     assert len(vectors) == 5
     assert any(size > 2 for size in calls), "the refusal has to be exercised"
+
+
+def test_load_shedding_is_retried_not_failed(monkeypatch):
+    """A 429 is a pace, not a fault. The overnight rebuild lost 245 documents to it before this existed."""
+    state = {"calls": 0}
+    sleeps: list[float] = []
+
+    def fake_post(url, body, timeout, method="POST"):
+        state["calls"] += 1
+        if state["calls"] <= 2:
+            raise urllib.error.HTTPError(url, 429, "Too Many Requests", {}, None)
+        return [[{"id": 0}] for _ in body["inputs"]]
+
+    monkeypatch.setattr(ingest, "_post", fake_post)
+    monkeypatch.setattr(ingest.time, "sleep", lambda seconds: sleeps.append(seconds))
+    counts = ingest.count_tokens(ingest.Services(), ["one", "two"])
+    assert counts == [1, 1]
+    assert state["calls"] == 3
+    assert sleeps == [1.0, 2.0], "backoff has to grow rather than spin"

@@ -229,6 +229,12 @@ services:
       # the delay before a new document is retrievable is what it buys.
       INGEST_INTERVAL_SECONDS: "900"
       INGEST_EMBED_BATCH: "16"
+      # **Two, because the embedding service can hold about one full batch at this size.** Each embedding
+      # request is bounded near the service's batch-token cap, so a window of four fills its queue and it
+      # answers 429; the worker now backs off and retries, but a window that does not provoke the queue is
+      # cheaper than one that does. The deeper fix (pacing by stage, so a bulk load and a quiet cycle are not
+      # the same setting) is RET-INGEST-002 and stays open.
+      INGEST_CONCURRENCY: "2"
       INGEST_MAX_FAILURES: "2"
       INGEST_STATE_PATH: /state/last-cycle.json
     volumes:
