@@ -1162,3 +1162,23 @@ executive compensation question is denied and an executive session gets the memo
 measured tokens exists in the index, the 756 KB unbroken run is 789 bounded chunks, and tables that did not fit are
 row groups carrying their identity and row range. `RET-CHUNK-001` is verified, the register row that would have
 caught this had it existed.
+
+
+## The corpus rebuild, and the verification that came with it — 2026-10-17
+
+After the chunker repair (chunker-v3, measured post-condition, truncation off) the corpus was rebuilt from the S3
+groups: 544 documents, 478 indexed by the end of the pass, 70,749 chunks, matching the Qdrant point count exactly.
+The invariant was checked against the whole collection rather than a sample: zero points over 512 measured tokens;
+the 756 KB unbroken run is 789 bounded chunks; 205 tables that did not fit are row groups carrying their row
+ranges; 169 executive documents are indexed. The contract records chunker-v3, 8,192 maximum input, truncation off.
+
+The rebuild found what the tests could not, again. The last 66 documents, all large, cycled between 429 and re-parse
+because two documents in flight each sent a near-cap embedding request and the service shed one; that is
+`RET-INGEST-002` in production, and the load now runs as a single writer (PR #154) with one 429 line instead of
+dozens. Ten files dead-lettered on parser 400/413 and parser task failures; the 3.3 MB text file refused with
+`HTTP 413 Payload Too Large` is the one worth a follow-up, because a text file that size should be parseable.
+
+Verified on the rebuilt corpus: the boundary gate check passes on both endpoints with a real answer on the
+permitted path, the job probe holds eight rights, the activity probe holds eight, the access canaries behave, and
+the new forty-question data set retrieves its expected documents for the sample checked. `RET-CHUNK-001` stays
+verified; `RET-INGEST-002` stays open with this as its evidence.
