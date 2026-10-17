@@ -5899,7 +5899,7 @@ That is why the route must not log its full URL.
 a clone of the app on a workstation, with `npm ci` once first.
 
 ```
-cd /opt/oic-ui/app
+cd <oic-ui>/app
 npm run typecheck
 npm test -- --run
 
@@ -6046,6 +6046,11 @@ the workstation is often shared. So:
   sentence a reader gets afterwards is the one `approvals.describe()` prints, in the app's own words in
   `approvalSentences.ts`: *"Approved at 2026-10-16T18:18:25+00:00 under the viewer role. The person who decided
   was not identified: sign-in is not enabled on this deployment, so the system cannot verify who acted."*
+  **The words are identical in both renderers and the timestamp is not.** The feed and `describe()` print the
+  recorded ISO value; the app passes the same field through `toLocaleString()`, so the same approval reads
+  `Approved at 10/16/2026, 2:18:25 PM under the viewer role.` on screen. A page that quotes one and calls it
+  the other is wrong about which renderer it is describing, and round three's executor found this page doing
+  exactly that.
 - **`claimed_subject` never sits where a verified name would sit.** The field is named `claimed_` on purpose,
   where an interface cannot drop the caveat by choosing not to render a paragraph.
 

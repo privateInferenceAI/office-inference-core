@@ -196,16 +196,21 @@ def prepare(*, token: str, question: str, body: dict, ctx: Context, resolve, mod
         result = retriever.search(ctx.services, question, permit.role, limit=ctx.passages, permit=permit)
     except Exception as exc:  # noqa: BLE001 - the message is the response
         audit("access", session.subject, session.role, "error",
-              {"stage": "retrieval", "error": type(exc).__name__})
+              {"stage": "retrieval", "error": type(exc).__name__}, request_id=request_id)
         raise Refused(502, {"error": f"retrieval failed: {exc}", "kind": "retrieval_failed"},
                       "retrieval_failed") from exc
 
     if not result.passages:
         # A 200 with an honest sentence rather than an error: the request succeeded and the corpus does
         # not contain the thing, which is a different fact from the service being broken.
+        # **The request id is what makes the answer findable in the record.** Every other audited path on
+        # this route passes one, and this branch did not: a `no_source` answer carried an id in its body and
+        # left a row that no lookup could reach, which is what `activity_probe.py`'s BYREQUEST right caught on
+        # 2026-10-16. The reader-facing consequence is worse than the probe's, because the answer is the one a
+        # person is most likely to ask about: "the system said it had nothing" is a claim to check.
         audit("access", session.subject, session.role, "denied",
               {"stage": "retrieval", "reason": "no passage the session may read matched",
-               "roots": sorted(permit.roots)})
+               "roots": sorted(permit.roots)}, request_id=request_id)
         raise Refused(200, {"answer": "No document you may read answers this question.", "citations": [],
                             "kind": "no_source", "role": session.role,
                             "roots": sorted(permit.roots)}, "no_source")
