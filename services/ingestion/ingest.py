@@ -352,8 +352,13 @@ def parse_document(services: Services, path: Path, relpath: str) -> dict:
         if state == "success":
             break
         if state in ("failure", "skipped"):
+            # The parser stores the conversion error and traceback under /v1/result; the status poll returns
+            # only the state. Asking for the detail is what turns a dead letter from "the parser failed" into
+            # the sentence an operator can act on. Without it, six unopenable spreadsheets looked identical.
+            detail = _get_json(f"{services.parser_url}/v1/result/{task_id}", services.timeout) or {}
+            failure = detail.get("failure") or {}
             raise RuntimeError(
-                f"the parser failed on {relpath}: {json.dumps(status)[:400]}")
+                f"the parser failed on {relpath}: {failure.get('error') or json.dumps(status)[:400]}")
         time.sleep(PARSE_POLL_SECONDS)
     else:
         raise TimeoutError(
@@ -716,11 +721,47 @@ def ensure_collection(services: Services) -> int:
     return measured
 
 
+# **A document's points do not fit in one request, and the store says so only when it is too late.** Qdrant
+# refused five documents on 2026-10-17 with either 400 (`JSON payload (53153923 bytes) is larger than allowed
+# (limit: 33554432 bytes)`) or 413 Payload Too Large. A row-heavy spreadsheet becomes thousands of points, each
+# carrying a 1,024-float vector: about 20 KB of JSON per point, so 2,000 points is already the limit. The batches
+# below stay inside it, by count and by estimated bytes, whichever comes first.
+UPSERT_BATCH_POINTS = int(os.environ.get("INGEST_UPSERT_BATCH_POINTS", "256"))
+UPSERT_BATCH_BYTES = int(os.environ.get("INGEST_UPSERT_BATCH_BYTES", str(8 * 1024 * 1024)))
+# Bytes per float in a serialised vector, measured from a real payload: 0.0123456789 plus the comma is 13, and
+# account for the widest exponents. Erring high costs empty request space; erring low fails a document.
+VECTOR_FLOAT_JSON_BYTES = 24
+
+
+def _point_bytes(point: dict) -> int:
+    payload = point.get("payload") or {}
+    return (VECTOR_FLOAT_JSON_BYTES * len(point.get("vector") or [])
+            + len(payload.get("text") or "")
+            + 2_000)
+
+
 def upsert_points(services: Services, points: list[dict]) -> None:
+    """Write a document's points in requests the store will accept.
+
+    Batched rather than one request, because one request is not a unit the store supports for documents with
+    thousands of row entries. Order is preserved and a failure in any batch fails the document, which the cycle
+    records against it.
+    """
     if not points:
         return
-    _post(f"{services.vector_url}/collections/{services.collection}/points?wait=true",
-          {"points": points}, services.timeout, method="PUT")
+    batch: list[dict] = []
+    size = 0
+    for point in points:
+        cost = _point_bytes(point)
+        if batch and (len(batch) >= UPSERT_BATCH_POINTS or size + cost > UPSERT_BATCH_BYTES):
+            _post(f"{services.vector_url}/collections/{services.collection}/points?wait=true",
+                  {"points": batch}, services.timeout, method="PUT")
+            batch, size = [], 0
+        batch.append(point)
+        size += cost
+    if batch:
+        _post(f"{services.vector_url}/collections/{services.collection}/points?wait=true",
+              {"points": batch}, services.timeout, method="PUT")
 
 
 # The share of the smaller document's chunks that two documents have in common, above which the pair is

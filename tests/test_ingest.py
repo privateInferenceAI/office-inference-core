@@ -1280,3 +1280,40 @@ def test_load_shedding_is_retried_not_failed(monkeypatch):
     assert counts == [1, 1]
     assert state["calls"] == 3
     assert sleeps == [1.0, 2.0], "backoff has to grow rather than spin"
+
+
+def test_points_are_written_in_batches_the_store_accepts(monkeypatch):
+    """A row-heavy document is thousands of points, each with a 1,024-float vector. One request for all of them
+    is over the store's body limit, so the write has to be batched, and every point must still be written
+    exactly once and in order."""
+    calls: list[list[dict]] = []
+
+    def fake_post(url, body, timeout, method="POST"):
+        calls.append(body["points"])
+        return {}
+
+    monkeypatch.setattr(ingest, "_post", fake_post)
+    monkeypatch.setattr(ingest, "UPSERT_BATCH_POINTS", 10)
+    monkeypatch.setattr(ingest, "UPSERT_BATCH_BYTES", 10 ** 9)
+    points = [{"id": f"p{i}", "payload": {"text": "x" * 50}, "vector": [0.1] * 8} for i in range(35)]
+    ingest.upsert_points(ingest.Services(), points)
+    assert len(calls) == 4
+    assert all(len(batch) <= 10 for batch in calls)
+    assert [p["id"] for batch in calls for p in batch] == [p["id"] for p in points]
+
+
+def test_the_byte_budget_splits_before_the_count_does(monkeypatch):
+    """The count bound alone is not enough: 256 points of a wide vector body can still be over the limit."""
+    calls: list[list[dict]] = []
+
+    def fake_post(url, body, timeout, method="POST"):
+        calls.append(body["points"])
+        return {}
+
+    monkeypatch.setattr(ingest, "_post", fake_post)
+    monkeypatch.setattr(ingest, "UPSERT_BATCH_POINTS", 10_000)
+    monkeypatch.setattr(ingest, "UPSERT_BATCH_BYTES", 30_000)
+    points = [{"id": f"p{i}", "payload": {"text": "x" * 500}, "vector": [0.1] * 1024} for i in range(10)]
+    ingest.upsert_points(ingest.Services(), points)
+    assert len(calls) > 1
+    assert [p["id"] for batch in calls for p in batch] == [p["id"] for p in points]
