@@ -550,6 +550,24 @@ items:
       not. OPEN DEPENDENCY: model_sha is null on this build, so the model revision is unverifiable and the contract
       records the null rather than omitting the field.
 
+  - id: RET-TABLE-001
+    title: A table too large to be a document table is indexed in bounded chunks with an omission marker, and a data file above the size threshold becomes a card
+    tier: [cloud, hosted, office]
+    phase: C2
+    verify: >-
+      ingest a document with a 6,000-row table and a 3 MB CSV. The table produces no per-row entries, no more
+      than 200 bounded row groups, and exactly one marker chunk naming the table, the total rows and the indexed
+      row range; the CSV produces exactly one chunk of kind dataset whose text names the file, without the parser
+      being called. A table of ordinary size keeps its per-row entries and gets no marker. The data suite then
+      shows the giant dumps out of the top five for ordinary questions with no regression in the prose and
+      cross-document categories.
+    status: open
+    note: >-
+      The row-per-entry rule is right for a business table and wrong for a data dump. On 2026-10-17 a 27,829-line
+      CSV became tens of thousands of near-identical row chunks and appeared in 42 of 52 baseline retrievals,
+      displacing the documents that held the answers (docs/reviews/baseline-v3.md). The cap is deliberately above
+      every normal schedule at 5,000 rows, and data files are classified before parsing at 2 MB for spreadsheets
+      and 4 MB for text dumps, so the expensive path is never entered for a file that should be a card.
   - id: RET-CHUNK-001
     title: Every embedded chunk is measured against the embedding model's input limit, and a chunk over it is refused rather than truncated
     tier: [cloud, hosted, office]

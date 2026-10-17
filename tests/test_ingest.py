@@ -1361,3 +1361,40 @@ def test_the_worklist_exists_even_when_nothing_was_rejected(tmp_path):
     header = (tmp_path / "rejected.csv").read_text(encoding="utf-8").strip().splitlines()
     assert header[0].startswith("relpath")
     assert len(header) == 1
+
+
+# ---------------------------------------------------------------- data sets (chunker-v4)
+
+def test_a_data_set_is_classified_before_parsing(tmp_path, wired):
+    """A multi-megabyte spreadsheet contributes one card and never reaches the parser: that is the point of the
+    policy, and a parse call would prove the policy did not fire."""
+    documents = tmp_path / "documents"
+    (documents / "company").mkdir(parents=True)
+    big = documents / "company" / "ledger.csv"
+    big.write_bytes(b"row,value\n" * 300_000)          # about 3 MB
+    assert chunker.dataset_reason(big)
+
+    services = wired()
+    document = ingest.Document(relpath="company/ledger.csv", root="company", path=big)
+    checksum, _size = ingest.sha256_of(big)
+    points, pages = ingest.ingest_document(services, document, checksum)
+
+    assert len(points) == 1
+    assert points[0]["payload"]["kind"] == "dataset"
+    assert services.parsed_names == [], "the parser must not be called for a classified data set"
+    assert pages is None
+
+
+def test_the_data_set_report_lists_classified_files(tmp_path):
+    """Data sets are not failures, so they get their own list, and the list is what a person can act on."""
+    documents = tmp_path / "documents"
+    documents.mkdir()
+    (documents / "big.csv").write_bytes(b"x,y\n" * 600_000)
+    (documents / "notes.txt").write_bytes(b"ordinary prose\n")
+    out = tmp_path / "out"
+
+    report = ingest.write_dataset_report(documents, out)
+    assert [row["relpath"] for row in report["datasets"]] == ["big.csv"]
+    rows = (out / "datasets.csv").read_text(encoding="utf-8").splitlines()
+    assert "big.csv" in rows[1]
+    assert "notes.txt" not in (out / "datasets.csv").read_text(encoding="utf-8")

@@ -40,6 +40,7 @@ from __future__ import annotations
 import hashlib
 import re
 import uuid
+from pathlib import Path
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable
 
@@ -55,10 +56,34 @@ PREFERRED_OVERLAP_TOKENS = 0
 # replaced rather than buried.
 TOKENS_PER_WORD = 1.35
 
+# ---------------------------------------------------------------- the giant-table policy (chunker-v4)
+#
+# **A table above this many rows is a data dump, not a document table.** It keeps bounded row groups and loses
+# its per-row retrieval entries. Five thousand is far above any normal business schedule: a big fee schedule is
+# hundreds of rows. It is far below the dumps that forced this rule on 2026-10-17, where a 27,829-line CSV became
+# tens of thousands of near-identical row chunks and appeared in 42 of 52 baseline retrievals, displacing the
+# documents that held the answers (docs/reviews/baseline-v3.md).
+MAX_ROW_ENTRIES = 5_000
+
+# And even row groups are bounded per table, so one dump cannot fill the collection. The excess rows are not
+# silently dropped: a marker chunk records the table, its total rows and the row range that is indexed, so a
+# citation can be honest about what is and is not searchable.
+MAX_TABLE_CHUNKS = 200
+TABLE_OMISSION_KIND = "table_marker"
+
+# Files that are data sets rather than documents. Classified before parsing, because parsing a nine megabyte
+# spreadsheet costs minutes and produces the row explosion; a card is what a person needs from it and what
+# retrieval should return ("this is a data set, here is where it is"). The thresholds are well above ordinary
+# spreadsheets a small business searches, and below the dumps that made the 2026-10-17 load take a day.
+DATASET_EXTENSIONS = frozenset({".csv", ".tsv", ".xls", ".xlsx"})
+DATASET_MIN_BYTES = 2 * 1024 * 1024
+DATASET_TEXT_SUFFIXES = frozenset({".txt", ".json", ".jsonl"})
+DATASET_TEXT_MIN_BYTES = 4 * 1024 * 1024
+
 # Bumped when any rule above changes, because it is part of every chunk id: a chunker change makes new
 # ids for the same document, which is what forces a deliberate re-embed rather than a silent mix of
 # two chunkings in one collection.
-CHUNKER_VERSION = "chunker-v3"
+CHUNKER_VERSION = "chunker-v4"
 
 _WORD = re.compile(r"\S+")
 
@@ -528,7 +553,10 @@ def chunk_document(document: dict, doc_id: str, source_sha256: str,
             bbox_start=group[0].bbox, bbox_end=group[-1].bbox,
             coord_origin=group[0].bbox.get("coord_origin"),
             count_tokens=count_tokens, limit=limit))
-        if include_row_entries:
+        # Row entries are the precise retrieval unit for an ordinary table. Above the cap the table is a data
+        # dump, and tens of thousands of near-identical row vectors are noise that displaces real documents; the
+        # bounded row groups and the omission marker carry what retrieval needs instead.
+        if include_row_entries and len(rows) <= MAX_ROW_ENTRIES:
             header_text = " | ".join(column_names).strip()
             for ordinal, (page_no, text, bbox) in enumerate(rows):
                 if not text.strip():
@@ -695,16 +723,82 @@ def _table_chunks(*, whole_text: str, rows: list[tuple[int, str, dict]], heading
     groups: list[tuple[int, int, list[tuple[int, str, dict]]]] = []
     current: list[tuple[int, str, dict]] = []
     start = 0
+    truncated = False
     for index, row in enumerate(rows):
         if current and count_tokens([with_prefix(current + [row])])[0] > limit:
             groups.append((start, index - 1, current))
             current, start = [row], index
         else:
             current.append(row)
-    if current:
+        # **Stop early as well as cap the output.** The rows past the cap would only be counted and thrown
+        # away, and counting them costs a tokenizer call each on a table that is already thousands of rows.
+        if len(groups) >= MAX_TABLE_CHUNKS:
+            truncated = True
+            break
+    if not truncated and current:
         groups.append((start, len(rows) - 1, current))
-    return [make(with_prefix(group_rows), row_start=first, row_end=last)
-            for first, last, group_rows in groups]
+
+    out = [make(with_prefix(group_rows), row_start=first, row_end=last)
+           for first, last, group_rows in groups]
+    if truncated:
+        last_indexed = groups[-1][1]
+        prefix = " > ".join(headings).strip()
+        marker = (
+            (f"{prefix}\n" if prefix else "")
+            + f"Table {table_id}: {len(rows)} rows in total. Rows 0 to {last_indexed} are searchable as "
+            f"grouped excerpts; the remaining {len(rows) - last_indexed - 1} rows are not indexed because the "
+            f"table is too large to index as a document table. Open the source document on pages "
+            f"{page_start} to {page_end} for the full data."
+        )
+        out.append(Chunk(
+            text=marker, page_start=page_start, page_end=page_end, kind=TABLE_OMISSION_KIND,
+            doc_id=doc_id, source_sha256=source_sha256, table_id=table_id,
+            row_start=last_indexed + 1, row_end=len(rows) - 1, table_rows=len(rows),
+            bbox_start=bbox_start, bbox_end=bbox_end, coord_origin=coord_origin, headings=headings))
+    return out
+
+
+def dataset_reason(path: "Path") -> str | None:
+    """Why this file is a data set rather than a document, or None when it should be parsed as one.
+
+    The decision is deliberately about type and size, not content: it is made before parsing, because parsing
+    the file is the expensive part this policy is avoiding. A spreadsheet a business searches for is kilobytes;
+    these are megabyte dumps. The cost of a wrong call is bounded either way: a document wrongly classified
+    produces a card that names the file, and the operator can see the rule and the threshold in the report.
+    """
+    suffix = path.suffix.lower()
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return None
+    if suffix in DATASET_EXTENSIONS:
+        if size >= DATASET_MIN_BYTES:
+            return f"{suffix} data file of {size} bytes"
+        return None
+    if suffix in DATASET_TEXT_SUFFIXES and size >= DATASET_TEXT_MIN_BYTES:
+        return f"{suffix} data dump of {size} bytes"
+    return None
+
+
+def dataset_chunk(*, relpath: str, source_sha256: str, size: int, reason: str) -> Chunk:
+    """The one chunk a data set contributes: a card naming it, not its rows.
+
+    Retrieval should be able to say "that is a data set and here it is", honestly, instead of returning
+    thousands of rows that crowd out documents. The card is embedded like any chunk, so a question naming the
+    file finds it; it carries the byte size and the reason it was classified, which is what an operator needs
+    to decide whether to open it, convert it, or ask for it as a queryable data source.
+    """
+    name = Path(relpath).name
+    text = (
+        f"Data set: {name} (file {relpath}). "
+        f"Classified as a data set rather than a document: {reason}. "
+        "It is not indexed page by page and its rows are not searchable. "
+        "A person can open the file directly; asking questions of its data needs the data query path."
+    )
+    return Chunk(
+        text=text, page_start=1, page_end=1, kind="dataset", doc_id=relpath,
+        source_sha256=source_sha256, page_is_nominal=True, is_ocr=False,
+    )
 
 
 def split_oversized(text: str, page_no: int, bbox: dict) -> list[str]:
