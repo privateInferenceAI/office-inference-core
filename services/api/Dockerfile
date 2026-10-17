@@ -20,6 +20,14 @@ COPY services /app/services
 # component, so a deployment has one record of what was applied rather than one per service.
 COPY db /app/db
 
+# **The image does not inherit the checkout's file modes.** The boundary runner starts a second API container as
+# the operator's uid rather than as root, and a checkout written under a restrictive umask gives that container
+# a tree it cannot read: it dies on the first import or migration with a `PermissionError` that reads like a
+# broken build. Found on 2026-10-16 by the C5 round-two fidelity checker, whose failing command was
+# `tests/fixtures/gate_check_run.sh`. One line here makes the image independent of how the checkout was written,
+# and the same reason applies to any image a non-root container is started from.
+RUN chmod -R a+rX /app/services /app/db
+
 ENV PYTHONUNBUFFERED=1 \
     OI_GATEWAY_URL=http://litellm:4000 \
     ACCESS_REGISTRY=/app/rendered/access.json \
