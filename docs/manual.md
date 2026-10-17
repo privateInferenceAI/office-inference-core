@@ -426,6 +426,13 @@ cd /opt/oi-core
 alias oi='docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env'
 ```
 
+**On a deployment built by the runbook, `oi` is also installed as a symlink** at `/usr/local/bin/oi` pointing
+into the repository (runbook section 0.8), so it works in a script, a cron entry and `ssh host 'command'` as
+well as in an interactive shell. That matters because the runbook records what happened when the command did
+not exist at all: a deployment ran an image from before a fix, and a teardown left 10,033 documents on disk.
+The alias below is for a box where the symlink has not been installed yet; the two are not alternatives a
+reader has to weigh.
+
 Everything below uses `oi`. Without the alias, write the whole thing out.
 
 **The alias exists only in the shell where you typed it.** In `ssh host 'command'`, in a script, or in
@@ -4356,13 +4363,17 @@ words.
 identity: {
   assurance: "unverified",
   basis: "session_token",
-  claimed_subject: "dana",
-  claimed_role: "staff"
+  claimed_subject: "probe-staff@officeinference.com",
+  claimed_role: "viewer"
 }
 ```
 
 **The fields are prefixed `claimed_` rather than `subject_`.** The caveat lives in the field name, where a
 screen or an export cannot drop it by leaving out a paragraph.
+
+**`claimed_role` is a session role, and `staff` is not one.** This deployment declares `viewer`, and `staff` is
+a group in `rendered/access.json` that decides which access roots a subject holds. A parser or a test written
+from an example that put `staff` in this field would never match a row.
 
 **Two rules make `assurance` safe, and both fail quietly if they are dropped.** A value the reader does not
 recognise becomes `unverified`, never something stronger, so a typo or an old schema cannot claim a
@@ -4755,9 +4766,13 @@ because there is no supported way to move one afterwards.
 **Write this down and give it to the client.** The app name, the client ID, the object ID, the one
 permission granted, the mailbox it reads, the name of the person who consented, and the date. One page.
 
-**Why one page matters more than it sounds.** Entra keeps audit records for 180 days on a Business Standard
-licence. If somebody asks in eight months whether a supplier's vendor ever had access, the tenant no longer
-knows. That page is the answer, and it is a deliverable rather than documentation debt.
+**Why one page matters more than it sounds, and the numbers are the reason to write it down.** Microsoft keeps
+two histories with two clocks, and quoting the wrong one to a client is easy. **Entra ID audit logs last 30 days
+on P1 and P2 and 7 days on Free**, and Entra's own documentation says they are separate from the Microsoft 365
+Unified Audit Log, whose retention is set in Purview and whose 180-day default is the number an operator is
+likely to be thinking of. So an eight-month-old question about who had access is answered by the page in the
+client's hands rather than by the tenant, which no longer knows. That is why this is a deliverable rather than
+documentation debt.
 
 ### Install it
 
@@ -4885,6 +4900,7 @@ count messages and five count attachments:
 
 | Key | Counts | Means |
 |---|---|---|
+| `channel` | — | `graph` or `folder`: which channel this poll read |
 | `messages_seen`, `no_attachment` | messages | what the folder listing returned, and how many of those carried no attachment |
 | `attachments` | attachments | how many the messages carried in total |
 | `deposited` | attachments | a document intake has not seen. **This is the one that writes a row and deposits a file** |

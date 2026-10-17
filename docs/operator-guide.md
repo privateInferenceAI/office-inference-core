@@ -124,8 +124,10 @@ not.** Neither one announces itself: the guide's later commands fail in ways tha
 fault rather than the machine's.
 
 ```
-# 1. The compose shorthand every later stage uses. A shell alias, so it exists only in the shell you typed
-#    it in — ssh host 'command', a script, and docker run do not have it.
+# 1. The compose shorthand every later stage uses. On a deployment the runbook built, `oi` is a symlink at
+#    /usr/local/bin/oi pointing into the repository (runbook 0.8), so scripts and ssh host 'command' have it.
+#    The alias below is for a box where that symlink has not been installed, and it exists only in the shell
+#    you typed it in.
 alias oi='docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env'
 
 # 2. A Python environment, once, for the tests. Ubuntu 24.04 refuses a bare pip install under PEP 668,
@@ -2164,7 +2166,7 @@ in the filter and the list is empty rather than partial: a partial answer to "sh
 # the app's own tests, from a workstation clone of it: the deployment has no Node toolchain
 cd /opt/oic-ui/app
 npm ci
-npx vitest run                                  # 172 collected: components, and the contract
+npx vitest run                                  # 173 collected: components, and the contract
 export OI_API_URL=http://127.0.0.1:18080 OI_TOKEN=$TOKEN
 npx vitest run tests/integration.test.ts        # 12: the app's client code, live
 npx playwright test                             # 23 collected: 13 pass, 10 skip without a deployment
@@ -2816,6 +2818,11 @@ docker run --rm --network ai-net --user "$(id -u):$(id -g)" -v /opt/oi-core:/w -
 echo "exit code $? (137 is SIGKILL, which is what you want)"
 ```
 
+**The job has to be one the probe left `queued`, not one waiting at the gate.** Pointing this at a gated job
+exits 3 with `child: finished without being killed, so the kill point was never reached`, which is the command
+refusing rather than the engine failing. To find a queued one:
+`select job_id from jobs where state = 'queued' order by created_at desc limit 1`.
+
 Then read the database rather than the process's opinion of it:
 
 ```
@@ -2836,7 +2843,14 @@ The invoice plan is six steps and the fourth is the gate. Use the job 13m.0 star
 the gate in 13m.1:
 
 ```
-JOB=<the job_id 13m.0 printed, or one the probe reports>
+# 13m.0 prints one job id. **The probe prints none**: `workflow_probe.py` reports rights and leaves its own
+# jobs at the gate, so a reader who ran 13m.1 first has to reach one of those with a query no page gave until
+# round three's cold reader asked for it.
+JOB=<the job_id 13m.0 printed>
+# or, for a job the probe left waiting:
+JOB=$(docker exec postgres psql -U oicore -d oicore -tAc \
+  "select job_id from jobs where state = 'awaiting_approval' order by created_at desc limit 1" | tr -d '[:space:]')
+echo "$JOB"
 docker exec postgres psql -U oicore -d oicore -c \
   "select name, state from job_steps where job_id = '$JOB' order by attempt"
 ```

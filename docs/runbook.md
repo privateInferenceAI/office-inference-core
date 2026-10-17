@@ -4528,7 +4528,9 @@ believes it.
 
 **What already exists.** `POST /jobs/{id}/{action}` takes pause, resume and cancel. `awaiting_approval` has
 been in the state machine since C4 and is reachable from `running`. Nothing has ever reached it, which is why
-C5 is its first writer and why two defects are still cheap to fix (`AUD-APPROVAL-001`, `UI-FEED-001`).
+C5 is its first writer and why two defects are still cheap to fix (`AUD-APPROVAL-001`, `UI-FEED-001`). Both
+are rows in `docs/requirements.yaml` rather than things a reader is expected to have read about elsewhere, and
+6.2 is where each one is explained and closed.
 
 **What is added, and why it is a route of its own rather than a fourth action.**
 
@@ -4862,7 +4864,10 @@ cd /opt/oi-core
 bash scripts/probe.sh workflow_probe.py
 docker exec postgres psql -U oicore -d oicore -tAc \
   "select summary from audit_feed where event_type = 'approval' order by id desc limit 3"
-OI_TEST_DATABASE_URL=<a database of your own> ~/venv/bin/python -m pytest tests/test_workflow_chain.py -q
+# **`-rs` is not decoration.** Without it a skip prints as one `s` and both the reason and the command to
+# start a database are hidden, so fourteen unheld rights read as fourteen fine ones. Round three's cold reader
+# recorded exactly that, and three of these tests are the ones holding the feed sentence to `describe()`.
+OI_TEST_DATABASE_URL=<a database of your own> ~/venv/bin/python -m pytest tests/test_workflow_chain.py -q -rs
 ```
 
 **And the sequence the register actually writes, which is five commands and one restart.** The engine is
@@ -5233,6 +5238,12 @@ with the `company` label, which is the label a client expects an invoice to carr
 a `.part` name and renamed into place, because the ingestion worker walks the same tree and `.part` is
 already in its list of suffixes it will not read. A half-written PDF never becomes a document.
 
+**These commands need a configuration that this step does not create.** `/etc/oi-intake/intake.yaml` and the
+credential beside it come from manual 13l's install section, which is the page a deployment is set up from; on
+a box without them the first command refuses with `no-config: no configuration at …` and exits 1, which is the
+guard working rather than a broken deployment. Manual 13l.7 has the five commands that need neither a tenant
+nor a configuration, and they are the ones to run first on a box with no client.
+
 **Commands.**
 
     cd /opt/oi-core
@@ -5283,8 +5294,9 @@ already in its list of suffixes it will not read. A half-written PDF never becom
 
 **Expected.** `check-config` prints `ok` and the five components with their owner. `cord-check` prints
 `no cord` and exits 0. **`fetch` prints one JSON object for the poll, not a line per message**, with these
-keys: `channel`; `messages_seen` and `no_attachment`, which count messages; and `attachments`, `deposited`,
-`duplicates`, `already` and `marked`, which count attachments. `deposited` writes a row and deposits a file,
+keys: `channel`; `messages_seen` and `no_attachment`, which count messages; `attachments`, `deposited`,
+`duplicates`, `already` and `marked`, which count attachments; and `last_error`, which is null on a clean poll
+and otherwise the classified failure the heartbeat recorded. `deposited` writes a row and deposits a file,
 `duplicates` writes a row with `duplicate_of` and deposits nothing, `already` writes **no row at all** (the
 same attachment on a message read on an earlier poll), and `marked` is a count of a sender verdict on the
 deposited rows rather than a fourth outcome. `enumerate-reach` prints a probe table where exactly one row is
@@ -5382,10 +5394,12 @@ the credential working and the queue empty, and a poll that never happens becaus
 **Why a heartbeat rather than error logging, and why polling rather than a filesystem watch.** Both are the
 same argument about a signal that is absent rather than wrong.
 
-**Error logging cannot see a silent failure.** A revoked scope, a pulled licence and a mail rule diverting
-invoices all leave a credential that authenticates and a queue that is empty. Every one of them looks exactly
-like a quiet week. Error logging reports nothing in all three cases, which is why every "we log exceptions"
-answer fails this requirement. The connector writes a heartbeat on every successful poll, and a separate
+**Error logging cannot see a silent failure.** A revoked scope and a mail rule diverting invoices both leave
+a credential that authenticates and a queue that is empty, and both look exactly like a quiet week. Error
+logging reports nothing in either case, which is why every "we log exceptions" answer fails this requirement.
+**The pulled licence is the half-way case and is worth separating**: it answers 403 with a healthy token, so
+the classifier does name it and the volume floor catches it as well. A reader who took all three for silent
+would read the classifier firing as a defect. The connector writes a heartbeat on every successful poll, and a separate
 check alerts when the last success is older than the interval allows. That catches the failures that produce
 no error, because the signal is the absence of a success rather than the presence of a failure.
 
@@ -5416,8 +5430,9 @@ remembered.
 **Expected.** `monitor` prints `no alert` on a healthy deployment, and one line per alert naming the failure
 in a sentence rather than a code. On a stale heartbeat it prints `stale_heartbeat` with the age in minutes
 and the address the alert was sent to. On a volume floor breach it prints `volume_floor` with the count and
-the window. `watch-folder` prints one line per file it takes, and prints nothing at all for a file that is
-still being written.
+the window. `watch-folder` prints **one JSON object per scan**, so a scan that takes nothing still prints a
+line and two of the three lines in the paste below describe no take. A file that is still being written is
+named in none of them, which is the half that matters: the settle check shows up as an absence.
 
 **Verify.** `CON-SILENT-001` is proved by three simulated failures in
 `tests/test_intake_silent.py`, each of which leaves the credential working and the queue empty.
@@ -5538,8 +5553,10 @@ ok   Acme Tool & Die (acme-2026)
 no cord
 ```
 
-**The fourth and fifth lines of the check section are the ones that matter.** The host allowlist is asserted
-rather than described, and then exercised: the command makes a request to a host we control and reports the
+**The two lines after the five components are the ones that matter**, which are the seventh and eighth of the
+block: the fourth and fifth are two of the components, and this sentence said otherwise until round three's
+fidelity checker counted them against the paste above. The host allowlist is asserted rather than described, and
+then exercised: the command makes a request to a host we control and reports the
 refusal. A control proved by refusing something is a control; a control described in a paragraph is a
 paragraph.
 
@@ -5895,8 +5912,9 @@ That is why the route must not log its full URL.
 **Verify, from a workstation.**
 
 **These three commands need Node, and the deployment does not carry it.** `node`, `npm` and `npx` all answer
-`command not found` on the box, which round two's executor confirmed by running each of them there. Run them in
-a clone of the app on a workstation, with `npm ci` once first.
+`command not found` on the box, which the second review round's executor confirmed by running each of them
+there (`docs/reviews/c5-round-2.md`). Run them in a clone of the app on a workstation, with `npm ci` once
+first.
 
 ```
 cd <oic-ui>/app
@@ -5910,10 +5928,10 @@ npx playwright test e2e/live.spec.ts
 ```
 
 **The app is a separate repository and `/opt/oic-ui` is its checkout on the deployment** (guide 13i.1), which is
-where the compose file builds the bundle from; it is not on the core's machine at any other path. Check it is at
-the commit these screens were built from before running the commands: `git -C /opt/oic-ui log --oneline -1`.
-That check is on the deployment and the three commands above are not. Check it is at the commit these screens were built from before
-running the commands: `git -C /opt/oic-ui log --oneline -1`.
+where the compose file builds the bundle from; it is not on the core's machine at any other path. The screens in
+this step are the ones built from `bcffdae` or later, and the deployment's checkout is where to check that:
+`git -C /opt/oic-ui log --oneline -1`, run on the box. That check is on the deployment and the three commands
+above are not.
 
 Expected: the unit suite passes with the live-view tests named, and the browser rung reports the refresh case,
 where the page is reloaded mid-run and the steps already recorded come back, none missing and none invented.
@@ -5944,7 +5962,7 @@ $ npm test -- --run
       Tests  161 passed | 12 skipped (173)
 ```
 
-**The counts moved by one in round two, and the reason is worth the line.** The suite was red for a day:
+**The counts moved by one in the second review round, and the reason is worth the line.** The suite was red for a day:
 `bcffdae` refreshed the app's copy of the contract while `tests/contract.test.ts` still held the eleven-path
 list and the three-field allowance the copy had outgrown. Fixing that restored 160, and the manual's second
 rule for the Review screen (*approve is never the default*) had no test until the same round, which is the
@@ -6131,7 +6149,7 @@ OK    the app's contract matches /opt/oi-core/docs/openapi.json
 always sent (`pending_action`, `pending_action_digest`, `events_through`) while the app's copy was last
 regenerated before them, and the app compiles against its own copy. `oic-ui` regenerated that copy at `bcffdae`
 and that commit changed one file. The allowance list in `tests/contract.test.ts` stayed behind, so the app's own
-suite went red on it, and round two's fidelity checker is what found that. The fix is in the app repository: the
+suite went red on it, and the second round's fidelity checker is what found that. The fix is in the app repository: the
 list was deleted rather than widened, which is what its own comment said to do when the fields landed. The check
 above is the one that says the two copies agree.
 

@@ -1057,3 +1057,43 @@ S3 is a deployment decision rather than a page fix.
 
 **Also closed while this round ran.** C6's register rows were written (25 rows, `phase: C6`), so a reader of the
 register alone can now see the phase is planned.
+
+## C5 panel, round 3 — 2026-10-16, the final round under the three-round cap
+
+**Verdicts. Executor yes, cold reader yes with no blocking finding, fidelity checker no with five page-side
+findings.** The three reports are filed under `docs/reviews/`, and the merged table is
+`docs/reviews/c5-round-3.md`.
+
+**Round two's corrections held under re-execution.** Every command in scope was run again from the pages: the
+start-a-job command prints the digest the page prints, the restart-and-approve sequence finishes over HTTP with
+one row per step, the feed sentence is the honest one in both databases, the probes report their rights, the
+intake acceptance is `10 PASS, 0 FAIL` with the stderr line the page now shows, and the app's counts are the
+counts the pages print.
+
+**Seventeen findings, one of them code.** `services/api/answer.py` audited its `no_source` branch — and its
+retrieval-error branch — without the `request_id` every other audited path on that route passes, so an answer
+that said it had nothing carried an id that could not find its own row. `activity_probe.py`'s `BYREQUEST` right is
+what caught it, and it now holds. The rest were page-side and are fixed: a wrong line pointer in `cord-check`'s
+output, `watch-folder`'s output described as one line per file when it is one per scan, a suite count one behind
+the suite, and a Microsoft retention figure that named the wrong store and the wrong number — Entra keeps 30 days
+on P1/P2 and 7 on Free, and the 180-day default an operator is likely to be thinking of belongs to the Microsoft
+365 Unified Audit Log in Purview. Ten more came from the cold reader, all of them small and none of them
+blocking: a configuration file the intake page never said to create, a job id with no source, a test command that
+hid its own skip reason without `-rs`, `oi` defined twice with a contradiction between the pages, an identity
+example carrying a group where a role goes, a silent failure that is not silent, a commit check printed twice and
+naming no commit, a register row named once and never explained, two `fetch` key lists that differed, and the
+phrase "round two" used where a reader has no round one.
+
+**Two items stay open, and neither is a page edit.** A denied job leaves its gate step row `running` while the job
+is terminal; it is documented in guide 13m.3 and runbook 6.2, and closing the row is a change to `jobs.decide()`
+that belongs beside C6's second caller of the gate. And the deployment's `documents` collection holds zero points
+with `documents/` empty, which is why the boundary runner still exits 1: the corpus is archived in
+`officeinference-corpus-878451098165` and `disk-ingest-documents-878451098165`, and restoring it is the owner's
+call rather than a documentation fix.
+
+**State at the close.** core and app clean and pushed; ten images current; api rebuilt; `activity_probe.py` 8
+rights, `workflow_probe.py` 13, `job_probe.py` 7 with 1 skipped by box state; 896 passed and 22 skipped on the
+workstation, 884 and 23 on the box with every skip named; the register at 145 items with C5 at 34 and C6 at 25.
+
+**The cap is reached and the panel stops here.** Each round found real defects and each round's findings were
+fixed and re-tested; a fourth round would be re-measuring fixes to a round that already passed.
