@@ -78,6 +78,39 @@ async def _refuse_a_model_this_role_may_not_use(request, role: str) -> None:
             f"only spend its own statement, and the model permission is what stops one role reaching "
             f"another role's model.")
 
+# **Prisma's pool parameters are not libpq's, and LiteLLM's process adds them to this environment.**
+# LiteLLM rewrites `DATABASE_URL` in-process at startup with the parameters Prisma's pool understands
+# (`connection_limit`, `pool_timeout`, `socket_timeout`, `max_idle_connection_lifetime`, `pgbouncer`) so the
+# reader and writer pools agree. psycopg 3 rejects any URI query parameter it does not recognise, so a
+# connection built from that string fails with `invalid URI query parameter: "connection_limit"` — which the
+# gateway surfaces as an authentication error, reading like a bad key rather than a bad DSN. Every query a
+# client sends went through one of these connections, so on 2026-10-16 the deployment could not answer a
+# question at all and the symptom looked like a broken virtual key. Plain parameters psycopg does know, such
+# as `sslmode` and `connect_timeout`, are kept.
+_PRISMA_ONLY_PARAMS = frozenset({
+    "connection_limit",
+    "pool_timeout",
+    "socket_timeout",
+    "max_idle_connection_lifetime",
+    "pgbouncer",
+})
+
+
+def _connection_url(required: bool = True) -> str | None:
+    """The deployment's DSN with Prisma's pool parameters removed, or None when there is none."""
+    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+    url = (os.environ.get("DATABASE_URL") or "").strip()
+    if not url:
+        if required:
+            raise Exception("no DATABASE_URL, so no ceiling could be read and no call may be allowed")
+        return None
+    parts = urlsplit(url)
+    kept = [(key, value) for key, value in parse_qsl(parts.query, keep_blank_values=True)
+            if key not in _PRISMA_ONLY_PARAMS]
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(kept), parts.fragment))
+
+
 def _team_rate_limits(role: str):
     """The team's tokens and requests per minute, or None when it declares neither.
 
@@ -87,7 +120,7 @@ def _team_rate_limits(role: str):
     """
     import psycopg
 
-    url = (os.environ.get("DATABASE_URL") or "").strip()
+    url = _connection_url(required=False)
     if not url:
         return (None, None)
     conn = psycopg.connect(url)
@@ -112,10 +145,7 @@ def _team_budget(role: str) -> float:
     """
     import psycopg
 
-    url = (os.environ.get("DATABASE_URL") or "").strip()
-    if not url:
-        raise Exception("no DATABASE_URL, so no ceiling could be read and no call may be allowed")
-    conn = psycopg.connect(url)
+    conn = psycopg.connect(_connection_url())
     try:
         with conn.cursor() as cur:
             cur.execute(

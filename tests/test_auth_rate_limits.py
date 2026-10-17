@@ -43,3 +43,26 @@ def test_the_hook_still_refuses_when_the_ceiling_cannot_be_read():
     source = AUTH.read_text()
     assert "no DATABASE_URL, so no ceiling could be read and no call may be allowed" in source
 
+
+
+def test_the_database_url_is_stripped_of_prismas_pool_parameters():
+    """The hook connects with psycopg, and LiteLLM's process rewrites DATABASE_URL with Prisma's parameters.
+
+    **Why this is a test and not a comment.** On 2026-10-16 every answer through the API came back
+    `degraded` with `reason: unreachable` while the master key worked and retrieval returned passages. The
+    gateway was logging `401 ... invalid URI query parameter: "connection_limit"` for every virtual key, so
+    the failure looked like a bad key and was a malformed DSN: LiteLLM appends Prisma's pool parameters to
+    `DATABASE_URL` in-process, psycopg rejects any query parameter it does not know, and the two reads in this
+    hook handed it the rewritten string unchanged. A new virtual key could never have fixed it.
+    """
+    source = AUTH.read_text()
+    assert "_connection_url" in source, "there is no reader that strips Prisma's pool parameters"
+    for name in ("connection_limit", "pool_timeout", "socket_timeout",
+                 "max_idle_connection_lifetime", "pgbouncer"):
+        assert name in source, f"{name} is not named among the parameters psycopg rejects"
+    assert source.count('os.environ.get("DATABASE_URL")') == 1, (
+        "the raw environment value should be read in exactly one place, the stripper")
+    assert "psycopg.connect(_connection_url())" in source, (
+        "the budget read does not connect with the stripped URL")
+    assert "_connection_url(required=False)" in source, (
+        "the rate-limit read does not connect with the stripped URL")
