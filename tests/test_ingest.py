@@ -80,6 +80,11 @@ def wired(monkeypatch):
         services.embedded.extend(texts)
         return [[0.1] * services.dims for _ in texts]
 
+    def fake_count_tokens(services, texts):
+        # The measured post-condition uses the serving model's tokenizer; a deterministic stand-in keeps the
+        # cycle tests off the network while still exercising the enforcement (RET-CHUNK-001).
+        return [max(1, (len(text) + 3) // 4) for text in texts]
+
     def fake_upsert(services, points):
         services.upserted.extend(points)
 
@@ -91,6 +96,7 @@ def wired(monkeypatch):
     monkeypatch.setattr(ingest, "ensure_collection", lambda services: services.dims)
     monkeypatch.setattr(ingest, "parse_document", fake_parse)
     monkeypatch.setattr(ingest, "embed_texts", fake_embed)
+    monkeypatch.setattr(ingest, "count_tokens", fake_count_tokens)
     monkeypatch.setattr(ingest, "upsert_points", fake_upsert)
     monkeypatch.setattr(ingest, "delete_document", fake_delete)
     return lambda **kwargs: (state.update(services=StubServices(**kwargs)), state["services"])[1]

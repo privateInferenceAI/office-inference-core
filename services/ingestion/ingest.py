@@ -451,6 +451,23 @@ def _ocr_ran(parsed: dict, confidence: dict | None = None) -> bool:
     return False
 
 
+def count_tokens(services: Services, texts: list[str]) -> list[int]:
+    """The served embedding model's own token count for each text.
+
+    **Why this is a call and not an estimate.** `chunker.estimate_tokens` is a whitespace-word estimate that
+    measured 2.8x to 3.2x low on two table samples and returns one token for a run with no whitespace, so it
+    cannot be the thing that decides a chunk fits. TEI serves the tokenizer the vectors are built with at
+    `/tokenize`; one call carries a batch. A deployment whose embedding service cannot answer this cannot
+    enforce the invariant, so the failure is loud rather than silently estimated (`RET-CHUNK-001`).
+    """
+    payload = _post(f"{services.embed_url}/tokenize", {"inputs": texts}, services.timeout)
+    if not isinstance(payload, list) or len(payload) != len(texts):
+        raise RuntimeError(
+            f"the embedding service did not tokenize {len(texts)} text(s); got {type(payload).__name__}. "
+            "The measured chunk post-condition needs its tokenizer, and an estimate is not a measurement.")
+    return [len(tokens) for tokens in payload]
+
+
 def _contract_change_allowed() -> bool:
     """Whether a contract change is deliberate. Never by default.
 
@@ -769,7 +786,9 @@ def ingest_document(services: Services, document: Document, content_sha256: str,
     parsed_result = parse_document(services, document.path, document.relpath)
     _t1 = time.monotonic()
     parsed = parsed_result["document"]
-    chunks = chunker.chunk_document(parsed, doc_id=document.relpath, source_sha256=content_sha256)
+    chunks = chunker.chunk_document(
+        parsed, doc_id=document.relpath, source_sha256=content_sha256,
+        count_tokens=lambda texts: count_tokens(services, texts))
     _t2 = time.monotonic()
     pages = len(parsed.get("pages") or {}) or None
     if timings is not None:
@@ -1748,6 +1767,16 @@ def main(argv: list[str] | None = None) -> int:
         if manifest is not None and getattr(manifest, "connection", None) is not None:
             import contract as contract_module
             live = contract_module.live_contract(services)
+            # **The one refusal that turns a silent data defect into a stopped worker.** A chunker bug is
+            # recoverable; a chunker bug plus an embedding service that truncates its input leaves documents
+            # that look ingested and are not, which is what happened to 73 documents on 2026-10-16. The
+            # repair is to serve the model with auto-truncate off (`--auto-truncate=false`) and to stop here
+            # if it is ever on again (RET-CHUNK-001).
+            if live.get("auto_truncate") is not False:
+                print("refusing to ingest: the embedding service reports auto_truncate="
+                      f"{live.get('auto_truncate')!r}. A chunk past its input limit would be embedded as a "
+                      "prefix of itself and look ingested. Serve the model with --auto-truncate=false.")
+                return 1
             outcome = contract_module.check(manifest.connection, services.collection, live,
                                             allow_change=_contract_change_allowed(),
                                             reason=os.environ.get("EMBED_CONTRACT_REASON"))

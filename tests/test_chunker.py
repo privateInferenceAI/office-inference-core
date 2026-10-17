@@ -438,3 +438,139 @@ def test_the_headings_field_still_carries_the_path_for_the_citation():
     chunk = next(c for c in chunker.chunk_document(document, "doc", "sha") if c.kind == "prose")
     assert chunk.headings == ["HALLORAN MECHANICAL LTD INVOICE 2026-0417"]
     assert chunk.text.startswith("HALLORAN MECHANICAL LTD INVOICE 2026-0417")
+
+
+# ---------------------------------------------------------------- the measured post-condition (RET-CHUNK-001)
+
+import math
+
+
+def measured_counter(texts):
+    """A stand-in for the served tokenizer: about four characters per token, deterministically.
+
+    The real number comes from TEI's `/tokenize` on bge-m3. What these tests pin is not the tokenizer but the
+    enforcement: the measurement happens after the heading prefix is in place, on every emission path, and a
+    chunk that measures over the budget is split rather than emitted.
+    """
+    return [max(1, math.ceil(len(text) / 4)) for text in texts]
+
+
+def unbroken_document(length: int = 40_000) -> dict:
+    """The 756 KB shape, scaled: no sentence-ending punctuation and no whitespace anywhere."""
+    run = "abc123" * (length // 6)
+    return {
+        "pages": {"1": {}},
+        "body": {"children": [{"$ref": "#/texts/0"}]},
+        "texts": [{"self_ref": "#/texts/0", "label": "paragraph", "text": run,
+                   "prov": [{"page_no": 1, "bbox": {"l": 53, "t": 700, "b": 660}}]}],
+        "tables": [],
+    }
+
+
+def big_table_document(rows: int = 80) -> dict:
+    """A fee schedule far past the budget, with a heading so the prefix can be checked on every part."""
+    cells = []
+    for row in range(rows):
+        for col, value in enumerate((f"Item {row} with a description of the fee", "per mile",
+                                     f"{row}.{row:02d} and some words")):
+            cells.append({
+                "text": value,
+                "start_row_offset_idx": row,
+                "start_col_offset_idx": col,
+                "bbox": {"l": 50 + col * 120, "t": 700 - row * 10, "r": 160 + col * 120,
+                         "b": 692 - row * 10},
+            })
+    return {
+        "pages": {"1": {}},
+        "body": {"children": [{"$ref": "#/texts/0"}, {"$ref": "#/texts/1"}]},
+        "texts": [
+            {"self_ref": "#/texts/0", "label": "title", "text": "Fee schedule",
+             "prov": [{"page_no": 1, "bbox": {"l": 50, "t": 760, "b": 740}}]},
+            {"self_ref": "#/texts/1", "label": "paragraph", "text": "This schedule lists the fees.",
+             "prov": [{"page_no": 1, "bbox": {"l": 50, "t": 735, "b": 730}}]},
+        ],
+        "tables": [{
+            "self_ref": "#/tables/0",
+            "prov": [{"page_no": 1, "bbox": {"l": 50, "t": 730, "r": 470, "b": 0}}],
+            "data": {"num_rows": rows, "num_cols": 3, "table_cells": cells},
+        }],
+    }
+
+
+def test_a_run_with_no_sentence_boundary_is_measured_and_cut():
+    """The 756 KB case: one word, no punctuation, so the sentence splitter and the estimator both see nothing."""
+    chunks = chunker.chunk_document(unbroken_document(), "doc", "sha", count_tokens=measured_counter)
+    assert len(chunks) > 1, "a 40 KB unbroken run has to become more than one chunk"
+    for chunk in chunks:
+        assert measured_counter([chunk.text])[0] <= chunker.MAX_TOKENS, "a chunk measured over the budget"
+        assert chunk.page_start == chunk.page_end == 1
+        assert chunk.token_count == measured_counter([chunk.text])[0]
+
+
+def test_an_oversized_table_becomes_row_groups_that_keep_its_identity():
+    """The 186 KB case: a table too large to embed is row groups, not one unembeddable entry.
+
+    The citation needs the schedule and the row, which is why `table_id`, the total row count and each
+    group's row range travel on every part, and why the heading prefix is repeated on each part.
+    """
+    document = big_table_document(rows=80)
+    chunks = chunker.chunk_document(document, "doc", "sha", count_tokens=measured_counter)
+    tables = [chunk for chunk in chunks if chunk.kind == "table"]
+    assert len(tables) > 1, "an oversized table must not stay one chunk"
+    ids = {chunk.table_id for chunk in tables}
+    assert len(ids) == 1 and None not in ids, "every group has to keep the table's identity"
+    assert all(chunk.table_rows == 79 for chunk in tables)
+    assert tables[0].row_start == 0 and tables[-1].row_end == 78
+    for previous, following in zip(tables, tables[1:]):
+        assert following.row_start == previous.row_end + 1, "row ranges have to be contiguous and complete"
+    for chunk in tables:
+        assert chunk.text.startswith("Fee schedule"), "the heading prefix has to repeat on every part"
+        assert measured_counter([chunk.text])[0] <= chunker.MAX_TOKENS
+        assert chunk.page_start == chunk.page_end == 1
+
+
+def test_a_table_that_fits_is_still_one_citation_unit():
+    """The rule that must survive: a table that fits stays one whole-table entry with no row range."""
+    document = big_table_document(rows=3)
+    chunks = chunker.chunk_document(document, "doc", "sha", count_tokens=measured_counter)
+    tables = [chunk for chunk in chunks if chunk.kind == "table"]
+    assert len(tables) == 1
+    assert tables[0].row_start is None and tables[0].row_end is None
+    assert tables[0].text.startswith("Fee schedule")
+
+
+def test_the_measurement_happens_after_the_heading_prefix():
+    """The prefix is part of the embedded text, so it is part of the budget.
+
+    The estimator sees a body with no whitespace as one token, so only the measured post-condition can catch a
+    chunk whose body fits and whose prefix pushes it over.
+    """
+    body = "x" * 2040                                       # 510 tokens at the fake ratio
+    document = {
+        "pages": {"1": {}},
+        "body": {"children": [{"$ref": "#/texts/0"}, {"$ref": "#/texts/1"}]},
+        "texts": [
+            {"self_ref": "#/texts/0", "label": "title", "text": "A heading path that costs tokens",
+             "prov": [{"page_no": 1, "bbox": {"l": 50, "t": 760, "b": 740}}]},
+            {"self_ref": "#/texts/1", "label": "paragraph", "text": body,
+             "prov": [{"page_no": 1, "bbox": {"l": 50, "t": 700, "b": 600}}]},
+        ],
+        "tables": [],
+    }
+    chunks = chunker.chunk_document(document, "doc", "sha", count_tokens=measured_counter)
+    assert len([c for c in chunks if c.kind == "prose"]) > 1, "the prefix has to count against the budget"
+
+
+def test_the_last_rung_cuts_by_characters_and_still_measures_inside():
+    pieces = chunker.split_to_limit("z" * 5000, lambda one: measured_counter([one])[0], chunker.MAX_TOKENS)
+    assert len(pieces) > 1
+    for piece in pieces:
+        assert measured_counter([piece])[0] <= chunker.MAX_TOKENS
+
+
+def test_sentence_boundaries_are_preferred_when_they_exist():
+    text = "The rate is 67 cents per mile. " * 80
+    pieces = chunker.split_to_limit(text, lambda one: measured_counter([one])[0], chunker.MAX_TOKENS)
+    assert len(pieces) > 1
+    for piece in pieces[:-1]:
+        assert piece.rstrip().endswith("."), f"split mid-sentence: {piece[-40:]!r}"

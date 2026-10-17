@@ -62,8 +62,16 @@ services:
     command:
       - "--model-id=BAAI/bge-m3"
       - "--port=80"
-      - "--max-batch-tokens=4096"
+      # **8192 rather than 4096, because truncation cannot be disabled below the model's maximum.**
+      # TEI refuses to start with `--auto-truncate=false` when the model's 8,192-token maximum input exceeds
+      # `--max-batch-tokens`, and that refusal is correct: the two settings would otherwise disagree about what
+      # a servable input is. The chunker's own budget is 512 measured tokens, so this ceiling is headroom.
+      - "--max-batch-tokens=8192"
       - "--max-concurrent-requests=16"
+      # **Truncation off, so an oversized input fails loudly instead of becoming a prefix.** The default is
+      # true, and it is how 73 documents came to hold vectors representing the first tokens of their text while
+      # looking ingested. The worker also refuses to run while this reports true (`RET-CHUNK-001`).
+      - "--auto-truncate=false"
     environment:
       HF_HOME: /data
       # A ten-minute first boot becomes twenty seconds with the warmup bounded.

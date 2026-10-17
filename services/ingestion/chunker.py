@@ -28,18 +28,20 @@ Two things this module does that the plan did not anticipate, both found by meas
     first data row, so the header names have to come from the fragment that carried them, or the
     serialised rows lose their column labels.
 
-Token counts here are estimated from word count rather than measured with the embedding model's
-tokenizer. That is deliberate for this step and is a known error, bounded by `TOKENS_PER_WORD`: the
-budget is a character count derived from it, and swapping in a real tokenizer changes the constants
-without changing the algorithm. The estimate is only used to bound chunk size, never to assert one.
+Token counts are estimated from word count for **planning** and measured with the embedding model's own
+tokenizer for **enforcement**. The estimate is deliberately cheap and is known to be wrong on table text: it
+measured 2.8x and 3.2x low on two table samples, and a run with no whitespace estimates as one token however
+long it is. So it may plan a boundary, and it may never decide that a chunk fits. `chunk_document` takes a
+`count_tokens` callable, measures every emitted chunk after its heading prefix is in place, and splits any
+chunk over the budget; the ingestion worker refuses to run without that measurement wired (`RET-CHUNK-001`).
 """
 from __future__ import annotations
 
 import hashlib
 import re
 import uuid
-from dataclasses import dataclass, field
-from typing import Any, Iterable
+from dataclasses import dataclass, field, replace
+from typing import Any, Callable, Iterable
 
 # The budget, in tokens, from the architecture. 384 is the floor rather than a target: a page whose
 # prose runs short produces a short chunk, and padding it to reach 384 would mean inventing text.
@@ -56,13 +58,18 @@ TOKENS_PER_WORD = 1.35
 # Bumped when any rule above changes, because it is part of every chunk id: a chunker change makes new
 # ids for the same document, which is what forces a deliberate re-embed rather than a silent mix of
 # two chunkings in one collection.
-CHUNKER_VERSION = "chunker-v2"
+CHUNKER_VERSION = "chunker-v3"
 
 _WORD = re.compile(r"\S+")
 
 
 def estimate_tokens(text: str) -> int:
-    """An estimate, documented as one. Never used to assert a size, only to bound it."""
+    """A cheap estimate for choosing boundaries. It never decides that a chunk fits.
+
+    Measured against the model we ship it is close on prose and low by 2.8x to 3.2x on table text, and a
+    run with no whitespace measures as a single word, so the measured post-condition below is the only
+    thing allowed to conclude that a chunk is inside the budget.
+    """
     return max(1, round(len(_WORD.findall(text)) * TOKENS_PER_WORD))
 
 
@@ -91,6 +98,15 @@ class Chunk:
     prev_chunk_id: str | None = None
     next_chunk_id: str | None = None
     page_is_nominal: bool = False
+    # A table too large to embed as one chunk becomes row groups that all carry the same table_id and
+    # their own row range, so a citation can name the schedule and the rows while the retrieval unit
+    # stays bounded. A table that fits keeps the whole-table entry and no row range.
+    row_start: int | None = None
+    row_end: int | None = None
+    table_rows: int | None = None
+    # The measured token count under the served embedding model, set by the post-condition. None when the
+    # caller did not supply a tokenizer, which the worker refuses to do.
+    token_count: int | None = None
     chunk_id: str = ""
 
     def sealed(self) -> "Chunk":
@@ -121,6 +137,9 @@ class Chunk:
             "page_is_nominal": self.page_is_nominal,
             "table_id": self.table_id,
             "row_index": self.row_index,
+            "row_start": self.row_start,
+            "row_end": self.row_end,
+            "table_rows": self.table_rows,
             "bbox_start": self.bbox_start,
             "bbox_end": self.bbox_end,
             "coord_origin": self.coord_origin,
@@ -130,6 +149,7 @@ class Chunk:
             "prev_chunk_id": self.prev_chunk_id,
             "next_chunk_id": self.next_chunk_id,
             "token_estimate": estimate_tokens(self.text),
+            "token_count": self.token_count,
         }
 
 
@@ -456,8 +476,16 @@ def _resolve(ref: str, document: dict) -> dict | None:
 # --------------------------------------------------------------------------- the entry point
 
 def chunk_document(document: dict, doc_id: str, source_sha256: str,
-                   include_row_entries: bool = True) -> list[Chunk]:
-    """A parsed document into chunks, in document order, with tables joined before they are split."""
+                   include_row_entries: bool = True,
+                   count_tokens: "TokenCounter | None" = None,
+                   limit: int = MAX_TOKENS) -> list[Chunk]:
+    """A parsed document into chunks, in document order, with tables joined before they are split.
+
+    `count_tokens` takes a list of texts and returns the embedding model's token count for each. When it is
+    supplied every emitted chunk is measured after its heading prefix is in place and split if it is over
+    `limit`; when it is not, chunks are planned by estimate only and nothing enforces the ceiling. The
+    worker always supplies it, and `RET-CHUNK-001` is the register row that says why.
+    """
     fragments = [
         TableFragment(
             self_ref=table.get("self_ref") or "",
@@ -493,12 +521,13 @@ def chunk_document(document: dict, doc_id: str, source_sha256: str,
         whole_text, column_names, rows = serialise_table(group, headings)
         table_id = f"{doc_id}:table:{group[0].self_ref.split('/')[-1]}"
         span = {p for p in range(min(first_page, last_page), max(first_page, last_page) + 1)}
-        chunks.append(Chunk(
-            text=whole_text, page_start=min(span), page_end=max(span), kind="table",
-            doc_id=doc_id, source_sha256=source_sha256, table_id=table_id,
+        chunks.extend(_table_chunks(
+            whole_text=whole_text, rows=rows, headings=headings, table_id=table_id,
+            doc_id=doc_id, source_sha256=source_sha256,
+            page_start=min(span), page_end=max(span),
             bbox_start=group[0].bbox, bbox_end=group[-1].bbox,
-            coord_origin=group[0].bbox.get("coord_origin"), headings=headings,
-        ))
+            coord_origin=group[0].bbox.get("coord_origin"),
+            count_tokens=count_tokens, limit=limit))
         if include_row_entries:
             header_text = " | ".join(column_names).strip()
             for ordinal, (page_no, text, bbox) in enumerate(rows):
@@ -525,6 +554,15 @@ def chunk_document(document: dict, doc_id: str, source_sha256: str,
             headings=headings, page_is_nominal=nominal,
         ))
 
+    # **The post-condition, measured after the heading prefix is in place.** The estimate plans the
+    # boundaries above; this is the only check allowed to conclude that a chunk fits, because the estimate
+    # is known to be low on table text and blind to a run with no whitespace.
+    if count_tokens is not None:
+        chunks = _enforce_measured_limit(chunks, count_tokens, limit)
+        measured = count_tokens([chunk.text for chunk in chunks]) if chunks else []
+        for chunk, count in zip(chunks, measured):
+            chunk.token_count = count
+
     for ordinal, chunk in enumerate(chunks):
         chunk.ordinal = ordinal
         chunk.sealed()
@@ -532,6 +570,133 @@ def chunk_document(document: dict, doc_id: str, source_sha256: str,
         chunk.prev_chunk_id = chunks[index - 1].chunk_id if index else None
         chunk.next_chunk_id = chunks[index + 1].chunk_id if index + 1 < len(chunks) else None
     return chunks
+
+
+TokenCounter = Callable[[list[str]], list[int]]
+
+
+def _merge_units(parts: list[str], count_one, limit: int, joiner: str) -> list[str]:
+    """Consecutive units merged while the measured count stays inside the budget."""
+    merged: list[str] = []
+    for part in parts:
+        if not part:
+            continue
+        if merged and count_one(merged[-1] + joiner + part) <= limit:
+            merged[-1] = merged[-1] + joiner + part
+        else:
+            merged.append(part)
+    return merged
+
+
+def _char_cut(text: str, count_one, limit: int) -> list[str]:
+    """The last rung: cut by characters, sized from the measured characters-per-token ratio.
+
+    A run with no whitespace and no punctuation cannot be cut at a word or a sentence, and leaving it whole
+    is the defect this exists to remove. The ratio comes from one measurement of the run, and the loop
+    re-measures each slice so a bad ratio cannot silently produce a piece that is still too large.
+    """
+    pieces: list[str] = []
+    rest = text
+    guard = 0
+    while rest and guard < 100_000:
+        guard += 1
+        if count_one(rest) <= limit:
+            pieces.append(rest)
+            break
+        ratio = max(1.0, len(rest) / max(1, count_one(rest)))
+        take = max(1, int(limit * ratio * 0.9))
+        pieces.append(rest[:take])
+        rest = rest[take:]
+    return pieces
+
+
+def split_to_limit(text: str, count_one, limit: int) -> list[str]:
+    """Cut one text into pieces that MEASURE at or under the limit, trying the least destructive rung first.
+
+    The order is the one the research and the builder both name: line, sentence (only when it actually
+    splits), clause punctuation, then characters. A citation quoting half a sentence reads as a misquote,
+    so sentence boundaries are tried before anything else; but a run with no sentence boundary has to be
+    cut by characters rather than passed through whole, which is exactly the failure this replaces.
+    """
+    if count_one(text) <= limit:
+        return [text]
+    out: list[str] = []
+    for unit in _merge_units(text.split("\n"), count_one, limit, "\n"):
+        if count_one(unit) <= limit:
+            out.append(unit)
+            continue
+        for sentence in _merge_units(re.split(r"(?<=[.!?])\s+", unit), count_one, limit, " "):
+            if count_one(sentence) <= limit:
+                out.append(sentence)
+                continue
+            for clause in _merge_units(re.split(r"(?<=[;:])\s+", sentence), count_one, limit, " "):
+                if count_one(clause) <= limit:
+                    out.append(clause)
+                else:
+                    out.extend(_char_cut(clause, count_one, limit))
+    return out
+
+
+def _enforce_measured_limit(chunks: list[Chunk], count_tokens: TokenCounter, limit: int) -> list[Chunk]:
+    """Every chunk measured; any chunk over the budget replaced by measured pieces with the same metadata."""
+    if not chunks:
+        return chunks
+    counts = count_tokens([chunk.text for chunk in chunks])
+    out: list[Chunk] = []
+    for chunk, count in zip(chunks, counts):
+        chunk.token_count = count
+        if count <= limit:
+            out.append(chunk)
+            continue
+        for piece in split_to_limit(chunk.text, lambda one: count_tokens([one])[0], limit):
+            other = replace(chunk, text=piece, chunk_id="", token_count=None)
+            out.append(other)
+    return out
+
+
+def _table_chunks(*, whole_text: str, rows: list[tuple[int, str, dict]], headings: list[str],
+                  table_id: str, doc_id: str, source_sha256: str, page_start: int, page_end: int,
+                  bbox_start: dict, bbox_end: dict, coord_origin: str | None,
+                  count_tokens: TokenCounter | None, limit: int) -> list[Chunk]:
+    """The table as bounded, citable chunks: one when it fits, row groups carrying a row range when it does not.
+
+    **Why this is not a split of the whole-table entry.** The whole-table entry is the citation unit, and a
+    fee schedule cited as half a schedule is a wrong citation. But an entry too large to embed is not a
+    citation unit at all: its vector is a truncated prefix of itself. So the table keeps its identity
+    (`table_id`, total row count) on every piece and the pieces are row groups with their own page and row
+    range, each prefixed with the heading path and each row line already carrying its column names, which
+    is what the serialiser folds into every row.
+    """
+    def make(text: str, row_start: int | None = None, row_end: int | None = None) -> Chunk:
+        return Chunk(
+            text=text, page_start=page_start, page_end=page_end, kind="table",
+            doc_id=doc_id, source_sha256=source_sha256, table_id=table_id,
+            row_start=row_start, row_end=row_end, table_rows=len(rows) or None,
+            bbox_start=bbox_start, bbox_end=bbox_end, coord_origin=coord_origin, headings=headings)
+
+    def with_prefix(group_rows: list[tuple[int, str, dict]]) -> str:
+        body = "\n".join(text for _, text, _ in group_rows)
+        prefix = " > ".join(headings).strip()
+        return f"{prefix}\n{body}" if prefix else body
+
+    if count_tokens is None:
+        return [make(whole_text)]
+    if count_tokens([whole_text])[0] <= limit:
+        return [make(whole_text)]
+
+    groups: list[tuple[int, int, list[tuple[int, str, dict]]]] = []
+    current: list[tuple[int, str, dict]] = []
+    start = 0
+    for index, row in enumerate(rows):
+        if current and count_tokens([with_prefix(current + [row])])[0] > limit:
+            groups.append((start, index - 1, current))
+            current, start = [row], index
+        else:
+            current.append(row)
+    if current:
+        groups.append((start, len(rows) - 1, current))
+    return [make(with_prefix(group_rows), row_start=first, row_end=last)
+            for first, last, group_rows in groups]
 
 
 def split_oversized(text: str, page_no: int, bbox: dict) -> list[str]:

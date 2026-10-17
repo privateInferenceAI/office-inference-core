@@ -1915,6 +1915,16 @@ Each chunk carries the label of the top-level folder it was found under, so `com
 is labelled `company`. The label is attached here rather than worked out during a search, because the
 search filters on it. Section 13d covers what enforces it.
 
+**A chunk is measured against the embedding model's own token limit before it is written.** The chunker plans
+with a cheap estimate, but that estimate measured 2.8x to 3.2x low on table text and reports a run with no
+whitespace as a single token, so it may plan a boundary and may never conclude that a chunk fits. The worker
+tokenizes every chunk with the served model (`POST /tokenize` on the embeddings service), splits anything over
+the budget at a line, then a sentence, then a clause, then a character window, and records the measured count on
+the chunk. The embeddings service runs with truncation off, so an oversized input is refused rather than
+embedded as a prefix of itself, and the worker refuses to run at all if the service reports that truncation is
+on (`RET-CHUNK-001`). The two chunks that exposed the gap were a 756 KB run with no sentence boundary and a
+186 KB table, on 2026-10-16; both are now bounded.
+
 ### Putting a document where the worker will find it
 
 **The folder is `/opt/oi-core/documents` on the host.** That is the whole answer to "where do I put the
@@ -2156,7 +2166,8 @@ changes, and the next cycle re-derives the whole corpus once. **Measured on the 
 documents in 1h36m at four documents in flight.** For a client's corpus it is the price of not serving content
 the code no longer produces.
 
-It is deliberately separate from the chunker's version, which is `chunker-v2`. **The separation is real and it
+It is deliberately separate from the chunker's version, which is `chunker-v3` (it was `chunker-v2` until the
+measured post-condition described in 13a landed). **The separation is real and it
 is not absolute**, and the change that raised both is the case that shows why. A labelling fix changes what a
 stored field means and leaves the chunk's text and its id alone, so only the payload version moves: forcing a
 re-parse for it would hide the difference between the two. But when the *chunking rules themselves* change --

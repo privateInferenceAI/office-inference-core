@@ -1535,6 +1535,16 @@ overflow, so a passage already over the budget went in whole and the chunk came 
 On a dense page that is precisely the outcome the ceiling exists to prevent. It is fixed, and the test
 for it uses a page of 800-token prose, which is what a real schedule's dense page looks like.
 
+**And the ceiling itself was only an estimate until chunker-v3.** The estimate is whitespace words × 1.35,
+which measured 2.8x to 3.2x low on table text and returns one token for a run with no whitespace; the table path
+had no size check at all. On a real 341-document corpus that produced a 756 KB prose chunk and a 186 KB table
+chunk, 73 documents were embedded as prefixes because truncation was on, and one assembled prompt was refused by
+the provider for size. **The repair is not a bigger number.** Every emitted chunk is measured with the served
+model's tokenizer after its heading prefix is in place, and split by a line/sentence/clause/character fallback if
+it is over; an oversized table becomes row groups that keep its `table_id`, total row count and each group's row
+range; and the embedding service runs with truncation off, so an oversized input fails loudly instead of becoming
+a prefix. `RET-CHUNK-001` is the row that keeps it true.
+
 **If it breaks.**
 
 - A test failing on row labelling: the column names are being paired with the wrong cells. This has now
