@@ -1159,7 +1159,10 @@ def _generate_with_tools(session, permit, model: str, question: str, result, req
 
     toolbox = tool_loop.ToolBox(STATE["services"], permit, session.role, audit=tool_audit,
                                 search_limit=search_limit)
-    deadline = time.monotonic() + max(5.0, request_budget.remaining() - 1.5)
+    # **Two thirds of the clock for the loop, the rest for the fallback.** The fallback is the single-shot answer
+    # with the passages retrieval already chose; giving the loop the whole budget would leave it nothing, which is
+    # how a loop that trips its caps turns a normal question into a degraded one.
+    deadline = time.monotonic() + max(6.0, (request_budget.remaining() - 1.5) * 0.6)
     loop = tool_loop.run_loop(
         lambda messages, tools: _tool_chat(session, model, messages, tools, request_budget),
         toolbox, question, seed_passages=result.passages,

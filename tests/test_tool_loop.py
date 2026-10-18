@@ -162,6 +162,27 @@ def test_progress_events_are_reported_for_steps_and_tools():
     assert events[1]["tool"] == "search_documents"
 
 
+def test_a_refusal_on_quoted_figures_triggers_one_lookup():
+    toolbox = make_toolbox()
+    calls = []
+
+    def fake_lookup(value, doc_id=""):
+        calls.append(value)
+        number = toolbox.add(FakePassage("c1", "228865.1 | 188387.5 | -6.1"))
+        return f"[{number}] company/coords.txt: 228865.1 | 188387.5 | -6.1"
+
+    toolbox.lookup_value = fake_lookup
+    replies = iter([
+        answer_reply("I could not find that in the available documents."),
+        answer_reply("The third value is -6.1 [1]."),
+    ])
+    result = tool_loop.run_loop(lambda messages, tools: next(replies), toolbox,
+                                "What is the third value for row 228865.1 and 188387.5?")
+    assert calls == ["228865.1 and 188387.5"]
+    assert result["auto_lookups"] == 1
+    assert "-6.1" in result["answer"]
+
+
 def test_a_provider_error_returns_a_reason_not_an_exception():
     toolbox = make_toolbox()
     result = tool_loop.run_loop(lambda messages, tools: {"error": "throttled"}, toolbox, "q")

@@ -107,7 +107,8 @@ SYSTEM_PROMPT = (
     "6. If the question asks about a specific event, period, meeting or document that the evidence never "
     "states, refuse even when the evidence contains related facts. Do not infer that a related figure answers "
     "it, and do not relabel a fact as the one that was asked for.\n"
-    "You have a limited number of tool calls. When you have the answer, reply with no tool call."
+    "You have at most four tool calls. Answer as soon as the evidence is enough; do not keep searching for "
+    "completeness. When you have the answer, reply with no tool call."
 )
 
 CORRECTIVE = (
@@ -116,6 +117,9 @@ CORRECTIVE = (
 )
 
 MAX_EVIDENCE_CHARS = 9000
+
+# The exact words the contract asks for when an answer is not in the evidence.
+_REFUSAL_PHRASE = "could not find that in the available documents"
 SNIPPET_CHARS = 700
 
 
@@ -138,7 +142,7 @@ class ToolBox:
     """
 
     def __init__(self, services, permit, role: str, audit=None, search_limit: int = 8,
-                 read_limit: int = 12, max_evidence: int = 24):
+                 read_limit: int = 12, max_evidence: int = 16):
         self.services = services
         self.permit = permit
         self.role = role
@@ -370,8 +374,9 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
             + (f"Evidence already retrieved, numbered:\n{seeded}\n\n" if seeded else "")
             + "Search if this is not enough, then answer.")},
     ]
-    stats = {"steps": 0, "tool_calls": 0, "corrections": 0}
+    stats = {"steps": 0, "tool_calls": 0, "corrections": 0, "auto_lookups": 0}
     limit_error = ""
+    lookup_enabled = any(schema["function"]["name"] == "lookup_value" for schema in active_tools())
 
     while stats["steps"] < max_steps:
         if deadline is not None and time.monotonic() >= deadline:
@@ -387,6 +392,28 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
         if not calls:
             content = (reply.get("content") or "").strip()
             failure = answer_contract.violation(content, toolbox.texts())
+            # **A refusal on a question that quotes figures the evidence does not contain is nudged once.**
+            # Measured: the large-table probe returns a refusal even though the quoted pair identifies the row
+            # uniquely. The model does not always take the lookup step the prompt describes, so the loop takes it
+            # deterministically: one automatic lookup for figures from the question, then ask again. Once only,
+            # so a genuinely absent figure still ends in a refusal.
+            if stats["auto_lookups"] == 0 and lookup_enabled and stats["steps"] < max_steps:
+                if failure is not None or (_REFUSAL_PHRASE in content.lower()):
+                    quoted = _figures_in(question)
+                    evidence_digits = "".join(
+                        char for text in toolbox.texts() for char in text if char.isdigit())
+                    missing = [figure for figure in quoted
+                               if "".join(ch for ch in figure if ch.isdigit()) not in evidence_digits]
+                    if missing:
+                        stats["auto_lookups"] = 1
+                        found = toolbox.lookup_value(" and ".join(missing[:2]))
+                        if not found.startswith('{"error"'):
+                            messages.append({"role": "assistant", "content": content})
+                            messages.append({"role": "user", "content": (
+                                "An automatic lookup for figures quoted in the question found this evidence:\n"
+                                + found + "\nAnswer the question again using it, or refuse if it does not "
+                                "answer the question.")})
+                            continue
             if failure and stats["steps"] < max_steps:
                 stats["corrections"] += 1
                 messages.append({"role": "assistant", "content": content})
@@ -421,12 +448,19 @@ def enabled() -> bool:
 
 
 def limits() -> tuple[int, int]:
+    """Steps and tool calls, defaulted to fit the request budget rather than to be generous.
+
+    **Measured on 2026-10-18.** Six steps and ten calls tripled the model calls and often spent the whole thirty
+    second budget inside the loop; the fallback single-shot answer then had nothing left and came back degraded,
+    which is worse than not having enabled the loop. Four and six leave the fallback a real share of the clock,
+    and the evidence collected in four steps was enough for almost every question in the suite.
+    """
     try:
-        steps = int(os.environ.get("OI_TOOL_MAX_STEPS", "6"))
+        steps = int(os.environ.get("OI_TOOL_MAX_STEPS", "4"))
     except ValueError:
-        steps = 6
+        steps = 4
     try:
-        calls = int(os.environ.get("OI_TOOL_MAX_CALLS", "10"))
+        calls = int(os.environ.get("OI_TOOL_MAX_CALLS", "6"))
     except ValueError:
-        calls = 10
+        calls = 6
     return max(1, min(steps, 12)), max(1, min(calls, 24))
