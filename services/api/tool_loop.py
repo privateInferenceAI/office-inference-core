@@ -107,8 +107,8 @@ SYSTEM_PROMPT = (
     "6. If the question asks about a specific event, period, meeting or document that the evidence never "
     "states, refuse even when the evidence contains related facts. Do not infer that a related figure answers "
     "it, and do not relabel a fact as the one that was asked for.\n"
-    "You have at most four tool calls. Answer as soon as the evidence is enough; do not keep searching for "
-    "completeness. When you have the answer, reply with no tool call."
+    "You have a limited number of tool calls. Answer as soon as the evidence is enough; do not keep searching "
+    "for completeness. When you have the answer, reply with no tool call."
 )
 
 CORRECTIVE = (
@@ -142,7 +142,7 @@ class ToolBox:
     """
 
     def __init__(self, services, permit, role: str, audit=None, search_limit: int = 8,
-                 read_limit: int = 12, max_evidence: int = 16):
+                 read_limit: int = 12, max_evidence: int = 24):
         self.services = services
         self.permit = permit
         self.role = role
@@ -452,19 +452,20 @@ def enabled() -> bool:
 
 
 def limits() -> tuple[int, int]:
-    """Steps and tool calls, defaulted to fit the request budget rather than to be generous.
+    """Steps and tool calls. Six and ten are the measured best, and the clock share is what keeps the fallback
+    alive rather than the caps.
 
-    **Measured on 2026-10-18.** Six steps and ten calls tripled the model calls and often spent the whole thirty
-    second budget inside the loop; the fallback single-shot answer then had nothing left and came back degraded,
-    which is worse than not having enabled the loop. Four and six leave the fallback a real share of the clock,
-    and the evidence collected in four steps was enough for almost every question in the suite.
+    **Measured on 2026-10-18.** Four steps scored 37.3 and six scored 43.3 on the same suite: the model needed the
+    extra turns to recover exact-number questions. The budget starvation that first looked like a caps problem was
+    the gateway refusing calls against an exhausted team ceiling; the loop now reserves the fallback's share of the
+    clock in the caller and the caps stay where the measurement put them.
     """
     try:
-        steps = int(os.environ.get("OI_TOOL_MAX_STEPS", "4"))
+        steps = int(os.environ.get("OI_TOOL_MAX_STEPS", "6"))
     except ValueError:
-        steps = 4
+        steps = 6
     try:
-        calls = int(os.environ.get("OI_TOOL_MAX_CALLS", "6"))
+        calls = int(os.environ.get("OI_TOOL_MAX_CALLS", "10"))
     except ValueError:
-        calls = 6
+        calls = 10
     return max(1, min(steps, 12)), max(1, min(calls, 24))

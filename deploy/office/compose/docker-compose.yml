@@ -498,12 +498,12 @@ services:
       # has been measured; the single-shot path stays as the fallback, so enabling this cannot be worse than not
       # enabling it. Bounds are steps, tool calls, and how many results a search may add to the evidence.
       OI_TOOL_LOOP: ${OI_TOOL_LOOP:-off}
-      OI_TOOL_MAX_STEPS: ${OI_TOOL_MAX_STEPS:-4}
-      OI_TOOL_MAX_CALLS: ${OI_TOOL_MAX_CALLS:-6}
+      OI_TOOL_MAX_STEPS: ${OI_TOOL_MAX_STEPS:-6}
+      OI_TOOL_MAX_CALLS: ${OI_TOOL_MAX_CALLS:-10}
       OI_TOOL_SEARCH_LIMIT: ${OI_TOOL_SEARCH_LIMIT:-8}
       # One tool can be turned off for a measurement without a code change. Lookup is on by default; when a
       # quoted figure appears in many documents it refuses to act as an anchor, which is what made it safe.
-      OI_TOOL_LOOKUP: ${OI_TOOL_LOOKUP:-on}
+      OI_TOOL_LOOKUP: ${OI_TOOL_LOOKUP:-off}
       # The audit tool's content mode, passed because the tool refuses to run without it. A model-call row
       # names a model and counts rather than text, so the policy has nothing to govern here.
       CONTENT_DEFAULT: ${CONTENT_DEFAULT:-hash}
