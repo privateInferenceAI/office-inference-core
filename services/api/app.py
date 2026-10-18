@@ -68,6 +68,7 @@ import ingest  # noqa: E402
 import retriever  # noqa: E402
 import session as session_module  # noqa: E402
 import budget as budget_module  # noqa: E402
+import answer_contract  # noqa: E402
 import routing  # noqa: E402
 import streaming  # noqa: E402
 
@@ -987,11 +988,7 @@ def _generate(session, permit, model: str, question: str, passages: list, budget
 
     budget = budget or budget_module.Budget()
     context = "\n\n".join(f"[{n + 1}] {p.text}" for n, p in enumerate(passages))
-    prompt = (
-        "Answer the question using only the numbered passages below. Cite the passages you use as [n]. "
-        "If they do not answer it, say so plainly. Do not use outside knowledge.\n\n"
-        f"Passages:\n{context}\n\nQuestion: {question}"
-    )
+    prompt = answer_contract.build_prompt(context, question)
     # **Minted per attempt, not once.** A statement is spent by its first presentation, and the first
     # version of this minted one before the retry loop. So attempt one earned the real 429, the retry
     # replayed a spent assertion, and the 401 that came back classified as `unclassified`: a genuine
@@ -1001,6 +998,10 @@ def _generate(session, permit, model: str, question: str, passages: list, budget
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": int(os.environ.get("OI_MAX_TOKENS", "700")),
+        # **Zero, because this is an extraction task and the measured failures were variance.** Four identical
+        # runs of the same questions scored 32, 26, 31 and 29; a sampled answer to a question whose value is in
+        # the passage has nothing to gain from variety.
+        "temperature": 0,
     }
 
     errors: list = []
@@ -1021,7 +1022,21 @@ def _generate(session, permit, model: str, question: str, passages: list, budget
             choices = data.get("choices") or []
             if not choices:
                 return None, ("unclassified", "the gateway returned no choices", attempt, errors)
-            return (choices[0].get("message") or {}).get("content", ""), None
+            content = (choices[0].get("message") or {}).get("content", "")
+            # **The answer is checked before it is returned.** A citation with no answer, an empty reply, or a
+            # figure present nowhere in the passages is sent back once with a corrective instruction. If the
+            # second attempt repeats it, the honest result is a refusal carrying the passages, not the number.
+            failure = answer_contract.violation(content, [p.text for p in passages])
+            if failure is not None:
+                errors.append({"attempt": attempt, "status": 200, "reason": failure,
+                               "matched": "", "retryable": True})
+                if attempt >= budget_module.MAX_ATTEMPTS:
+                    return None, (failure, {"reason": failure, "matched": "", "retryable": False},
+                                  attempt, errors)
+                payload["messages"] = [{"role": "user",
+                                        "content": prompt + "\n\n" + answer_contract.corrective_message(failure)}]
+                continue
+            return content, None
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode(errors="replace")[:400]
             kind = budget_module.classify(detail)
@@ -1073,6 +1088,11 @@ def _degrade_detail(reason: str) -> str:
         "unclassified": "the model call failed in a way this deployment does not recognise, so the answer "
                         "below comes from your own documents",
         "timeout": "the model did not answer within the time this deployment allows",
+        "unsupported_number": "the model's answer stated a figure this deployment could not find in your "
+                              "documents, so the answer below comes from your own documents instead",
+        "citation_only": "the model replied with a citation but no answer, so the passages below are the "
+                         "answer",
+        "empty_answer": "the model returned an empty answer, so the passages below are the answer",
     }.get(reason, "the model call did not complete, so the answer below comes from your own documents")
 
 def _backoff(attempt: int, retry_after: str | None) -> float:
@@ -1316,17 +1336,16 @@ async def _frames(session, permit, model: str, question: str, result, requested_
                                         for n, p in enumerate(result.passages)]})
 
     context = "\n\n".join(f"[{n + 1}] {p.text}" for n, p in enumerate(result.passages))
-    prompt = (
-        "Answer the question using only the numbered passages below. Cite the passages you use as [n]. "
-        "If they do not answer it, say so plainly. Do not use outside knowledge.\n\n"
-        f"Passages:\n{context}\n\nQuestion: {question}"
-    )
+    # Same contract as the JSON path. The stream is not post-checked, because a token already sent cannot be
+    # retracted; the constraint belongs in the prompt for this path and the check belongs in the other.
+    prompt = answer_contract.build_prompt(context, question)
     # Minted per attempt here too, for the reason above: an assertion is spent once, so a retry that
     # replays one is a retry that cannot authenticate.
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": int(os.environ.get("OI_MAX_TOKENS", "700")),
+        "temperature": 0,
         "stream": True,
     }
     def _request():
