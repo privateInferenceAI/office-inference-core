@@ -136,12 +136,17 @@ def _team_rate_limits(role: str):
     return (int(row[0]) if row[0] else None, int(row[1]) if row[1] else None)
 
 
-def _team_budget(role: str) -> float:
-    """How much of this role's ceiling is left, which is what the gateway enforces.
+def _team_ceiling(role: str) -> float:
+    """This role's ceiling, which is what the gateway enforces on the identity it is handed.
 
-    Read per request rather than cached, because the number changes as the gateway records spend and a stale
-    ceiling is a ceiling that lets a runaway through. One indexed row read on a local socket is cheaper than
-    the model call it guards.
+    **The ceiling, not the remainder, and that distinction cost a day of measurement.** The earlier version
+    passed `ceiling - spend` as the identity's budget, but the gateway accumulates spend against the identity it
+    is given. Both sides therefore subtracted the same spend: a role with 2.00 spent of 10.00 was handed 8.00 and
+    refused once that identity had spent 8.00, at which point the team row showed 10.00 and the true remainder
+    was nothing. A budget that fires at half its nominal value is a bug that reads like a limit.
+
+    Read per request rather than cached, because a stale ceiling is a ceiling that lets a runaway through. One
+    indexed row read on a local socket is cheaper than the model call it guards.
     """
     import psycopg
 
@@ -163,17 +168,13 @@ def _team_budget(role: str) -> float:
             f"no team named {role!r} exists, so this role has no ceiling and no call may be allowed. "
             f"Run: oi --profile tools run --rm keys --provision-teams"
         )
-    ceiling, spend = row[0], row[1]  # the query also returns tpm_limit and rpm_limit, read by _team_rate_limits
+    ceiling = row[0]  # the query also returns spend and the limits, read by _team_rate_limits
     if ceiling is None:
         # A deployment that declared no ceiling for this role. The manifest allows it, and the honest answer
         # is a number the gateway can enforce a spend against rather than an unlimited lane.
         return float(os.environ.get("OI_UNBUDGETED_ROLE_CEILING", "1.0"))
-    remaining = float(ceiling) - float(spend or 0)
-    if remaining <= 0:
-        # Zero rather than a refusal here, so the gateway produces its own budget error and the API reports
-        # a refusal with the numbers in it, which is a better message than anything this hook would invent.
-        return 0.0
-    return remaining
+    ceiling = float(ceiling)
+    return ceiling if ceiling > 0 else 0.0
 
 async def user_api_key_auth(request: Request, api_key: str) -> UserAPIKeyAuth:
     """Resolve the caller, or refuse with the reason."""
@@ -227,7 +228,7 @@ async def user_api_key_auth(request: Request, api_key: str) -> UserAPIKeyAuth:
     # **A ceiling that cannot be read is a refusal, not an allowance.** A database that is unreachable must
     # not turn a budget into an unmetered lane, which is the direction this fails in and the reason it is a
     # raise rather than a default.
-    budget = _team_budget(role)
+    budget = _team_ceiling(role)
     limits = _team_rate_limits(role)
 
     return UserAPIKeyAuth(
@@ -236,7 +237,11 @@ async def user_api_key_auth(request: Request, api_key: str) -> UserAPIKeyAuth:
         # how a deployment says it has no rate limit rather than one of zero.
         tpm_limit=limits[0],
         rpm_limit=limits[1],
-        api_key="oi-assertion",
+        # **One identity name per role, not one for the deployment.** Every request used to be recorded under
+        # `oi-assertion`, so four roles shared one spend counter and the gateway compared the sum against a
+        # per-role remainder. Now the identity that accumulates spend is the role's own, which is the number the
+        # ceiling is about.
+        api_key=f"oi-assertion-{role}",
         # The team is what carries the ceiling. One team per role, provisioned from the manifest.
         team_id=role,
         user_id=payload.get("session_id") or "oi-session",

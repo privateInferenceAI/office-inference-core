@@ -102,9 +102,13 @@ budgets:
   # told otherwise. The ceilings that hold are the egress gate, which decides what may leave at all, and a
   # per-request max_tokens.
   period_days: 30
+  # **The analyst ceiling is a development number.** Measuring the answer path costs model calls, and the tool
+  # loop multiplies them: 2026-10-18 spent 9.6 USD of a 10 USD analyst ceiling in one day of suite runs, which
+  # exhausted the budget and turned every answer into a degraded one. Fifty is enough for measurement cycles;
+  # production manifests set the ceiling per client contract.
   roles:
     front_desk: 2
-    analyst: 10
+    analyst: 50
     reader: 10
     coder: 5
 compliance:
