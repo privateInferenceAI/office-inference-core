@@ -494,6 +494,13 @@ services:
       COLLECTION: ${COLLECTION:-documents}
       OI_DEFAULT_MODEL_ROLE: ${OI_DEFAULT_MODEL_ROLE:-analyst}
       OI_DEFAULT_API_ROLE: ${OI_DEFAULT_API_ROLE:-viewer}
+      # **The tool-using answer path, off unless a deployment turns it on.** The loop is an experiment until it
+      # has been measured; the single-shot path stays as the fallback, so enabling this cannot be worse than not
+      # enabling it. Bounds are steps, tool calls, and how many results a search may add to the evidence.
+      OI_TOOL_LOOP: ${OI_TOOL_LOOP:-off}
+      OI_TOOL_MAX_STEPS: ${OI_TOOL_MAX_STEPS:-6}
+      OI_TOOL_MAX_CALLS: ${OI_TOOL_MAX_CALLS:-10}
+      OI_TOOL_SEARCH_LIMIT: ${OI_TOOL_SEARCH_LIMIT:-8}
       # The audit tool's content mode, passed because the tool refuses to run without it. A model-call row
       # names a model and counts rather than text, so the policy has nothing to govern here.
       CONTENT_DEFAULT: ${CONTENT_DEFAULT:-hash}
