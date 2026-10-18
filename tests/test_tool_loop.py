@@ -169,7 +169,7 @@ def test_a_refusal_on_quoted_figures_triggers_one_lookup():
     def fake_lookup(value, doc_id=""):
         calls.append(value)
         number = toolbox.add(FakePassage("c1", "228865.1 | 188387.5 | -6.1"))
-        return f"[{number}] company/coords.txt: 228865.1 | 188387.5 | -6.1"
+        return f"Passages stating {value!r}:\n[{number}] company/coords.txt: 228865.1 | 188387.5 | -6.1"
 
     toolbox.lookup_value = fake_lookup
     replies = iter([

@@ -407,7 +407,11 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
                     if missing:
                         stats["auto_lookups"] = 1
                         found = toolbox.lookup_value(" and ".join(missing[:2]))
-                        if not found.startswith('{"error"'):
+                        # **Only real evidence justifies a second attempt.** The lookup also answers with a
+                        # note when a figure appears in many documents (it is not an anchor) and with an error
+                        # when nothing states it; nudging on either told the model "here is evidence" when there
+                        # was none, and the Phase B measurement showed exact-number questions getting worse.
+                        if found.startswith("Passages stating"):
                             messages.append({"role": "assistant", "content": content})
                             messages.append({"role": "user", "content": (
                                 "An automatic lookup for figures quoted in the question found this evidence:\n"
