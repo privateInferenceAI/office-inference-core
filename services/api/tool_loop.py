@@ -91,8 +91,9 @@ SYSTEM_PROMPT = (
     "You have three tools. search_documents searches the documents; read_passages opens a document around a "
     "result; lookup_value finds the exact place a figure appears. Use them. If the first search does not contain "
     "the answer, search again with different words. If a result names a table but the excerpt is not enough, read "
-    "that document. If the question quotes a figure and the excerpts do not show that figure, look it up. If the "
-    "question compares two documents, search for both.\n"
+    "that document. If the question quotes a figure and the excerpts do not show that figure, look it up; a row "
+    "described by two figures can be looked up with both in one call. If the question compares two documents, "
+    "search for both.\n"
     "Rules for the final answer:\n"
     "1. Put the answer in the first sentence. Quote a figure exactly as it appears in the evidence, with units.\n"
     "2. Cite the evidence number that carries the answer as [n], using the numbers shown in tool results.\n"
@@ -114,6 +115,17 @@ CORRECTIVE = (
 
 MAX_EVIDENCE_CHARS = 9000
 SNIPPET_CHARS = 700
+
+
+# How a figure is written, and how it is compared: commas removed, so a comma-separated figure and a plain one
+# are the same figure. Kept at module level so a test can hold the comparison without a database.
+import re as _re
+
+_FIGURES = _re.compile(r"\d[\d,]*(?:\.\d+)?")
+
+
+def _figures_in(value: str) -> list[str]:
+    return [match.replace(",", "") for match in _FIGURES.findall(value or "")]
 
 
 class ToolBox:
@@ -233,11 +245,18 @@ class ToolBox:
         tokenises them badly, which is why the value was in the retrieved context only 58 percent of the time. A
         literal match is exact, cheap and explainable, so it belongs where a model can ask for it.
         """
-        normalized = "".join(character for character in str(value or "") if character.isdigit() or
-                             character in ".-")
-        if not normalized or normalized in {".", "-"}:
+        # **A row described by two figures is an intersection, not one number.** The first version normalised
+        # the whole argument to one digit string, so `228865.1 and 188387.5` became `22886511883875`, which
+        # appears nowhere; the model then reported that no passage stated the figures. Each figure is its own
+        # literal match, and a row described by two must contain both.
+        figures = _figures_in(str(value or ""))
+        if not figures:
             return json.dumps({"error": "value must contain a figure, for example 59,473"})
-        ids = self._lookup_chunk_ids(normalized, doc_id)
+        first = self._lookup_chunk_ids(figures[0], doc_id)
+        wanted = set(first)
+        for figure in figures[1:]:
+            wanted &= set(self._lookup_chunk_ids(figure, doc_id))
+        ids = [chunk_id for chunk_id in first if chunk_id in wanted]
         if not ids:
             return json.dumps({"error": f"no passage states {value!r} in the documents this session may read"})
         import retriever
