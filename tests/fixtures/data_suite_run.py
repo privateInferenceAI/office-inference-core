@@ -144,6 +144,7 @@ REFUSAL_MARKERS = (
     "no relevant", "cannot provide", "do not provide", "does not provide",
     "cannot determine", "not mentioned", "no mention", "not enough information",
     "not answered", "is not answered", "no such information",
+    "could not find", "couldn't find",
 )
 
 

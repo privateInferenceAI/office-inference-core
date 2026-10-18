@@ -1226,3 +1226,26 @@ Haiku with the loop on; rollback is the flag or the manifest.
 Remaining: the large-table pinpoint probe still fails, which is the row-cap tradeoff and the reason Phase B adds a
 lookup_value tool. Tool use on the weaker model slightly hurt honesty (two unanswerable questions answered from
 adjacent facts); Haiku held 7 of 7. Prompt tightening on both is next.
+
+## 2026-10-18, evening: Phases B and C, and the budget that was pretending to be an outage
+
+Phase B added lookup_value, the two-figure intersection, the ambiguity guard, the automatic lookup before a
+refusal, and the honesty rule. Phase C added opt-in tool streaming with progress frames, manual section 13n,
+runbook 6.7, and this acceptance run. Each phase was measured before the next started, three suite runs each.
+
+Final configuration (Claude Haiku, six steps, ten calls, lookup off): 41, 40, 39 of 52. The loop is worth about
+five points on this configuration and eight at its best observed (44, 44, 42 before lookup and the canary document
+changed); single-shot scored 35 to 36. The differences between loop configurations are inside run-to-run variance,
+which is wide, so the report states the range rather than a single number. Lookup did not pay off on this corpus:
+duplicated census figures made it an anchoring risk, the ambiguity guard correctly refuses that, and the
+large-table pinpoint probe still answers the wrong row. It stays implemented and switchable, default off.
+
+All four acceptance probes pass on the final configuration: interface 8, activity 8, access 4, stream 4. The stream
+canary had to be restored to the corpus first; without it the REDACTED right was proving nothing, and it said so
+rather than passing.
+
+The acceptance run also found a real budget defect: 21 of 52 answers degraded with numbers that could not be right.
+The hook passed the team's remaining budget as the identity budget while the gateway charges spend to the
+identity, so the same spend was subtracted twice and the budget fired at half its value; and every role shared one
+identity name, so four roles shared one spend counter. Fixed in PR #173. The development ceiling of 10 USD had also
+been spent by the day's measurement and is raised to 100 on the owner's instruction.

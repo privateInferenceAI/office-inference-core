@@ -5613,6 +5613,80 @@ The denial appeal agent end to end.
 
 ---
 
+
+### 6.7 The answer step searches: enabling, measuring and rolling back the tool loop
+
+The answer step can run as a bounded tool loop (C6). Retrieval, access, citation verification and the audit chain
+are unchanged; the model may search again and read around a hit before it answers.
+
+**Enable it on a deployment.**
+
+    cd /opt/oi-core
+    grep -q '^OI_TOOL_LOOP=' rendered/env && sed -i 's/^OI_TOOL_LOOP=.*/OI_TOOL_LOOP=on/' rendered/env \
+      || echo 'OI_TOOL_LOOP=on' >> rendered/env
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env up -d --force-recreate api
+    docker exec api printenv OI_TOOL_LOOP        # expect: on
+    docker logs api 2>&1 | grep 'tool-loop'      # one line per answer after the next question
+
+**Choose the model.** The loop is provider-agnostic, but tool calling quality is not. The measured best is Claude
+Haiku 4.5 through Bedrock:
+
+    # manifests/dev-cloud.yaml: analyst.frontier: bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0
+    python3 scripts/render_manifest.py --manifest manifests/dev-cloud.yaml --out rendered
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env up -d --force-recreate litellm api
+
+Prerequisites for Claude on Bedrock in this account, all verified on 2026-10-18: the Anthropic use-case form is
+submitted, and `oi-core-dev-bedrock-invoke` (v5) allows the Claude inference profiles and the foundation-model
+ARNs in us-east-1, us-east-2 and us-west-2. Check the resolved model on a real answer:
+
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      run -T --rm --no-deps --entrypoint python -v /opt/oi-core:/w -w /w \
+      -e OI_API_URL=http://api:8088 -e ACCESS_REGISTRY=/w/rendered/access.json \
+      eval /w/tests/fixtures/ask_client.py -q "What is the mileage rate?" --json | grep resolved_model
+
+**Measure it.** Same forty questions, three runs, same scorer:
+
+    for n in 1 2 3; do
+      docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env run -T --rm --no-deps \
+        --entrypoint python -v /opt/oi-core:/w -v /tmp/data_suite_run.py:/suite.py -v /tmp/oic-eval-out:/out \
+        -e OI_API_URL=http://api:8088 -e ACCESS_REGISTRY=/w/rendered/access.json \
+        eval /suite.py --json-out /out/run-$n.json
+    done
+
+Expected with the measured configuration (six steps, ten calls, lookup off): 39 to 43 of 52 per run, with
+run-to-run variance of several points, so run three and read the range. Single-shot Nova is 28 to 29; single-shot
+Claude Haiku is 34 to 36. Check the analyst team ceiling first: a budget-exhausted lane reports every answer as
+degraded with reason budget, and the gateway numbers in the error are the way to tell that apart from an outage.
+
+**Test the streaming opt-in.** The old frames are unchanged unless the client asks for tools:
+
+    ... ask_client.py -q "In the census table reporting a median household income of 59,473 dollars, what is
+    the mean household income?" --stream --tools
+
+Expect `start`, one or more `progress` frames, `sources`, `delta`, `done`. Without `--tools` the stream is the
+single-shot stream it has always been.
+
+**Run the acceptance probes** (each prints a ledger and exits non-zero if a right failed):
+
+    for probe in interface_probe activity_probe; do
+      docker run --rm --network ai-net --user "$(id -u):$(id -g)" -v /opt/oi-core:/w -w /w \
+        --env-file rendered/env --entrypoint python oi-core/session:local /w/tests/fixtures/$probe.py
+    done
+    docker run --rm --network ai-net --user "$(id -u):$(id -g)" -v /opt/oi-core:/w -w /w \
+      --env-file rendered/env -e AUDIT_TOOL=/w/services/audit/audit.py --entrypoint python oi-core/eval:local \
+      /w/tests/fixtures/access_probe.py
+    docker run --rm --network ai-net --user "$(id -u):$(id -g)" -v /opt/oi-core:/w -w /w \
+      --env-file rendered/env --entrypoint python oi-core/session:local /w/tests/fixtures/stream_probe.py
+
+**Roll back.** Flag off for the loop, or the manifest for the model, then recreate only the containers that read
+that configuration. Nothing in the corpus, the vector store or the audit chain changes either way.
+
+**What to watch.** About 1.6 times the suite time (178 to 188 seconds against 110 single-shot) and two to three
+times the model calls per answer. The development analyst ceiling is 100 USD for a 30-day period; a day of suite
+runs costs about 0.4 USD per run. The step and call caps bound it; a question that hits the cap returns the single-shot answer rather
+than failing. The large-table row cap still means pinpoint rows in very large tables are found by `lookup_value`,
+not by reading every row.
+
 ## Standing rules
 
 1. One phase at a time. Verify before moving on.
