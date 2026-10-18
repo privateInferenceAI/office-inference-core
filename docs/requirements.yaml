@@ -914,6 +914,46 @@ items:
 
 
   # ---------------------------------------------------------------- inference and serving
+  - id: AGENT-TOOLS-001
+    title: The answer step can search and read the client's documents before it answers
+    tier: [cloud, hosted]
+    phase: C6
+    verify: >-
+      with OI_TOOL_LOOP on, the assistant answers exact-number and cross-document questions by calling
+      search_documents and read_passages, the final answer cites evidence the tools returned, every tool call is
+      scoped by the session's access roots and recorded in the audit chain, and the loop respects its step, call
+      and deadline caps. With the flag off, the single-shot path is unchanged.
+    status: verified
+    note: >-
+      Built and measured 2026-10-18. Phase A in services/api/tool_loop.py: two tools, a bounded loop, and a
+      numbered evidence list that the citation verifier checks the final answer against. Any loop failure falls
+      back to the single-shot path. On the forty-question suite (52 runs, three runs per configuration):
+      Claude Haiku 4.5 with the loop scored 44, 44, 42 (average 43.3 of 52) against 28.7 single-shot Nova Lite and
+      35.3 single-shot Claude Haiku. Exact-number 1-2 of 8 to 5-7 of 8; cross-document 2-4 of 8 to 7-8 of 8.
+      The same suite costs about three times the model calls, bounded by the caps. Evidence:
+      docs/reviews/answer-quality-day-2026-10-18.md, PR #165. Phase B is the lookup_value tool for the one
+      remaining large-table probe; Phase C is streaming progress and the acceptance panel.
+  - id: INF-PROVIDER-001
+    title: A deployment can point a model role at a provider other than Bedrock
+    tier: [cloud, hosted]
+    phase: C6
+    verify: >-
+      a manifest that names an OpenAI-compatible provider (base URL and API key environment variable) renders a
+      gateway configuration that reaches that provider, and the same manifest on an in-office profile is refused
+      at validation because the data would leave the building. The key appears nowhere in the rendered gateway
+      configuration, only in the rendered environment. A suite run and a comparison run against the same
+      questions succeed with the alternate provider.
+    status: open
+    note: >-
+      Direction approved by the owner 2026-10-18: provider choice is a client-facing option rather than a Bedrock
+      lock-in, because what is permitted can change. Deliberately parked behind the answer-quality work; noted as
+      a TODO at the owner's request. Design shape when picked up: a providers block in the manifest (type,
+      base_url, api_key_env), renderer emits LiteLLM entries with os.environ references, keys only in rendered/env
+      (mode 600), validation refuses external providers on the office profile, frontier egress recorded in the
+      audit as it already is for Bedrock. One OpenAI-compatible adapter covers DeepSeek direct, Groq, Together and
+      local vLLM or Ollama, which also gives the office tier a provider-shaped local path. Estimated one to two
+      days including tests and manual updates. DeepSeek is already reachable today through Bedrock
+      (bedrock/deepseek.v3.2 on the coder role), so this is for provider independence rather than for capability.
   - id: INF-ROLE-001
     title: Model roles are read from the manifest, not hardcoded
     tier: [cloud, office, hosted]
