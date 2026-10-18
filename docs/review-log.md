@@ -1202,3 +1202,27 @@ against a baseline of 33, nineteen question-runs flip, and the three baseline pa
 byte-identical passages. Where the model varies more than the change, the comparison has to be retrieval and
 citations, and that is what the report concludes. `RET-TABLE-001` is verified; the probe redesign and the
 multi-run majority are logged as follow-ups in `docs/reviews/after-v4.md`.
+
+## 2026-10-18: what was actually wrong with the answers, and the fix that measured
+
+Retrieval was not the problem: the right document was found 33 of 37 times, but the chunk holding the value only
+11 of 19, and 18 of the 32 failing question-runs had the value in context and still failed. The model had no way to
+look beyond the five passages it was handed. Three changes followed, each measured on the same forty questions.
+
+The answer contract (temperature zero, value-first, numbers must exist in the evidence) changed nothing on its
+own. The frontier comparison found the real wording defect: "using only the numbered passages" made both Claude
+models refuse every cross-document question, 0 of 8, and Nova had been hiding it by ignoring the instruction. The
+multi-passage rule recovered those and Haiku single-shot reached 35.3 of 52.
+
+The tool loop is what moved it: search_documents and read_passages, a numbered evidence list, bounded steps and
+calls, and a fallback to the single-shot path on any failure. Nova Lite with tools scored 37.7; Claude Haiku with
+tools scored 44, 44, 42, average 43.3 of 52, with exact-number answers at 5 to 7 of 8 and cross-document at 7 to 8
+of 8. The cost is about three times the model calls per answer, inside the caps.
+
+Anthropic access was enabled in the credits account: the use-case form was submitted, and the instance policy now
+carries the Claude inference profiles and their three regions (policy versions v4 and v5). The deployment runs
+Haiku with the loop on; rollback is the flag or the manifest.
+
+Remaining: the large-table pinpoint probe still fails, which is the row-cap tradeoff and the reason Phase B adds a
+lookup_value tool. Tool use on the weaker model slightly hurt honesty (two unanswerable questions answered from
+adjacent facts); Haiku held 7 of 7. Prompt tightening on both is next.
