@@ -35,9 +35,11 @@ ANSWER_PROMPT = (
     "2. Put the citation for the passage that contains the answer immediately after the sentence, as [n].\n"
     "3. Do not describe the passages, do not repeat the question, and do not narrate your search. Answer it.\n"
     "4. Do not reply with only a citation. A citation is evidence for an answer, not an answer.\n"
-    "5. If the passages do not contain the answer, reply exactly: I could not find that in the available "
+    "5. If answering takes two passages combined, such as a difference, a ratio or a comparison, do that and "
+    "cite both passages. Only refuse when a needed value is absent.\n"
+    "6. If the passages do not contain the answer, reply exactly: I could not find that in the available "
     "documents. Do not use outside knowledge and do not guess.\n"
-    "6. A figure copied from a table row is a valid answer. Check every passage before concluding the answer is "
+    "7. A figure copied from a table row is a valid answer. Check every passage before concluding the answer is "
     "absent.\n\n"
     "Passages:\n{context}\n\nQuestion: {question}"
 )

@@ -28,6 +28,15 @@ def test_the_prompt_asks_for_the_value_first_and_a_refusal_only_when_absent():
     assert "Passages:" in prompt and "Question: What is the income?" in prompt
 
 
+def test_the_prompt_allows_combining_two_passages():
+    # Measured on 2026-10-18: both Claude models refused cross-document questions 8 times in 8 because the
+    # contract said "using only the passages" and they read it as "one passage". The frontier comparison is what
+    # found the wording defect; Nova's tendency to ignore the rule had been hiding it.
+    prompt = answer_contract.build_prompt("[1] a\n[2] b", "What is the difference?")
+    assert "two passages combined" in prompt
+    assert "cite both" in prompt
+
+
 def test_a_value_copied_from_the_passages_is_accepted():
     assert answer_contract.violation("The median household income is 59,473 dollars [1].", PASSAGES) is None
 
