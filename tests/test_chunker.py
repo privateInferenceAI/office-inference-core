@@ -639,6 +639,15 @@ def test_a_large_data_file_is_classified_as_a_dataset(tmp_path):
     card = chunker.dataset_chunk(relpath="company/ledger.csv", source_sha256="sha",
                                  size=big.stat().st_size, reason=chunker.dataset_reason(big))
     assert card.kind == "dataset"
+    # The first version of this card shipped unsealed and Qdrant rejected it: an empty id is not a point.
+    assert card.chunk_id, "a dataset card must carry the id every other chunk has"
+    import uuid as _uuid
+    _uuid.UUID(card.chunk_id)
+
+    # A text dump between three and four megabytes is still a data set, because the parser refuses it.
+    dump = tmp_path / "run.txt"
+    dump.write_bytes(b"0.1 0.2 0.3\n" * 300_000)
+    assert chunker.dataset_reason(dump), "a 3 MB text dump must classify, not dead-letter at the parser"
     assert card.doc_id == "company/ledger.csv"
     assert "Data set" in card.text and "ledger.csv" in card.text
     assert card.page_start == card.page_end == 1

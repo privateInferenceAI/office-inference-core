@@ -78,7 +78,10 @@ TABLE_OMISSION_KIND = "table_marker"
 DATASET_EXTENSIONS = frozenset({".csv", ".tsv", ".xls", ".xlsx"})
 DATASET_MIN_BYTES = 2 * 1024 * 1024
 DATASET_TEXT_SUFFIXES = frozenset({".txt", ".json", ".jsonl"})
-DATASET_TEXT_MIN_BYTES = 4 * 1024 * 1024
+# Three megabytes rather than four, because the parser's own upload limit sits between the two: a 3.3 MB text dump
+# was refused by the parser with 413 and dead-lettered, and a file the parser cannot accept is better represented by
+# a card than by a permanent failure. A 3 MB text file is a data dump in this corpus, not a manual.
+DATASET_TEXT_MIN_BYTES = 3 * 1024 * 1024
 
 # Bumped when any rule above changes, because it is part of every chunk id: a chunker change makes new
 # ids for the same document, which is what forces a deliberate re-embed rather than a silent mix of
@@ -795,10 +798,14 @@ def dataset_chunk(*, relpath: str, source_sha256: str, size: int, reason: str) -
         "It is not indexed page by page and its rows are not searchable. "
         "A person can open the file directly; asking questions of its data needs the data query path."
     )
+    # **Sealed before it leaves here.** Every chunk's id is assigned by `sealed`, and the first version of this
+    # function returned an unsealed chunk with an empty id: Qdrant rejected every card write with "value is not
+    # a valid point ID", the five data-set files dead-lettered twice, and the corpus ended with no cards at all.
+    # A chunk without an id is not a chunk.
     return Chunk(
         text=text, page_start=1, page_end=1, kind="dataset", doc_id=relpath,
         source_sha256=source_sha256, page_is_nominal=True, is_ocr=False,
-    )
+    ).sealed()
 
 
 def split_oversized(text: str, page_no: int, bbox: dict) -> list[str]:
