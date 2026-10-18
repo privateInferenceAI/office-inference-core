@@ -933,6 +933,62 @@ items:
       The same suite costs about three times the model calls, bounded by the caps. Evidence:
       docs/reviews/answer-quality-day-2026-10-18.md, PR #165. Phase B is the lookup_value tool for the one
       remaining large-table probe; Phase C is streaming progress and the acceptance panel.
+  - id: AGENT-TOOLS-002
+    title: The streaming endpoint can run the tool loop and reports progress frames
+    tier: [cloud, hosted]
+    phase: C6
+    verify: >-
+      a stream request carrying "tools": true, on a deployment with the loop enabled, emits start, one or more
+      progress frames, a sources frame with the evidence the tools returned, then the redacted answer and done.
+      Existing clients that send nothing new receive exactly the frames they received before. The stream probe
+      passes all four of its rights.
+    status: verified
+    note: >-
+      Built and measured 2026-10-18 (PR #168, docs 6.7). The loop runs on a worker thread and frames are drained
+      from a queue, so a tool call appears as a frame while it happens. Token streaming is traded for progress
+      streaming on this path in this version, because the loop needs complete messages to parse tool calls; that
+      limit is written in the code. Stream probe on the final configuration: END-TO-END, TTFT, INCREMENTAL and
+      REDACTED all pass.
+
+  - id: AGENT-LOOKUP-001
+    title: A literal figure lookup tool, with an ambiguity guard and an automatic retry before a refusal
+    tier: [cloud, hosted]
+    phase: C6
+    verify: >-
+      lookup_value finds chunks stating a figure comma-insensitively inside the session's access roots; a
+      two-figure row is the intersection of two literal matches; a figure that appears in more than three
+      documents is reported as not identifying a row rather than returned as an anchor; and when the model is
+      about to refuse a question quoting figures absent from the evidence, the loop performs one lookup and asks
+      again only when the lookup returned real passages.
+    status: verified
+    note: >-
+      Built 2026-10-18 (PRs #167, #170, #171, #172, #174). **Measured neutral to negative on this corpus**: with
+      the tool on the suite scored 40 to 41, with it off 37 to 40, and the Phase A search-and-read configuration
+      scored 43 before the tool existed. The cause is measured: this corpus repeats census figures across many
+      documents, so a quoted figure identifies twenty tables and the ambiguity guard correctly refuses to anchor.
+      The pinpoint row inside the 41,000-row table still answers with the wrong line. The tool is kept, tested and
+      switchable with OI_TOOL_LOOKUP, default off; it is the right instrument for unique identifiers and the wrong
+      one for duplicated census data. The real fix for the probe is row-indexed storage or a table-aware read.
+
+  - id: BUDGET-IDENTITY-001
+    title: A gateway identity charges one spend counter and enforces the role ceiling, not the remainder
+    tier: [cloud, hosted, office]
+    phase: C3
+    verify: >-
+      each role's model calls are recorded against an identity named for that role, and the identity is granted
+      the team ceiling rather than the remaining budget, so the gateway's own spend accounting is not subtracted
+      twice. A role whose team row is exhausted is refused with the numbers in the error rather than at half its
+      ceiling.
+    status: verified
+    note: >-
+      Found by the Phase B acceptance run on 2026-10-18, which returned 21 of 52 answers degraded with a budget
+      reason whose numbers did not add up (cost 0.4075 against a maximum 0.3947 while the team still had room).
+      Two defects: the hook passed the remaining budget while the gateway records spend against the identity, so
+      the same spend was subtracted twice and the budget fired at half its value; and every role shared the
+      identity name `oi-assertion`, so four roles shared one spend counter. Fixed in PR #173, with structural tests
+      because the alternative needs a database and a gateway. The development analyst ceiling was then raised to
+      100 USD on the owner's instruction (PR #175) because measurement spends about 0.4 USD per suite run.
+
   - id: INF-PROVIDER-001
     title: A deployment can point a model role at a provider other than Bedrock
     tier: [cloud, hosted]

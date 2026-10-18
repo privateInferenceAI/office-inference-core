@@ -5675,3 +5675,60 @@ deployment's network. There is no backup, no restore drill and no alarm set. **E
 above is built**, and each phase's page says what it could not prove when it was written: the client
 application is 13i, the approval gate and its record are 13j and 13k, the email intake connector is 13l, and
 the workflow engine is 13m.
+
+## 13n. The answer step: single-shot, tools, and how to roll back
+
+The step that turns retrieved passages into an answer has two modes, and the deployment chooses.
+
+**Single-shot (the older mode, `OI_TOOL_LOOP=off`).** Retrieval returns passages, they go into one prompt, the
+model answers once. It is the cheapest and it is what every deployment gets by default.
+
+**Tools (`OI_TOOL_LOOP=on`).** The model gets two or three tools and a bounded loop. `search_documents` runs the
+same hybrid retrieval under the session's access roots. `read_passages` opens a document around a hit, the rest of
+a table, or the next page. `lookup_value` finds the exact place a figure appears, comma-insensitive, for the
+figures embeddings are bad at. Every chunk a tool returns is numbered, and the final answer is checked against
+that evidence by the same citation verifier as before, so a citation cannot point at a passage the model never
+saw.
+
+**The bounds, all set in the environment and visible to an operator.**
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `OI_TOOL_LOOP` | off | on enables the tool path |
+| `OI_TOOL_MAX_STEPS` | 6 | model turns per answer, capped at 12 |
+| `OI_TOOL_MAX_CALLS` | 10 | tool calls per answer, capped at 24 |
+| `OI_TOOL_SEARCH_LIMIT` | 8 | results a search may add |
+| `OI_TOOL_LOOKUP` | off | enables the literal figure lookup tool; measured neutral to negative on duplicated census data |
+
+The wall clock is the same request budget the single-shot path uses. Any loop failure, cap, provider error or
+exception falls back to the single-shot answer with the passages retrieval already chose, so enabling the loop
+cannot answer worse than turning it off.
+
+**Streaming.** `/ask/stream` keeps its existing frames unless the client opts in with `"tools": true`. With the
+opt-in and the loop enabled, the stream carries a `progress` frame for each step and tool call, a `sources` frame
+with the evidence the tools returned, then the redacted answer as one or two deltas, then `done`. Token streaming
+is traded for progress streaming on this path: the loop needs complete messages to parse tool calls from. Clients
+that send nothing new see no change.
+
+**Which model.** The tools need a model that supports tool calling through the gateway. Claude Haiku 4.5 was the
+measured best (43.3 of 52 on the data suite, three runs) and is what the development deployment runs. Nova Lite
+works and is cheaper, but it scores lower (37.7) and needs the honesty rule watched. Claude on Bedrock needs
+three things an operator must check: the Anthropic use-case form accepted in the account, an IAM policy allowing
+the inference profile and the foundation-model ARNs in every region the profile routes to, and the manifest naming
+the `us.` inference profile rather than the raw model id.
+
+**Rolling back.** Either the flag or the model, not a redeploy from scratch.
+
+    # back to single-shot, same model
+    sed -i 's/^OI_TOOL_LOOP=.*/OI_TOOL_LOOP=off/' rendered/env
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env up -d --force-recreate api
+
+    # back to the cheaper model (then re-render, and recreate litellm and api)
+    # analyst.frontier: bedrock/amazon.nova-lite-v1:0 in manifests/dev-cloud.yaml
+
+**How it is measured.** The same forty questions, three runs per configuration, scored by
+`tests/fixtures/data_suite_run.py`. The numbers that led to the current mode are in
+`docs/reviews/answer-quality-day-2026-10-18.md` and `docs/reviews/phase-b-c-2026-10-18.md`: single-shot 29 to 36,
+the tool loop 37 to 44 depending on configuration, with run-to-run variance of several points. The final
+configuration (six steps, ten calls, lookup off) measured 41, 40, 39 of 52. A single run is not enough to compare
+configurations; use three and read the range.
