@@ -168,6 +168,21 @@ def test_a_provider_error_returns_a_reason_not_an_exception():
     assert result["answer"] is None and result["reason"] == "throttled"
 
 
+def test_lookup_refuses_to_anchor_on_a_figure_in_many_documents():
+    toolbox = make_toolbox()
+    matches = [(f"chunk{i}", f"company/doc{i}.csv") for i in range(5)]
+    toolbox._lookup_matches = lambda normalized, doc_id="": matches
+    payload = json.loads(toolbox.lookup_value("59,473"))
+    assert "does not identify one row" in payload["note"]
+
+
+def test_the_lookup_tool_can_be_turned_off_for_a_measurement(monkeypatch):
+    monkeypatch.delenv("OI_TOOL_LOOKUP", raising=False)
+    assert "lookup_value" in [schema["function"]["name"] for schema in tool_loop.active_tools()]
+    monkeypatch.setenv("OI_TOOL_LOOKUP", "off")
+    assert "lookup_value" not in [schema["function"]["name"] for schema in tool_loop.active_tools()]
+
+
 def test_the_tool_schemas_match_the_executor():
     names = [schema["function"]["name"] for schema in tool_loop.TOOLS]
     assert names == ["search_documents", "read_passages", "lookup_value"]
@@ -179,9 +194,9 @@ def test_lookup_value_uses_each_figure_it_is_given():
 
     def fake_lookup(normalized, doc_id=""):
         seen.append(normalized)
-        return ["c1"] if normalized in ("228865.1", "188387.5") else []
+        return [("c1", "company/coords.txt")] if normalized in ("228865.1", "188387.5") else []
 
-    toolbox._lookup_chunk_ids = fake_lookup
+    toolbox._lookup_matches = fake_lookup
     import retriever as real_retriever
     real_fetch = real_retriever._fetch_payloads
     real_retriever._fetch_payloads = lambda services, ids, roots: {
@@ -204,11 +219,11 @@ def test_lookup_value_rejects_an_empty_figure():
 
 def test_lookup_value_renders_the_matching_rows():
     toolbox = make_toolbox()
-    toolbox._lookup_chunk_ids = lambda normalized, doc_id="": []
+    toolbox._lookup_matches = lambda normalized, doc_id="": []
     payload = json.loads(toolbox.lookup_value("59,473"))
     assert "no passage states" in payload["error"]
 
-    toolbox._lookup_chunk_ids = lambda normalized, doc_id="": ["c1"]
+    toolbox._lookup_matches = lambda normalized, doc_id="": [("c1", "company/census.csv")]
     import retriever as real_retriever
     imports = real_retriever  # only to satisfy the import inside the method
     toolbox.add(FakePassage("c1", "median household income 59,473 dollars"))

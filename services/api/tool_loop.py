@@ -88,8 +88,10 @@ TOOLS = [
 
 SYSTEM_PROMPT = (
     "You answer questions about a client's own documents.\n"
-    "You have three tools. search_documents searches the documents; read_passages opens a document around a "
-    "result; lookup_value finds the exact place a figure appears. Use them. If the first search does not contain "
+    "You have tools. search_documents searches the documents; read_passages opens a document around a "
+    "result; lookup_value finds the exact place a figure appears (it is for figures that identify a row "
+    "uniquely; if it says a figure appears in many documents, search instead). Use them. If the first search does "
+    "not contain "
     "the answer, search again with different words. If a result names a table but the excerpt is not enough, read "
     "that document. If the question quotes a figure and the excerpts do not show that figure, look it up; a row "
     "described by two figures can be looked up with both in one call. If the question compares two documents, "
@@ -252,13 +254,24 @@ class ToolBox:
         figures = _figures_in(str(value or ""))
         if not figures:
             return json.dumps({"error": "value must contain a figure, for example 59,473"})
-        first = self._lookup_chunk_ids(figures[0], doc_id)
-        wanted = set(first)
+        first = self._lookup_matches(figures[0], doc_id)
+        wanted = {chunk_id for chunk_id, _doc in first}
         for figure in figures[1:]:
-            wanted &= set(self._lookup_chunk_ids(figure, doc_id))
-        ids = [chunk_id for chunk_id in first if chunk_id in wanted]
+            wanted &= {chunk_id for chunk_id, _doc in self._lookup_matches(figure, doc_id)}
+        ids = [chunk_id for chunk_id, _doc in first if chunk_id in wanted]
         if not ids:
             return json.dumps({"error": f"no passage states {value!r} in the documents this session may read"})
+        # **A figure stated in many documents is not an anchor, and pretending it is produces confident wrong
+        # answers.** Measured in the Phase B run: a model told that 59,473 appears in twenty census tables read
+        # the mean from the wrong one. The tool now says so and names the documents, so the model searches for
+        # the table the question describes instead of anchoring on the first match.
+        documents = {doc for chunk_id, doc in first if chunk_id in ids}
+        if len(documents) > 3:
+            examples = sorted(documents)[:5]
+            return json.dumps({
+                "note": f"{value!r} appears in {len(documents)} documents, so it does not identify one row. "
+                        f"Search for the table the question describes, or call lookup again with doc_id. "
+                        f"Examples: {examples}"})
         import retriever
 
         payloads = retriever._fetch_payloads(self.services, ids, self.roots)
@@ -268,14 +281,15 @@ class ToolBox:
         return ("Passages stating " + json.dumps(str(value)) + ":\n" + rendered) if rendered \
             else json.dumps({"error": "the figure was indexed but the passages could not be read"})
 
-    def _lookup_chunk_ids(self, normalized: str, doc_id: str = "") -> list[str]:
-        """The literal-match query. Split out so a test can hold the query without a database."""
+    def _lookup_matches(self, normalized: str, doc_id: str = "") -> list[tuple[str, str]]:
+        """The literal-match query, as (chunk id, document id). Split out so a test can hold it without a
+        database, and so the ambiguity guard can count documents rather than guessing from an id."""
         import psycopg2
 
         dsn = getattr(self.services, "database_url", "")
         if not dsn:
             return []
-        sql = ("select chunk_id from chunk_index where acl = any(%(roots)s) "
+        sql = ("select chunk_id, doc_id from chunk_index where acl = any(%(roots)s) "
                "and replace(text, ',', '') like %(needle)s")
         params = {"roots": sorted(self.roots), "needle": f"%{normalized}%"}
         if doc_id:
@@ -287,7 +301,7 @@ class ToolBox:
             with psycopg2.connect(dsn) as connection:
                 with connection.cursor() as cursor:
                     cursor.execute(sql, params)
-                    return [row[0] for row in cursor.fetchall()]
+                    return [(row[0], row[1]) for row in cursor.fetchall()]
         except Exception as exc:  # noqa: BLE001
             print(f"lookup_value unavailable: {type(exc).__name__}: {exc}")
             return []
@@ -327,6 +341,13 @@ class ToolBox:
         return out
 
 
+def active_tools() -> list:
+    """The tools this deployment offers, so a measurement can turn one off without a code change."""
+    if os.environ.get("OI_TOOL_LOOKUP", "on").strip().lower() in ("off", "0", "false", "no"):
+        return [schema for schema in TOOLS if schema["function"]["name"] != "lookup_value"]
+    return TOOLS
+
+
 def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
              max_steps: int = 6, max_tool_calls: int = 10, deadline: float | None = None,
              on_event=None) -> dict:
@@ -359,7 +380,7 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
         stats["steps"] += 1
         if on_event is not None:
             on_event({"type": "step", "step": stats["steps"]})
-        reply = call_model(messages, TOOLS)
+        reply = call_model(messages, active_tools())
         if reply.get("error"):
             return {"answer": None, "reason": reply["error"], "evidence": toolbox.evidence, **stats}
         calls = reply.get("tool_calls") or []
