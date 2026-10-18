@@ -14,6 +14,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "services" / "api"))
+sys.path.insert(0, str(ROOT / "services" / "retrieval"))
+sys.path.insert(0, str(ROOT / "services" / "ingestion"))
 
 import tool_loop  # noqa: E402
 
@@ -154,7 +156,44 @@ def test_a_provider_error_returns_a_reason_not_an_exception():
 
 def test_the_tool_schemas_match_the_executor():
     names = [schema["function"]["name"] for schema in tool_loop.TOOLS]
-    assert names == ["search_documents", "read_passages"]
+    assert names == ["search_documents", "read_passages", "lookup_value"]
+
+
+def test_lookup_value_rejects_an_empty_figure():
+    toolbox = make_toolbox()
+    payload = json.loads(toolbox.lookup_value("not a number"))
+    assert "value must contain a figure" in payload["error"]
+
+
+def test_lookup_value_renders_the_matching_rows():
+    toolbox = make_toolbox()
+    toolbox._lookup_chunk_ids = lambda normalized, doc_id="": []
+    payload = json.loads(toolbox.lookup_value("59,473"))
+    assert "no passage states" in payload["error"]
+
+    toolbox._lookup_chunk_ids = lambda normalized, doc_id="": ["c1"]
+    import retriever as real_retriever
+    imports = real_retriever  # only to satisfy the import inside the method
+    toolbox.add(FakePassage("c1", "median household income 59,473 dollars"))
+    real_fetch = imports._fetch_payloads
+    imports._fetch_payloads = lambda services, ids, roots: {
+        "c1": {"chunk_id": "c1", "doc_id": "company/census.csv", "acl": "company",
+               "text": "median household income 59,473 dollars", "page_start": 1, "page_end": 1,
+               "kind": "table_row"}}
+    try:
+        out = toolbox.lookup_value("59,473")
+    finally:
+        imports._fetch_payloads = real_fetch
+    assert "59,473" in out and "company/census.csv" in out
+
+
+def test_the_prompt_carries_the_honesty_rule_for_absent_events():
+    # The 2026-10-18 tool runs on the weaker model answered two unanswerable questions from adjacent facts.
+    # The rule that stops a related figure being relabelled as the asked-for one lives in the system prompt.
+    prompt = tool_loop.SYSTEM_PROMPT
+    assert "specific event, period, meeting or document" in prompt
+    assert "Do not infer that a related figure" in prompt
+    assert "lookup_value" in prompt
 
 
 def test_the_flag_defaults_off(monkeypatch):

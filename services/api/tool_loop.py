@@ -64,14 +64,35 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "lookup_value",
+            "description": (
+                "Find the exact place a figure appears in the documents, comma-insensitive. Use it when the "
+                "question quotes a number, or when a value sits in a very large table whose rows are not "
+                "searchable individually."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "value": {"type": "string",
+                              "description": "the figure exactly as it appears, for example 59,473"},
+                    "doc_id": {"type": "string",
+                               "description": "optional: search only this document"},
+                },
+                "required": ["value"],
+            },
+        },
+    },
 ]
 
 SYSTEM_PROMPT = (
     "You answer questions about a client's own documents.\n"
-    "You have two tools. search_documents searches the documents; read_passages opens a document around a "
-    "result. Use them. If the first search does not contain the answer, search again with different words. If a "
-    "result names a table but the excerpt is not enough, read that document. If the question compares two "
-    "documents, search for both.\n"
+    "You have three tools. search_documents searches the documents; read_passages opens a document around a "
+    "result; lookup_value finds the exact place a figure appears. Use them. If the first search does not contain "
+    "the answer, search again with different words. If a result names a table but the excerpt is not enough, read "
+    "that document. If the question quotes a figure and the excerpts do not show that figure, look it up. If the "
+    "question compares two documents, search for both.\n"
     "Rules for the final answer:\n"
     "1. Put the answer in the first sentence. Quote a figure exactly as it appears in the evidence, with units.\n"
     "2. Cite the evidence number that carries the answer as [n], using the numbers shown in tool results.\n"
@@ -80,6 +101,9 @@ SYSTEM_PROMPT = (
     "4. Do not describe your search. Do not reply with only a citation.\n"
     "5. If the evidence does not contain the answer, reply exactly: I could not find that in the available "
     "documents.\n"
+    "6. If the question asks about a specific event, period, meeting or document that the evidence never "
+    "states, refuse even when the evidence contains related facts. Do not infer that a related figure answers "
+    "it, and do not relabel a fact as the one that was asked for.\n"
     "You have a limited number of tool calls. When you have the answer, reply with no tool call."
 )
 
@@ -201,6 +225,54 @@ class ToolBox:
         return (f"Passages from {doc_id} pages {start}-{end}:\n{rendered}") if rendered \
             else json.dumps({"error": "no readable passages at that location"})
 
+    def lookup_value(self, value: str, doc_id: str = "") -> str:
+        """Find chunks stating a figure, comma-insensitive, within the permitted roots.
+
+        **Why this is a tool rather than a better search.** Embeddings are weak on numbers: a question quoting
+        59,473 and a table row stating it are not similar text. The vector arm misses those and the lexical arm
+        tokenises them badly, which is why the value was in the retrieved context only 58 percent of the time. A
+        literal match is exact, cheap and explainable, so it belongs where a model can ask for it.
+        """
+        normalized = "".join(character for character in str(value or "") if character.isdigit() or
+                             character in ".-")
+        if not normalized or normalized in {".", "-"}:
+            return json.dumps({"error": "value must contain a figure, for example 59,473"})
+        ids = self._lookup_chunk_ids(normalized, doc_id)
+        if not ids:
+            return json.dumps({"error": f"no passage states {value!r} in the documents this session may read"})
+        import retriever
+
+        payloads = retriever._fetch_payloads(self.services, ids, self.roots)
+        passages = [retriever.Passage.from_payload(payloads[key], None, 0.0)
+                    for key in ids if key in payloads]
+        rendered = self.render(passages)
+        return ("Passages stating " + json.dumps(str(value)) + ":\n" + rendered) if rendered \
+            else json.dumps({"error": "the figure was indexed but the passages could not be read"})
+
+    def _lookup_chunk_ids(self, normalized: str, doc_id: str = "") -> list[str]:
+        """The literal-match query. Split out so a test can hold the query without a database."""
+        import psycopg2
+
+        dsn = getattr(self.services, "database_url", "")
+        if not dsn:
+            return []
+        sql = ("select chunk_id from chunk_index where acl = any(%(roots)s) "
+               "and replace(text, ',', '') like %(needle)s")
+        params = {"roots": sorted(self.roots), "needle": f"%{normalized}%"}
+        if doc_id:
+            sql += " and doc_id = %(doc)s"
+            params["doc"] = doc_id
+        sql += " order by doc_id, page_start, chunk_id limit %(limit)s"
+        params["limit"] = 8
+        try:
+            with psycopg2.connect(dsn) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(sql, params)
+                    return [row[0] for row in cursor.fetchall()]
+        except Exception as exc:  # noqa: BLE001
+            print(f"lookup_value unavailable: {type(exc).__name__}: {exc}")
+            return []
+
     def execute(self, name: str, arguments: str) -> str:
         """Run one tool call. A malformed call or a failing tool is returned to the model as an error, because a
         model that sees its own mistake can correct it; the loop's caps stop a model that cannot."""
@@ -217,9 +289,11 @@ class ToolBox:
             elif name == "read_passages":
                 out = self.read_passages(str(args.get("doc_id") or ""), args.get("page_start"),
                                          args.get("page_end"), str(args.get("chunk_id") or ""))
+            elif name == "lookup_value":
+                out = self.lookup_value(str(args.get("value") or ""), str(args.get("doc_id") or ""))
             else:
                 out = json.dumps({"error": f"unknown tool {name!r}; available: search_documents, "
-                                           f"read_passages"})
+                                           f"read_passages, lookup_value"})
         except Exception as exc:  # noqa: BLE001 - a tool failure must not end the request
             out = json.dumps({"error": f"the tool failed: {type(exc).__name__}"})
         if self.audit is not None:
