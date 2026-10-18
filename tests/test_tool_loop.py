@@ -173,6 +173,29 @@ def test_the_tool_schemas_match_the_executor():
     assert names == ["search_documents", "read_passages", "lookup_value"]
 
 
+def test_lookup_value_uses_each_figure_it_is_given():
+    toolbox = make_toolbox()
+    seen = []
+
+    def fake_lookup(normalized, doc_id=""):
+        seen.append(normalized)
+        return ["c1"] if normalized in ("228865.1", "188387.5") else []
+
+    toolbox._lookup_chunk_ids = fake_lookup
+    import retriever as real_retriever
+    real_fetch = real_retriever._fetch_payloads
+    real_retriever._fetch_payloads = lambda services, ids, roots: {
+        "c1": {"chunk_id": "c1", "doc_id": "company/coords.txt", "acl": "company",
+               "text": "228865.1 | 188387.5 | -6.1", "page_start": 1, "page_end": 1,
+               "kind": "table_row"}}
+    try:
+        out = toolbox.lookup_value("228865.1 and 188387.5")
+    finally:
+        real_retriever._fetch_payloads = real_fetch
+    assert seen == ["228865.1", "188387.5"], "each figure is a literal match"
+    assert "188387.5" in out and "company/coords.txt" in out
+
+
 def test_lookup_value_rejects_an_empty_figure():
     toolbox = make_toolbox()
     payload = json.loads(toolbox.lookup_value("not a number"))
