@@ -71,6 +71,7 @@ import budget as budget_module  # noqa: E402
 import answer_contract  # noqa: E402
 import routing  # noqa: E402
 import streaming  # noqa: E402
+import tool_loop  # noqa: E402
 
 # **What a client is promised, declared rather than described.** These are attached with
 # `responses={...}` so they reach `/openapi.json`, which is the artifact the client app is built from.
@@ -381,8 +382,27 @@ async def ask(request: Request):
         return JSONResponse({**refused.payload, "request_id": request_id}, status_code=refused.status)
 
     request_budget = budget_module.Budget.for_lane(decision.lane, started=asked_at)
-    generated, generation = _generate(session, permit, model, (body.get("question") or "").strip(),
-                                      result.passages, request_budget)
+    question_text = (body.get("question") or "").strip()
+    if tool_loop.enabled():
+        try:
+            loop = _generate_with_tools(session, permit, model, question_text, result, request_budget)
+        except Exception as exc:  # noqa: BLE001 - the single-shot path is the fallback, not a failure response
+            print(f"tool-loop unavailable, using the single-shot path: {type(exc).__name__}", flush=True)
+            loop = {"answer": None, "reason": "tool_loop_error", "evidence": []}
+        if loop.get("answer") is not None:
+            generated, generation = loop["answer"], None
+            if loop.get("evidence"):
+                # **The citations are verified against what the model actually read.** Without this the
+                # verifier would check tool-derived citations against the original five passages and refuse
+                # correct answers.
+                import dataclasses
+                result = dataclasses.replace(result, passages=loop["evidence"])
+        else:
+            generated, generation = _generate(session, permit, model, question_text, result.passages,
+                                              request_budget)
+    else:
+        generated, generation = _generate(session, permit, model, question_text, result.passages,
+                                          request_budget)
     if generated is None:
         reason, kind, attempts, attempt_errors = generation if isinstance(generation, tuple) else (
             "unclassified", {}, 1, [])
@@ -1070,6 +1090,84 @@ def _generate(session, permit, model: str, question: str, passages: list, budget
     # No attempt was made at all: the deadline left no room. That is a timeout, and saying so is more
     # honest than `unclassified`, which reads as a failure nobody understands.
     return None, ("timeout", {"reason": "timeout", "matched": "", "retryable": True}, attempt, errors)
+
+
+def _tool_chat(session, model: str, messages: list, tools, request_budget):
+    """One model call for the tool loop, returning a message that may carry tool calls.
+
+    Deliberately simpler than `_generate`: the loop itself is the retry structure, so a provider failure here is
+    classified and returned rather than slept on. The assertion is minted per attempt for the same reason it is
+    in `_generate`: a statement is spent by its first presentation.
+    """
+    import urllib.error
+    import urllib.request
+
+    payload = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": int(os.environ.get("OI_MAX_TOKENS", "700")),
+        "temperature": 0,
+        "tools": tools,
+        "tool_choice": "auto",
+    }
+    attempts = 0
+    while attempts < 2:
+        attempts += 1
+        if request_budget.past_reserve():
+            return {"error": "budget"}
+        statement = assertion.mint(STATE["key"], model, session_id=session.session_id)
+        request = urllib.request.Request(
+            GATEWAY_URL + "/v1/chat/completions", data=json.dumps(payload).encode(), method="POST",
+            headers={"Content-Type": "application/json", assertion.HEADER: statement})
+        try:
+            with urllib.request.urlopen(request, timeout=max(1.0, request_budget.remaining())) as response:
+                data = json.load(response)
+            choices = data.get("choices") or []
+            if not choices:
+                return {"error": "unclassified"}
+            message = choices[0].get("message") or {}
+            calls = []
+            for call in message.get("tool_calls") or []:
+                function = call.get("function") or {}
+                calls.append({"id": call.get("id") or "", "name": function.get("name") or "",
+                              "arguments": function.get("arguments") or "{}"})
+            return {"content": message.get("content") or "", "tool_calls": calls, "error": None}
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode(errors="replace")[:300]
+            kind = budget_module.classify(detail)
+            if not kind["retryable"] or attempts >= 2:
+                return {"error": kind["reason"]}
+            time.sleep(0.5)
+        except Exception as exc:  # noqa: BLE001
+            kind = budget_module.classify(type(exc).__name__)
+            if not kind["retryable"] or attempts >= 2:
+                return {"error": kind["reason"]}
+            time.sleep(0.5)
+    return {"error": "unclassified"}
+
+
+def _generate_with_tools(session, permit, model: str, question: str, result, request_budget) -> dict:
+    """The tool loop, wired to the live services. Returns the loop's result dict.
+
+    The seed passages are the ones retrieval already chose, so the model starts from the single-shot context and
+    may extend it rather than starting blank. Every extra search and read is bounded by `tool_loop.limits()`.
+    """
+    max_steps, max_calls = tool_loop.limits()
+    search_limit = int(os.environ.get("OI_TOOL_SEARCH_LIMIT", "8"))
+    def tool_audit(event, actor, actor_role, outcome, payload, **extra):
+        audit(event, session.subject, session.role, outcome, payload, **extra)
+
+    toolbox = tool_loop.ToolBox(STATE["services"], permit, session.role, audit=tool_audit,
+                                search_limit=search_limit)
+    deadline = time.monotonic() + max(5.0, request_budget.remaining() - 1.5)
+    loop = tool_loop.run_loop(
+        lambda messages, tools: _tool_chat(session, model, messages, tools, request_budget),
+        toolbox, question, seed_passages=result.passages,
+        max_steps=max_steps, max_tool_calls=max_calls, deadline=deadline)
+    print(f"tool-loop: answer={'yes' if loop.get('answer') is not None else 'no'} "
+          f"reason={loop.get('reason')!r} steps={loop.get('steps')} calls={loop.get('tool_calls')} "
+          f"corrections={loop.get('corrections')} evidence={len(loop.get('evidence') or [])}", flush=True)
+    return loop
 
 
 def _degrade_detail(reason: str) -> str:
