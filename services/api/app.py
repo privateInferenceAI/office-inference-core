@@ -1478,7 +1478,8 @@ async def _tool_frames(session, permit, model: str, question: str, result, reque
         yield frame("degraded", budget_module.degraded(
             reason, _degrade_detail(reason), result.passages, request_budget, 1,
             request_budget.timed_out(), False, lane))
-        yield frame("done", {"deltas": 0, "retrieval_ms": int((started - requested_at) * 1000),
+        yield frame("done", {"deltas": 0, "redactions": {},
+                             "retrieval_ms": int((started - requested_at) * 1000),
                              "ttft_ms": None, "model_first_ms": None,
                              "total_ms": int((time.monotonic() - requested_at) * 1000)})
         return
