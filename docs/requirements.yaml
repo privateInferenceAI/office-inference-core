@@ -561,13 +561,17 @@ items:
       being called. A table of ordinary size keeps its per-row entries and gets no marker. The data suite then
       shows the giant dumps out of the top five for ordinary questions with no regression in the prose and
       cross-document categories.
-    status: open
+    status: verified
     note: >-
       The row-per-entry rule is right for a business table and wrong for a data dump. On 2026-10-17 a 27,829-line
       CSV became tens of thousands of near-identical row chunks and appeared in 42 of 52 baseline retrievals,
       displacing the documents that held the answers (docs/reviews/baseline-v3.md). The cap is deliberately above
       every normal schedule at 5,000 rows, and data files are classified before parsing at 2 MB for spreadsheets
       and 4 MB for text dumps, so the expensive path is never entered for a file that should be a card.
+      Measured 2026-10-18 on the rebuilt corpus (538 documents, 100,477 chunks, six cards, six dead letters):
+      the 27,829-row dump fell from the top five of 15 baseline runs (42 of 260 passages) to 0 of 52 runs
+      and 0 of 260 passages; exact-number retrieval rose from 3 of 8 to 6 of 8; prose and cross-document
+      retrieval did not regress, and the access boundary did not move. See docs/reviews/after-v4.md.
   - id: RET-CHUNK-001
     title: Every embedded chunk is measured against the embedding model's input limit, and a chunk over it is refused rather than truncated
     tier: [cloud, hosted, office]
