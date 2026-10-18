@@ -1396,15 +1396,139 @@ async def ask_stream(request: Request):
     }
     requested_at = time.monotonic()
     return EventSourceResponse(
-        _frames(session, permit, model, question, result, requested_at, stream_decision.lane),
+        _frames(session, permit, model, question, result, requested_at, stream_decision.lane,
+                use_tools=bool(body.get("tools"))),
         headers=headers,
         ping=int(os.environ.get("OI_STREAM_PING_SECONDS", "15")),
     )
 
 
+async def _tool_frames(session, permit, model: str, question: str, result, requested_at: float,
+                       lane: str = "frontier"):
+    """The tool-using answer as frames: start, progress, sources, delta, done.
+
+    **The loop runs on a worker thread and the frames are drained from a queue.** A synchronous loop inside the
+    generator would block the event loop; a queue lets each tool call become a frame while the loop is still
+    running. The same bounded loop, caps and fallback as the JSON path are used, so the two cannot drift.
+
+    **Token streaming is traded for progress streaming on this path**, and that is a deliberate first version: the
+    model's tool turns are non-streaming because the loop needs complete messages to parse tool calls from. The
+    final answer still arrives redacted, and a `sources` frame carries the evidence the tools actually returned,
+    so a client that renders citations has the right ones even though the `start` frame listed only the seeds.
+    """
+    import asyncio
+    import queue
+    import threading
+
+    def frame(kind: str, data: dict) -> dict:
+        return {"event": kind, "data": json.dumps(data, sort_keys=True)}
+
+    request_budget = budget_module.Budget.for_lane(lane, started=requested_at)
+    data_class = ((STATE.get("manifest") or {}).get("access") or {}).get("data_class") or "regulated"
+    yield frame("start", {"model": model, "role": session.role, "roots": sorted(permit.roots),
+                          "citations": [{"index": n + 1, "doc_id": p.doc_id, "acl": p.acl,
+                                         "page_start": p.page_start, "page_end": p.page_end}
+                                        for n, p in enumerate(result.passages)],
+                          "tools": True})
+
+    events: "queue.Queue[dict]" = queue.Queue()
+    holder: dict = {}
+
+    def worker() -> None:
+        try:
+            max_steps, max_calls = tool_loop.limits()
+
+            def tool_audit(event, actor, actor_role, outcome, payload, **extra):
+                audit(event, session.subject, session.role, outcome, payload, **extra)
+
+            toolbox = tool_loop.ToolBox(STATE["services"], permit, session.role, audit=tool_audit,
+                                        search_limit=int(os.environ.get("OI_TOOL_SEARCH_LIMIT", "8")))
+            holder["loop"] = tool_loop.run_loop(
+                lambda messages, tools: _tool_chat(session, model, messages, tools, request_budget),
+                toolbox, question, seed_passages=result.passages, max_steps=max_steps,
+                max_tool_calls=max_calls,
+                deadline=time.monotonic() + max(5.0, request_budget.remaining() - 1.5),
+                on_event=events.put)
+        except Exception as exc:  # noqa: BLE001 - a failed loop is a degraded answer here
+            holder["error"] = type(exc).__name__
+        finally:
+            events.put({"type": "final"})
+
+    threading.Thread(target=worker, daemon=True).start()
+    first_token_at = None
+    while True:
+        try:
+            event = await asyncio.to_thread(events.get, True, 0.5)
+        except queue.Empty:
+            continue
+        if event.get("type") == "final":
+            break
+        yield frame("progress", event)
+
+    loop = holder.get("loop") or {"answer": None, "reason": holder.get("error") or "tool_loop_error",
+                                  "evidence": []}
+    started = time.monotonic()
+    if loop.get("answer") is None:
+        reason = loop.get("reason") or "unclassified"
+        audit("model_call", session.subject, session.role, "denied",
+              budget_module.audit_facts(reason=reason, matched="", retryable=False, attempts=1,
+                                        threshold=request_budget.timed_out(), budget=request_budget,
+                                        partial_output=False, errors=[], lane=lane, data_class=data_class),
+              model=model)
+        yield frame("degraded", budget_module.degraded(
+            reason, _degrade_detail(reason), result.passages, request_budget, 1,
+            request_budget.timed_out(), False, lane))
+        yield frame("done", {"deltas": 0, "retrieval_ms": int((started - requested_at) * 1000),
+                             "ttft_ms": None, "model_first_ms": None,
+                             "total_ms": int((time.monotonic() - requested_at) * 1000)})
+        return
+
+    evidence = loop.get("evidence") or result.passages
+    yield frame("sources", {"citations": [
+        {"index": n + 1, "doc_id": p.doc_id, "acl": p.acl, "page_start": p.page_start,
+         "page_end": p.page_end} for n, p in enumerate(evidence)]})
+
+    redactor = streaming.StreamRedactor()
+    deltas = 0
+    safe = redactor.feed(loop["answer"] or "")
+    if safe:
+        first_token_at = time.monotonic()
+        deltas += 1
+        yield frame("delta", {"text": safe})
+    tail = redactor.finish()
+    if tail:
+        deltas += 1
+        yield frame("delta", {"text": tail})
+    report = redactor.report()
+    audit("model_call", session.subject, session.role, "ok",
+          {"stage": "ask_stream_tools", "model": model, "deltas": deltas,
+           "passages": len(evidence), "steps": loop.get("steps"),
+           "tool_calls": loop.get("tool_calls"), "corrections": loop.get("corrections"),
+           "redactions": report["redactions"], "holdback": report["holdback"]}, model=model,
+          data_class=data_class, egress_allowed=(lane == "frontier"),
+          redactions=report["redactions"],
+          unverified_card_shapes=report.get("unverified_card_shapes", 0),
+          prompt=redaction.redact(question)[0])
+    yield frame("done", {"deltas": deltas, "redactions": report["redactions"],
+                         "retrieval_ms": int((started - requested_at) * 1000),
+                         "ttft_ms": int((first_token_at - requested_at) * 1000) if first_token_at else None,
+                         "model_first_ms": int((first_token_at - started) * 1000) if first_token_at else None,
+                         "total_ms": int((time.monotonic() - requested_at) * 1000)})
+
+
 async def _frames(session, permit, model: str, question: str, result, requested_at: float,
-                   lane: str = "frontier"):
-    """The events, in the order a client should read them."""
+                   lane: str = "frontier", use_tools: bool = False):
+    """The events, in the order a client should read them.
+
+    **Two streaming behaviours, and the client chooses.** Without `tools: true` in the request this is the
+    single-shot stream it has always been. With it, and when the deployment enables the loop, the frames carry
+    progress events while the model searches and reads, then the answer. Existing clients are untouched, which is
+    why this is opt-in rather than a change to the event order.
+    """
+    if use_tools and tool_loop.enabled():
+        async for event in _tool_frames(session, permit, model, question, result, requested_at, lane):
+            yield event
+        return
     import urllib.error
     import urllib.request
 
