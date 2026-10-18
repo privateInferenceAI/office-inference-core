@@ -51,9 +51,11 @@ no withheld value. The raw JSON behind every row is `docs/reviews/baseline-v3.js
 ## What the baseline shows
 
 **1. One row dump is dominating retrieval.** `company/group-02/481953.csv`, a 27,829-row numeric dump indexed under
-v3 as 28,000-odd table-row chunks, appears in the top five of **42 of the 52 runs**. Its rows are near-identical
-numeric strings, so they match almost any numeric question and displace the documents that hold the answer. This
-is the pollution the row cap is meant to remove, measured rather than argued.
+v3 as 28,000-odd table-row chunks, appears in the top five of **15 of the 52 runs**, contributing 42 of the 260
+retrieved passages in total (an earlier version of this report said 42 runs; 42 was the passage count, and the
+corrected run count is 15). Its rows are near-identical numeric strings, so they match almost any numeric question
+and displace the documents that hold the answer. This is the pollution the row cap is meant to remove, measured
+rather than argued.
 
 **2. Exact-number questions are the weak category, and the two causes are separable.** Retrieval found the right
 document for only 3 of 8, and only 1 of 8 answers passed. The probe on a normal-sized table (PR1) misses because

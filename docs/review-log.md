@@ -1182,3 +1182,23 @@ Verified on the rebuilt corpus: the boundary gate check passes on both endpoints
 permitted path, the job probe holds eight rights, the activity probe holds eight, the access canaries behave, and
 the new forty-question data set retrieves its expected documents for the sample checked. `RET-CHUNK-001` stays
 verified; `RET-INGEST-002` stays open with this as its evidence.
+
+## 2026-10-18: chunker-v4 rebuilt corpus, and the before-and-after
+
+The v3 index was frozen and snapshotted first (checksum-verified, copied to S3 with the manifest dump), the
+baseline suite was run and committed (PR #159), then the giant-table policy was built (PR #160) and the corpus
+rebuilt from zero: 538 documents, 100,477 chunks, six data-set cards, six dead letters, contract chunker-v4. The
+dump that appeared in 15 of 52 baseline runs appears in none of the after runs, and exact-number retrieval rose
+from 3 of 8 to 6 of 8.
+
+The rebuild found two defects the tests had not. The data-set card was returned unsealed, so its chunk id was
+empty and Qdrant rejected every card write; five files dead-lettered twice before that was seen and fixed in PR
+#161. And the text-dump threshold at 4 MB handed a 3.4 MB dump to a parser that refuses it; the line is now 3 MB.
+The rebuild took five and a half hours against my estimate of one to two; the remaining work was genuine parse
+and embed of documents that had never been indexed, which no policy removes.
+
+The answer half of the suite is not usable as a single-run total: four identical runs scored 32, 26, 31 and 29
+against a baseline of 33, nineteen question-runs flip, and the three baseline passes that fail after retrieved
+byte-identical passages. Where the model varies more than the change, the comparison has to be retrieval and
+citations, and that is what the report concludes. `RET-TABLE-001` is verified; the probe redesign and the
+multi-run majority are logged as follow-ups in `docs/reviews/after-v4.md`.
