@@ -66,3 +66,19 @@ def test_the_database_url_is_stripped_of_prismas_pool_parameters():
         "the budget read does not connect with the stripped URL")
     assert "_connection_url(required=False)" in source, (
         "the rate-limit read does not connect with the stripped URL")
+
+
+def test_every_role_gets_its_own_identity_name():
+    """One identity name for the deployment meant four roles shared one spend counter, and the gateway compared
+    the sum against a per-role budget. Measured on 2026-10-18: the fake budget refused at half its value."""
+    source = AUTH.read_text()
+    assert 'api_key=f"oi-assertion-{role}"' in source, "roles still share one identity name"
+
+
+def test_the_identity_is_given_the_ceiling_not_the_remainder():
+    """The gateway subtracts identity spend itself; passing a remainder that already had spend subtracted made
+    the budget fire at half its nominal value."""
+    source = AUTH.read_text()
+    assert "max_budget=budget" in source
+    assert "_team_ceiling" in source, "the hook no longer reads the ceiling"
+    assert "remaining = float(ceiling) - float(spend" not in source, "the remainder is still being passed"
