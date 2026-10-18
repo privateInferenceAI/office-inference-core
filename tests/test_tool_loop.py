@@ -148,6 +148,20 @@ def test_an_unsupported_figure_gets_one_corrective_turn():
     assert "67 cents" in result["answer"]
 
 
+def test_progress_events_are_reported_for_steps_and_tools():
+    toolbox = make_toolbox()
+    toolbox.search_documents = lambda query: "no results"
+    events = []
+    replies = iter([
+        tool_reply("search_documents", json.dumps({"query": "mileage"})),
+        answer_reply("I could not find that in the available documents."),
+    ])
+    tool_loop.run_loop(lambda messages, tools: next(replies), toolbox, "q",
+                       on_event=events.append)
+    assert [event["type"] for event in events] == ["step", "tool", "step"]
+    assert events[1]["tool"] == "search_documents"
+
+
 def test_a_provider_error_returns_a_reason_not_an_exception():
     toolbox = make_toolbox()
     result = tool_loop.run_loop(lambda messages, tools: {"error": "throttled"}, toolbox, "q")

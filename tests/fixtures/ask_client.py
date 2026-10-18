@@ -75,6 +75,8 @@ def main() -> int:
     parser.add_argument('--task', default='', help='a task name, for the agentic trigger')
     parser.add_argument('--stronger', action='store_true', help='ask for the stronger model')
     parser.add_argument('--stream', action='store_true', help='use /ask/stream and print the frames')
+    parser.add_argument('--tools', action='store_true',
+                        help='let the stream run the tool loop (progress frames, then the answer)')
     parser.add_argument('--json', action='store_true', help='print the raw response')
     args = parser.parse_args()
 
@@ -91,6 +93,8 @@ def main() -> int:
         body['task'] = args.task
     if args.stronger:
         body['stronger'] = True
+    if args.tools:
+        body['tools'] = True
 
     path = '/ask/stream' if args.stream else '/ask'
     request = urllib.request.Request(API + path, data=json.dumps(body).encode(), method='POST',

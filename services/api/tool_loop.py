@@ -309,7 +309,8 @@ class ToolBox:
 
 
 def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
-             max_steps: int = 6, max_tool_calls: int = 10, deadline: float | None = None) -> dict:
+             max_steps: int = 6, max_tool_calls: int = 10, deadline: float | None = None,
+             on_event=None) -> dict:
     """Run the model until it answers, bounded by steps, tool calls and a deadline.
 
     `call_model(messages, tools)` returns a dict: `{"content", "tool_calls", "error"}`. `tool_calls` is a list
@@ -337,6 +338,8 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
             return {"answer": None, "reason": "tool_deadline", "evidence": toolbox.evidence,
                     **stats}
         stats["steps"] += 1
+        if on_event is not None:
+            on_event({"type": "step", "step": stats["steps"]})
         reply = call_model(messages, TOOLS)
         if reply.get("error"):
             return {"answer": None, "reason": reply["error"], "evidence": toolbox.evidence, **stats}
@@ -363,6 +366,9 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
                 return {"answer": None, "reason": "tool_budget", "evidence": toolbox.evidence, **stats}
             stats["tool_calls"] += 1
             result = toolbox.execute(call.get("name") or "", call.get("arguments") or "{}")
+            if on_event is not None:
+                on_event({"type": "tool", "tool": call.get("name") or "",
+                          "evidence": len(toolbox.evidence)})
             messages.append({"role": "tool", "tool_call_id": call.get("id") or "",
                              "content": result})
             if isinstance(result, str) and result.startswith('{"error"'):
