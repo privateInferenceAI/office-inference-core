@@ -29,6 +29,20 @@
       "replacement": "amazon.nova-pro-v1:0",
       "note": "ON_DEMAND, so it survives the single-Region residency rule that disqualifies the inference-profile-only frontier models."
     },
+    "anthropic.claude-haiku-4-5-20251001-v1:0": {
+      "provider": "Anthropic",
+      "status": "ACTIVE",
+      "eol_date": null,
+      "replacement": "anthropic.claude-haiku-5-5",
+      "note": "Inference-profile only. Verified with bedrock:GetFoundationModel on 2026-10-19, when the development deployment's tracked manifest named it as the analyst primary; the rest of the table was verified 2026-10-11. The provider reports it ACTIVE and it answers for this account."
+    },
+    "anthropic.claude-sonnet-4-5-20250929-v1:0": {
+      "provider": "Anthropic",
+      "status": "LEGACY",
+      "eol_date": null,
+      "replacement": "anthropic.claude-sonnet-5",
+      "note": "LEGACY as reported by bedrock:GetFoundationModel on 2026-10-19. The development deployment's fallback named it until this change; the fallback chain now uses Haiku in a second Region and Nova Pro instead. Sonnet 5 is ACTIVE in the catalog but AccessDenied for this account, so the replacement is recorded rather than adopted, and enabling that access is a client installation step."
+    },
     "anthropic.claude-sonnet-5": {
       "provider": "Anthropic",
       "status": "ACTIVE",

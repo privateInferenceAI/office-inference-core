@@ -12,7 +12,7 @@ answers questions through a bounded tool loop rather than a single retrieval-and
 | Thing | State |
 |---|---|
 | Model answering questions | Claude Haiku 4.5 on Bedrock, inference profile `us.anthropic.claude-haiku-4-5-20251001-v1:0` |
-| Answer path | Tool loop on, six steps, ten tool calls. `search_documents`, `read_passages` and the row query are offered; `lookup_value` is off. The gateway fails over to Claude Sonnet 4.5 if the Haiku deployment fails |
+| Answer path | Tool loop on, six steps, ten tool calls. `search_documents`, `read_passages` and the row query are offered; `lookup_value` is off. The gateway fails over to the same Haiku from us-east-2 and then to Nova Pro if the primary deployment fails |
 | Flags | `OI_TOOL_LOOP=on`, `OI_TOOL_MAX_STEPS=6`, `OI_TOOL_MAX_CALLS=10`, `OI_TOOL_QUERY=on`, `OI_TOOL_LOOKUP=off`, `OI_TOOL_HONESTY=on` |
 | Corpus | 539 documents, 100,478 chunks, six data-set cards, six dead letters excluded by owner decision (0003). Frozen since 2026-10-18 |
 | Measured quality | On the corrected instrument (2026-10-19 evening): **50.6 of 52** (52, 50, 51, 51, 49). The row-query milestone measured 46.6 against a same-day control of 43.0 on the old instrument; the two are not comparable because three questions were corrected (section 2c) |
@@ -146,6 +146,36 @@ column is the model that answered and its payload keeps the role as `model_role`
 primary on purpose: the answer reported `bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0` with
 `model_group: analyst-fallback` and `fallback_used: true`, and the row said the same.
 
+## 2e. Update 2026-10-19 night: the chain, the tracked model, and the instrument
+
+**The fallback is a chain now, and the deployment renders from a tracked manifest.** `models.<role>.fallback`
+takes a list tried in order, and an entry may carry `@<region>`. The development deployment's analyst is
+`manifests/dev-cloud-claude.yaml`: Claude Haiku 4.5 through the us profile, the same Haiku from us-east-2,
+then Nova Pro. The model choice no longer lives in the untracked `rendered/` override, so a re-render cannot
+revert it. **A client's account must allow the fallback Region's inference-profile ARN**: the credits account's
+`oi-core-dev-bedrock-invoke` policy went to v6 for exactly that, and the runbook's installation section tells
+a client to copy the shape. Without it the second entry fails AccessDenied when it is needed.
+
+**A client who is not serviced can change a model.** `scripts/model_admin.py` lists the lifecycle table and
+what a deployment names, checks a manifest with the same two gates CI runs, and rewrites one role's model and chain
+only when the whole candidate manifest passes; it writes only the models block and never calls AWS.
+`docs/model-lifecycle.md` carries the procedure. The lifecycle refresh recorded a real finding: Sonnet 4.5,
+the previous fallback, is LEGACY; Sonnet 5 is ACTIVE in the catalog but AccessDenied for this account, so the
+chain's model entry is Nova Pro.
+
+**The instrument was redesigned and measured (PR #192).** PR1 and PR4 are independent probes now (they had
+duplicated N07's premise and N06's fact), PR5 measures the PII gate end to end, and unanswerable questions are
+re-checked against the index on every run. That check found U05's stale pattern (the topic word matched
+cafeteria-plan tax text); it now reads "cafeteria menu". Five runs on the new instrument: **52, 52, 52, 51, 52 of
+53 (mean 51.8)**, all five probes passing in every run, all eight absent patterns at zero, U08 failing in all five
+and N04 in one. This is a new baseline, not an improvement claim, because the run set changed.
+
+**A wider evaluation set is ready (PR #193).** 66 questions: the live 40 plus 26 authored from index-verified facts
+(aggregation, date arithmetic, multi-hop, untouched-document coverage), with a validator that proves computed
+answers through their operands. It is not the scored instrument yet.
+
+**Chain measurement** (instrument = the redesigned probes): healthy five runs scored 52, 52, 52, 52, 52 of 53 with zero of 492 model calls failing over. With the primary failed on purpose, five runs scored the same 52, 52, 52, 52, 52, zero degraded answers, and every one of the 265 answer rows came through the us-east-2 Haiku entry. With both that entry and the primary failed, four of four answers came from Nova Pro (two of four questions correct: the third leg works, and it is a last resort). Cost per answer about 0.0134 USD, p95 about 12 seconds. Evidence: `docs/reviews/regional-fallback-2026-10-19.md`.
+
 ## 3. What was built, in order, and why
 
 All pull requests are in `privateInferenceAI/office-inference-core`.
@@ -253,17 +283,19 @@ The structured row query is **done and measured** (section 2b). The priorities b
    were corrected (A06, P05, P06); U08 is a genuine honesty failure, deferred with a defined retest. See section 2c
    and `docs/reviews/deterministic-failures-2026-10-19.md`. The corrected instrument measures 50.6 of 52, so the
    next score claim needs a wider instrument rather than another prompt or tool change.
-2. **Provider reliability is built and measured.** A declared fallback model behind the gateway carries the
-   question when the primary deployment fails; see section 2d and `docs/reviews/provider-fallback-2026-10-19.md`.
-   The development deployment runs Haiku with a Sonnet fallback. The first follow-up is the answering-model gap:
-   the answer and its audit row report the configured model rather than the model that answered.
-3. **Redesign the two bad probes.** `probe_row_normal` and `probe_pollution` are known-imperfect; replace them
-   before they influence another decision.
-4. **A harder, wider evaluation set.** The current instrument is near its ceiling for some categories (cross-document
-   8 of 8, prose 6 of 6). Add questions that require aggregating several rows, date arithmetic, and documents the
-   current set does not touch, so the next improvement is measurable rather than invisible.
-5. **The acceptance panel on the finished corpus**, including p95 latency and cost per answer. The loop costs about
-   365 seconds per 52-question suite against 112 single-shot; that is a product decision the panel should see.
+2. **Provider reliability is built, measured, and credited.** The fallback is a chain: the same model from
+   another Region first, then a different model (section 2e). The answer and its audit row credit the model that
+   answered (section 2d). The deployment renders from `manifests/dev-cloud-claude.yaml`, and
+   `scripts/model_admin.py` is the client's supported way to change a model after installation. Evidence:
+   `docs/reviews/regional-fallback-2026-10-19.md`.
+3. **Done: the bad probes are redesigned (PR #192).** PR1 and PR4 are independent of the question set, PR5 was
+   added for the PII gate, and unanswerable questions are re-verified against the index every run. All five probes
+   passed in every run of the new baseline.
+4. **Done: a wider evaluation set is ready (PR #193).** 66 questions, 26 of them new, every one mechanically
+   validated against the index. It is not the scored instrument yet; measuring it is the next work.
+5. **The acceptance panel.** Latency is now captured per answer and summarised (p50, p95) by the runner, and
+   `scripts/acceptance_panel.py` joins the runs to the gateway's spend records for cost per answer,
+   `docs/reviews/acceptance-panel-2026-10-19.md` carries the numbers.
 6. **Row-query default policy.** Keep it opt-in in code; a deployment turns it on after measuring its own corpus
    (the development deployment has it on; its evidence is one corpus).
 7. **`lookup_value` is superseded for table rows.** Keep it implemented and off; plan retirement once `query_rows`

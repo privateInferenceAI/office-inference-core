@@ -560,8 +560,22 @@
           "description": "Model id used when the frontier lane is on."
         },
         "fallback": {
-          "type": "string",
-          "description": "Model id the gateway fails over to when this role's primary deployment fails. Cloud builds only: falling over from a local primary to a remote model would be an undeclared egress path."
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 3,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          ],
+          "description": "The model or models the gateway fails over to when this role's primary deployment fails, in order. One entry is a single fallback; a list is a chain, tried one at a time. An entry may carry an @region suffix to ask for the same model from another Region, which keeps the model and changes only the regional endpoint. Cloud builds only: falling over from a local primary to a remote model would be an undeclared egress path. See the runbook's model-swap section."
         }
       }
     }

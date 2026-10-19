@@ -17,6 +17,8 @@ Usage:
 """
 from __future__ import annotations
 
+from manifest_fields import fallback_chain, split_fallback  # noqa: E402
+
 import json
 import re
 import sys
@@ -24,6 +26,7 @@ from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 TABLE = ROOT / "data" / "model-lifecycle.json"
 
 # Geographic inference-profile prefixes. A profile like us.anthropic.claude-sonnet-5 names the model
@@ -55,11 +58,12 @@ def check(manifest: dict, table: dict, today: date) -> list[str]:
     # possible time to discover it. Both fields are read here so a manifest cannot carry one unaccounted
     # remote model past the table.
     for role, entry in sorted((manifest.get("models") or {}).items()):
-        for field in ("frontier", "fallback"):
-            frontier = (entry or {}).get(field) or ""
+        candidates = [(f"models.{role}", (entry or {}).get("frontier") or "")]
+        for index, item in enumerate(fallback_chain(entry)):
+            candidates.append((f"models.{role}.fallback[{index}]", split_fallback(item)[0]))
+        for label, frontier in candidates:
             if not frontier:
                 continue
-            label = f"models.{role}" if field == "frontier" else f"models.{role}.fallback"
             identifier = model_id(frontier)
             known = (table.get("models") or {}).get(identifier)
             if known is None:
@@ -105,9 +109,11 @@ def main(argv: list[str]) -> int:
         problems = check(manifest, table, today)
         # Both remote fields count, so the number printed beside the pass is the number checked: a
         # fallback that was not counted would make the line understate what the manifest sends to a provider.
-        named = [model_id((entry or {}).get(field, ""))
-                 for entry in (manifest.get("models") or {}).values()
-                 for field in ("frontier", "fallback") if (entry or {}).get(field)]
+        named = [model_id((entry or {}).get("frontier", ""))
+                 for entry in (manifest.get("models") or {}).values() if (entry or {}).get("frontier")]
+        named += [model_id(split_fallback(item)[0])
+                  for entry in (manifest.get("models") or {}).values()
+                  for item in fallback_chain(entry)]
         checked += len(named)
         if problems:
             failed += 1
