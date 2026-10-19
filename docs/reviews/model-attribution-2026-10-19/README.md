@@ -75,7 +75,17 @@ retrieval path. The regression check exists to catch a wiring mistake (an except
 degrade every answer).
 
 Five runs on the same deployed configuration as the corrected-instrument baseline (Haiku primary, Sonnet
-fallback configured but not exercised): **(pending)**.
+fallback configured but not exercised): **51, 50, 51, 51, 51, mean 50.8**, range 50 to 51. The corrected-instrument
+baseline before this change was 50.6 (52, 50, 51, 51, 49); the change is reporting-only, so the two belong to the
+same range rather than to different configurations.
+
+**A first batch was discarded, and the reason is recorded rather than smoothed over.** It scored 44, 50, 51, 51, 51;
+its first run answered seven exact-number questions as `degraded / unclassified` and nothing else. The API log from
+that minute shows the tool loop returning `unclassified` on the first step with no gateway error behind it, and the
+gateway logged no 429, 500 or exception in the window. The behaviour is a tool-loop flake at run start, not the
+attribution change (which only reads response headers and writes fields), and the replacement batch is the
+measurement of record. Four other runs of the same set were normal, which is why one bad run was re-run rather than
+explained away.
 
 ## Caveats, recorded rather than discovered later
 
