@@ -62,7 +62,11 @@ async def health():
 
 @app.post('/model/{model_id}/invoke')
 @app.post('/model/{model_id}/invoke-with-response-stream')
+@app.post('/model/{model_id}/converse')
 async def invoke(model_id: str, request: Request):
+    # The converse path is the one the deployed gateway's Bedrock provider actually calls, found by
+    # watching the stub's access log during the first provider-fallback measurement. Without it the
+    # injected failure was a 404 from an unrouted path rather than the 503 the scenario describes.
     # **The default scenario is read from the environment, because a full-stack test cannot send this
     # header.** A request made through the gateway reaches the stub without x-fault, so a test that wants
     # every model call to fail — the provider-fallback measurement is the first one — starts the stub with
