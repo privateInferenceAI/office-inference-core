@@ -20,6 +20,13 @@ models:
   analyst:
     local: ""
     frontier: bedrock/amazon.nova-lite-v1:0
+    # **The fallback is the same-account model one tier up, and it is not a quality decision.** It exists so
+    # that a Bedrock failure on the primary answers from a second deployment instead of degrading the question.
+    # The gateway makes one attempt per model and then fails over; retries stay zero, so a provider that is
+    # already struggling is asked once, not three times. The development deployment overrides this pair to
+    # Claude Haiku and Sonnet (runbook 6.7); the tracked values here are the repo default so a fresh render
+    # produces a valid fallback chain.
+    fallback: bedrock/amazon.nova-pro-v1:0
   reader:
     local: ""
     frontier: bedrock/amazon.nova-pro-v1:0

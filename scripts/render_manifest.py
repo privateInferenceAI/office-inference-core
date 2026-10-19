@@ -95,8 +95,17 @@ def build_litellm_config(manifest: dict, env: dict[str, str]) -> dict:
     understood local entries, rendered an empty model list for exactly the deployment we build
     first. Local entries point at the model server; frontier entries point at Bedrock in the
     client's own account.
+
+    **A role may also declare a \`fallback\`**, a second remote model the gateway routes to when the
+    primary deployment fails. It renders as its own model group (\`<role>-fallback\`) plus a
+    \`litellm_settings.fallbacks\` entry, so the gateway does the failover once and every caller —
+    question, stream and tool loop — gets it without a second implementation. It is cloud-only on
+    purpose: silently moving a local-lane question to a remote model would break the residency
+    promise, so the validator refuses a fallback on a non-cloud profile and this loop would not
+    emit one there anyway.
     """
     models = []
+    fallbacks: list[dict] = []
     frontier_enabled = bool(((manifest.get("lanes") or {}).get("frontier") or {}).get("enabled"))
     profile = manifest.get("profile")
 
@@ -116,33 +125,51 @@ def build_litellm_config(manifest: dict, env: dict[str, str]) -> dict:
                 "model_info": {"lane": "local"},
             })
 
-        if frontier and (frontier_enabled or profile == "cloud"):
+        primary_name = role if not local else f"{role}-frontier"
+        primary_emitted = bool(frontier) and (frontier_enabled or profile == "cloud")
+        if primary_emitted:
             model_id = frontier.split("/", 1)[1] if frontier.startswith("bedrock/") else frontier
             models.append({
-                "model_name": role if not local else f"{role}-frontier",
+                "model_name": primary_name,
                 "litellm_params": {"model": f"bedrock/{model_id}"},
                 "model_info": {"lane": "frontier"},
             })
-    return {
-        "model_list": models,
-        "litellm_settings": {
-            "drop_params": True,
-            "set_verbose": False,
-            # **Retries are the API's job and the gateway must not add its own.** LiteLLM defaults
-            # `num_retries` to 2 when it is unset, so our three budgeted attempts could have become
-            # NINE upstream calls, none of them visible to the deadline and none counted in the record.
-            # The research on 2026-10-14 calls this retry amplification: two layers multiply into
-            # (1+N)**2 calls per request, and AWS states that retries "can make the overload worse
-            # instead of better". Setting it to zero explicitly makes the number in our audit row true.
-            "num_retries": 0,
-            # The API owns the timeouts too, for the same reason: a retry that ignores the caller's
-            # deadline is not a retry, it is an unaccounted one. These sit far above our 30s total so
-            # they act only as a backstop against a socket that never returns.
-            "request_timeout": 120,
-            "stream_timeout": 120,
-        },
-        "general_settings": {"master_key": "os.environ/LITELLM_MASTER_KEY"},
+
+        fallback = entry.get("fallback") or ""
+        if fallback and primary_emitted:
+            fallback_id = fallback.split("/", 1)[1] if fallback.startswith("bedrock/") else fallback
+            fallback_name = f"{role}-fallback"
+            models.append({
+                "model_name": fallback_name,
+                "litellm_params": {"model": f"bedrock/{fallback_id}"},
+                "model_info": {"lane": "frontier", "fallback_for": primary_name},
+            })
+            fallbacks.append({primary_name: [fallback_name]})
+    settings: dict = {
+        "drop_params": True,
+        "set_verbose": False,
+        # **Retries are the API's job and the gateway must not add its own.** LiteLLM defaults
+        # \`num_retries\` to 2 when it is unset, so our three budgeted attempts could have become
+        # NINE upstream calls, none of them visible to the deadline and none counted in the record.
+        # The research on 2026-10-14 calls this retry amplification: two layers multiply into
+        # (1+N)**2 calls per request, and AWS states that retries "can make the overload worse
+        # instead of better". Setting it to zero explicitly makes the number in our audit row true.
+        "num_retries": 0,
+        # The API owns the timeouts too, for the same reason: a retry that ignores the caller's
+        # deadline is not a retry, it is an unaccounted one. These sit far above our 30s total so
+        # they act only as a backstop against a socket that never returns.
+        "request_timeout": 120,
+        "stream_timeout": 120,
     }
+    if fallbacks:
+        # **A failover is not a retry.** The retry count above stays zero, so the gateway makes one
+        # attempt per model and then moves to the declared fallback. The fallback exists because a
+        # provider failure is not the client's fault and a second model in the same account can
+        # answer; it does not multiply attempts on the primary, which is the overload the zero was
+        # there to avoid.
+        settings["fallbacks"] = fallbacks
+    return {"model_list": models, "litellm_settings": settings,
+            "general_settings": {"master_key": "os.environ/LITELLM_MASTER_KEY"}}
 
 
 def build_access_registry(manifest: dict) -> dict:

@@ -97,3 +97,21 @@ def test_the_real_table_records_where_its_facts_came_from(real_table):
     for model, entry in real_table["models"].items():
         assert entry["status"], f"{model} has no status"
         assert entry.get("replacement"), f"{model} has no recorded replacement"
+
+
+def test_a_deprecated_fallback_fails_the_check(check):
+    """The fallback is the recovery path; one that is past its end-of-life stops working exactly when it is
+    needed, so it is checked like the primary rather than trusted because it is only a backup."""
+    table = json.loads((FIXTURES / "lifecycle-past-eol.json").read_text())
+    manifest = manifest_naming("bedrock/amazon.nova-micro-v1:0")
+    manifest["models"]["analyst"]["fallback"] = "bedrock/amazon.nova-micro-v1:0"
+    problems = check.check(manifest, table, TODAY)
+    assert any("models.analyst.fallback" in problem for problem in problems), problems
+
+
+def test_an_unlisted_fallback_model_fails_the_check(check):
+    manifest = manifest_naming("bedrock/amazon.nova-micro-v1:0")
+    manifest["models"]["analyst"]["fallback"] = "bedrock/some.brand-new-model"
+    problems = check.check(manifest, {"models": {}}, TODAY)
+    assert any("models.analyst.fallback" in problem and "not in" in problem
+               for problem in problems), problems

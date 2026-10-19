@@ -5702,8 +5702,76 @@ single-shot stream it has always been.
     docker run --rm --network ai-net --user "$(id -u):$(id -g)" -v /opt/oi-core:/w -w /w \
       --env-file rendered/env --entrypoint python oi-core/session:local /w/tests/fixtures/stream_probe.py
 
+**The fallback model (provider reliability).** A role may declare a second remote model the gateway fails over
+to when the primary deployment fails, so a transient Bedrock failure answers from a second deployment instead of
+degrading the question. It is a manifest field:
+
+    # manifests/dev-cloud.yaml
+    models:
+      analyst:
+        local: ""
+        frontier: bedrock/amazon.nova-lite-v1:0
+        fallback: bedrock/amazon.nova-pro-v1:0
+
+Rendering it produces two things, and both are required: a second model group \`analyst-fallback\` and a
+\`litellm_settings.fallbacks\` entry mapping \`analyst\` to it. The gateway does the failover once, so the
+question path, the stream and every tool-loop call get it without a second implementation. **The retry count
+stays zero**: the gateway makes one attempt per model and then moves on, so a provider that is already struggling
+is not asked three times.
+
+**Cloud builds only, and the validator enforces it.** On an office or hybrid build the primary can be the local
+lane, and failing over to a remote model would send a client's content off the box on an undeclared egress path.
+The lifecycle check reads the fallback too, because a deprecated fallback would stop working exactly when it is
+needed.
+
+**The development deployment overrides the pair.** Its primary is Claude Haiku, so after changing
+\`rendered/litellm.yaml\` for the model (the override described above), add the fallback to the same file and to
+\`rendered/manifest.json\`:
+
+    # rendered/litellm.yaml: after the analyst entry, and inside litellm_settings
+    - model_name: analyst-fallback
+      litellm_params:
+        model: bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0
+      model_info:
+        lane: frontier
+        fallback_for: analyst
+    litellm_settings:
+      fallbacks:
+      - analyst:
+        - analyst-fallback
+
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      up -d --force-recreate litellm
+
+**Measure it by failing the primary on purpose, not by waiting for a provider blip.** The fault stub in
+\`tests/faultinject/\` speaks the provider's failure shapes, and it takes a default scenario from
+\`OI_STUB_FAULT\` because a request that arrives through the gateway carries no per-request header:
+
+    cd /opt/oi-core
+    docker run -d --name oi-fault-stub --network ai-net -e OI_STUB_FAULT=unavailable \
+      -v /opt/oi-core/tests/faultinject:/app:ro -w /app --entrypoint uvicorn \
+      python:3.12-slim fault_stub:app --host 0.0.0.0 --port 8099
+    cp rendered/litellm.yaml /tmp/litellm.yaml.before-fault
+    # point only the primary at the stub: add  api_base: http://oi-fault-stub:8099  under analyst's
+    # litellm_params, then:
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      up -d --force-recreate litellm
+    scripts/run_answer_suite.sh 5 /tmp/oic-fault-fallback        # every answer should come via the fallback
+    docker logs litellm 2>&1 | grep -i fallback | tail            # the gateway records the failover
+    # restore and recreate the gateway before doing anything else
+    cp /tmp/litellm.yaml.before-fault rendered/litellm.yaml
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+      up -d --force-recreate litellm
+    docker rm -f oi-fault-stub
+
+A run with the primary broken and the fallback in place should produce no \`provider_unavailable\` degradations
+and a score comparable to the healthy baseline. A run with the primary broken and no fallback produces degraded
+answers with that reason, which is the control. \`docs/reviews/provider-fallback-2026-10-19.md\` holds the
+measured comparison.
+
 **Roll back.** Flag off for the loop, or the manifest for the model, then recreate only the containers that read
-that configuration. Nothing in the corpus, the vector store or the audit chain changes either way.
+that configuration. Nothing in the corpus, the vector store or the audit chain changes either way. A fallback is
+removed by deleting its model group and its \`fallbacks\` entry; the primary is untouched.
 
 **What to watch.** About 1.6 times the suite time (178 to 188 seconds against 110 single-shot) and two to three
 times the model calls per answer. The development analyst ceiling is 100 USD for a 30-day period; a day of suite

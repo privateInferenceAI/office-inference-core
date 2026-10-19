@@ -173,7 +173,10 @@ def test_the_dev_cloud_manifest_routes_every_role_to_bedrock(tmp_path):
     assert render(dev_cloud, tmp_path).returncode == 0
 
     entries = gateway_entries(tmp_path)
-    assert {entry["model_name"] for entry in entries} == {"front_desk", "analyst", "reader", "coder"}
+    # The four role entries, plus the analyst fallback the manifest declares. A fallback is a second
+    # Bedrock deployment of the same lane, so the "no local lane" claim still holds for every entry.
+    assert {entry["model_name"] for entry in entries} == {
+        "front_desk", "analyst", "reader", "coder", "analyst-fallback"}
     for entry in entries:
         assert entry["model_info"]["lane"] == "frontier"
         assert entry["litellm_params"]["model"].startswith("bedrock/")
@@ -300,3 +303,52 @@ def test_the_fault_endpoint_redirects_every_model_when_asked(tmp_path, monkeypat
     text = (out / "litellm.yaml").read_text()
     assert text.count("api_base: http://stub:8099") >= 4, "every model entry should carry it"
     assert "FAULT" in result.stdout, "and the run should say so out loud"
+
+
+def test_a_declared_fallback_renders_a_group_and_the_failover_setting(tmp_path):
+    """The gateway does the failover, so the rendered config needs both halves: the second model group and
+    the setting that names it. A group without the setting is a model nobody calls; a setting without the
+    group is a failover to nothing."""
+    manifest = yaml.safe_load(DEV_CLOUD.read_text())
+    manifest["models"]["reader"]["fallback"] = "bedrock/amazon.nova-lite-v1:0"
+    path = tmp_path / "with-fallback.yaml"
+    path.write_text(yaml.safe_dump(manifest), encoding="utf-8")
+
+    out = tmp_path / "rendered"
+    result = render(path, out)
+    assert result.returncode == 0, result.stderr
+
+    config = yaml.safe_load((out / "litellm.yaml").read_text())
+    names = [entry["model_name"] for entry in config["model_list"]]
+    assert "reader-fallback" in names
+    fallback = next(entry for entry in config["model_list"] if entry["model_name"] == "reader-fallback")
+    assert fallback["litellm_params"]["model"] == "bedrock/amazon.nova-lite-v1:0"
+    assert fallback["model_info"]["fallback_for"] == "reader"
+    # The shipped dev-cloud manifest already declares an analyst fallback, so this asserts the reader
+    # mapping is present without pretending it is the only one.
+    assert {"reader": ["reader-fallback"]} in config["litellm_settings"]["fallbacks"]
+
+
+def test_an_office_build_renders_no_fallback(tmp_path):
+    """The office build has no frontier lane, and a remote failover from a local primary is the egress path
+    the validator refuses. The renderer must not emit one either, so a manifest that slipped past the
+    validator still cannot produce a config that sends content off the box."""
+    manifest = yaml.safe_load(OFFICE.read_text())
+    manifest["models"]["analyst"]["fallback"] = "bedrock/amazon.nova-pro-v1:0"
+    path = tmp_path / "office-with-fallback.yaml"
+    path.write_text(yaml.safe_dump(manifest), encoding="utf-8")
+
+    out = tmp_path / "rendered"
+    result = render(path, out)
+    assert result.returncode != 0, "the renderer runs the validator, so this manifest is refused"
+    assert "cloud-only" in result.stdout, result.stdout
+
+    # And the guard inside the builder holds even if the manifest reached it, which is what keeps a
+    # validator change from turning into an egress path.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("renderer_under_test", RENDERER)
+    renderer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(renderer)
+    built = renderer.build_litellm_config(manifest, {})
+    assert "analyst-fallback" not in [entry["model_name"] for entry in built["model_list"]]
+    assert "fallbacks" not in built["litellm_settings"]

@@ -12,7 +12,7 @@ answers questions through a bounded tool loop rather than a single retrieval-and
 | Thing | State |
 |---|---|
 | Model answering questions | Claude Haiku 4.5 on Bedrock, inference profile `us.anthropic.claude-haiku-4-5-20251001-v1:0` |
-| Answer path | Tool loop on, six steps, ten tool calls. `search_documents`, `read_passages` and the row query are offered; `lookup_value` is off |
+| Answer path | Tool loop on, six steps, ten tool calls. `search_documents`, `read_passages` and the row query are offered; `lookup_value` is off. The gateway fails over to Claude Sonnet 4.5 if the Haiku deployment fails |
 | Flags | `OI_TOOL_LOOP=on`, `OI_TOOL_MAX_STEPS=6`, `OI_TOOL_MAX_CALLS=10`, `OI_TOOL_QUERY=on`, `OI_TOOL_LOOKUP=off`, `OI_TOOL_HONESTY=on` |
 | Corpus | 539 documents, 100,478 chunks, six data-set cards, six dead letters excluded by owner decision (0003). Frozen since 2026-10-18 |
 | Measured quality | On the corrected instrument (2026-10-19 evening): **50.6 of 52** (52, 50, 51, 51, 49). The row-query milestone measured 46.6 against a same-day control of 43.0 on the old instrument; the two are not comparable because three questions were corrected (section 2c) |
@@ -122,6 +122,25 @@ measurable, which is why the probe redesign and the wider evaluation set come be
 Provider fallback can be verified deterministically instead of statistically: make the primary model unavailable
 and check that the fallback answers.
 
+## 2d. Update 2026-10-19 evening: provider fallback
+
+A role may now declare a second remote model in the manifest. Rendering emits a second gateway group and a
+`litellm_settings.fallbacks` mapping, so one failover covers the question path, the stream and every tool-loop
+call; retries stay at zero, so the gateway makes one attempt at the primary and then one at the fallback. It is
+cloud-only and enforced by the validator, because on an office build a local primary failing over to a remote
+model would be an undeclared egress path. The lifecycle check reads the fallback too.
+
+**Measured with a deliberately broken primary**, which is the only deterministic way to test it: the repository's
+fault stub returned 503 on every request to the primary, and five runs scored **49, 49, 49, 48, 49 (mean 48.8)
+with zero degraded answers**, 847 failed primary attempts all answered by the fallback. The control, the same
+broken primary with no fallback, degraded every answer. Healthy traffic is unchanged: five runs with the fallback
+configured but inert scored 51, 51, 51, 51, 49 (mean 50.6), the same as before the change. The development
+deployment runs Haiku with a Sonnet fallback. Evidence: `docs/reviews/provider-fallback-2026-10-19.md`.
+
+**Known gap, recorded rather than papered over:** the answer and its audit row still name the configured primary
+model, not the fallback that answered; the gateway's response carries the real model. Recording the answering
+model is follow-up work under `INF-ROLE-001`.
+
 ## 3. What was built, in order, and why
 
 All pull requests are in `privateInferenceAI/office-inference-core`.
@@ -229,10 +248,10 @@ The structured row query is **done and measured** (section 2b). The priorities b
    were corrected (A06, P05, P06); U08 is a genuine honesty failure, deferred with a defined retest. See section 2c
    and `docs/reviews/deterministic-failures-2026-10-19.md`. The corrected instrument measures 50.6 of 52, so the
    next score claim needs a wider instrument rather than another prompt or tool change.
-2. **Provider reliability.** Five of the 27 remaining failing runs were `provider_unavailable`, and the treatment
-   window carried eleven degradations. A fallback model or route (for example to the global profile or Sonnet) on
-   a classified provider failure would recover up to two points and improve the client experience. Measure it the
-   same way.
+2. **Provider reliability is built and measured.** A declared fallback model behind the gateway carries the
+   question when the primary deployment fails; see section 2d and `docs/reviews/provider-fallback-2026-10-19.md`.
+   The development deployment runs Haiku with a Sonnet fallback. The first follow-up is the answering-model gap:
+   the answer and its audit row report the configured model rather than the model that answered.
 3. **Redesign the two bad probes.** `probe_row_normal` and `probe_pollution` are known-imperfect; replace them
    before they influence another decision.
 4. **A harder, wider evaluation set.** The current instrument is near its ceiling for some categories (cross-document
