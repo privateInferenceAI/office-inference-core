@@ -1,0 +1,88 @@
+# Untouched-document coverage candidates, authored 2026-10-19.
+#
+# Each candidate is drawn from a document that no question in docs/eval/data-questions.yaml and none of the
+# four probes in tests/fixtures/data_suite_run.py references. All are staff-visible company/ documents, so
+# only the staff expectation is given. File types are recorded in untouched.evidence.md.
+#
+# Ground truth was read from chunk_index on the deployment; the carrying sentence is in source_quote and the
+# verifying SQL is in the evidence file. These are drafts for review, not the live suite.
+
+- id: CAND_UNTOUCHED_01
+  category: coverage
+  question: "In customs ruling NY F86667, what is the applicable HTS subheading for style #20320?"
+  expected:
+    staff: {answered: true, docs: ["company/group-02/592778.doc"], contains: ["6117.10.1010"]}
+  source_quote: "The applicable subheading for style #20320 will be 6117.10.1010"
+  evidence: "Read from page 1 of the ruling; 6117.10.1010 appears only in this document, in the sentence naming style #20320."
+
+- id: CAND_UNTOUCHED_02
+  category: coverage
+  question: "How many commercial poultry farms are in the area of Torun County, Poland?"
+  expected:
+    staff: {answered: true, docs: ["company/group-01/251719.doc"], contains: ["six commercial poultry farms"]}
+  source_quote: "There are six commercial poultry farms and four poultry slaughter and processing plants in the area of Torun County."
+  evidence: "Read from the GAIN report's second page; 'six commercial poultry farms' appears only in this document, in the sentence naming Torun County."
+
+- id: CAND_UNTOUCHED_03
+  category: coverage
+  question: "What is the subject of GCN Circular 7186?"
+  expected:
+    staff: {answered: true, docs: ["company/group-02/003549.txt"], contains: ["NGC 2770B", "same redshift"]}
+  source_quote: "SUBJECT: NGC 2770B has the same redshift as NGC 2770"
+  evidence: "Read from the circular header; 'NGC 2770B' appears only in this document, in the SUBJECT line of Circular 7186."
+
+- id: CAND_UNTOUCHED_04
+  category: coverage
+  question: "When emailing comments on the FEMA draft environmental assessment for the E.H. Burton property, what site number should be entered in the subject field?"
+  expected:
+    staff: {answered: true, docs: ["company/group-02/228801.txt"], contains: ["OR-205"]}
+  source_quote: "When responding by email, enter site number OR-205 in the subject field."
+  evidence: "Read from the public notice's comment paragraph; 'OR-205' appears only in this document, in the sentence about the email subject field."
+
+- id: CAND_UNTOUCHED_05
+  category: coverage
+  question: "In the airline on-time performance summary, how many operations were reported for 2003?"
+  expected:
+    staff: {answered: true, docs: ["company/group-02/059190.csv"], contains: ["552,109"]}
+  source_quote: "2003 | 552,109 | 82,900 | 66,453 | 8,341 | 847 | 83.32 | 15.02 | 12.04 | 1.51 | 0.15"
+  evidence: "Read from the 2003 row of Table 1; '552,109' appears only in this document, in the Operations column for 2003."
+
+- id: CAND_UNTOUCHED_06
+  category: coverage
+  question: "According to the person-month conversion guidance, what monthly salary corresponds to an academic year appointment with a salary of 63,000 dollars?"
+  expected:
+    staff: {answered: true, docs: ["company/group-02/016886.xls"], contains: ["7,000"]}
+  source_quote: "A PI on an AY appointment at a salary of $63,000 will have a monthly salary of $7,000 (one-ninth of the AY)."
+  evidence: "Read from the spreadsheet's AY example; the same sheet's CY example uses 72,000 dollars and 6,000 dollars, so the 63,000/7,000 pair is the AY case the question names."
+
+- id: CAND_UNTOUCHED_07
+  category: coverage
+  question: "How many full-time equivalent employees did Apple report as of September 28, 2024?"
+  expected:
+    staff: {answered: true, docs: ["company/apple-10k-2024.htm"], contains: ["164,000"]}
+  source_quote: "As of September 28, 2024, the Company had approximately 164,000 full-time equivalent employees."
+  evidence: "Read from the 10-K's Human Capital paragraph; '164,000 full-time equivalent' appears only in this document."
+
+- id: CAND_UNTOUCHED_08
+  category: coverage
+  question: "For calendar year 2025, what is the social security wage base limit for each employee?"
+  expected:
+    staff: {answered: true, docs: ["company/irs-p15.pdf"], contains: ["176,100"]}
+  source_quote: "Calendar year: 2025-social security; Wage base limit (each employee): $176,100; Tax rate on taxable wages and tips: 12.4%"
+  evidence: "Read from the 2025 row of the employment-tax table on page 39; '176,100' appears only in this document."
+
+- id: CAND_UNTOUCHED_09
+  category: coverage
+  question: "According to the vendor onboarding note, where is the primary contact reference for the Acme engagement stored?"
+  expected:
+    staff: {answered: true, docs: ["company/canary-pii.md"], contains: ["vendor record"]}
+  source_quote: "The primary contact reference for the Acme engagement is 219-09-9999 and it is stored in the vendor record."
+  evidence: "Read from the single canary chunk; 'vendor record' appears only in this document, and the question asks for the storage location rather than the reserved number the redaction gate strips."
+
+- id: CAND_UNTOUCHED_10
+  category: coverage
+  question: "Under the ACORP Appendix 8 request form, where must procedures involving an explosive agent be performed?"
+  expected:
+    staff: {answered: true, docs: ["company/group-01/380391.rtf"], contains: ["properly operating, ventilated safety hood"]}
+  source_quote: "a) procedures are performed within a properly operating, ventilated safety hood"
+  evidence: "Read from item 9(a) of the form; 'properly operating, ventilated safety hood' appears only in this document."

@@ -1,0 +1,77 @@
+# Aggregation and multi-row reasoning candidates, authored 2026-10-19.
+#
+# Each answer is arithmetic over several rows of one indexed table, not a single-cell lookup. The four source
+# documents (770592.csv, 970969.csv, 468293.csv, 159927.xls) are absent from docs/eval/data-questions.yaml
+# and from the four probes in tests/fixtures/data_suite_run.py. All are staff-visible company/ documents, so
+# only the staff expectation is given.
+#
+# Ground truth is the indexed text: the operands in source_quote are verbatim from chunk_index, and
+# aggregation.evidence.md shows the SQL that recomputes each result from those rows, with the query output.
+# The " ... " between row fragments marks rows omitted for length, the same convention the live suite uses;
+# every fragment between ellipses is exact.
+#
+# These are drafts for review, not the live suite.
+
+- id: CAND_AGGREGATION_01
+  category: aggregation
+  question: "In the Nebraska county population table, what was the combined April 1, 2000 census population of Adams, Antelope, and Arthur counties?"
+  expected:
+    staff: {answered: true, docs: ["company/group-02/770592.csv"], contains: ["39,047"]}
+  source_quote: "Adams | Nebraska | 29,625 | 29,639 | 29,918 | 30,047 | 30,320 | 30,508 | 30,783 | 30,890 | 31,050 | 31,054 | 31,106 | 31,151 ... Antelope | Nebraska | 7,965 | 7,942 | 7,941 | 7,879 | 7,793 | 7,733 | 7,717 | 7,639 | 7,645 | 7,604 | 7,493 | 7,452 ... Arthur | Nebraska | 462 | 468 | 445 | 462 | 472 | 441 | 434 | 429 | 440 | 447 | 445 | 444"
+  evidence: "Summed the April 1, 2000 column over the three rows in chunk 64e809d6-1257-5969-a2d2-58642b6f2d1f; 31,151 + 7,452 + 444 = 39,047."
+
+- id: CAND_AGGREGATION_02
+  category: aggregation
+  question: "In the Nebraska county population table, how many more residents did Boone County have than Boyd County on April 1, 2000?"
+  expected:
+    staff: {answered: true, docs: ["company/group-02/770592.csv"], contains: ["3,821"]}
+  source_quote: "Boone | Nebraska | 6,667 | 6,668 | 6,675 | 6,592 | 6,578 | 6,517 | 6,506 | 6,526 | 6,465 | 6,400 | 6,376 | 6,259 ... Boyd | Nebraska | 2,835 | 2,830 | 2,769 | 2,732 | 2,726 | 2,707 | 2,705 | 2,666 | 2,608 | 2,508 | 2,458 | 2,438"
+  evidence: "Subtracted Boyd's April 1, 2000 value from Boone's in chunk 917d5df0-400e-5c5f-84aa-f4dced16b135; 6,259 - 2,438 = 3,821."
+
+- id: CAND_AGGREGATION_03
+  category: aggregation
+  question: "Among Boyd, Brown, and Buffalo counties in the Nebraska population table, what is the difference between the largest and smallest April 1, 2000 populations?"
+  expected:
+    staff: {answered: true, docs: ["company/group-02/770592.csv"], contains: ["39,821"]}
+  source_quote: "Boyd | Nebraska | 2,835 | 2,830 | 2,769 | 2,732 | 2,726 | 2,707 | 2,705 | 2,666 | 2,608 | 2,508 | 2,458 | 2,438 ... Brown | Nebraska | 3,657 | 3,656 | 3,676 | 3,676 | 3,673 | 3,662 | 3,664 | 3,642 | 3,631 | 3,574 | 3,559 | 3,525 ... Buffalo | Nebraska | 37,447 | 37,603 | 38,195 | 38,774 | 39,515 | 39,834 | 40,381 | 41,084 | 41,310 | 41,716 | 41,904 | 42,259"
+  evidence: "Compared the three rows in chunk 917d5df0-400e-5c5f-84aa-f4dced16b135; Buffalo 42,259 minus Boyd 2,438 = 39,821."
+
+- id: CAND_AGGREGATION_04
+  category: aggregation
+  question: "In the 1993 year-end certificated carrier employment table, how many full-time employees did American, Delta, and United have combined?"
+  expected:
+    staff: {answered: true, docs: ["company/group-01/970969.csv"], contains: ["222,108"]}
+  source_quote: "American | 83,047 | 12,901 | 95,948 ... Delta | 65,212 | 5,916 | 71,128 ... United | 73,849 | 7,662 | 81,511"
+  evidence: "Summed the FULL column over the three rows in chunk c764997d-9e4e-5b43-8350-9a44ff66fe8a; 83,047 + 65,212 + 73,849 = 222,108."
+
+- id: CAND_AGGREGATION_05
+  category: aggregation
+  question: "In the 1993 year-end certificated carrier employment table, how many more total employees did Federal Express have than United?"
+  expected:
+    staff: {answered: true, docs: ["company/group-01/970969.csv"], contains: ["18,825"]}
+  source_quote: "Federal Express | 67,726 | 32,610 | 100,336 ... United | 73,849 | 7,662 | 81,511"
+  evidence: "Subtracted United's TOTAL from Federal Express's in chunk c764997d-9e4e-5b43-8350-9a44ff66fe8a; 100,336 - 81,511 = 18,825."
+
+- id: CAND_AGGREGATION_06
+  category: aggregation
+  question: "In the 1993 year-end certificated carrier employment table, how many employees in total, full-time plus part-time, did the major carriers other than American, Delta, and United have?"
+  expected:
+    staff: {answered: true, docs: ["company/group-01/970969.csv"], contains: ["284,433"]}
+  source_quote: "Total Majors | 457291 | 75729 | 533020 ... American | 83,047 | 12,901 | 95,948 ... Delta | 65,212 | 5,916 | 71,128 ... United | 73,849 | 7,662 | 81,511"
+  evidence: "Subtracted the three TOTAL values from the Total Majors row in chunk c764997d-9e4e-5b43-8350-9a44ff66fe8a; 533,020 - 95,948 - 71,128 - 81,511 = 284,433, and the eight remaining rows sum to the same figure."
+
+- id: CAND_AGGREGATION_07
+  category: aggregation
+  question: "In the Census 2000 school enrollment table that reports 1,230,550 people enrolled in public school, how many people aged 3, 4, and 5 were enrolled in total?"
+  expected:
+    staff: {answered: true, docs: ["company/group-01/468293.csv"], contains: ["86,294"]}
+  source_quote: "..Total | 1,230,550 | 56,045 | 66,597 | 278,685 | 280,868 | 279,656 | 225,950 | 42,749 ... 3 years | 14,455 | 14,176 | 279 | - | - | - | - | - ... 4 years | 26,599 | 25,258 | 1,341 | - | - | - | - | - ... 5 years | 45,240 | 16,611 | 27,021 | 1,608 | - | - | - | -"
+  evidence: "Summed the Total in public school column over the three age rows in chunk 39095b2c-819e-522f-a68c-5282609f3944; 14,455 + 26,599 + 45,240 = 86,294."
+
+- id: CAND_AGGREGATION_08
+  category: aggregation
+  question: "In the merchant acceptance list covering the 4th quarter of 1996 through the 3rd quarter of 1997, how much more was the merchant acceptance amount for GSA/CUST SUPPLY CTR 84 than for JOHNSON & JOHNSON?"
+  expected:
+    staff: {answered: true, docs: ["company/group-02/159927.xls"], contains: ["9,076,788"]}
+  source_quote: "GSA/CUST SUPPLY CTR 84 | TX | FT WORTH | 26649830.44 ... JOHNSON & JOHNSON | NJ | PISCATAWAY | 17573042.44"
+  evidence: "Subtracted Johnson & Johnson's amount from GSA/CUST SUPPLY CTR 84's in chunk d11dcba3-f778-5b0e-b3b6-be6d37cf4987; 26,649,830.44 - 17,573,042.44 = 9,076,788.00."

@@ -19,7 +19,11 @@ What is checked, per question:
     ("59,473 - 48,240 = 11,233"): the operands before the "=" must be in the index and the expected
     values must be inside the quote. The arithmetic itself is reviewed in the evidence file, not
     recomputed here;
-  * an unanswerable question's `absent_pattern` matches zero chunks.
+  * an unanswerable question's `absent_pattern` matches zero chunks;
+  * a question whose expected value is computed rather than printed may carry a `derivation`
+    block. Every operand must occur in the named documents, the operation is recomputed, and the
+    result must be the expected value. The literal path above is unchanged; a derivation is only
+    needed when the source quote does not state the answer.
 
 Usage:
 
@@ -41,6 +45,8 @@ import re
 import sys
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import date
+from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable, Mapping, Protocol, Sequence
 
 import yaml
@@ -51,6 +57,102 @@ ELLIPSIS = re.compile(r"\s*(?:\.\.\.|…)\s*")
 # The operators an arithmetic source quote may use before its "=". Deliberately excludes "x" so a
 # prose quote containing the letter is not split into operands.
 ARITHMETIC_OPERATORS = re.compile(r"\s*[+\-*/×]\s*")
+
+# Derivation support. A derivation states the operands as they appear in the named documents, the
+# operation, and the value the question expects. It exists for answers computed from indexed rows
+# (a sum over three counties, a span between two dates), which cannot appear literally in the text.
+DERIVATION_OPERATIONS = ("sum", "difference", "latest", "days-between", "years-between")
+BETWEEN_OPERATIONS = ("days-between", "years-between")
+
+_NUMBER = re.compile(r"[-+]?\d[\d,]*(?:\.\d+)?")
+_NUMBER_WORDS = {
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+    "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+    "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17,
+    "eighteen": 18, "nineteen": 19, "twenty": 20, "thirty": 30, "forty": 40,
+    "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90,
+}
+_MONTHS = {
+    "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6, "july": 7,
+    "august": 8, "september": 9, "october": 10, "november": 11, "december": 12,
+}
+_MONTH_FIRST = re.compile(r"([A-Za-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?\s*,?\s+(\d{4})")
+_DAY_FIRST = re.compile(r"(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})")
+_SLASH_DATE = re.compile(r"(?<!\d)(\d{1,2})/(\d{1,2})/(\d{2}|\d{4})(?!\d)")
+
+
+def operand_number(value: Any) -> Decimal | None:
+    """The number an operand or result states, as an exact Decimal.
+
+    A digit run wins ("26,649,830.44", "5-year terms", "3 days"). Without one, a spelled-out
+    number is read ("eight years"), because the corpus states some terms in prose. Units are not
+    converted: a derivation's operands must already share the unit its result is stated in.
+    """
+    text = str(value or "").strip()
+    match = _NUMBER.search(text)
+    if match:
+        try:
+            return Decimal(match.group(0).replace(",", ""))
+        except InvalidOperation:
+            return None
+    return _spelled_number(text)
+
+
+def _spelled_number(text: str) -> Decimal | None:
+    total = 0
+    current = 0
+    found = False
+    for token in re.findall(r"[a-z]+(?:-[a-z]+)?", text.lower()):
+        for word in token.split("-"):
+            if word in _NUMBER_WORDS:
+                current += _NUMBER_WORDS[word]
+                found = True
+            elif word == "hundred":
+                current = (current or 1) * 100
+                found = True
+            elif word == "thousand":
+                total += (current or 1) * 1000
+                current = 0
+                found = True
+    return Decimal(total + current) if found else None
+
+
+def parse_date(value: Any) -> date | None:
+    """A date an operand or result states, or None.
+
+    Handles the forms in the corpus: "September 9, 2004" (month first), "30 September 2004" (day
+    first) and the exhibit index's "8/23/24". A two-digit year is read as 20xx, which is safe for
+    this corpus and is pinned by the tests.
+    """
+    text = " ".join(str(value or "").replace("\u00a0", " ").split())
+    match = _MONTH_FIRST.search(text)
+    if match and match.group(1).lower() in _MONTHS:
+        return _safe_date(int(match.group(3)), _MONTHS[match.group(1).lower()], int(match.group(2)))
+    match = _DAY_FIRST.search(text)
+    if match and match.group(2).lower() in _MONTHS:
+        return _safe_date(int(match.group(3)), _MONTHS[match.group(2).lower()], int(match.group(1)))
+    match = _SLASH_DATE.search(text)
+    if match:
+        year = int(match.group(3))
+        year = 2000 + year if year < 100 else year
+        return _safe_date(year, int(match.group(1)), int(match.group(2)))
+    return None
+
+
+def _safe_date(year: int, month: int, day: int) -> date | None:
+    try:
+        return date(year, month, day)
+    except ValueError:
+        return None
+
+
+def completed_years(first: date, second: date) -> int:
+    """Whole years elapsed between two dates, ignoring the order they are given in."""
+    start, end = sorted((first, second))
+    years = end.year - start.year
+    if (end.month, end.day) < (start.month, start.day):
+        years -= 1
+    return years
 
 
 def normalise(text: Any) -> str:
@@ -90,6 +192,15 @@ class Expectation:
 
 
 @dataclass(frozen=True)
+class Derivation:
+    """How a computed expected value follows from indexed operands."""
+
+    operands: tuple[str, ...]
+    operation: str
+    result: str
+
+
+@dataclass(frozen=True)
 class Question:
     id: str
     category: str
@@ -98,6 +209,7 @@ class Question:
     source_quote: str | None = None
     absent_pattern: str | None = None
     evidence: str | None = None
+    derivation: Derivation | None = None
 
 
 @dataclass
@@ -123,6 +235,36 @@ def _string_list(value: Any, where: str, errors: list[str], *, required: bool = 
             return ()
         strings.append(item)
     return tuple(strings)
+
+
+def parse_derivation(raw: Any, where: str, errors: list[str]) -> Derivation | None:
+    """Parse a derivation block, appending shape errors. None when it cannot be used."""
+    if not isinstance(raw, Mapping):
+        errors.append(f"{where}.derivation must be a mapping")
+        return None
+    operands = _string_list(raw.get("operands"), f"{where}.derivation.operands", errors)
+    operation_raw = raw.get("operation")
+    operation = operation_raw.strip() if isinstance(operation_raw, str) else ""
+    if operation not in DERIVATION_OPERATIONS:
+        errors.append(
+            f"{where}.derivation.operation must be one of {', '.join(DERIVATION_OPERATIONS)}; "
+            f"got {operation_raw!r}"
+        )
+    result_raw = raw.get("result")
+    result = result_raw.strip() if isinstance(result_raw, str) else ""
+    if not result:
+        errors.append(f"{where}.derivation.result must be a non-empty string")
+
+    if operands and operation in ("sum", "difference") and len(operands) < 2:
+        errors.append(f"{where}.derivation.operation {operation!r} needs at least two operands")
+    if operands and operation in BETWEEN_OPERATIONS and len(operands) != 2:
+        errors.append(f"{where}.derivation.operation {operation!r} needs exactly two operands")
+    if operands and operation == "latest" and len(operands) < 2:
+        errors.append(f"{where}.derivation.operation 'latest' needs at least two dates")
+
+    if not operands or operation not in DERIVATION_OPERATIONS or not result:
+        return None
+    return Derivation(operands=operands, operation=operation, result=result)
 
 
 def parse_document(document: Any) -> tuple[list[Question], list[str]]:
@@ -173,6 +315,12 @@ def parse_document(document: Any) -> tuple[list[Question], list[str]]:
         evidence = raw.get("evidence")
         if evidence is not None and not isinstance(evidence, str):
             errors.append(f"{where}.evidence must be a string when present")
+        derivation_raw = raw.get("derivation")
+        derivation = (
+            parse_derivation(derivation_raw, where, errors)
+            if derivation_raw is not None
+            else None
+        )
 
         expected_raw = raw.get("expected")
         if not isinstance(expected_raw, Mapping) or not expected_raw:
@@ -234,6 +382,7 @@ def parse_document(document: Any) -> tuple[list[Question], list[str]]:
             source_quote=source_quote.strip() if isinstance(source_quote, str) else None,
             absent_pattern=absent_pattern.strip() if isinstance(absent_pattern, str) else None,
             evidence=evidence,
+            derivation=derivation,
         ))
 
     return questions, errors
@@ -289,6 +438,88 @@ def _quote_failures(question: Question, documents: Sequence[str], index: ChunkIn
     return failures, named
 
 
+def _derivation_failures(derivation: Derivation, expected_values: Sequence[str],
+                         documents: Sequence[str],
+                         doc_texts: Mapping[str, str]) -> list[str]:
+    """Check a derivation against the named documents and its own arithmetic.
+
+    An empty list means the operands are indexed, the operation recomputes and the result is one of
+    the expected values. That is what lets a computed answer stand in for a literal one.
+    """
+    failures: list[str] = []
+    named = [normalise(doc_texts[doc]) for doc in documents if doc in doc_texts]
+    for operand in derivation.operands:
+        needle = normalise(operand)
+        if not needle:
+            failures.append(f"derivation operand {operand!r} has no alphanumerics to look up")
+        elif named and not any(needle in text for text in named):
+            failures.append(f"derivation operand {operand!r} is not in the named documents")
+
+    expected_normalised = {normalise(value) for value in expected_values}
+    if normalise(derivation.result) not in expected_normalised:
+        failures.append(
+            f"derivation.result {derivation.result!r} is not one of the expected contains values"
+        )
+
+    operation = derivation.operation
+    numbers = [operand_number(operand) for operand in derivation.operands]
+    if operation in ("sum", "difference"):
+        if any(number is None for number in numbers):
+            bad = [operand for operand, number in zip(derivation.operands, numbers)
+                   if number is None]
+            failures.append(f"derivation operands {bad!r} are not numeric")
+        else:
+            computed = sum(numbers) if operation == "sum" else numbers[0] - sum(numbers[1:])
+            stated = operand_number(derivation.result)
+            if stated is None:
+                failures.append(f"derivation.result {derivation.result!r} is not numeric")
+            elif computed != stated:
+                failures.append(
+                    f"derivation {operation} recomputes to {computed} but the result states {stated}"
+                )
+    elif operation == "latest":
+        dates = [parse_date(operand) for operand in derivation.operands]
+        if any(parsed is None for parsed in dates):
+            bad = [operand for operand, parsed in zip(derivation.operands, dates) if parsed is None]
+            failures.append(f"derivation operands {bad!r} are not dates")
+        else:
+            result_date = parse_date(derivation.result)
+            if result_date is None:
+                failures.append(f"derivation.result {derivation.result!r} is not a date")
+            elif result_date not in dates:
+                failures.append(
+                    f"derivation.result {derivation.result!r} is not one of the operands"
+                )
+            elif result_date != max(dates):
+                failures.append(
+                    f"derivation.result {derivation.result!r} is not the latest operand date"
+                )
+    else:  # days-between or years-between; the parser guarantees exactly two operands
+        dates = [parse_date(operand) for operand in derivation.operands]
+        if any(parsed is None for parsed in dates):
+            bad = [operand for operand, parsed in zip(derivation.operands, dates) if parsed is None]
+            failures.append(f"derivation operands {bad!r} are not dates")
+        else:
+            stated = operand_number(derivation.result)
+            if stated is None:
+                failures.append(f"derivation.result {derivation.result!r} is not numeric")
+            elif operation == "days-between":
+                computed = abs((dates[0] - dates[1]).days)
+                if stated != computed:
+                    failures.append(
+                        f"derivation days-between recomputes to {computed} days "
+                        f"but the result states {stated}"
+                    )
+            else:
+                computed = completed_years(dates[0], dates[1])
+                if stated != stated.to_integral_value() or stated != computed:
+                    failures.append(
+                        f"derivation years-between recomputes to {computed} completed years "
+                        f"but the result states {stated}"
+                    )
+    return failures
+
+
 def validate_questions(questions: Sequence[Question], index: ChunkIndex,
                        duplicates: Iterable[str] = ()) -> list[QuestionReport]:
     """Run every check against an index, returning one report per question.
@@ -329,11 +560,26 @@ def validate_questions(questions: Sequence[Question], index: ChunkIndex,
             for value in expectation.contains
         ]
 
+        # A valid derivation lets a computed value stand where the quote states only operands.
+        # The literal path is untouched: with no derivation, derived_value stays empty.
+        derivation_ok = False
+        derived_value = ""
+        if question.derivation is not None:
+            derivation_problems = _derivation_failures(
+                question.derivation, expected_values, documents, doc_texts
+            )
+            report.failures.extend(derivation_problems)
+            derivation_ok = not derivation_problems
+            if derivation_ok:
+                derived_value = normalise(question.derivation.result)
+
         if question.source_quote:
             quote_problems, _ = _quote_failures(question, documents, index, doc_texts)
             report.failures.extend(quote_problems)
             for value in expected_values:
                 if normalise(value) not in quote_norm:
+                    if derivation_ok and normalise(value) == derived_value:
+                        continue
                     report.failures.append(f"contains {value!r} is not inside source_quote")
 
         for role, expectation in question.expected.items():
@@ -342,8 +588,11 @@ def validate_questions(questions: Sequence[Question], index: ChunkIndex,
             for value in expectation.contains:
                 needle = normalise(value)
                 # A value in a verified quote is grounded even when the document states the
-                # operands and the answer is derived (the live cross-document questions).
+                # operands and the answer is derived (the live cross-document questions). A
+                # verified derivation grounds it too.
                 if needle not in role_text and needle not in quote_norm:
+                    if derivation_ok and needle == derived_value:
+                        continue
                     report.failures.append(
                         f"expected.{role}.contains {value!r} is not in the named documents "
                         "or in source_quote"

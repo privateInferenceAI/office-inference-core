@@ -215,3 +215,272 @@ def test_absent_pattern_must_match_zero_chunks():
     report = check(FakeIndex({"company/doc.txt": "The answer is 42."}, absent_matches=2), absent_pattern="cafeteria")
     assert not report.passed
     assert any("matches 2 chunk" in failure for failure in report.failures)
+
+# --------------------------------------------------------------------------- derivation
+
+def derivation(**overrides):
+    base = {"operands": ["10", "32"], "operation": "sum", "result": "42"}
+    base.update(overrides)
+    return base
+
+
+def test_a_derivation_parses_into_operands_operation_and_result():
+    questions, errors = parse(derivation=derivation())
+    assert errors == []
+    parsed = questions[0].derivation
+    assert parsed is not None
+    assert parsed.operands == ("10", "32")
+    assert parsed.operation == "sum"
+    assert parsed.result == "42"
+
+
+def test_a_derivation_must_be_a_mapping():
+    _, errors = parse(derivation=["10", "32"])
+    assert any(".derivation must be a mapping" in error for error in errors)
+
+
+def test_an_unknown_derivation_operation_is_refused():
+    _, errors = parse(derivation=derivation(operation="average"))
+    assert any("operation" in error and "average" in error for error in errors)
+
+
+def test_a_sum_needs_at_least_two_operands():
+    _, errors = parse(derivation=derivation(operands=["42"]))
+    assert any("at least two operands" in error for error in errors)
+
+
+def test_a_between_operation_needs_exactly_two_operands():
+    _, errors = parse(derivation=derivation(operation="days-between",
+                                            operands=["September 9, 2004",
+                                                      "September 30, 2004",
+                                                      "October 1, 2004"]))
+    assert any("exactly two operands" in error for error in errors)
+
+
+def test_a_sum_derivation_admits_a_value_the_quote_does_not_state():
+    report = check(
+        FakeIndex({"company/doc.txt": "The table reports 10 and 32."}),
+        expected={"staff": {"answered": True, "docs": ["company/doc.txt"],
+                            "contains": ["42"]}},
+        source_quote="The table reports 10 and 32",
+        derivation=derivation(),
+    )
+    assert report.passed, report.failures
+
+
+def test_a_derivation_operand_missing_from_the_document_is_reported():
+    report = check(
+        FakeIndex({"company/doc.txt": "The table reports 10 only."}),
+        expected={"staff": {"answered": True, "docs": ["company/doc.txt"],
+                            "contains": ["42"]}},
+        source_quote="The table reports 10 only",
+        derivation=derivation(),
+    )
+    assert not report.passed
+    assert any("operand '32' is not in the named documents" in failure
+               for failure in report.failures)
+
+
+def test_a_derivation_whose_arithmetic_is_wrong_is_reported():
+    report = check(
+        FakeIndex({"company/doc.txt": "The table reports 10 and 32."}),
+        expected={"staff": {"answered": True, "docs": ["company/doc.txt"],
+                            "contains": ["43"]}},
+        source_quote="The table reports 10 and 32",
+        derivation=derivation(result="43"),
+    )
+    assert not report.passed
+    assert any("sum recomputes to 42" in failure for failure in report.failures)
+
+
+def test_a_derivation_result_must_be_an_expected_value():
+    report = check(
+        FakeIndex({"company/doc.txt": "The table reports 10 and 32."}),
+        expected={"staff": {"answered": True, "docs": ["company/doc.txt"],
+                            "contains": ["99"]}},
+        source_quote="The table reports 10 and 32",
+        derivation=derivation(result="42"),
+    )
+    assert not report.passed
+    assert any("is not one of the expected contains values" in failure
+               for failure in report.failures)
+
+
+def test_a_derivation_does_not_excuse_a_different_missing_value():
+    report = check(
+        FakeIndex({"company/doc.txt": "The table reports 10 and 32."}),
+        expected={"staff": {"answered": True, "docs": ["company/doc.txt"],
+                            "contains": ["42", "99"]}},
+        source_quote="The table reports 10 and 32",
+        derivation=derivation(),
+    )
+    assert not report.passed
+    assert any("contains '99' is not inside source_quote" in failure
+               for failure in report.failures)
+
+
+def test_a_difference_may_chain_more_than_two_operands():
+    rows = ("Total Majors | 457291 | 75729 | 533020 ... "
+            "American | 83,047 | 12,901 | 95,948 ... "
+            "Delta | 65,212 | 5,916 | 71,128 ... "
+            "United | 73,849 | 7,662 | 81,511")
+    report = check(
+        FakeIndex({"company/doc.txt": rows}),
+        expected={"staff": {"answered": True, "docs": ["company/doc.txt"],
+                            "contains": ["284,433"]}},
+        source_quote=rows,
+        derivation=derivation(
+            operands=["533,020", "95,948", "71,128", "81,511"],
+            operation="difference",
+            result="284,433",
+        ),
+    )
+    assert report.passed, report.failures
+
+
+def test_days_between_counts_the_span():
+    quote = "Adopted:  September 9, 2004\tReleased:  September 30, 2004"
+    report = check(
+        FakeIndex({"company/doc.txt": quote}),
+        expected={"staff": {"answered": True, "docs": ["company/doc.txt"],
+                            "contains": ["21"]}},
+        source_quote=quote,
+        derivation=derivation(
+            operands=["September 9, 2004", "September 30, 2004"],
+            operation="days-between",
+            result="21",
+        ),
+    )
+    assert report.passed, report.failures
+
+
+def test_days_between_with_the_wrong_span_is_reported():
+    quote = "Adopted:  September 9, 2004\tReleased:  September 30, 2004"
+    report = check(
+        FakeIndex({"company/doc.txt": quote}),
+        expected={"staff": {"answered": True, "docs": ["company/doc.txt"],
+                            "contains": ["20"]}},
+        source_quote=quote,
+        derivation=derivation(
+            operands=["September 9, 2004", "September 30, 2004"],
+            operation="days-between",
+            result="20",
+        ),
+    )
+    assert not report.passed
+    assert any("recomputes to 21 days" in failure for failure in report.failures)
+
+
+def test_years_between_counts_completed_years():
+    quote = "June 1, 2018 ... July 1, 2021"
+    report = check(
+        FakeIndex({"company/doc.txt": quote}),
+        expected={"staff": {"answered": True, "docs": ["company/doc.txt"],
+                            "contains": ["3"]}},
+        source_quote=quote,
+        derivation=derivation(
+            operands=["June 1, 2018", "July 1, 2021"],
+            operation="years-between",
+            result="3",
+        ),
+    )
+    assert report.passed, report.failures
+
+
+def test_years_between_rejects_a_fractional_result():
+    quote = "June 1, 2018 ... July 1, 2021"
+    report = check(
+        FakeIndex({"company/doc.txt": quote}),
+        expected={"staff": {"answered": True, "docs": ["company/doc.txt"],
+                            "contains": ["3.5"]}},
+        source_quote=quote,
+        derivation=derivation(
+            operands=["June 1, 2018", "July 1, 2021"],
+            operation="years-between",
+            result="3.5",
+        ),
+    )
+    assert not report.passed
+    assert any("recomputes to 3 completed years" in failure
+               for failure in report.failures)
+
+
+def test_latest_accepts_the_maximum_operand():
+    quote = ("Adopted: September 13, 2001 ... Released: September 20, 2001 ... "
+             "Comment Date: December 3, 2001 ... Reply Comment Date: January 7, 2002")
+    report = check(
+        FakeIndex({"company/doc.txt": quote}),
+        expected={"staff": {"answered": True, "docs": ["company/doc.txt"],
+                            "contains": ["January 7, 2002"]}},
+        source_quote=quote,
+        derivation=derivation(
+            operands=["September 13, 2001", "September 20, 2001",
+                      "December 3, 2001", "January 7, 2002"],
+            operation="latest",
+            result="January 7, 2002",
+        ),
+    )
+    assert report.passed, report.failures
+
+
+def test_latest_rejects_an_operand_that_is_not_the_maximum():
+    quote = ("Adopted: September 13, 2001 ... Released: September 20, 2001")
+    report = check(
+        FakeIndex({"company/doc.txt": quote}),
+        expected={"staff": {"answered": True, "docs": ["company/doc.txt"],
+                            "contains": ["September 13, 2001"]}},
+        source_quote=quote,
+        derivation=derivation(
+            operands=["September 13, 2001", "September 20, 2001"],
+            operation="latest",
+            result="September 13, 2001",
+        ),
+    )
+    assert not report.passed
+    assert any("not the latest operand date" in failure for failure in report.failures)
+
+
+def test_a_date_operation_rejects_a_non_date_operand():
+    quote = "The table reports 10 and 32."
+    report = check(
+        FakeIndex({"company/doc.txt": quote}),
+        expected={"staff": {"answered": True, "docs": ["company/doc.txt"],
+                            "contains": ["42"]}},
+        source_quote=quote,
+        derivation=derivation(operation="latest", result="42"),
+    )
+    assert not report.passed
+    assert any("are not dates" in failure for failure in report.failures)
+
+
+def test_spelled_out_operands_are_read_as_numbers():
+    quote = ("NASA limits its SAAs to 5-year terms in all but very few cases ... "
+             "All broadcast station licenses are granted by the Commission for eight years.")
+    report = check(
+        FakeIndex({"company/doc.txt": quote}),
+        expected={"staff": {"answered": True, "docs": ["company/doc.txt"],
+                            "contains": ["3"]}},
+        source_quote=quote,
+        derivation=derivation(
+            operands=["eight years", "5-year terms"],
+            operation="difference",
+            result="3",
+        ),
+    )
+    assert report.passed, report.failures
+
+
+def test_a_normalised_operand_matches_an_unpunctuated_document():
+    quote = "Total Majors | 533020 ... Other | 533017"
+    report = check(
+        FakeIndex({"company/doc.txt": quote}),
+        expected={"staff": {"answered": True, "docs": ["company/doc.txt"],
+                            "contains": ["3"]}},
+        source_quote=quote,
+        derivation=derivation(
+            operands=["533,020", "533,017"],
+            operation="difference",
+            result="3",
+        ),
+    )
+    assert report.passed, report.failures

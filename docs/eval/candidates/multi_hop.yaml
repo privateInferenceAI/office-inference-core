@@ -1,0 +1,44 @@
+# Candidate multi-hop questions for the RAG answer-quality suite.
+#
+# Drafts only: nothing here is scored until it is reviewed and accepted into
+# docs/eval/data-questions.yaml. Each question needs a fact from two named prose
+# documents; the exact SQL, both carrying passages and the duplicate check are in
+# multi_hop.evidence.md.
+#
+# The corpus has few cross-referenced company pairs, so these are deliberate
+# two-document syntheses: two FCC regulatory periods, an FCC period against a NASA
+# period, an Apple exhibit against the Apple 10-K that describes its plan, and an
+# Apple vesting period against an Acurx purchase period. Every fact is stated in the
+# indexed text and quoted in the evidence file.
+
+- id: CAND_multi_hop_01
+  category: multi_hop
+  question: "According to the FCC's license renewal guide, broadcast station licenses are granted for eight years. The FCC's 2004 digital LPTV order allows three years from permit issuance to complete construction. If a station used both periods in full, how many years would they total?"
+  expected:
+    staff: {answered: true, docs: ["company/group-02/069856.doc", "company/group-02/545688.doc"], contains: ["11"]}
+  source_quote: "Each original construction permit for the construction of a new digital low power television or television translator station shall specify a period of three years from the date of issuance of the original construction permit ... All broadcast station licenses are granted by the Commission for eight years."
+  evidence: "select doc_id, chunk_id, left(text, 420) from chunk_index where doc_id in ('company/group-02/545688.doc','company/group-02/069856.doc') and (text ilike '%period of three years from the date of issuance%' or text ilike '%granted by the Commission for eight years%') order by doc_id returns both sentences; 3 + 8 = 11 years."
+
+- id: CAND_multi_hop_02
+  category: multi_hop
+  question: "According to the FCC's license renewal guide, all broadcast station licenses are granted for eight years. NASA's Space Act Agreements Guide limits Space Act Agreements to 5-year terms in all but very few cases. How many years longer is the FCC license term than the NASA limit?"
+  expected:
+    staff: {answered: true, docs: ["company/group-02/069856.doc", "company/group-02/173609.doc"], contains: ["3"]}
+  source_quote: "NASA limits its SAAs to 5-year terms in all but very few cases ... All broadcast station licenses are granted by the Commission for eight years."
+  evidence: "select doc_id, chunk_id, left(text, 380) from chunk_index where doc_id in ('company/group-02/173609.doc','company/group-02/069856.doc') and (text ilike '%5-year terms%' or text ilike '%granted by the Commission for eight years%') order by doc_id returns both sentences; 8 - 5 = 3 years."
+
+- id: CAND_multi_hop_03
+  category: multi_hop
+  question: "In Exhibit 10.19 to Apple's 2024 Form 10-K, the restricted stock unit award agreement's Notice of Grant includes a Vesting Commencement Date. According to the 2024 Form 10-K, over how many years do RSUs granted under the 2022 Employee Stock Plan generally vest?"
+  expected:
+    staff: {answered: true, docs: ["company/apple-ex10-1-2024.htm", "company/apple-10k-2024.htm"], contains: ["four years"]}
+  source_quote: "2022 EMPLOYEE STOCK PLAN ... RESTRICTED STOCK UNIT AWARD AGREEMENT ... RSUs granted under the 2022 Plan generally vest over four years"
+  evidence: "select doc_id, chunk_id, left(text, 300) from chunk_index where (doc_id='company/apple-ex10-1-2024.htm' and text ilike '%Exhibit 10.19%') or (doc_id='company/apple-10k-2024.htm' and text ilike '%generally vest over four years%') returns the exhibit title naming the 2022 plan and the 10-K sentence stating four years."
+
+- id: CAND_multi_hop_04
+  category: multi_hop
+  question: "Apple's 2024 Form 10-K states that RSUs granted under the 2022 Employee Stock Plan generally vest over four years. Acurx's S-1 states that shares registered in the offering may be sold to Lincoln Park over a period of up to 24 months. How many months longer is Apple's standard RSU vesting period than Acurx's purchase period?"
+  expected:
+    staff: {answered: true, docs: ["company/apple-10k-2024.htm", "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm"], contains: ["24"]}
+  source_quote: "RSUs granted under the 2022 Plan generally vest over four years ... the shares registered in this offering may be sold to Lincoln Park at our discretion over a period of up to 24 months beginning on the Commencement Date."
+  evidence: "select doc_id, chunk_id, left(text, 420) from chunk_index where doc_id in ('company/apple-10k-2024.htm','company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm') and (text ilike '%generally vest over four years%' or text ilike '%period of up to 24 months%') order by doc_id returns both facts; 4 years = 48 months, so 48 - 24 = 24 months."

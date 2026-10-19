@@ -1,0 +1,54 @@
+# Candidate date-arithmetic questions for the RAG answer-quality suite.
+#
+# Drafts only: nothing here is scored until it is reviewed and accepted into
+# docs/eval/data-questions.yaml. Every expected value was read from chunk_index on the
+# deployment (2026-10-19) and the carrying passage is quoted in source_quote. The exact
+# SQL, the result, the arithmetic and the duplicate check are in
+# date_arithmetic.evidence.md.
+#
+# One candidate for each kind the axis calls for: a difference between two dates, the
+# latest of several dates, a duration from an effective date to a filing date, and a
+# deadline with an extended date.
+
+- id: CAND_date_arithmetic_01
+  category: date_arithmetic
+  question: "How many days elapsed between the adoption and release of the FCC's Report and Order in MB Docket No. 03-185 on digital low power television stations?"
+  expected:
+    staff: {answered: true, docs: ["company/group-02/545688.doc"], contains: ["21"]}
+  source_quote: "Adopted:  September 9, 2004\tReleased:  September 30, 2004"
+  evidence: "select doc_id, chunk_id, page_start, left(text, 450) from chunk_index where doc_id='company/group-02/545688.doc' and text ilike '%Adopted:%' returns one chunk carrying both dates; 30 September minus 9 September 2004 is 21 days."
+
+- id: CAND_date_arithmetic_02
+  category: date_arithmetic
+  question: "The FCC's order and notice of proposed rulemaking in MM Docket No. 96-197 lists an adoption date, a release date, a comment date, and a reply comment date. Which of those four dates is the latest?"
+  expected:
+    staff: {answered: true, docs: ["company/group-01/012148.doc"], contains: ["January 7, 2002"]}
+  source_quote: |
+    Adopted:
+
+    September 13, 2001
+
+    Released:
+
+    September 20, 2001
+
+    Comment Date:  December 3, 2001
+
+    Reply Comment Date: January 7, 2002
+  evidence: "select doc_id, chunk_id, page_start, left(text, 450) from chunk_index where doc_id='company/group-01/012148.doc' and text ilike '%Reply Comment Date%' returns the four dates on the order's face; the reply comment date, January 7, 2002, is later than December 3, 2001, September 20, 2001 and September 13, 2001."
+
+- id: CAND_date_arithmetic_03
+  category: date_arithmetic
+  question: "Apple's 2024 Form 10-K exhibit index lists the Amended and Restated Bylaws as effective as of August 20, 2024, filed on Form 8-K. According to the filing date in that exhibit index, how many days after the effective date was the 8-K filed?"
+  expected:
+    staff: {answered: true, docs: ["company/apple-10k-2024.htm"], contains: ["3 days"]}
+  source_quote: "3.2 | Amended and Restated Bylaws of the Registrant effective as of August 20, 2024. | 8-K | 3.2 | 8/23/24"
+  evidence: "select chunk_id, left(text, 260) from chunk_index where doc_id='company/apple-10k-2024.htm' and text ilike '%Amended and Restated Bylaws%' and text like '%8/23/24%' returns the row, and the table header chunk 7ae45cc9-b3c8-5064-be84-90238cdfe9f4 names the last column 'Filing Date/ Period End Date'; August 23 minus August 20, 2024 is 3 days."
+
+- id: CAND_date_arithmetic_04
+  category: date_arithmetic
+  question: "Under IRS Publication 15 for 2026, how many days after the standard deadline for filing the 2025 Form 940 may an employer that deposited all FUTA tax when due file it?"
+  expected:
+    staff: {answered: true, docs: ["company/irs-p15.pdf"], contains: ["8"]}
+  source_quote: "File your 2025 Form 940 by February 2, 2026. However, if you deposited all FUTA tax when due, you may file on or before February 10, 2026."
+  evidence: "select doc_id, chunk_id, page_start, text from chunk_index where doc_id='company/irs-p15.pdf' and text ilike '%2025 Form 940%' returns one chunk with both dates; February 10 minus February 2, 2026 is 8 days."
