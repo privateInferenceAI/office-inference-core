@@ -106,3 +106,23 @@ def api_app():
             "Run: pip install 'fastapi==0.143.0' 'sse-starlette==3.0.2'"
         )
     return app_module.app
+
+# --------------------------------------------------------------------------- no network from a unit test
+#
+# **A test that talks to Bedrock is a test that behaves differently on every machine.** The retriever calls the
+# reranker when the module is importable, and `rerank.available()` is true wherever AWS credentials happen to exist.
+# On a developer machine with credentials, the retriever tests therefore made real Bedrock calls, which is slow,
+# costs money and made one assertion (`fused_score > 0`) fail only where the network answered. The failing test was
+# reported as a pre-existing retriever failure for a day; the defect was the suite's hermeticity, not the retriever.
+#
+# So the reranker is switched off for every test file except the ones that test it. Those opt back in by having
+# `rerank` in their filename and stubbing their own transport.
+@pytest.fixture(autouse=True)
+def _no_network_reranker(request, monkeypatch):
+    if "rerank" in Path(str(request.node.fspath)).name:
+        return
+    try:
+        import rerank as rerank_module
+    except Exception:  # noqa: BLE001 - a test environment without the retrieval deps is not this fixture's problem
+        return
+    monkeypatch.setattr(rerank_module, "available", lambda: False, raising=False)
