@@ -174,7 +174,7 @@ and N04 in one. This is a new baseline, not an improvement claim, because the ru
 (aggregation, date arithmetic, multi-hop, untouched-document coverage), with a validator that proves computed
 answers through their operands. It is not the scored instrument yet.
 
-**Chain measurement** (primary failed on purpose, instrument = the redesigned probes): **(pending)**.
+**Chain measurement** (instrument = the redesigned probes): healthy five runs scored 52, 52, 52, 52, 52 of 53 with zero of 492 model calls failing over. With the primary failed on purpose, five runs scored the same 52, 52, 52, 52, 52, zero degraded answers, and every one of the 265 answer rows came through the us-east-2 Haiku entry. With both that entry and the primary failed, four of four answers came from Nova Pro (two of four questions correct: the third leg works, and it is a last resort). Cost per answer about 0.0134 USD, p95 about 12 seconds. Evidence: `docs/reviews/regional-fallback-2026-10-19.md`.
 
 ## 3. What was built, in order, and why
 

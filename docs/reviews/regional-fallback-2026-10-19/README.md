@@ -51,4 +51,21 @@ and the shape to copy is the policy above with the client's account id.
 
 All runs use the redesigned five-probe instrument (PR #192), tool loop on, query tool on.
 
-**(pending - filled before merge)**
+All runs use the redesigned five-probe instrument (PR #192), tool loop on, query tool on. The healthy
+configuration has the chain configured and inert; the fault configuration points the primary at the fault stub.
+
+| Configuration | Runs | Mean of 53 | Failures | Degraded | Fallback used | p50 | p95 | Cost per answer |
+|---|---|---|---|---|---|---|---|---|
+| pre-chain baseline (instrument PR) | 52, 52, 52, 51, 52 | 51.8 | U08 x5, N04 x1 | 0 | n/a | 3,436 ms | 12,297 ms | 0.01343 USD |
+| chain, healthy | 52, 52, 52, 52, 52 | 52.0 | U08 x5 | 0 | 0 of 492 calls | 3,198 ms | 12,744 ms | 0.01339 USD |
+| chain, primary failed | 52, 52, 52, 52, 52 | 52.0 | U08 x5 | 0 | 265 of 265 answer rows via analyst-fallback (us-east-2 Haiku) | 3,428 ms | 11,819 ms | 0.01345 USD |
+| primary and first fallback failed (4-question subset) | 2 of 4 | n/a | N04, N06 | 0 | 4 of 4 via analyst-fallback-2 (Nova Pro) | n/a | n/a | n/a |
+
+**What the numbers say.** A primary outage costs nothing in answer quality while the same model still answers from
+the other Region: score, latency and cost match the healthy baseline. When the same model is unavailable in both
+Regions, the third entry answers, and the subset shows the expected quality drop (two of four exact-number
+questions wrong) rather than a degraded answer. The third leg is a last resort, not an equivalent.
+
+**The client's wait and spend** are on the acceptance panel in
+docs/reviews/acceptance-panel-2026-10-19.md: about 0.0134 USD per answer at about three provider calls per answer,
+p95 between 11.8 and 12.7 seconds across the three configurations.
