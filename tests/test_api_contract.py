@@ -248,6 +248,20 @@ def test_every_audit_column_the_api_is_handed_reaches_the_tool():
     assert "request-id" in passed, "the request id specifically is not passed to the tool"
 
 
+def test_a_tool_call_record_names_the_tool():
+    """**The tool keyword every tool call passes was silently discarded.** The loop's audit wrapper calls
+    `audit(..., tool=name)`, and `audit()` never read that keyword, so every `tool_call` row in the chain
+    named no tool while the column and the CLI flag had both existed from the start. The test above cannot
+    catch this, because it only checks the keywords `audit()` reads: a keyword it ignores is invisible to it.
+    Found on 2026-10-19 while adding the row query, when its own calls could not be counted by tool.
+    """
+    source = APP.read_text()
+    start = source.index("def audit(event: str")
+    body = source[start:source.index("\ndef ", start + 10)]
+    assert 'extra.get("tool")' in body, "audit() ignores the tool= keyword every tool call passes"
+    assert '"--tool"' in body, "audit() reads the tool name and does not pass it to the tool"
+
+
 def test_the_answer_and_its_row_share_one_identifier():
     """The id in the response and the id in the record are the same value, produced once.
 
