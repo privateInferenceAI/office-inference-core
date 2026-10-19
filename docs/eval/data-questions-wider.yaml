@@ -1,0 +1,824 @@
+# Wider data-question set for future measurement, assembled 2026-10-19.
+#
+# This is the live forty (docs/eval/data-questions.yaml, reproduced unchanged below) plus the
+# twenty-six candidates from docs/eval/candidates/ at commit da08258 that passed mechanical validation:
+# 66 questions in
+# all. It is not the frozen instrument: the forty stay frozen for comparisons with earlier runs, and
+# this file is what a future, harder measurement should point at. The per-candidate verdicts are in
+# docs/eval/candidates/VALIDATION.md.
+#
+# Thirteen of the candidates state a computed answer, so their expected value is not literal in
+# source_quote. Each carries a `derivation` block instead: the indexed operands, the operation and the
+# result. The validator checks every operand against the named documents' text and recomputes the
+# value; a question without a derivation still needs the value literally in source_quote or in the
+# document. The section on derivation in VALIDATION.md states the rules.
+#
+# **Known baseline failure, left unchanged on purpose.** U05's absent_pattern "cafeteria" matches nine
+# chunks in the current index: seven in IRS Publication 15's "cafeteria plan" tax text and two in a
+# Minnesota school pesticide table's "Cafeteria and kitchen" cell. The question is still substantively
+# unanswerable (no menu is indexed), but the suite's own rule says an absent_pattern must match zero
+# chunks, so the validator reports U05 as failing. The forty are frozen for this change; replacing
+# U05 is a separate edit to docs/eval/data-questions.yaml.
+#
+# The accepted candidates keep their own category names: aggregation, date_arithmetic, multi_hop and
+# coverage. None of them duplicates a live question id; no id was rewritten.
+#
+# Run it with the existing runner, from the repository root on the box, with the eval image:
+#
+#   docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
+#     run -T --rm --no-deps --entrypoint python -v /opt/oi-core:/w:ro -w /w \
+#     -e DATA_SUITE_QUESTIONS=/w/docs/eval/data-questions-wider.yaml eval \
+#     /w/tests/fixtures/data_suite_run.py
+#
+# DATA_SUITE_QUESTIONS is the path inside the container, not the host path. Add --no-answers for the
+# retrieval-only smoke test. The validator reads the same file directly:
+#
+#   DATABASE_URL=... python3 scripts/validate_data_questions.py docs/eval/data-questions-wider.yaml
+#
+# Header ends here; the live file's own header follows.
+
+# Forty questions for the corpus in /opt/oi-core/documents, authored 2026-10-17.
+#
+# **Ground truth comes from the documents, not from the system's answers.** Every expected value below was read
+# from the ingested source text (the `chunk_index` copy of the parser output) and the quote that carries it is in
+# `source_quote`, so a reviewer can check the question before the runner asks it. Nothing here was written by
+# looking at what the assistant said.
+#
+# The corpus is the group-01/02/03 corpus: `company/` for group-01 and group-02, `executive/` for group-03 plus
+# the executive compensation memorandum. Documents are mostly public-domain filings and data tables with numeric
+# names, so some questions name the document; a scoped question is a legitimate question, and it is the only way
+# to keep a numeric table's answer unambiguous.
+#
+# Scoring, for the runner:
+#   * `answered` is whether the system produced an answer grounded in the corpus at all.
+#   * `docs` are the documents the retrieved passages must include for a retrieval hit.
+#   * `contains` is compared case-insensitively after removing commas, dollar signs, percent signs and spaces,
+#     so "48,240", "48240" and "$48,240" all match.
+#   * `denied` means the access boundary must refuse or withhold: no passage from a document outside the role's
+#     folders, and the answer must say it cannot see it rather than invent.
+#   * For `expected.staff` and `expected.executive`, they differ only for the access category by design.
+#
+# **Three questions were corrected on 2026-10-19 after measurement showed them failing deterministically**: A06
+# was ambiguous (the document states three uniqueness rules), P05 asked for a telephone number that the answer
+# redaction masks by policy, and P06 asked for a single FPCON condition in a document that lists all four. Each
+# entry says what changed and why; the diagnosis is docs/reviews/deterministic-failures-2026-10-19.md. The
+# question count and the categories are unchanged.
+version: 1
+authored: "2026-10-17"
+corrected: "2026-10-19"
+corpus: "company/group-01, company/group-02, executive/group-03, executive/executive-compensation.md"
+
+questions:
+  # ---------------------------------------------------------------- exact numbers from tables (8)
+  # Each question is anchored on a value that appears in exactly one document (checked against chunk_index), so a
+  # repeated table id in another file cannot send retrieval to a twin with different numbers.
+  - id: N01
+    category: exact_number
+    question: "In the census table that reports a median household income of 59,473 dollars, what is the mean household income?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/471787.csv"], contains: ["77,258"]}
+      executive: {answered: true, docs: ["company/group-02/471787.csv"], contains: ["77,258"]}
+    source_quote: "DP03 | 63.0 | Median household income (dollars) | 59,473 ... DP03 | 64.0 | Mean household income (dollars) | 77,258"
+
+  - id: N02
+    category: exact_number
+    question: "In the census table that reports a median household income of 48,240 dollars, what is the mean household income?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/048411.csv"], contains: ["61,958"]}
+      executive: {answered: true, docs: ["company/group-02/048411.csv"], contains: ["61,958"]}
+    source_quote: "DP03 | 63.0 | Median household income (dollars) | 48,240 ... DP03 | 64.0 | Mean household income (dollars) | 61,958"
+
+  - id: N03
+    category: exact_number
+    question: "In the census table that reports a median household income of 59,473 dollars, how many households earn 200,000 dollars or more?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/471787.csv"], contains: ["163,932"]}
+      executive: {answered: true, docs: ["company/group-02/471787.csv"], contains: ["163,932"]}
+    source_quote: "DP03 | 62.0 | $200,000 or more | 163,932 | +/-4,900 | 4.7"
+
+  - id: N04
+    category: exact_number
+    question: "In the census table that reports a median household income of 48,240 dollars, how many households earn 200,000 dollars or more?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/048411.csv"], contains: ["14,353"]}
+      executive: {answered: true, docs: ["company/group-02/048411.csv"], contains: ["14,353"]}
+    source_quote: "DP03 | 62.0 | $200,000 or more | 14,353 | +/-1,884 | 2.4"
+
+  - id: N05
+    category: exact_number
+    question: "In the census table that reports male median earnings of 33,270 dollars, what is the median earnings for women?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/294613.csv"], contains: ["25,307"]}
+      executive: {answered: true, docs: ["company/group-02/294613.csv"], contains: ["25,307"]}
+    source_quote: "S0802 | 37.0 | Median earnings (dollars) | 31,638 | +/-67 | 33,270 | +/-142 | 25,307"
+
+  - id: N06
+    category: exact_number
+    question: "In the census table that reports male median earnings of 33,270 dollars, what is the overall median earnings figure for workers 16 years and over?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/294613.csv"], contains: ["31,638"]}
+      executive: {answered: true, docs: ["company/group-02/294613.csv"], contains: ["31,638"]}
+    source_quote: "S0802 | 37.0 | Median earnings (dollars) | 31,638"
+
+  - id: N07
+    category: exact_number
+    question: "In the census table that reports 15,455 households in the 150,000 to 199,999 dollar band, what percentage of households is that?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/048411.csv"], contains: ["2.6"]}
+      executive: {answered: true, docs: ["company/group-02/048411.csv"], contains: ["2.6"]}
+    source_quote: "DP03 | 61.0 | $150,000 to $199,999 | 15,455 | +/-1,906 | 2.6"
+
+  - id: N08
+    category: exact_number
+    question: "What is the assumed public offering price per share in the Acurx S-1 registration statement?"
+    expected:
+      staff: {answered: true, docs: ["company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm"], contains: ["1.45"]}
+      executive: {answered: true, docs: ["company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm"], contains: ["1.45"]}
+    source_quote: "Assumed public offering price per share | $ | 1.45"
+
+  # ---------------------------------------------------------------- prose facts (8)
+  - id: P01
+    category: prose_fact
+    question: "What is the CFDA number of the Native Hawaiian Career and Technical Education Program grant application?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/956808.doc"], contains: ["84.259A"]}
+      executive: {answered: true, docs: ["company/group-02/956808.doc"], contains: ["84.259A"]}
+    source_quote: "CFDA Number 84.259A"
+
+  - id: P02
+    category: prose_fact
+    question: "Is participation in Grants.gov voluntary for the Native Hawaiian Career and Technical Education Program application?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/956808.doc"], contains: ["voluntary"]}
+      executive: {answered: true, docs: ["company/group-02/956808.doc"], contains: ["voluntary"]}
+    source_quote: "Your participation in Grants.gov is voluntary."
+
+  - id: P03
+    category: prose_fact
+    question: "In the NASA foreign agreements chapter, which numbered agreement covers reimbursable travel?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/173609.doc"], contains: ["4.6.4", "Reimbursable Travel"]}
+      executive: {answered: true, docs: ["company/group-02/173609.doc"], contains: ["4.6.4", "Reimbursable Travel"]}
+    source_quote: "4.6.4. REIMBURSABLE TRAVEL AGREEMENT 3"
+
+  - id: P04
+    category: prose_fact
+    question: "What must be personally verified for each signatory under section 2.2.16 of the NASA agreement form?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/173609.doc"], contains: ["name and title"]}
+      executive: {answered: true, docs: ["company/group-02/173609.doc"], contains: ["name and title"]}
+    source_quote: "Please provide the name and title of each signatory, wherein the name and title has been personally verified by each signatory."
+
+  - id: P05
+    category: prose_fact
+    # **Rewritten 2026-10-19: the value is masked by the answer redaction.** The telephone number is in the
+    # document and the model found it; the egress redaction replaces every phone number in the returned answer
+    # with [REDACTED-PHONE] by policy, so this question could never pass and was testing the redaction rather
+    # than retrieval. This version asks for a fact in the same communications section that the policy does not
+    # mask. The original phone-number question is recorded as a redaction probe candidate in
+    # docs/reviews/deterministic-failures-2026-10-19.md.
+    question: "What communication equipment is assigned to each sentry in the sample post orders?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/104644.doc"], contains: ["portable radio"]}
+      executive: {answered: true, docs: ["company/group-02/104644.doc"], contains: ["portable radio"]}
+    source_quote: "Portable Radio: Each sentry assigned to the post will be equipped with a portable radio."
+
+  - id: P06
+    category: prose_fact
+    # **Rewritten 2026-10-19: the original question had no single answer.** The document is a sample-post-orders
+    # template whose manning/arming table lists FPCON A, B, C and D, so no one condition is "the" FPCON at the
+    # post. The original expected value came from a misread of merged table cells. This version asks for one row
+    # of that table, which the parsed index states twice (manning/arming and hours of operation).
+    question: "According to the manning and arming requirements in the sample post orders, what is the requirement for FPCON D?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/104644.doc"], contains: ["Closed"]}
+      executive: {answered: true, docs: ["company/group-02/104644.doc"], contains: ["Closed"]}
+    source_quote: "FPCON \"D\" Closed"
+
+  - id: P07
+    category: prose_fact
+    question: "When was the Acurx Pharmaceuticals S-1 filed with the Securities and Exchange Commission?"
+    expected:
+      staff: {answered: true, docs: ["company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm"], contains: ["September 8, 2026"]}
+      executive: {answered: true, docs: ["company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm"], contains: ["September 8, 2026"]}
+    source_quote: "As filed with the Securities and Exchange Commission on September 8, 2026"
+
+  - id: P08
+    category: prose_fact
+    question: "How many shares of common stock are being offered under the Acurx prospectus?"
+    expected:
+      staff: {answered: true, docs: ["company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm"], contains: ["1,500,000"]}
+      executive: {answered: true, docs: ["company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm"], contains: ["1,500,000"]}
+    source_quote: "$1.45(3) | 1,500,000 | 21.25% | $ | 2,175,000"
+
+  # ---------------------------------------------------------------- unanswerable, verified absent (8)
+  # Each keyword pattern was checked against chunk_index and returns zero rows. The system must say it cannot
+  # answer from the corpus rather than invent an answer or cite an unrelated passage.
+  - id: U01
+    category: unanswerable
+    question: "What Q4 dividend did the board declare?"
+    absent_pattern: "Q4 dividend"
+    expected:
+      staff: {answered: false, denied: false}
+      executive: {answered: false, denied: false}
+
+  - id: U02
+    category: unanswerable
+    question: "What did the board decide at the annual board retreat?"
+    absent_pattern: "board retreat"
+    expected:
+      staff: {answered: false, denied: false}
+      executive: {answered: false, denied: false}
+
+  - id: U03
+    category: unanswerable
+    question: "What is the company's policy on cryptocurrency mining?"
+    absent_pattern: "cryptocurrency"
+    expected:
+      staff: {answered: false, denied: false}
+      executive: {answered: false, denied: false}
+
+  - id: U04
+    category: unanswerable
+    question: "How many employees work at the Australian subsidiary?"
+    absent_pattern: "Australian subsidiary"
+    expected:
+      staff: {answered: false, denied: false}
+      executive: {answered: false, denied: false}
+
+  - id: U05
+    category: unanswerable
+    question: "What is on the cafeteria menu this month?"
+    absent_pattern: "cafeteria menu"
+    expected:
+      staff: {answered: false, denied: false}
+      executive: {answered: false, denied: false}
+
+  - id: U06
+    category: unanswerable
+    question: "What does the solar farm maintenance agreement require?"
+    absent_pattern: "solar farm"
+    expected:
+      staff: {answered: false, denied: false}
+      executive: {answered: false, denied: false}
+
+  - id: U07
+    category: unanswerable
+    question: "What was Zephyr Holdings' revenue last year?"
+    absent_pattern: "Zephyr"
+    expected:
+      staff: {answered: false, denied: false}
+      executive: {answered: false, denied: false}
+
+  - id: U08
+    category: unanswerable
+    question: "What is the company's parental leave policy?"
+    absent_pattern: "parental leave"
+    expected:
+      staff: {answered: false, denied: false}
+      executive: {answered: false, denied: false}
+
+  # ---------------------------------------------------------------- cross-document comparisons (8)
+  - id: X01
+    category: cross_document
+    question: "How much higher is the median household income in the census table reporting 59,473 dollars than in the one reporting 48,240 dollars?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/471787.csv", "company/group-02/048411.csv"], contains: ["11,233"]}
+      executive: {answered: true, docs: ["company/group-02/471787.csv", "company/group-02/048411.csv"], contains: ["11,233"]}
+    source_quote: "59,473 - 48,240 = 11,233"
+
+  - id: X02
+    category: cross_document
+    question: "The census table reporting a median household income of 59,473 reports a mean household income of 77,258; the table reporting 48,240 reports 61,958. What is the difference between the two means?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/471787.csv", "company/group-02/048411.csv"], contains: ["15,300"]}
+      executive: {answered: true, docs: ["company/group-02/471787.csv", "company/group-02/048411.csv"], contains: ["15,300"]}
+    source_quote: "77,258 - 61,958 = 15,300"
+
+  - id: X03
+    category: cross_document
+    question: "What is the difference between the median household income of 48,240 dollars and the S0802 median earnings of 31,638 dollars?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/048411.csv", "company/group-02/294613.csv"], contains: ["16,602"]}
+      executive: {answered: true, docs: ["company/group-02/048411.csv", "company/group-02/294613.csv"], contains: ["16,602"]}
+    source_quote: "48,240 - 31,638 = 16,602"
+
+  - id: X04
+    category: cross_document
+    question: "What is the difference between the median household income of 48,240 dollars and the S0601 median income of 25,688 dollars?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/048411.csv", "company/group-02/294613.csv"], contains: ["22,552"]}
+      executive: {answered: true, docs: ["company/group-02/048411.csv", "company/group-02/294613.csv"], contains: ["22,552"]}
+    source_quote: "48,240 - 25,688 = 22,552"
+
+  - id: X05
+    category: cross_document
+    question: "What is the difference between the DP03 median earnings for female full-time year-round workers of 35,919 dollars and the S0802 female median earnings of 25,307 dollars?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/471787.csv", "company/group-02/294613.csv"], contains: ["10,612"]}
+      executive: {answered: true, docs: ["company/group-02/471787.csv", "company/group-02/294613.csv"], contains: ["10,612"]}
+    source_quote: "35,919 - 25,307 = 10,612"
+
+  - id: X06
+    category: cross_document
+    question: "Which is higher, the DP03 median earnings for female full-time workers of 35,919 dollars or the S0802 male median earnings of 33,270 dollars, and by how much?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/471787.csv", "company/group-02/294613.csv"], contains: ["35,919", "2,649"]}
+      executive: {answered: true, docs: ["company/group-02/471787.csv", "company/group-02/294613.csv"], contains: ["35,919", "2,649"]}
+    source_quote: "35,919 - 33,270 = 2,649, the DP03 figure is higher"
+
+  - id: X07
+    category: cross_document
+    question: "In the DP03 census tables, how many more households earn 200,000 dollars or more in the table reporting 163,932 such households than in the table reporting 14,353?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/471787.csv", "company/group-02/048411.csv"], contains: ["149,579"]}
+      executive: {answered: true, docs: ["company/group-02/471787.csv", "company/group-02/048411.csv"], contains: ["149,579"]}
+    source_quote: "163,932 - 14,353 = 149,579"
+
+  - id: X08
+    category: cross_document
+    question: "In the DP03 census tables, how many more households are in the 150,000 to 199,999 dollar band in the table reporting 166,908 than in the table reporting 15,455?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/471787.csv", "company/group-02/048411.csv"], contains: ["151,453"]}
+      executive: {answered: true, docs: ["company/group-02/471787.csv", "company/group-02/048411.csv"], contains: ["151,453"]}
+    source_quote: "166,908 - 15,455 = 151,453"
+
+  # ---------------------------------------------------------------- access boundary (8)
+  # Six questions whose only sources are in the executive folder. Staff must be denied and must not receive the
+  # figure; an executive session must answer it. Two questions from company documents must answer for both roles,
+  # which proves the filter is not simply "hide everything".
+  - id: A01
+    category: access_boundary
+    question: "What is the Chief Executive Officer's base salary?"
+    expected:
+      staff: {answered: false, denied: true, forbidden_docs: ["executive/executive-compensation.md"]}
+      executive: {answered: true, docs: ["executive/executive-compensation.md"], contains: ["418,750"]}
+    source_quote: "The Chief Executive Officer's base salary is 418,750 dollars per year"
+
+  - id: A02
+    category: access_boundary
+    question: "What is the Chief Financial Officer's base salary?"
+    expected:
+      staff: {answered: false, denied: true, forbidden_docs: ["executive/executive-compensation.md"]}
+      executive: {answered: true, docs: ["executive/executive-compensation.md"], contains: ["315,400"]}
+    source_quote: "The Chief Financial Officer's base salary is 315,400 dollars per year"
+
+  - id: A03
+    category: access_boundary
+    question: "What is the annual bonus target for the Chief Executive Officer?"
+    expected:
+      staff: {answered: false, denied: true, forbidden_docs: ["executive/executive-compensation.md"]}
+      executive: {answered: true, docs: ["executive/executive-compensation.md"], contains: ["62.5"]}
+    source_quote: "The annual bonus target for the Chief Executive Officer is 62.5 percent of base salary"
+
+  - id: A04
+    category: access_boundary
+    question: "What is the Chief Executive Officer's long-term incentive target award for the current year?"
+    expected:
+      staff: {answered: false, denied: true, forbidden_docs: ["executive/executive-compensation.md"]}
+      executive: {answered: true, docs: ["executive/executive-compensation.md"], contains: ["1,250,000"]}
+    source_quote: "The Chief Executive Officer's target award for the current year is 1,250,000 dollars in grant-date value"
+
+  - id: A05
+    category: access_boundary
+    question: "Under the NESHAP for epoxy resin production, how long must an owner or operator retain the measurements file?"
+    expected:
+      staff: {answered: false, denied: true, forbidden_docs: ["executive/group-03/543276.doc"]}
+      executive: {answered: true, docs: ["executive/group-03/543276.doc"], contains: ["five years"]}
+    source_quote: "retain the file for at least five years following the date of such measurements"
+
+  - id: A06
+    category: access_boundary
+    # **Rewritten 2026-10-19: the original question was ambiguous.** It asked "what must be unique for a
+    # laboratory" while the document states three uniqueness rules: the Laboratory State ID No., the Federal ID
+    # No., and the Laboratory Name. The model answered "Laboratory Name must be unique", which the document also
+    # states, so the expected value was over-strict rather than the answer wrong. This version asks for the error
+    # message the same sentence pair names, which has one answer.
+    question: "Under the SDWIS state legal entity rules, what error message is invoked when a laboratory's Federal ID No. is not unique?"
+    expected:
+      staff: {answered: false, denied: true, forbidden_docs: ["executive/group-03/491223.doc"]}
+      executive: {answered: true, docs: ["executive/group-03/491223.doc"], contains: ["Laboratory Federal ID No. must be unique"]}
+    source_quote: "Federal ID No. must be unique. The following error message will be invoked: Laboratory Federal ID No. must be unique."
+
+  - id: A07
+    category: access_boundary
+    question: "In the sample post orders, what is the sentry at the post armed with?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/104644.doc"], contains: ["9mm pistol", "shotgun"]}
+      executive: {answered: true, docs: ["company/group-02/104644.doc"], contains: ["9mm pistol", "shotgun"]}
+    source_quote: "One sentry armed with a 9mm pistol and a shotgun"
+
+  - id: A08
+    category: access_boundary
+    question: "According to the proceeding notice, where can interested parties examine the filings?"
+    expected:
+      staff: {answered: true, docs: ["company/group-02/532049.doc"], contains: ["Reference Information Center"]}
+      executive: {answered: true, docs: ["company/group-02/532049.doc"], contains: ["Reference Information Center"]}
+    source_quote: "available for examination by interested parties during regular business hours in the Commission's Reference Information Center"
+
+  # ------------------------------------------------ wider set: literal candidates (13)
+  # From docs/eval/candidates/. Category names are the candidates' own. The thirteen computed
+  # candidates follow in the next section, each with a derivation.
+  - id: CAND_date_arithmetic_02
+    category: date_arithmetic
+    question: The FCC's order and notice of proposed rulemaking in MM Docket No. 96-197 lists an adoption date, a release date, a comment date, and a reply comment date. Which of those four dates is the latest?
+    expected:
+      staff:
+        answered: true
+        docs:
+        - company/group-01/012148.doc
+        contains:
+        - January 7, 2002
+    source_quote: 'Adopted:
+
+
+      September 13, 2001
+
+
+      Released:
+
+
+      September 20, 2001
+
+
+      Comment Date:  December 3, 2001
+
+
+      Reply Comment Date: January 7, 2002
+
+      '
+    evidence: select doc_id, chunk_id, page_start, left(text, 450) from chunk_index where doc_id='company/group-01/012148.doc' and text ilike '%Reply Comment Date%' returns the four dates on the order's face; the reply comment date, January 7, 2002, is later than December 3, 2001, September 20, 2001 and September 13, 2001.
+  - id: CAND_multi_hop_03
+    category: multi_hop
+    question: In Exhibit 10.19 to Apple's 2024 Form 10-K, the restricted stock unit award agreement's Notice of Grant includes a Vesting Commencement Date. According to the 2024 Form 10-K, over how many years do RSUs granted under the 2022 Employee Stock Plan generally vest?
+    expected:
+      staff:
+        answered: true
+        docs:
+        - company/apple-ex10-1-2024.htm
+        - company/apple-10k-2024.htm
+        contains:
+        - four years
+    source_quote: 2022 EMPLOYEE STOCK PLAN ... RESTRICTED STOCK UNIT AWARD AGREEMENT ... RSUs granted under the 2022 Plan generally vest over four years
+    evidence: select doc_id, chunk_id, left(text, 300) from chunk_index where (doc_id='company/apple-ex10-1-2024.htm' and text ilike '%Exhibit 10.19%') or (doc_id='company/apple-10k-2024.htm' and text ilike '%generally vest over four years%') returns the exhibit title naming the 2022 plan and the 10-K sentence stating four years.
+  - id: CAND_multi_hop_04
+    category: multi_hop
+    question: Apple's 2024 Form 10-K states that RSUs granted under the 2022 Employee Stock Plan generally vest over four years. Acurx's S-1 states that shares registered in the offering may be sold to Lincoln Park over a period of up to 24 months. How many months longer is Apple's standard RSU vesting period than Acurx's purchase period?
+    expected:
+      staff:
+        answered: true
+        docs:
+        - company/apple-10k-2024.htm
+        - company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm
+        contains:
+        - '24'
+    source_quote: RSUs granted under the 2022 Plan generally vest over four years ... the shares registered in this offering may be sold to Lincoln Park at our discretion over a period of up to 24 months beginning on the Commencement Date.
+    evidence: select doc_id, chunk_id, left(text, 420) from chunk_index where doc_id in ('company/apple-10k-2024.htm','company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm') and (text ilike '%generally vest over four years%' or text ilike '%period of up to 24 months%') order by doc_id returns both facts; 4 years = 48 months, so 48 - 24 = 24 months.
+  - id: CAND_UNTOUCHED_01
+    category: coverage
+    question: 'In customs ruling NY F86667, what is the applicable HTS subheading for style #20320?'
+    expected:
+      staff:
+        answered: true
+        docs:
+        - company/group-02/592778.doc
+        contains:
+        - 6117.10.1010
+    source_quote: 'The applicable subheading for style #20320 will be 6117.10.1010'
+    evidence: 'Read from page 1 of the ruling; 6117.10.1010 appears only in this document, in the sentence naming style #20320.'
+  - id: CAND_UNTOUCHED_02
+    category: coverage
+    question: How many commercial poultry farms are in the area of Torun County, Poland?
+    expected:
+      staff:
+        answered: true
+        docs:
+        - company/group-01/251719.doc
+        contains:
+        - six commercial poultry farms
+    source_quote: There are six commercial poultry farms and four poultry slaughter and processing plants in the area of Torun County.
+    evidence: Read from the GAIN report's second page; 'six commercial poultry farms' appears only in this document, in the sentence naming Torun County.
+  - id: CAND_UNTOUCHED_03
+    category: coverage
+    question: What is the subject of GCN Circular 7186?
+    expected:
+      staff:
+        answered: true
+        docs:
+        - company/group-02/003549.txt
+        contains:
+        - NGC 2770B
+        - same redshift
+    source_quote: 'SUBJECT: NGC 2770B has the same redshift as NGC 2770'
+    evidence: Read from the circular header; 'NGC 2770B' appears only in this document, in the SUBJECT line of Circular 7186.
+  - id: CAND_UNTOUCHED_04
+    category: coverage
+    question: When emailing comments on the FEMA draft environmental assessment for the E.H. Burton property, what site number should be entered in the subject field?
+    expected:
+      staff:
+        answered: true
+        docs:
+        - company/group-02/228801.txt
+        contains:
+        - OR-205
+    source_quote: When responding by email, enter site number OR-205 in the subject field.
+    evidence: Read from the public notice's comment paragraph; 'OR-205' appears only in this document, in the sentence about the email subject field.
+  - id: CAND_UNTOUCHED_05
+    category: coverage
+    question: In the airline on-time performance summary, how many operations were reported for 2003?
+    expected:
+      staff:
+        answered: true
+        docs:
+        - company/group-02/059190.csv
+        contains:
+        - 552,109
+    source_quote: 2003 | 552,109 | 82,900 | 66,453 | 8,341 | 847 | 83.32 | 15.02 | 12.04 | 1.51 | 0.15
+    evidence: Read from the 2003 row of Table 1; '552,109' appears only in this document, in the Operations column for 2003.
+  - id: CAND_UNTOUCHED_06
+    category: coverage
+    question: According to the person-month conversion guidance, what monthly salary corresponds to an academic year appointment with a salary of 63,000 dollars?
+    expected:
+      staff:
+        answered: true
+        docs:
+        - company/group-02/016886.xls
+        contains:
+        - 7,000
+    source_quote: A PI on an AY appointment at a salary of $63,000 will have a monthly salary of $7,000 (one-ninth of the AY).
+    evidence: Read from the spreadsheet's AY example; the same sheet's CY example uses 72,000 dollars and 6,000 dollars, so the 63,000/7,000 pair is the AY case the question names.
+  - id: CAND_UNTOUCHED_07
+    category: coverage
+    question: How many full-time equivalent employees did Apple report as of September 28, 2024?
+    expected:
+      staff:
+        answered: true
+        docs:
+        - company/apple-10k-2024.htm
+        contains:
+        - 164,000
+    source_quote: As of September 28, 2024, the Company had approximately 164,000 full-time equivalent employees.
+    evidence: Read from the 10-K's Human Capital paragraph; '164,000 full-time equivalent' appears only in this document.
+  - id: CAND_UNTOUCHED_08
+    category: coverage
+    question: For calendar year 2025, what is the social security wage base limit for each employee?
+    expected:
+      staff:
+        answered: true
+        docs:
+        - company/irs-p15.pdf
+        contains:
+        - 176,100
+    source_quote: 'Calendar year: 2025-social security; Wage base limit (each employee): $176,100; Tax rate on taxable wages and tips: 12.4%'
+    evidence: Read from the 2025 row of the employment-tax table on page 39; '176,100' appears only in this document.
+  - id: CAND_UNTOUCHED_09
+    category: coverage
+    question: According to the vendor onboarding note, where is the primary contact reference for the Acme engagement stored?
+    expected:
+      staff:
+        answered: true
+        docs:
+        - company/canary-pii.md
+        contains:
+        - vendor record
+    source_quote: The primary contact reference for the Acme engagement is 219-09-9999 and it is stored in the vendor record.
+    evidence: Read from the single canary chunk; 'vendor record' appears only in this document, and the question asks for the storage location rather than the reserved number the redaction gate strips.
+  - id: CAND_UNTOUCHED_10
+    category: coverage
+    question: Under the ACORP Appendix 8 request form, where must procedures involving an explosive agent be performed?
+    expected:
+      staff:
+        answered: true
+        docs:
+        - company/group-01/380391.rtf
+        contains:
+        - properly operating, ventilated safety hood
+    source_quote: a) procedures are performed within a properly operating, ventilated safety hood
+    evidence: Read from item 9(a) of the form; 'properly operating, ventilated safety hood' appears only in this document.  # ------------------------------------------------ derived candidates (13)
+  # The thirteen candidates the first validation pass rejected for stating a computed answer. Each now
+  # carries a derivation block: the operands as they appear in the named documents, the operation and
+  # the expected value. The validator checks every operand against the indexed document text, recomputes
+  # the value, and only then accepts it in place of a literal in source_quote. Categories and ids are the
+  # candidates' own; source_quote and evidence are unchanged.
+  - id: CAND_AGGREGATION_01
+    category: aggregation
+    question: "In the Nebraska county population table, what was the combined April 1, 2000 census population of Adams, Antelope, and Arthur counties?"
+    expected:
+      staff:
+        answered: true
+        docs:
+        - company/group-02/770592.csv
+        contains:
+        - '39,047'
+    source_quote: "Adams | Nebraska | 29,625 | 29,639 | 29,918 | 30,047 | 30,320 | 30,508 | 30,783 | 30,890 | 31,050 | 31,054 | 31,106 | 31,151 ... Antelope | Nebraska | 7,965 | 7,942 | 7,941 | 7,879 | 7,793 | 7,733 | 7,717 | 7,639 | 7,645 | 7,604 | 7,493 | 7,452 ... Arthur | Nebraska | 462 | 468 | 445 | 462 | 472 | 441 | 434 | 429 | 440 | 447 | 445 | 444"
+    derivation:
+      operands: ["31,151", "7,452", "444"]
+      operation: sum
+      result: "39,047"
+    evidence: "Summed the April 1, 2000 column over the three rows in chunk 64e809d6-1257-5969-a2d2-58642b6f2d1f; 31,151 + 7,452 + 444 = 39,047."
+
+  - id: CAND_AGGREGATION_02
+    category: aggregation
+    question: "In the Nebraska county population table, how many more residents did Boone County have than Boyd County on April 1, 2000?"
+    expected:
+      staff:
+        answered: true
+        docs:
+        - company/group-02/770592.csv
+        contains:
+        - '3,821'
+    source_quote: "Boone | Nebraska | 6,667 | 6,668 | 6,675 | 6,592 | 6,578 | 6,517 | 6,506 | 6,526 | 6,465 | 6,400 | 6,376 | 6,259 ... Boyd | Nebraska | 2,835 | 2,830 | 2,769 | 2,732 | 2,726 | 2,707 | 2,705 | 2,666 | 2,608 | 2,508 | 2,458 | 2,438"
+    derivation:
+      operands: ["6,259", "2,438"]
+      operation: difference
+      result: "3,821"
+    evidence: "Subtracted Boyd's April 1, 2000 value from Boone's in chunk 917d5df0-400e-5c5f-84aa-f4dced16b135; 6,259 - 2,438 = 3,821."
+
+  - id: CAND_AGGREGATION_03
+    category: aggregation
+    question: "Among Boyd, Brown, and Buffalo counties in the Nebraska population table, what is the difference between the largest and smallest April 1, 2000 populations?"
+    expected:
+      staff:
+        answered: true
+        docs:
+        - company/group-02/770592.csv
+        contains:
+        - '39,821'
+    source_quote: "Boyd | Nebraska | 2,835 | 2,830 | 2,769 | 2,732 | 2,726 | 2,707 | 2,705 | 2,666 | 2,608 | 2,508 | 2,458 | 2,438 ... Brown | Nebraska | 3,657 | 3,656 | 3,676 | 3,676 | 3,673 | 3,662 | 3,664 | 3,642 | 3,631 | 3,574 | 3,559 | 3,525 ... Buffalo | Nebraska | 37,447 | 37,603 | 38,195 | 38,774 | 39,515 | 39,834 | 40,381 | 41,084 | 41,310 | 41,716 | 41,904 | 42,259"
+    derivation:
+      operands: ["42,259", "2,438"]
+      operation: difference
+      result: "39,821"
+    evidence: "Compared the three rows in chunk 917d5df0-400e-5c5f-84aa-f4dced16b135; Buffalo 42,259 minus Boyd 2,438 = 39,821."
+
+  - id: CAND_AGGREGATION_04
+    category: aggregation
+    question: "In the 1993 year-end certificated carrier employment table, how many full-time employees did American, Delta, and United have combined?"
+    expected:
+      staff:
+        answered: true
+        docs:
+        - company/group-01/970969.csv
+        contains:
+        - '222,108'
+    source_quote: "American | 83,047 | 12,901 | 95,948 ... Delta | 65,212 | 5,916 | 71,128 ... United | 73,849 | 7,662 | 81,511"
+    derivation:
+      operands: ["83,047", "65,212", "73,849"]
+      operation: sum
+      result: "222,108"
+    evidence: "Summed the FULL column over the three rows in chunk c764997d-9e4e-5b43-8350-9a44ff66fe8a; 83,047 + 65,212 + 73,849 = 222,108."
+
+  - id: CAND_AGGREGATION_05
+    category: aggregation
+    question: "In the 1993 year-end certificated carrier employment table, how many more total employees did Federal Express have than United?"
+    expected:
+      staff:
+        answered: true
+        docs:
+        - company/group-01/970969.csv
+        contains:
+        - '18,825'
+    source_quote: "Federal Express | 67,726 | 32,610 | 100,336 ... United | 73,849 | 7,662 | 81,511"
+    derivation:
+      operands: ["100,336", "81,511"]
+      operation: difference
+      result: "18,825"
+    evidence: "Subtracted United's TOTAL from Federal Express's in chunk c764997d-9e4e-5b43-8350-9a44ff66fe8a; 100,336 - 81,511 = 18,825."
+
+  - id: CAND_AGGREGATION_06
+    category: aggregation
+    question: "In the 1993 year-end certificated carrier employment table, how many employees in total, full-time plus part-time, did the major carriers other than American, Delta, and United have?"
+    expected:
+      staff:
+        answered: true
+        docs:
+        - company/group-01/970969.csv
+        contains:
+        - '284,433'
+    source_quote: "Total Majors | 457291 | 75729 | 533020 ... American | 83,047 | 12,901 | 95,948 ... Delta | 65,212 | 5,916 | 71,128 ... United | 73,849 | 7,662 | 81,511"
+    derivation:
+      operands: ["533,020", "95,948", "71,128", "81,511"]
+      operation: difference
+      result: "284,433"
+    evidence: "Subtracted the three TOTAL values from the Total Majors row in chunk c764997d-9e4e-5b43-8350-9a44ff66fe8a; 533,020 - 95,948 - 71,128 - 81,511 = 284,433, and the eight remaining rows sum to the same figure."
+
+  - id: CAND_AGGREGATION_07
+    category: aggregation
+    question: "In the Census 2000 school enrollment table that reports 1,230,550 people enrolled in public school, how many people aged 3, 4, and 5 were enrolled in total?"
+    expected:
+      staff:
+        answered: true
+        docs:
+        - company/group-01/468293.csv
+        contains:
+        - '86,294'
+    source_quote: "..Total | 1,230,550 | 56,045 | 66,597 | 278,685 | 280,868 | 279,656 | 225,950 | 42,749 ... 3 years | 14,455 | 14,176 | 279 | - | - | - | - | - ... 4 years | 26,599 | 25,258 | 1,341 | - | - | - | - | - ... 5 years | 45,240 | 16,611 | 27,021 | 1,608 | - | - | - | -"
+    derivation:
+      operands: ["14,455", "26,599", "45,240"]
+      operation: sum
+      result: "86,294"
+    evidence: "Summed the Total in public school column over the three age rows in chunk 39095b2c-819e-522f-a68c-5282609f3944; 14,455 + 26,599 + 45,240 = 86,294."
+
+  - id: CAND_AGGREGATION_08
+    category: aggregation
+    question: "In the merchant acceptance list covering the 4th quarter of 1996 through the 3rd quarter of 1997, how much more was the merchant acceptance amount for GSA/CUST SUPPLY CTR 84 than for JOHNSON & JOHNSON?"
+    expected:
+      staff:
+        answered: true
+        docs:
+        - company/group-02/159927.xls
+        contains:
+        - '9,076,788'
+    source_quote: "GSA/CUST SUPPLY CTR 84 | TX | FT WORTH | 26649830.44 ... JOHNSON & JOHNSON | NJ | PISCATAWAY | 17573042.44"
+    derivation:
+      operands: ["26,649,830.44", "17,573,042.44"]
+      operation: difference
+      result: "9,076,788"
+    evidence: "Subtracted Johnson & Johnson's amount from GSA/CUST SUPPLY CTR 84's in chunk d11dcba3-f778-5b0e-b3b6-be6d37cf4987; 26,649,830.44 - 17,573,042.44 = 9,076,788.00."
+
+  - id: CAND_date_arithmetic_01
+    category: date_arithmetic
+    question: "How many days elapsed between the adoption and release of the FCC's Report and Order in MB Docket No. 03-185 on digital low power television stations?"
+    expected:
+      staff:
+        answered: true
+        docs:
+        - company/group-02/545688.doc
+        contains:
+        - '21'
+    source_quote: "Adopted:  September 9, 2004 Released:  September 30, 2004"
+    derivation:
+      operands: ["September 9, 2004", "September 30, 2004"]
+      operation: days-between
+      result: "21"
+    evidence: "select doc_id, chunk_id, page_start, left(text, 450) from chunk_index where doc_id='company/group-02/545688.doc' and text ilike '%Adopted:%' returns one chunk carrying both dates; 30 September minus 9 September 2004 is 21 days."
+
+  - id: CAND_date_arithmetic_03
+    category: date_arithmetic
+    question: "Apple's 2024 Form 10-K exhibit index lists the Amended and Restated Bylaws as effective as of August 20, 2024, filed on Form 8-K. According to the filing date in that exhibit index, how many days after the effective date was the 8-K filed?"
+    expected:
+      staff:
+        answered: true
+        docs:
+        - company/apple-10k-2024.htm
+        contains:
+        - '3 days'
+    source_quote: "3.2 | Amended and Restated Bylaws of the Registrant effective as of August 20, 2024. | 8-K | 3.2 | 8/23/24"
+    derivation:
+      operands: ["August 20, 2024", "8/23/24"]
+      operation: days-between
+      result: "3 days"
+    evidence: "select chunk_id, left(text, 260) from chunk_index where doc_id='company/apple-10k-2024.htm' and text ilike '%Amended and Restated Bylaws%' and text like '%8/23/24%' returns the row, and the table header chunk 7ae45cc9-b3c8-5064-be84-90238cdfe9f4 names the last column 'Filing Date/ Period End Date'; August 23 minus August 20, 2024 is 3 days."
+
+  - id: CAND_date_arithmetic_04
+    category: date_arithmetic
+    question: "Under IRS Publication 15 for 2026, how many days after the standard deadline for filing the 2025 Form 940 may an employer that deposited all FUTA tax when due file it?"
+    expected:
+      staff:
+        answered: true
+        docs:
+        - company/irs-p15.pdf
+        contains:
+        - '8'
+    source_quote: "File your 2025 Form 940 by February 2, 2026. However, if you deposited all FUTA tax when due, you may file on or before February 10, 2026."
+    derivation:
+      operands: ["February 2, 2026", "February 10, 2026"]
+      operation: days-between
+      result: "8"
+    evidence: "select doc_id, chunk_id, page_start, text from chunk_index where doc_id='company/irs-p15.pdf' and text ilike '%2025 Form 940%' returns one chunk with both dates; February 10 minus February 2, 2026 is 8 days."
+
+  - id: CAND_multi_hop_01
+    category: multi_hop
+    question: "According to the FCC's license renewal guide, broadcast station licenses are granted for eight years. The FCC's 2004 digital LPTV order allows three years from permit issuance to complete construction. If a station used both periods in full, how many years would they total?"
+    expected:
+      staff:
+        answered: true
+        docs:
+        - company/group-02/069856.doc
+        - company/group-02/545688.doc
+        contains:
+        - '11'
+    source_quote: "Each original construction permit for the construction of a new digital low power television or television translator station shall specify a period of three years from the date of issuance of the original construction permit ... All broadcast station licenses are granted by the Commission for eight years."
+    derivation:
+      operands: ["three years", "eight years"]
+      operation: sum
+      result: "11"
+    evidence: "select doc_id, chunk_id, left(text, 420) from chunk_index where doc_id in ('company/group-02/545688.doc','company/group-02/069856.doc') and (text ilike '%period of three years from the date of issuance%' or text ilike '%granted by the Commission for eight years%') order by doc_id returns both sentences; 3 + 8 = 11 years."
+
+  - id: CAND_multi_hop_02
+    category: multi_hop
+    question: "According to the FCC's license renewal guide, all broadcast station licenses are granted for eight years. NASA's Space Act Agreements Guide limits Space Act Agreements to 5-year terms in all but very few cases. How many years longer is the FCC license term than the NASA limit?"
+    expected:
+      staff:
+        answered: true
+        docs:
+        - company/group-02/069856.doc
+        - company/group-02/173609.doc
+        contains:
+        - '3'
+    source_quote: "NASA limits its SAAs to 5-year terms in all but very few cases ... All broadcast station licenses are granted by the Commission for eight years."
+    derivation:
+      operands: ["eight years", "5-year terms"]
+      operation: difference
+      result: "3"
+    evidence: "select doc_id, chunk_id, left(text, 380) from chunk_index where doc_id in ('company/group-02/173609.doc','company/group-02/069856.doc') and (text ilike '%5-year terms%' or text ilike '%granted by the Commission for eight years%') order by doc_id returns both sentences; 8 - 5 = 3 years."
