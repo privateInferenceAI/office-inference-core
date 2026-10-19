@@ -5644,19 +5644,16 @@ ARNs in us-east-1, us-east-2 and us-west-2. Check the resolved model on a real a
       -e OI_API_URL=http://api:8088 -e ACCESS_REGISTRY=/w/rendered/access.json \
       eval /w/tests/fixtures/ask_client.py -q "What is the mileage rate?" --json | grep resolved_model
 
-**Measure it.** Same forty questions, three runs, same scorer:
+**Measure it.** Same forty questions, five runs minimum, same scorer, from the deployment root:
 
-    for n in 1 2 3; do
-      docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env run -T --rm --no-deps \
-        --entrypoint python -v /opt/oi-core:/w -v /tmp/data_suite_run.py:/suite.py -v /tmp/oic-eval-out:/out \
-        -e OI_API_URL=http://api:8088 -e ACCESS_REGISTRY=/w/rendered/access.json \
-        eval /suite.py --json-out /out/run-$n.json
-    done
+    scripts/run_answer_suite.sh 5 /tmp/oic-suite
 
-Expected with the measured configuration (six steps, ten calls, lookup off): 39 to 43 of 52 per run, with
-run-to-run variance of several points, so run three and read the range. Single-shot Nova is 28 to 29; single-shot
-Claude Haiku is 34 to 36. Check the analyst team ceiling first: a budget-exhausted lane reports every answer as
-degraded with reason budget, and the gateway numbers in the error are the way to tell that apart from an outage.
+Five is the minimum because five identical runs of one configuration have spanned 33 to 45 of 52. Read the range,
+not one number. Expected with the measured configuration (six steps, ten calls, lookup off): 40 to 42 mean, with
+individual runs from 33 to 45. Single-shot Nova is a mean of 29; single-shot Claude Haiku a mean of 35. Check the
+analyst team ceiling first: a budget-exhausted lane reports every answer as degraded with reason budget, and the
+gateway numbers in the error are the way to tell that apart from an outage. The per-question evidence behind the
+recorded five-run experiment is in `docs/reviews/experiment-answers-2026-10-19/`.
 
 **Test the streaming opt-in.** The old frames are unchanged unless the client asks for tools:
 

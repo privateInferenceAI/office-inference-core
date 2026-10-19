@@ -107,13 +107,13 @@ The suite runner is `tests/fixtures/data_suite_run.py`; it runs the 40 questions
 plus four probes embedded in the runner. From `/opt/oi-core`:
 
 ```bash
-for n in 1 2 3 4 5; do
-  docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env run -T --rm --no-deps \
-    --entrypoint python -v /opt/oi-core:/w:ro -v /tmp/data_suite_run.py:/suite.py:ro -v /tmp/oic-eval-out:/out \
-    -e OI_API_URL=http://api:8088 -e ACCESS_REGISTRY=/w/rendered/access.json \
-    eval /suite.py --json-out /out/run-$n.json < /dev/null > /dev/null 2>&1
-done
+# from /opt/oi-core, five runs (the minimum for a configuration claim)
+scripts/run_answer_suite.sh 5 /tmp/oic-suite
 ```
+
+The script runs the committed runner (`tests/fixtures/data_suite_run.py`) and writes one JSON per run. There is no
+staged copy in `/tmp` any more; an earlier measurement depended on one and could not be regenerated from the
+repository alone.
 
 Rules established from experience:
 
@@ -179,9 +179,12 @@ stream probe 4. Run commands are in `docs/runbook.md` section 6.7. The stream pr
   retrieval in the frozen JSON is authoritative; the evidence capture is for human reading.
 - **The corpus is not in git.** Do not assume `documents/` is committed. The box has it; S3 has the archive; the
   rejected and data-set lists live beside it.
-- **One pre-existing test failure** exists on main and has existed all day:
-  `tests/test_retrieval.py::test_an_identifier_the_vector_arm_missed_is_found_by_the_lexical_arm` fails with
-  `fused_score 0.0`. It is unrelated to the answer path work and should be investigated separately.
+- **The test suite is hermetic now, and must stay that way.** One red test on 2026-10-18
+  (`test_an_identifier_the_vector_arm_missed_is_found_by_the_lexical_arm`, `fused_score 0.0`) looked like a
+  retriever bug. It was the suite calling the live Bedrock reranker because the workstation had credentials:
+  tests behaved differently on every machine, cost money, and failed only where the network answered. An autouse
+  fixture in `tests/conftest.py` disables the reranker outside the rerank tests. If a unit test starts reaching the
+  network, fix the test, not the component.
 - **The four probes are not equal.** `probe_row_normal` (PR1) and `probe_pollution` (PR4) are known imperfect
   probes; their failures are not clean system evidence and should be redesigned before they are used to judge a
   change.
@@ -227,3 +230,28 @@ stream probe 4. Run commands are in `docs/runbook.md` section 6.7. The stream pr
 - The data suite output files used for this hand-off are also committed under
   `docs/reviews/experiment-answers-2026-10-19/raw/` so the experiment is reproducible without the box.
 - Repo: `github.com/privateInferenceAI/office-inference-core`, `gh` authenticated as `anthonystachowitz-wq`.
+
+## 11. Decisions taken while the owner was away (2026-10-19)
+
+The owner asked for the remaining decisions to be made and reported. These are the ones taken, with the reasoning,
+so a later reader can reverse any of them deliberately.
+
+1. **The box is left running.** The next piece of work (the structured query tool) needs the deployment, and
+   starting and stopping an instance between sessions costs more time than the idle hours. Cost is recorded in
+   section 10; the owner stops it when the work pauses.
+2. **The deployment is frozen on the measured configuration** from section 1. No prompt, cap, model or flag was
+   changed after the five-run experiment. The only changes after the experiment were documentation, the answer
+   audit, this hand-off, the hermetic test fix and the suite script.
+3. **The six rejected files and the six data-set cards are left untouched.** Both need a human decision (replace or
+   exclude; convert or leave) and deleting client-like material without the owner is the wrong direction. They are
+   listed at `/opt/oi-core/rejected/rejected.csv` and `/opt/oi-core/rejected/datasets.csv`.
+4. **The pre-existing test failure was fixed, as a test defect rather than a retriever defect.** The suite is now
+   953 passed, 22 skipped, 0 failed. The reranker is switched off for tests that are not about reranking.
+5. **The suite runner is reproducible from the repository.** `scripts/run_answer_suite.sh` replaces a command that
+   depended on a staged file in `/tmp`, so a measurement can be regenerated from the repository on any machine with
+   the deployment.
+6. **The recommendation in the reply stands: begin the next milestone with a fresh agent**, using this document as
+   its starting point. The first tasks are section 9. Nothing in the plan depends on the previous session's memory.
+7. **No new measurement was taken.** The frozen fifteen-run experiment remains the evidence of record; the audit
+   bundle under `docs/reviews/experiment-answers-2026-10-19/` is the per-question backing for it.
+
