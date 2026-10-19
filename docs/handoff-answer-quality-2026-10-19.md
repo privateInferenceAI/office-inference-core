@@ -15,7 +15,7 @@ answers questions through a bounded tool loop rather than a single retrieval-and
 | Answer path | Tool loop on, six steps, ten tool calls. `search_documents`, `read_passages` and the row query are offered; `lookup_value` is off |
 | Flags | `OI_TOOL_LOOP=on`, `OI_TOOL_MAX_STEPS=6`, `OI_TOOL_MAX_CALLS=10`, `OI_TOOL_QUERY=on`, `OI_TOOL_LOOKUP=off`, `OI_TOOL_HONESTY=on` |
 | Corpus | 539 documents, 100,478 chunks, six data-set cards, six dead letters excluded by owner decision (0003). Frozen since 2026-10-18 |
-| Measured quality | Row query on: **46.6 of 52** (five runs) against a same-day control of **43.0**; historical pre-query means 40.2–41.2 and single-shot 35.0 are not comparable across days |
+| Measured quality | On the corrected instrument (2026-10-19 evening): **50.6 of 52** (52, 50, 51, 51, 49). The row-query milestone measured 46.6 against a same-day control of 43.0 on the old instrument; the two are not comparable because three questions were corrected (section 2c) |
 | Measurement set | 40 questions + 4 probes, 52 role-runs per suite run |
 | Development budget | Analyst team ceiling 100 USD per 30 days, about 0.4 USD per suite run |
 | Repo state | `main` at `30b0100` plus this update; 974 tests pass, zero open PRs |
@@ -97,6 +97,30 @@ current one cannot distinguish 46 from 48.
 
 **Acceptance probes on the live build are now evidenced**: `docs/reviews/query-tool-2026-10-19/probes/` holds the
 interface (8 rights), activity (8), access (4) and stream (4) outputs, captured against the deployed code.
+
+## 2c. Update 2026-10-19 evening: the four deterministic failures diagnosed
+
+The four questions that failed in every run were diagnosed against the indexed source text. Three were defects
+in the instrument, not the product: **A06** asked an ambiguous question (the SDWIS document states three
+uniqueness rules and the model answered one of them correctly), **P05** asked for a telephone number that the
+answer redaction masks as [REDACTED-PHONE] by policy, and **P06** asked for a single FPCON condition in a
+sample-post-orders template that lists all four. The three were corrected in `docs/eval/data-questions.yaml`;
+the question count and categories are unchanged.
+
+The fourth, **U08**, is a genuine honesty failure: the corpus contains no parental-leave policy, and the model
+assembles one out of generic employment law in an instructions document. It is not fixed here. The prompt is
+frozen until the row query is measured on a second corpus, and no deterministic check for this class of claim
+exists in the current architecture. The retest is defined: when the prompt unfreezes, add "a policy, procedure
+or plan" to the honesty rule and measure five runs.
+
+Five runs on the corrected instrument: **52, 50, 51, 51, 49, a mean of 50.6**, with the three corrected
+questions passing in every run and U08 failing four of five. This is a new baseline, not a product improvement.
+The diagnosis, the evidence and the five raw runs are in `docs/reviews/deterministic-failures-2026-10-19.md`.
+
+**The instrument is now close to its ceiling.** The remaining section 6 items need a wider instrument to be
+measurable, which is why the probe redesign and the wider evaluation set come before any further score claim.
+Provider fallback can be verified deterministically instead of statistically: make the primary model unavailable
+and check that the fallback answers.
 
 ## 3. What was built, in order, and why
 
@@ -201,11 +225,10 @@ The structured row query is **done and measured** (section 2b). The priorities b
 0. **Order of work and expected effect.** Diagnose the four deterministic failures (about two to three points), then
    provider fallback (one to two), then probe redesign and the wider evaluation set (measurement quality, not score),
    then the acceptance panel. Do not start another item before the five-run comparison of the previous one.
-1. **Four deterministic question failures are the largest answer-quality gap.** A06/executive (partial answer on
-   the SDWIS legal-entity question, 5 of 5), P05 and P06 (wrong content on the post-orders questions, 5 of 5 each),
-   and U08 (answers instead of refusing, 4 of 5). Each needs a diagnosis before a fix: is it retrieval, formatting,
-   an over-strict expected value, or a genuine model failure? Fix them as product bugs, one at a time, with a
-   five-run before and after.
+1. **The four deterministic question failures are diagnosed.** Three were instrument defects and their questions
+   were corrected (A06, P05, P06); U08 is a genuine honesty failure, deferred with a defined retest. See section 2c
+   and `docs/reviews/deterministic-failures-2026-10-19.md`. The corrected instrument measures 50.6 of 52, so the
+   next score claim needs a wider instrument rather than another prompt or tool change.
 2. **Provider reliability.** Five of the 27 remaining failing runs were `provider_unavailable`, and the treatment
    window carried eleven degradations. A fallback model or route (for example to the global profile or Sonnet) on
    a classified provider failure would recover up to two points and improve the client experience. Measure it the
