@@ -279,6 +279,13 @@ def test_the_prompt_only_names_the_tools_that_are_offered():
     assert "lookup_value" in with_lookup
 
 
+def test_the_thoroughness_rule_is_in_the_prompt():
+    # Dropping this rule in the Phase B rewrite halved the loop's duration and cost the suite seven points.
+    prompt = tool_loop.system_prompt(lookup_enabled=False, honesty_enabled=True)
+    assert "table row is a valid answer" in prompt
+    assert "Check every passage before concluding" in prompt
+
+
 def test_the_honesty_rule_can_be_measured_off():
     prompt = tool_loop.system_prompt(lookup_enabled=False, honesty_enabled=False)
     assert "specific event, period, meeting or document" not in prompt

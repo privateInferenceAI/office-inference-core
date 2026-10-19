@@ -105,8 +105,17 @@ _PROMPT_RULES = (
     "documents.\n"
 )
 
+# **The rule that made the model thorough.** It was in the Phase A prompt and was accidentally dropped when the
+# rules were rewritten for Phase B; the Phase A runs took about 330 seconds and answered 44, 44, 42, the rewritten
+# prompt took 166 and answered 37, 35. A model told that a table row is a valid answer and that every passage must
+# be checked before concluding absence searches more, and searching more is what this loop is for.
+_TABLE_RULE = (
+    "6. A figure copied from a table row is a valid answer. Check every passage before concluding the answer is "
+    "absent.\n"
+)
+
 _HONESTY_RULE = (
-    "6. If the question asks about a specific event, period, meeting or document that the evidence never "
+    "7. If the question asks about a specific event, period, meeting or document that the evidence never "
     "states, refuse even when the evidence contains related facts. Do not infer that a related figure answers "
     "it, and do not relabel a fact as the one that was asked for.\n"
 )
@@ -127,7 +136,7 @@ def system_prompt(lookup_enabled: bool = True, honesty_enabled: bool = True) -> 
     """
     tools = ("; lookup_value finds the exact place a figure appears, for figures that identify a row uniquely"
              if lookup_enabled else "")
-    rules = _PROMPT_HEAD.format(tools=tools) + _PROMPT_RULES
+    rules = _PROMPT_HEAD.format(tools=tools) + _PROMPT_RULES + _TABLE_RULE
     if honesty_enabled:
         rules += _HONESTY_RULE
     return rules + _PROMPT_TAIL
