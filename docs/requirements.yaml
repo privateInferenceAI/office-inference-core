@@ -973,6 +973,31 @@ items:
       switchable with OI_TOOL_LOOKUP, default off; it is the right instrument for unique identifiers and the wrong
       one for duplicated census data. The real fix for the probe is row-indexed storage or a table-aware read.
 
+  - id: AGENT-QUERY-001
+    title: The answer step can query table rows directly, read-only, bounded and access-filtered
+    tier: [cloud, hosted]
+    phase: C6
+    verify: >-
+      with OI_TOOL_QUERY on, the model can call query_rows with one to four literal strings and receives the table
+      rows that contain every string, each carrying its document, page and row ordinal and numbered into the
+      evidence the citation verifier checks the answer against; the query is one parameterised SELECT with the
+      session's access roots in its where clause; a match spanning more than three documents without a doc_id is
+      refused as not identifying a row; the scan, row, character and evidence bounds hold; and every call is a
+      tool_call audit row carrying its candidate, matched and returned-row counts. With the flag off the tool is
+      not offered and the answer path is unchanged.
+    status: verified
+    note: >-
+      Built and measured 2026-10-19 (PR #183, docs/reviews/query-tool-2026-10-19.md). Five runs per configuration,
+      same corpus and model: 43.0 of 52 with the tool off and 46.6 with it on, ranges 42 to 44 and 45 to 47.
+      Exact-number questions 4.8 to 7.4 of 8; the large-table pinpoint probe 0 to 4 of 5; and the control's seven
+      unsupported-number refusals become zero. The first treatment measured 46.4 and lost N06 in all five runs
+      because a full evidence namespace silently swallowed the queried row; rows now get an eight-slot allowance
+      past the ceiling, and a matched row that still cannot be numbered returns an explicit error. Off by default
+      in code, on for the development deployment, the flag is the rollback. The measured remaining cost is the
+      error rate on guessed values: 13 of 53 calls found no candidate chunk. Also fixed here: the suite script
+      could not write its output directory as the eval image's non-root user, and the API never passed --tool to
+      the audit tool, so every tool_call row in the chain named no tool.
+
   - id: BUDGET-IDENTITY-001
     title: A gateway identity charges one spend counter and enforces the role ceiling, not the remainder
     tier: [cloud, hosted, office]
