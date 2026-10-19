@@ -1029,6 +1029,26 @@ items:
       supported procedure for a client to change a model after installation. A client installation must allow the
       profile ARN in the fallback Region in its own account; the runbook's installation section says so.
 
+  - id: AGENT-MODEL-CHANGE-001
+    title: A client can change a deployment's model after installation through a validated tool
+    tier: [cloud, hosted, office]
+    phase: C6
+    verify: >-
+      a manifest's model role can be changed without hand-editing a gateway config: scripts/model_admin.py lists
+      the models the lifecycle table knows and what a deployment names, checks a manifest with the validator and
+      the lifecycle table, and rewrites one role's model and fallback chain only when the whole candidate manifest
+      passes; it writes only the models mapping and the rest of the file is preserved; it never calls the
+      provider; and a change that names a deprecated or unknown model, an invalid Region, or an unknown role is
+      refused without writing.
+    status: verified
+    note: >-
+      Built 2026-10-19 (PR #194, docs/model-lifecycle.md and docs/runbook.md 6.7). Eleven tests cover listing,
+      checking, the dry run, a valid chain write, a legacy model refusal, an unknown role, a malformed Region,
+      removing a chain, and that the header and every non-models section survive the rewrite. The problem it
+      solves is the sale, not the build: the system may be sold and not serviced, and models are deprecated on
+      the provider's schedule. The tool cannot check provider permissions, so a client installation that adds a
+      fallback Region must also allow that Region's inference-profile ARN in its own account; the runbook says so.
+
   - id: BUDGET-IDENTITY-001
     title: A gateway identity charges one spend counter and enforces the role ceiling, not the remainder
     tier: [cloud, hosted, office]
