@@ -121,6 +121,14 @@ REJECTED_DIR = Path(os.environ.get("INGEST_REJECTED_DIR", "/state/rejected"))
 REJECTED_FIELDS = ("relpath", "root", "bytes", "failure_count", "failure_kind", "last_error",
                    "updated_at")
 
+# **An owner decision has to reach the worklist, or it is not a decision the pipeline honours.** This file is
+# written by a person, one row per file the owner has decided will never be indexed, with the reason and who
+# decided. The worker reads it and never writes it, so no cycle can overwrite a decision. Nothing is deleted:
+# the file stays on disk, and a replacement re-enters on its own because a failure is keyed on the bytes that
+# failed, so new bytes are a different document.
+EXCLUSIONS_FILENAME = "exclusions.csv"
+EXCLUSION_FIELDS = ("relpath", "reason", "decided_by", "decided_at")
+
 # The root a deployment's documents live under. Named so the guard above can tell "the deployment's folder"
 # from "some subset somebody pointed a measurement at".
 DEFAULT_DOCUMENTS_ROOT = Path(os.environ.get("INGEST_DOCUMENTS_ROOT", "/documents"))
@@ -1788,23 +1796,63 @@ def write_dataset_report(documents_root: Path, directory: Path = REJECTED_DIR) -
     return payload
 
 
+def load_exclusions(directory: Path = REJECTED_DIR) -> dict[str, dict]:
+    """The owner's exclusion decisions by relative path, or an empty map when there is no file.
+
+    **A malformed decision file is reported and ignored, not fatal.** This report is written at the end of every
+    ingestion cycle, and losing the worklist because one row of the decisions file is wrong would turn a records
+    problem into a corpus-load failure. Every unusable row is named on stdout so it cannot pass silently.
+    """
+    path = directory / EXCLUSIONS_FILENAME
+    if not path.exists():
+        return {}
+    try:
+        with path.open(newline="", encoding="utf-8") as handle:
+            rows = list(csv.DictReader(handle))
+    except (OSError, csv.Error) as exc:  # noqa: BLE001 - a decision file must not break a cycle
+        print(f"could not read {path}: {type(exc).__name__}: {exc}")
+        return {}
+    exclusions: dict[str, dict] = {}
+    for number, row in enumerate(rows, start=2):
+        relpath = str(row.get("relpath") or "").strip()
+        if not relpath:
+            print(f"  {path}:{number} has no relpath, so it cannot exclude anything and was ignored")
+            continue
+        exclusions[relpath] = {field: str(row.get(field) or "").strip() for field in EXCLUSION_FIELDS}
+    return exclusions
+
+
 def write_rejected_report(manifest, directory: Path = REJECTED_DIR) -> dict:
     """Write the documents the pipeline has given up on where a person can find and act on them.
 
     Called at the end of every cycle and by `--rejected`. The CSV is the worklist an operator reads or hands to a
     client: name, size, why it failed, when it last failed. The JSON also carries the retrying documents, so a
     dashboard or a later API has the full picture without parsing the CSV.
+
+    **A file the owner has decided to exclude moves out of the worklist and into the record.** The worklist stays
+    the list of files still waiting for somebody to decide; `excluded` in the JSON and `exclusions.csv` beside it
+    are the decisions taken, with the reason. A decision is matched by path only while the file is still
+    dead-lettered, so a replacement that indexed successfully disappears from both lists rather than being
+    misreported as excluded.
     """
     records = manifest.failed_documents()
-    rejected = [record for record in records
-                if (record.get("failure_count") or 0) >= MAX_FAILURES]
+    dead = [record for record in records
+            if (record.get("failure_count") or 0) >= MAX_FAILURES]
     retrying = [record for record in records
                 if (record.get("failure_count") or 0) < MAX_FAILURES]
+    exclusions = load_exclusions(directory)
+    excluded = [dict(record, **{field: exclusions[record["relpath"]][field]
+                                for field in ("reason", "decided_by", "decided_at")})
+                for record in dead
+                if (record.get("relpath") or "") in exclusions]
+    rejected = [record for record in dead
+                if (record.get("relpath") or "") not in exclusions]
     directory.mkdir(parents=True, exist_ok=True)
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "rejected": rejected,
         "retrying": retrying,
+        "excluded": excluded,
     }
     (directory / "rejected.json").write_text(
         json.dumps(payload, indent=2, default=str) + "\n", encoding="utf-8")
@@ -1928,12 +1976,18 @@ def main(argv: list[str] | None = None) -> int:
         path = REJECTED_DIR / "rejected.csv"
         datasets = write_dataset_report(Path(os.environ.get("DOCUMENTS_ROOT", "/documents")))
         print(f"rejected worklist: {path}")
-        print(f"  {len(report['rejected'])} dead-lettered, {len(report['retrying'])} retrying")
+        print(f"  {len(report['rejected'])} dead-lettered, {len(report.get('excluded') or [])} excluded by "
+              f"decision, {len(report['retrying'])} retrying")
         print(f"  {len(datasets['datasets'])} data set(s) listed in {REJECTED_DIR / 'datasets.csv'}")
         for record in report["rejected"]:
             reason = " ".join(str(record.get("last_error") or "").split())[:200]
             print(f"  {record['relpath']}  ({record.get('bytes')} bytes)")
             print(f"    {reason}")
+        for record in report.get("excluded") or []:
+            decision = " ".join(str(record.get("reason") or "no reason given").split())[:200]
+            print(f"  excluded: {record['relpath']}  ({record.get('decided_by') or 'unknown'}, "
+                  f"{record.get('decided_at') or 'undated'})")
+            print(f"    {decision}")
         return 0
 
     if args.failures:
@@ -2087,6 +2141,9 @@ def main(argv: list[str] | None = None) -> int:
             if rejected["rejected"]:
                 print(f"  {len(rejected['rejected'])} rejected file(s) are listed in "
                       f"{REJECTED_DIR / 'rejected.csv'} for a person to deal with")
+            if rejected.get("excluded"):
+                print(f"  {len(rejected['excluded'])} file(s) are excluded by an owner decision recorded in "
+                      f"{REJECTED_DIR / EXCLUSIONS_FILENAME}; they stay on disk and a replacement re-enters")
             datasets = write_dataset_report(documents_root)
             if datasets["datasets"]:
                 print(f"  {len(datasets['datasets'])} data set(s) are listed in "

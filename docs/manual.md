@@ -1842,6 +1842,15 @@ rejected file that is replaced or fixed re-enters the queue on its own when its 
 bytes have not changed, `docker exec ingestion python3 /app/ingest.py --clear-failures <relpath>`, or run the
 same file with `--rejected` to refresh the list on demand.
 
+**A decision about a rejected file is recorded in `exclusions.csv` beside it.** The file is operator-written, one
+row per file the owner has decided will never be indexed, with `relpath,reason,decided_by,decided_at`. The worker
+reads it and never writes it, so no cycle can overwrite a decision. A decided file leaves `rejected.csv`, the list
+of files still waiting for a decision, and appears in `rejected.json`'s `excluded` list with the reason it was
+excluded. Nothing is deleted: the file stays on disk, and a replacement re-enters ingestion on its own because a
+failure is keyed on the bytes that failed. Reversing the decision means deleting its row from `exclusions.csv` and
+running `--clear-failures` for that path, or replacing the file. The first decision of this kind, the six
+unreadable files of the development corpus, is recorded in `docs/decisions/0003-corpus-decisions.md`.
+
 **Tables and data files have a size rule, and it is deliberate.** A table up to 5,000 rows is indexed as a
 document table: each row gets its own retrieval entry, plus bounded group entries for the table as a whole. A
 table bigger than that is a data dump inside a document. It gets no per-row entries, at most 200 bounded group

@@ -14,7 +14,7 @@ answers questions through a bounded tool loop rather than a single retrieval-and
 | Model answering questions | Claude Haiku 4.5 on Bedrock, inference profile `us.anthropic.claude-haiku-4-5-20251001-v1:0` |
 | Answer path | Tool loop on, six steps, ten tool calls. `search_documents`, `read_passages` and the row query are offered; `lookup_value` is off |
 | Flags | `OI_TOOL_LOOP=on`, `OI_TOOL_MAX_STEPS=6`, `OI_TOOL_MAX_CALLS=10`, `OI_TOOL_QUERY=on`, `OI_TOOL_LOOKUP=off`, `OI_TOOL_HONESTY=on` |
-| Corpus | 539 documents, 100,478 chunks, six data-set cards, six dead letters. Frozen since 2026-10-18 |
+| Corpus | 539 documents, 100,478 chunks, six data-set cards, six dead letters excluded by owner decision (0003). Frozen since 2026-10-18 |
 | Measured quality | Row query on: **46.6 of 52** (five runs) against a same-day control of **43.0**; historical pre-query means 40.2–41.2 and single-shot 35.0 are not comparable across days |
 | Measurement set | 40 questions + 4 probes, 52 role-runs per suite run |
 | Development budget | Analyst team ceiling 100 USD per 30 days, about 0.4 USD per suite run |
@@ -140,8 +140,9 @@ model id; the raw model id fails with a validation error. The 5,000 USD Activate
 
 **Corpus:** documents on the box at `/opt/oi-core/documents/`, archived in S3
 `s3://officeinference-corpus-878451098165/` (the corpus is not in the repository; it is 15 GB). The six data sets
-are listed in `/opt/oi-core/rejected/datasets.csv`; the six genuinely unreadable files are in
-`/opt/oi-core/rejected/rejected.csv` and are waiting for a human to replace or exclude them.
+are listed in `/opt/oi-core/rejected/datasets.csv` and stay cards. The six genuinely unreadable files are
+excluded permanently by owner decision (`docs/decisions/0003-corpus-decisions.md`) and listed in
+`/opt/oi-core/rejected/exclusions.csv`; they remain on disk and a replacement re-ingests.
 
 **The answer path, in order:** client app container (`app`, built from the separate `oic-ui` checkout) → `api`
 (FastAPI, `services/api/app.py`) → retrieval (`services/retrieval/retriever.py`: TEI embeddings container,
@@ -220,8 +221,10 @@ The structured row query is **done and measured** (section 2b). The priorities b
    (the development deployment has it on; its evidence is one corpus).
 7. **`lookup_value` is superseded for table rows.** Keep it implemented and off; plan retirement once `query_rows`
    has been measured on a second corpus.
-8. **Provider layer (`INF-PROVIDER-001`), data-set path, and the six rejected files** remain as before. The data-set
-   cards are not reachable by the row query because they have no rows; a data path is a separate piece of work.
+8. **Provider layer (`INF-PROVIDER-001`) remains parked.** The six rejected files are now excluded by owner
+   decision and need no further action unless a replacement arrives. The data-set cards stay cards: they are not
+   reachable by the row query because they have no rows, and a data path is a separate piece of work with no client
+   requirement behind it yet.
 
 ## 7. Traps, written down so they are not repeated
 
@@ -317,19 +320,23 @@ Decisions taken while the owner was away on 2026-10-19, updated after the row-qu
    it. Cost about 0.81 USD per hour; the owner decides when to pause.
 2. **Deployment frozen after each measurement.** It is now on the measured row-query build: main `30b0100`,
    query on, loop on, Claude Haiku, six steps, ten calls, lookup off, honesty on, ceiling 100.
-3. **Rejected files and data-set cards untouched**, pending an owner decision. `rejected/rejected.csv` and
-   `rejected/datasets.csv` are the lists. **Recommendation:** exclude the six unreadable files permanently and
-   record the decision without deleting them; leave the six data-set cards as cards, because indexing them as
-   rows is the explosion chunker-v4 removed and the query tool does not reach them.
+3. **Corpus decisions were taken by the owner on 2026-10-19 and are recorded in
+   `docs/decisions/0003-corpus-decisions.md`.** The six unreadable files are **excluded permanently**, not
+   deleted: they are listed in `rejected/exclusions.csv`, which the worker reads and never writes, so they leave
+   the worklist and appear in `rejected.json`'s `excluded` list with the reason. A replacement at any of those
+   paths re-enters on its own because a failure is keyed on the bytes that failed. The six data-set cards
+   **stay cards**: converting them to searchable rows would re-create the row explosion chunker-v4 removed, and
+   the row query cannot reach a card with no rows. Revisit only with a real client data-path requirement.
 4. **Test suite was fixed to be hermetic** (the red test was tests calling the live reranker). It is now 974 passed,
    22 skipped, 0 failed; keep it that way.
 5. **The suite runner is reproducible** (`scripts/run_answer_suite.sh`; the second session fixed a permission bug in
    it). Five runs minimum, same-day control.
 6. **A new agent can start from this document**, as recommended. The first tasks are section 9.
 7. **Row query remains opt-in by default in code**; the development deployment has it on. Promotion to default is a
-   per-deployment decision after that deployment's own five-run measurement.
-8. **`lookup_value` remains implemented and off**, superseded for table rows by `query_rows`; retirement is a later
-   decision after a second corpus is measured.
+   per-deployment decision after that deployment's own five-run measurement. **Confirmed by the owner 2026-10-19.**
+8. **`lookup_value` remains implemented, tested and off**, superseded for table rows by `query_rows`; retirement is
+   planned after the row query is measured on a second corpus. **Confirmed by the owner 2026-10-19; do not delete
+   it yet.**
 9. **No prompt tuning is planned.** The remaining points are in specific failures, reliability and a harder
    evaluation set, not in prompt wording.
 
