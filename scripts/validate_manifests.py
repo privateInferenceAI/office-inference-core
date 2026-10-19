@@ -308,6 +308,30 @@ def check(manifest: dict, packs: set[str], path: Path) -> list[str]:
         if not isinstance(entry, dict) or "local" not in entry:
             problems.append(f"models.{role} must declare a local field (may be empty on cloud)")
 
+    # **A fallback is a remote model, so only a cloud build may declare one.** It exists so a provider
+    # failure answers from a second deployment instead of degrading the question. On an office or hybrid
+    # build the primary may be the local lane, and failing over to a remote model would send a client's
+    # content off the box without a declared egress decision. The rule is profile-level rather than
+    # per-role because a role that is frontier-only today can be given a local model tomorrow, and the
+    # permission would change silently.
+    for role, entry in (models or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        fallback = entry.get("fallback")
+        if fallback is None:
+            continue
+        if not isinstance(fallback, str) or not fallback.strip():
+            problems.append(f"models.{role}.fallback must be a non-empty model id or absent")
+            continue
+        if profile != "cloud":
+            problems.append(
+                f"models.{role}.fallback is declared on a {profile!r} build, but a fallback is a remote "
+                f"model and a local primary failing over to it would be an undeclared egress path. "
+                f"Fallbacks are cloud-only")
+        if not fallback.startswith("bedrock/"):
+            problems.append(
+                f"models.{role}.fallback must name a Bedrock model as bedrock/<id>, got {fallback!r}")
+
     # The two compliance profiles that make no regulated-data claim. Read by the account-owner
     # rule below and by the residency rules after it.
     unrestricted = ("none", "contractual")
@@ -393,19 +417,25 @@ def check(manifest: dict, packs: set[str], path: Path) -> list[str]:
     # profile can route a prompt anywhere AWS operates. The schema carried data_residency and
     # nothing read it; these rules read it.
     for role, entry in (manifest.get("models") or {}).items():
-        frontier = ((entry or {}).get("frontier") or "")
-        if not frontier.startswith("bedrock/"):
-            continue
-        model_id = frontier.split("/", 1)[1]
-        if model_id.startswith("global.") and compliance_for_residency not in unrestricted:
-            problems.append(
-                f"models.{role}: a global inference profile ({model_id}) can route a prompt to any "
-                f"Region, which is not acceptable with compliance profile "
-                f"{compliance_for_residency!r}. Use a geographic profile such as us.")
-        if model_id.startswith("anthropic.claude-fable"):
-            problems.append(
-                f"models.{role}: Fable models permit only aws_review or provider_data_share retention, "
-                "which means instructing AWS to retain inputs and outputs for human review")
+        # **The fallback is held to the same residency rules as the primary.** A fallback is where a
+        # prompt goes when the primary fails, so a global profile hidden in a fallback field routes a
+        # prompt just as far as one in the primary field would. Checking only the primary would leave
+        # the one field a reviewer looks at last as the way around the rule.
+        for field in ("frontier", "fallback"):
+            frontier = ((entry or {}).get(field) or "")
+            if not frontier.startswith("bedrock/"):
+                continue
+            model_id = frontier.split("/", 1)[1]
+            label = f"models.{role}" if field == "frontier" else f"models.{role}.fallback"
+            if model_id.startswith("global.") and compliance_for_residency not in unrestricted:
+                problems.append(
+                    f"{label}: a global inference profile ({model_id}) can route a prompt to any "
+                    f"Region, which is not acceptable with compliance profile "
+                    f"{compliance_for_residency!r}. Use a geographic profile such as us.")
+            if model_id.startswith("anthropic.claude-fable"):
+                problems.append(
+                    f"{label}: Fable models permit only aws_review or provider_data_share retention, "
+                    "which means instructing AWS to retain inputs and outputs for human review")
     # Only where inference is remote. An office build's residency is the client's building, and
     # demanding a Region there is noise.
     if compliance_for_residency not in unrestricted and manifest.get("profile") in ("cloud", "hybrid"):

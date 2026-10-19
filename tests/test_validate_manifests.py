@@ -541,3 +541,37 @@ def test_an_office_build_may_declare_an_empty_egress_list(packs):
     assert manifest["lanes"]["frontier"]["enabled"] is False
     assert manifest["access"]["egress"]["frontier_classes"] == []
     assert problems(manifest, packs) == []
+
+
+def test_a_cloud_fallback_is_accepted(packs):
+    """The second model group is a recovery path, not a policy exception: a cloud build may declare one."""
+    manifest = load(STANDARD)
+    manifest["models"]["analyst"]["fallback"] = "bedrock/amazon.nova-pro-v1:0"
+    found = problems(manifest, packs)
+    assert not mentions(found, "fallback"), found
+
+
+def test_a_fallback_on_an_office_build_is_refused(packs):
+    """On an office or hybrid build a local primary could fail over to a remote model, which is content
+    leaving the box on a path no egress declaration covers."""
+    manifest = load(ROOT / "manifests" / "dev-office.yaml")
+    manifest["models"]["analyst"]["fallback"] = "bedrock/amazon.nova-pro-v1:0"
+    found = problems(manifest, packs)
+    assert mentions(found, "cloud-only"), found
+
+
+def test_a_fallback_must_name_a_bedrock_model(packs):
+    manifest = load(STANDARD)
+    manifest["models"]["analyst"]["fallback"] = "openai/gpt-4o"
+    found = problems(manifest, packs)
+    assert mentions(found, "bedrock/<id>"), found
+
+
+def test_a_global_fallback_profile_is_refused_under_a_regulated_profile(packs):
+    """A global profile in a fallback routes a prompt as far as one in the primary field, so the residency
+    rule has to read both fields or the last one a reviewer looks at is the way around it."""
+    manifest = load(COMPLIANT)
+    manifest["models"]["analyst"]["fallback"] = "bedrock/global.anthropic.claude-sonnet-5"
+    found = problems(manifest, packs)
+    assert mentions(found, "models.analyst.fallback"), found
+    assert mentions(found, "global"), found

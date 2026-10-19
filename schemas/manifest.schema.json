@@ -560,7 +560,8 @@
           "description": "Model id used when the frontier lane is on."
         },
         "fallback": {
-          "type": "string"
+          "type": "string",
+          "description": "Model id the gateway fails over to when this role's primary deployment fails. Cloud builds only: falling over from a local primary to a remote model would be an undeclared egress path."
         }
       }
     }

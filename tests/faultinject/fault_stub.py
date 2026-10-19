@@ -63,7 +63,12 @@ async def health():
 @app.post('/model/{model_id}/invoke')
 @app.post('/model/{model_id}/invoke-with-response-stream')
 async def invoke(model_id: str, request: Request):
-    fault = request.headers.get('x-fault', 'ok')
+    # **The default scenario is read from the environment, because a full-stack test cannot send this
+    # header.** A request made through the gateway reaches the stub without x-fault, so a test that wants
+    # every model call to fail — the provider-fallback measurement is the first one — starts the stub with
+    # OI_STUB_FAULT and gets that scenario without a per-request header. The header still wins when it is
+    # present, so the taxonomy tests keep driving one stub through every shape.
+    fault = request.headers.get('x-fault') or os.environ.get('OI_STUB_FAULT', 'ok')
 
     if fault == 'throttle':
         return _error(429, 'ThrottlingException', retry_after='1')

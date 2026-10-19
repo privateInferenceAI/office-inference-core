@@ -50,33 +50,39 @@ def load_table(path: Path) -> dict:
 
 def check(manifest: dict, table: dict, today: date) -> list[str]:
     problems = []
+    # **The fallback is checked exactly like the primary.** It is the model that answers when the primary
+    # fails, so a fallback that is deprecated is a recovery path that stops working on a date — the worst
+    # possible time to discover it. Both fields are read here so a manifest cannot carry one unaccounted
+    # remote model past the table.
     for role, entry in sorted((manifest.get("models") or {}).items()):
-        frontier = (entry or {}).get("frontier") or ""
-        if not frontier:
-            continue
-        identifier = model_id(frontier)
-        known = (table.get("models") or {}).get(identifier)
-        if known is None:
-            problems.append(
-                f"models.{role}: {identifier} is not in {TABLE.name}. Add it with its lifecycle "
-                "status, or the next deprecation will be discovered by a client")
-            continue
-        status = str(known.get("status", "")).upper()
-        if status != "ACTIVE":
-            problems.append(
-                f"models.{role}: {identifier} is {status}, and the manifest still names it. "
-                f"Replacement on file: {known.get('replacement', 'none recorded')}")
-        eol = known.get("eol_date")
-        if eol:
-            try:
-                eol_date = date.fromisoformat(eol)
-            except ValueError:
-                problems.append(f"{identifier}: eol_date {eol!r} is not an ISO date")
+        for field in ("frontier", "fallback"):
+            frontier = (entry or {}).get(field) or ""
+            if not frontier:
                 continue
-            if eol_date < today:
+            label = f"models.{role}" if field == "frontier" else f"models.{role}.fallback"
+            identifier = model_id(frontier)
+            known = (table.get("models") or {}).get(identifier)
+            if known is None:
                 problems.append(
-                    f"models.{role}: {identifier} passed its end-of-life date on {eol}. "
+                    f"{label}: {identifier} is not in {TABLE.name}. Add it with its lifecycle "
+                    "status, or the next deprecation will be discovered by a client")
+                continue
+            status = str(known.get("status", "")).upper()
+            if status != "ACTIVE":
+                problems.append(
+                    f"{label}: {identifier} is {status}, and the manifest still names it. "
                     f"Replacement on file: {known.get('replacement', 'none recorded')}")
+            eol = known.get("eol_date")
+            if eol:
+                try:
+                    eol_date = date.fromisoformat(eol)
+                except ValueError:
+                    problems.append(f"{identifier}: eol_date {eol!r} is not an ISO date")
+                    continue
+                if eol_date < today:
+                    problems.append(
+                        f"{label}: {identifier} passed its end-of-life date on {eol}. "
+                        f"Replacement on file: {known.get('replacement', 'none recorded')}")
     return problems
 
 
@@ -97,8 +103,11 @@ def main(argv: list[str]) -> int:
     for path in paths:
         manifest = yaml.safe_load(path.read_text()) or {}
         problems = check(manifest, table, today)
-        named = [model_id((e or {}).get("frontier", ""))
-                 for e in (manifest.get("models") or {}).values() if (e or {}).get("frontier")]
+        # Both remote fields count, so the number printed beside the pass is the number checked: a
+        # fallback that was not counted would make the line understate what the manifest sends to a provider.
+        named = [model_id((entry or {}).get(field, ""))
+                 for entry in (manifest.get("models") or {}).values()
+                 for field in ("frontier", "fallback") if (entry or {}).get(field)]
         checked += len(named)
         if problems:
             failed += 1
