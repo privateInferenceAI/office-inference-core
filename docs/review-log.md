@@ -1249,3 +1249,20 @@ The hook passed the team's remaining budget as the identity budget while the gat
 identity, so the same spend was subtracted twice and the budget fired at half its value; and every role shared one
 identity name, so four roles shared one spend counter. Fixed in PR #173. The development ceiling of 10 USD had also
 been spent by the day's measurement and is raised to 100 on the owner's instruction.
+
+## 2026-10-19, overnight: five runs settle the loop question, and correct a method failure
+
+Ran five suite runs for each of three frozen configurations: Phase A's commit, current main with the loop on, and
+current main with the loop off. Phase A 37, 43, 40, 44, 42 (mean 41.2). Main 33, 45, 44, 36, 43 (mean 40.2).
+Single-shot 36, 33, 34, 35, 37 (mean 35.0). The loop is worth five to six points; the two loop configurations are
+one point apart with overlapping ranges and a per-question split of 11 wins, 7 wins, 34 ties.
+
+The correction matters more than the numbers. On 2026-10-18 the phase report treated a Phase A triple of 44, 44, 42
+as a peak, concluded the final configuration had regressed, and shipped two prompt changes in response. The
+overnight experiment shows the triple was the top of a distribution centred at 41.2, and the prompt changes were
+noise chasing. Five runs per configuration, frozen corpus, one scorer: that is the method from now on, and the
+phase report is superseded by docs/reviews/experiment-three-configs-2026-10-19.md.
+
+Exact-number questions are the loop's real contribution: 5.4 to 6.0 of 8 against 0.8 single-shot. The honesty
+categories are where single-shot is nominally ahead, which is the trade to watch. Deployment left running current
+main with the loop on; next work is the structured query tool.
