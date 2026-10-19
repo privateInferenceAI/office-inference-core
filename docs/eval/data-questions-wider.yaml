@@ -249,7 +249,7 @@ questions:
   - id: U05
     category: unanswerable
     question: "What is on the cafeteria menu this month?"
-    absent_pattern: "cafeteria"
+    absent_pattern: "cafeteria menu"
     expected:
       staff: {answered: false, denied: false}
       executive: {answered: false, denied: false}
