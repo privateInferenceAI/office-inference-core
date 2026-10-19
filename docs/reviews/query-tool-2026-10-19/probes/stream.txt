@@ -1,0 +1,10 @@
+ok   END-TO-END  17 frame(s), 6 citation(s), answer starts 'I could not find that in the available documents.\n\nWhile pas'
+            if it were absent: a stream that lost the answer or its citations is not the same capability
+ok   TTFT        first token at 714ms of 1398ms total, 14 frame(s)
+            if it were absent: a response that arrives whole has a first token at the total time, which is not streaming
+ok   INCREMENTAL 14 frame(s) at 9 distinct arrival times, spread 1.40s, X-Accel-Buffering='no'
+            if it were absent: one frame containing the whole answer means something upstream is buffering
+ok   REDACTED    canary in any frame: no; the stream reported redactions {'ssn': 1}
+            if it were absent: a value that reaches the browser mid-stream cannot be recalled, so the control has to be before the frame rather than after the answer
+
+PASSED: 4 right(s) held against the streaming service

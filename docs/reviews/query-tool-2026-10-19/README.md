@@ -123,6 +123,11 @@ measurement of record; the re-measurement above is, on the fixed build.
 - The tool remains off by default in code. The development deployment has it on; a different corpus measures
   differently, and the opt-in is deliberate.
 
+## Acceptance probes on the live build
+
+Captured against the deployed code after the measurement: interface 8 rights, activity 8, access 4, stream 4, all
+passing. Outputs are in `probes/`.
+
 ## Evidence
 
 - `raw/control/run-1.json` to `run-5.json`: the five control suite runs.
