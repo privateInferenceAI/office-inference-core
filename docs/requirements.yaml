@@ -928,11 +928,14 @@ items:
       Built and measured 2026-10-18. Phase A in services/api/tool_loop.py: two tools, a bounded loop, and a
       numbered evidence list that the citation verifier checks the final answer against. Any loop failure falls
       back to the single-shot path. On the forty-question suite (52 runs, three runs per configuration):
-      Claude Haiku 4.5 with the loop scored 44, 44, 42 (average 43.3 of 52) against 28.7 single-shot Nova Lite and
-      35.3 single-shot Claude Haiku. Exact-number 1-2 of 8 to 5-7 of 8; cross-document 2-4 of 8 to 7-8 of 8.
-      The same suite costs about three times the model calls, bounded by the caps. Evidence:
-      docs/reviews/answer-quality-day-2026-10-18.md, PR #165. Phase B is the lookup_value tool for the one
-      remaining large-table probe; Phase C is streaming progress and the acceptance panel.
+      Superseded evidence, from the overnight five-run experiment on 2026-10-19 (docs/reviews/experiment-three-
+      configs-2026-10-19.md): the loop averages 41.2 (Phase A build) and 40.2 (current main) against 35.0 for
+      single-shot Claude Haiku, five runs per configuration. Exact-number questions are 5.4 to 6.0 of 8 with the
+      loop against 0.8 without. The earlier three-run comparison that appeared to show the final configuration
+      worse than Phase A was noise; the two configurations are indistinguishable. The remaining weakness is the
+      honesty categories, where single-shot is marginally ahead because it answers less. The same suite costs
+      about three times the model calls, bounded by the caps. Evidence: docs/reviews/answer-quality-day-2026-10-
+      18.md and docs/reviews/experiment-three-configs-2026-10-19.md, PR #165.
   - id: AGENT-TOOLS-002
     title: The streaming endpoint can run the tool loop and reports progress frames
     tier: [cloud, hosted]
