@@ -167,9 +167,9 @@ def system_prompt(lookup_enabled: bool = True, honesty_enabled: bool = True,
     search. Found on 2026-10-18 after the final configuration measured below the Phase A peak: the prompt and the
     tool list have to be one fact, which is why both now come from this function.
 
-    **`query_rows` is named here for the same reason the other two tools are.** It is the one tool that returns
-    a row instead of a passage, so the model has to be told it exists and what it is for; the description of the
-    tool alone sits after the rules and was not enough to steer a model that had already settled on an answer.
+    **`query_rows` is named here for the same reason the other two tools are.** A tool the prompt does not
+    name is a tool the model uses late or not at all, and the prompt and the offered list have to be one fact in
+    both directions: name what is offered, and offer what is named.
     """
     tools = ""
     if query_enabled:
