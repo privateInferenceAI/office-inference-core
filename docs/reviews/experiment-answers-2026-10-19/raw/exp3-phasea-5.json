@@ -1,0 +1,6037 @@
+{
+  "ran_at": "2026-10-19T01:16:35Z",
+  "duration_seconds": 358.3,
+  "answers": true,
+  "summary": {
+    "exact_number": {
+      "runs": 8,
+      "passed": 5,
+      "retrieval_hits": 6,
+      "retrieval_expected": 8
+    },
+    "prose_fact": {
+      "runs": 8,
+      "passed": 6,
+      "retrieval_hits": 7,
+      "retrieval_expected": 8
+    },
+    "unanswerable": {
+      "runs": 8,
+      "passed": 7,
+      "retrieval_hits": 0,
+      "retrieval_expected": 0
+    },
+    "cross_document": {
+      "runs": 8,
+      "passed": 7,
+      "retrieval_hits": 8,
+      "retrieval_expected": 8
+    },
+    "access_boundary": {
+      "runs": 16,
+      "passed": 15,
+      "retrieval_hits": 10,
+      "retrieval_expected": 10
+    },
+    "probe_row_normal": {
+      "runs": 1,
+      "passed": 1,
+      "retrieval_hits": 0,
+      "retrieval_expected": 1
+    },
+    "probe_row_large": {
+      "runs": 1,
+      "passed": 0,
+      "retrieval_hits": 1,
+      "retrieval_expected": 1
+    },
+    "probe_dataset_only": {
+      "runs": 1,
+      "passed": 1,
+      "retrieval_hits": 0,
+      "retrieval_expected": 0
+    },
+    "probe_pollution": {
+      "runs": 1,
+      "passed": 0,
+      "retrieval_hits": 1,
+      "retrieval_expected": 1
+    }
+  },
+  "results": [
+    {
+      "id": "N01",
+      "category": "exact_number",
+      "role": "staff",
+      "question": "In the census table that reports a median household income of 59,473 dollars, what is the mean household income?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-02/471787.csv"
+        ],
+        "contains": [
+          "77,258"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-02/471787.csv",
+          "company/group-02/471787.csv",
+          "company/group-02/351295.csv",
+          "company/group-02/574787.csv",
+          "company/group-01/561157.xls"
+        ],
+        "kinds": [
+          "table",
+          "table_row",
+          "table_row",
+          "table_row",
+          "table"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": true,
+        "withheld": 0,
+        "reason": "a passage the 'staff' role may not see matched this question better than any passage it may see, so the answer drawn from what is available is incomplete by construction.",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "In the census table that reports a median household income of $59,473, the mean household income is $60,563 dollars. [1][2]",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/471787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/351295.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/561157.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/574787.csv",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 0,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": false,
+        "contains_ok": false,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-02/471787.csv"
+        ]
+      }
+    },
+    {
+      "id": "N02",
+      "category": "exact_number",
+      "role": "staff",
+      "question": "In the census table that reports a median household income of 48,240 dollars, what is the mean household income?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-02/048411.csv"
+        ],
+        "contains": [
+          "61,958"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-02/048411.csv",
+          "company/group-02/774677.xls",
+          "company/group-02/294613.csv",
+          "company/group-01/561157.xls",
+          "company/group-01/561157.xls"
+        ],
+        "kinds": [
+          "table_row",
+          "table",
+          "table_row",
+          "table_row",
+          "table_row"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            3,
+            3
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": true,
+        "withheld": 0,
+        "reason": "a passage the 'staff' role may not see matched this question better than any passage it may see, so the answer drawn from what is available is incomplete by construction.",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Perfect! I found the answer. In the census table from document company/group-02/048411.csv that reports a median household income of $48,240 [1], the mean household income is **61,958 dollars** [23].",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/048411.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/561157.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/574787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/774677.xls",
+            "page_start": 3
+          },
+          {
+            "doc_id": "company/group-02/574787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/048411.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/048411.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/048411.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/048411.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/048411.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/048411.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/048411.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/048411.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/048411.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/048411.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/048411.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/048411.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/351295.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/574787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/351295.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/250147.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/048411.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/527124.csv",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 3,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-02/048411.csv"
+        ]
+      }
+    },
+    {
+      "id": "N03",
+      "category": "exact_number",
+      "role": "staff",
+      "question": "In the census table that reports a median household income of 59,473 dollars, how many households earn 200,000 dollars or more?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-02/471787.csv"
+        ],
+        "contains": [
+          "163,932"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-01/561157.xls",
+          "company/group-02/774677.xls",
+          "company/group-02/574787.csv",
+          "company/group-02/471787.csv",
+          "company/group-01/561157.xls"
+        ],
+        "kinds": [
+          "table",
+          "table",
+          "table",
+          "table_row",
+          "table"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            3,
+            3
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": true,
+        "withheld": 0,
+        "reason": "a passage the 'staff' role may not see matched this question better than any passage it may see, so the answer drawn from what is available is incomplete by construction.",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Looking at the evidence provided, I can find the answer directly.\n\nIn evidence [1], I can see the census table (DP03) that reports a median household income of $59,473. In the same table, the row for \"$200,000 or more\" shows **163,932** households earn $200,000 or more [1].",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/471787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/561157.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/774677.xls",
+            "page_start": 3
+          },
+          {
+            "doc_id": "company/group-02/574787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/471787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 1,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-02/471787.csv"
+        ]
+      }
+    },
+    {
+      "id": "N04",
+      "category": "exact_number",
+      "role": "staff",
+      "question": "In the census table that reports a median household income of 48,240 dollars, how many households earn 200,000 dollars or more?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-02/048411.csv"
+        ],
+        "contains": [
+          "14,353"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-01/561157.xls",
+          "company/group-02/774677.xls",
+          "company/group-02/048411.csv",
+          "company/group-02/466445.csv",
+          "company/group-02/479434.csv"
+        ],
+        "kinds": [
+          "table",
+          "table",
+          "table_row",
+          "table",
+          "table"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            3,
+            3
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": true,
+        "withheld": 0,
+        "reason": "a passage the 'staff' role may not see matched this question better than any passage it may see, so the answer drawn from what is available is incomplete by construction.",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Perfect! I found it. Evidence [8] shows the census table with a median household income of $48,240, and it also shows that \"$200,000 or more\" has **14,353** households.\n\nIn the census table that reports a median household income of 48,240 dollars, **14,353** households earn $200,000 or more [8].",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/774677.xls",
+            "page_start": 3
+          },
+          {
+            "doc_id": "company/group-01/561157.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/561157.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/466445.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/048411.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/048411.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/351295.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 2,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-02/048411.csv"
+        ]
+      }
+    },
+    {
+      "id": "N05",
+      "category": "exact_number",
+      "role": "staff",
+      "question": "In the census table that reports male median earnings of 33,270 dollars, what is the median earnings for women?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-02/294613.csv"
+        ],
+        "contains": [
+          "25,307"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-02/574787.csv",
+          "company/group-02/479434.csv",
+          "company/group-02/479434.csv",
+          "company/group-02/574787.csv",
+          "company/group-02/527124.csv"
+        ],
+        "kinds": [
+          "table_row",
+          "table",
+          "table",
+          "table",
+          "table_row"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "",
+        "kind": "degraded",
+        "reason": "unsupported_number",
+        "citations": [],
+        "passages": 6,
+        "unsupported": 0,
+        "notice": null
+      },
+      "retrieval_hit": false,
+      "score": {
+        "pass": false,
+        "contains_ok": false,
+        "cited_ok": false,
+        "retrieval_hit": false,
+        "expected_docs": [
+          "company/group-02/294613.csv"
+        ]
+      }
+    },
+    {
+      "id": "N06",
+      "category": "exact_number",
+      "role": "staff",
+      "question": "In the census table that reports male median earnings of 33,270 dollars, what is the overall median earnings figure for workers 16 years and over?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-02/294613.csv"
+        ],
+        "contains": [
+          "31,638"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-02/479434.csv",
+          "company/group-02/479434.csv",
+          "company/group-02/479434.csv",
+          "company/group-02/294613.csv",
+          "company/group-02/294613.csv"
+        ],
+        "kinds": [
+          "table_row",
+          "table_row",
+          "table_row",
+          "table_row",
+          "table_row"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Based on result [8], I can see the S0802 table row 37.0 for \"Median earnings (dollars)\" which shows:\n- First value: 31,638 (this appears to be the overall/total median earnings)\n- Second value: 33,270 (male median earnings)\n- Third value: 25,307 (female median earnings)\n- Fourth value: 26,143\n\nThe overall median earnings figure for workers 16 years and over in the census table that reports male median earnings of $33,270 is **31,638 dollars** [8].",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/527124.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/351295.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/774677.xls",
+            "page_start": 3
+          },
+          {
+            "doc_id": "company/group-02/048411.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/574787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/471787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/250147.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 1,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-02/294613.csv"
+        ]
+      }
+    },
+    {
+      "id": "N07",
+      "category": "exact_number",
+      "role": "staff",
+      "question": "In the census table that reports 15,455 households in the 150,000 to 199,999 dollar band, what percentage of households is that?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-02/048411.csv"
+        ],
+        "contains": [
+          "2.6"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-02/351295.csv",
+          "company/group-01/561157.xls",
+          "company/group-01/561157.xls",
+          "company/group-01/561157.xls",
+          "company/group-01/561157.xls"
+        ],
+        "kinds": [
+          "table_row",
+          "table_row",
+          "table_row",
+          "table_row",
+          "table_row"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": true,
+        "withheld": 0,
+        "reason": "a passage the 'staff' role may not see matched this question better than any passage it may see, so the answer drawn from what is available is incomplete by construction.",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "I could not find that in the available documents. The passages contain a value of 15456 in passage [2], which is close to 15,455, but passage [2] reports a percentage range of \"25.0 to 29.9 percent\" rather than a specific percentage. Passage [5] reports the $150,000 to $199,999 income band but with different household values (9776, 7172, 12380), not 15,455.",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/351295.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/561157.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/561157.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/561157.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/561157.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/635350.csv",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 3,
+        "notice": ""
+      },
+      "retrieval_hit": false,
+      "score": {
+        "pass": false,
+        "contains_ok": false,
+        "cited_ok": false,
+        "retrieval_hit": false,
+        "expected_docs": [
+          "company/group-02/048411.csv"
+        ]
+      }
+    },
+    {
+      "id": "N08",
+      "category": "exact_number",
+      "role": "staff",
+      "question": "What is the assumed public offering price per share in the Acurx S-1 registration statement?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm"
+        ],
+        "contains": [
+          "1.45"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+          "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+          "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+          "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+          "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm"
+        ],
+        "kinds": [
+          "table",
+          "prose",
+          "prose",
+          "prose",
+          "table_row"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Based on the evidence already retrieved, I can answer your question directly.\n\nThe assumed public offering price per share in the Acurx S-1 registration statement is **$1.45** [1].",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 1,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm"
+        ]
+      }
+    },
+    {
+      "id": "P01",
+      "category": "prose_fact",
+      "role": "staff",
+      "question": "What is the CFDA number of the Native Hawaiian Career and Technical Education Program grant application?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-02/956808.doc"
+        ],
+        "contains": [
+          "84.259A"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-02/956808.doc",
+          "company/group-02/956808.doc",
+          "company/group-02/956808.doc",
+          "company/group-02/956808.doc",
+          "company/group-02/956808.doc"
+        ],
+        "kinds": [
+          "prose",
+          "prose",
+          "prose",
+          "prose",
+          "prose"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Based on the evidence already retrieved, I can answer your question directly.\n\nThe CFDA number of the Native Hawaiian Career and Technical Education Program grant application is **84.259A** [1].",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/956808.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/956808.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/956808.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/956808.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/956808.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/956808.doc",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 1,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-02/956808.doc"
+        ]
+      }
+    },
+    {
+      "id": "P02",
+      "category": "prose_fact",
+      "role": "staff",
+      "question": "Is participation in Grants.gov voluntary for the Native Hawaiian Career and Technical Education Program application?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-02/956808.doc"
+        ],
+        "contains": [
+          "voluntary"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-02/956808.doc",
+          "company/group-02/956808.doc",
+          "company/group-02/956808.doc",
+          "company/group-02/956808.doc",
+          "company/group-02/956808.doc"
+        ],
+        "kinds": [
+          "prose",
+          "prose",
+          "prose",
+          "prose",
+          "prose"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Based on the evidence already retrieved, I can answer your question directly.\n\nYes, participation in Grants.gov is voluntary for the Native Hawaiian Career and Technical Education Program application. The document explicitly states: \"Your participation in Grants.gov is voluntary.\" [6]",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/956808.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/956808.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/956808.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/956808.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/956808.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/956808.doc",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 2,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-02/956808.doc"
+        ]
+      }
+    },
+    {
+      "id": "P03",
+      "category": "prose_fact",
+      "role": "staff",
+      "question": "In the NASA foreign agreements chapter, which numbered agreement covers reimbursable travel?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-02/173609.doc"
+        ],
+        "contains": [
+          "4.6.4",
+          "Reimbursable Travel"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-02/173609.doc",
+          "company/group-02/173609.doc",
+          "company/group-02/173609.doc",
+          "company/group-02/173609.doc",
+          "company/group-02/173609.doc"
+        ],
+        "kinds": [
+          "prose",
+          "prose",
+          "prose",
+          "prose",
+          "prose"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Perfect! I found the answer in result [7], which shows a table of contents listing \"4.6.4. REIMBURSABLE TRAVEL AGREEMENT\" as section 4.6.4.\n\nBased on the evidence retrieved, the numbered agreement that covers reimbursable travel in the NASA foreign agreements chapter is **section 4.6.4, titled \"REIMBURSABLE TRAVEL AGREEMENT\"** [7].",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/173609.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/173609.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/173609.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/173609.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/173609.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/173609.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/173609.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/173609.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/173609.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/173609.doc",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 2,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-02/173609.doc"
+        ]
+      }
+    },
+    {
+      "id": "P04",
+      "category": "prose_fact",
+      "role": "staff",
+      "question": "What must be personally verified for each signatory under section 2.2.16 of the NASA agreement form?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-02/173609.doc"
+        ],
+        "contains": [
+          "name and title"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-02/173609.doc",
+          "company/group-02/173609.doc",
+          "company/group-02/173609.doc",
+          "company/group-02/173609.doc",
+          "company/group-02/173609.doc"
+        ],
+        "kinds": [
+          "prose",
+          "prose",
+          "prose",
+          "prose",
+          "prose"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Based on the evidence already retrieved, I can answer your question.\n\nUnder section 2.2.16 of the NASA agreement form, the **name and title of each signatory must be personally verified by each signatory** [1]. \n\nSpecifically, the section states: \"Please provide the name and title of each signatory, wherein the name and title has been personally verified by each signatory.\"",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/173609.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/173609.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/173609.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/173609.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/173609.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/173609.doc",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 2,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-02/173609.doc"
+        ]
+      }
+    },
+    {
+      "id": "P05",
+      "category": "prose_fact",
+      "role": "staff",
+      "question": "What is the telephone number given in the sample post orders?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-02/104644.doc"
+        ],
+        "contains": [
+          "556-9875"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-02/004399.txt",
+          "company/group-01/472339.txt",
+          "company/group-02/004399.txt",
+          "company/group-02/004399.txt",
+          "company/group-02/004399.txt"
+        ],
+        "kinds": [
+          "prose",
+          "prose",
+          "prose",
+          "prose",
+          "prose"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": true,
+        "withheld": 0,
+        "reason": "a passage the 'staff' role may not see matched this question better than any passage it may see, so the answer drawn from what is available is incomplete by construction.",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Perfect! I found the answer. The telephone number given in the sample post orders is **[REDACTED-PHONE]** [13].",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/636901.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/122293.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/004399.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/159927.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/472339.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/597447.xls",
+            "page_start": 22
+          },
+          {
+            "doc_id": "company/group-02/004399.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/746981.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/104644.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/472339.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/004399.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/746981.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/104644.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/104644.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/216905.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/505788.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/222694.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/004399.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/004399.txt",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 3,
+        "notice": ""
+      },
+      "retrieval_hit": false,
+      "score": {
+        "pass": false,
+        "contains_ok": false,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-02/104644.doc"
+        ]
+      }
+    },
+    {
+      "id": "P06",
+      "category": "prose_fact",
+      "role": "staff",
+      "question": "What is the FPCON condition at the post described in the sample post orders?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-02/104644.doc"
+        ],
+        "contains": [
+          "FPCOND"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-02/104644.doc",
+          "company/group-02/104644.doc",
+          "company/group-02/104644.doc",
+          "company/group-02/104644.doc",
+          "company/group-02/104644.doc"
+        ],
+        "kinds": [
+          "prose",
+          "table",
+          "table_row",
+          "table",
+          "table_row"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "I could not find that in the available documents. The sample post orders describe the operational requirements for multiple FPCON conditions (A, B, C, and D) but do not specify which single FPCON condition is currently in effect at the post.",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/104644.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/104644.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/104644.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/104644.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/104644.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/104644.doc",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 2,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": false,
+        "contains_ok": false,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-02/104644.doc"
+        ]
+      }
+    },
+    {
+      "id": "P07",
+      "category": "prose_fact",
+      "role": "staff",
+      "question": "When was the Acurx Pharmaceuticals S-1 filed with the Securities and Exchange Commission?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm"
+        ],
+        "contains": [
+          "September 8, 2026"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+          "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+          "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+          "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+          "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm"
+        ],
+        "kinds": [
+          "prose",
+          "table",
+          "prose",
+          "prose",
+          "table"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Based on the evidence already retrieved, I can answer your question.\n\nThe Acurx Pharmaceuticals S-1 was filed with the Securities and Exchange Commission on **September 8, 2026** [1].",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 1,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm"
+        ]
+      }
+    },
+    {
+      "id": "P08",
+      "category": "prose_fact",
+      "role": "staff",
+      "question": "How many shares of common stock are being offered under the Acurx prospectus?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm"
+        ],
+        "contains": [
+          "1,500,000"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+          "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+          "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+          "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+          "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm"
+        ],
+        "kinds": [
+          "prose",
+          "table",
+          "prose",
+          "prose",
+          "prose"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Based on the evidence retrieved, **1,500,000 shares of common stock are being offered under the Acurx prospectus** [19][20][22]. This prospectus relates to the resale of up to 1,500,000 shares of common stock by Lincoln Park Capital Fund, LLC, which have been or may be issued to Lincoln Park pursuant to a purchase agreement dated May 8, 2025.",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 2,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm"
+        ]
+      }
+    },
+    {
+      "id": "U01",
+      "category": "unanswerable",
+      "role": "staff",
+      "question": "What Q4 dividend did the board declare?",
+      "expected": {
+        "answered": false,
+        "denied": false
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/apple-10k-2024.htm",
+          "company/apple-10k-2024.htm",
+          "company/irs-p15.pdf",
+          "company/group-02/327556.doc",
+          "company/apple-10k-2024.htm"
+        ],
+        "kinds": [
+          "table",
+          "prose",
+          "table_row",
+          "prose",
+          "table"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            34,
+            34
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "I could not find that in the available documents. While passage [3] mentions that the Company raised its quarterly dividend from $0.24 to $0.25 per share beginning in May 2024, and passage [1] shows dividends declared per share for full fiscal years, the available documents do not contain a specific declaration of a Q4 dividend amount by the board.",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/irs-p15.pdf",
+            "page_start": 34
+          },
+          {
+            "doc_id": "company/group-02/327556.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 2,
+        "notice": ""
+      },
+      "retrieval_hit": null,
+      "score": {
+        "pass": true,
+        "declined": true,
+        "refusal_text": true,
+        "forbidden_cited": [],
+        "leaked_value": false,
+        "retrieval_hit": null,
+        "expected_docs": []
+      }
+    },
+    {
+      "id": "U02",
+      "category": "unanswerable",
+      "role": "staff",
+      "question": "What did the board decide at the annual board retreat?",
+      "expected": {
+        "answered": false,
+        "denied": false
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-01/864675.xls",
+          "company/group-02/327556.doc",
+          "company/group-01/490686.xls",
+          "company/group-01/864675.xls",
+          "company/group-02/327556.doc"
+        ],
+        "kinds": [
+          "table_row",
+          "prose",
+          "table_row",
+          "table_row",
+          "prose"
+        ],
+        "pages": [
+          [
+            2,
+            2
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            4,
+            4
+          ],
+          [
+            7,
+            7
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "I could not find that in the available documents. The passages provided do not contain information about decisions made at an annual board retreat.",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-01/864675.xls",
+            "page_start": 2
+          },
+          {
+            "doc_id": "company/group-02/327556.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/490686.xls",
+            "page_start": 4
+          },
+          {
+            "doc_id": "company/group-01/864675.xls",
+            "page_start": 7
+          },
+          {
+            "doc_id": "company/group-02/327556.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/174154.doc",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 2,
+        "notice": ""
+      },
+      "retrieval_hit": null,
+      "score": {
+        "pass": true,
+        "declined": true,
+        "refusal_text": true,
+        "forbidden_cited": [],
+        "leaked_value": false,
+        "retrieval_hit": null,
+        "expected_docs": []
+      }
+    },
+    {
+      "id": "U03",
+      "category": "unanswerable",
+      "role": "staff",
+      "question": "What is the company's policy on cryptocurrency mining?",
+      "expected": {
+        "answered": false,
+        "denied": false
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-02/632971.xls",
+          "company/apple-10k-2024.htm",
+          "company/apple-10k-2024.htm",
+          "company/apple-10k-2024.htm",
+          "company/apple-10k-2024.htm"
+        ],
+        "kinds": [
+          "table_row",
+          "prose",
+          "table_row",
+          "prose",
+          "prose"
+        ],
+        "pages": [
+          [
+            3,
+            3
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": true,
+        "withheld": 0,
+        "reason": "a passage the 'staff' role may not see matched this question better than any passage it may see, so the answer drawn from what is available is incomplete by construction.",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "I could not find that in the available documents.\n\nThe search results do not contain any information about a company's policy on cryptocurrency mining. The documents appear to contain financial reports, policies on other topics, and information about physical mining operations, but no specific policy regarding cryptocurrency mining.",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/632971.xls",
+            "page_start": 3
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/751399.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/136034.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/136034.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/864675.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/864675.xls",
+            "page_start": 5
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/012148.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/136034.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/879373.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/390979.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/879373.xls",
+            "page_start": 6
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/795128.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/795128.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/979151.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/751332.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 3,
+        "notice": ""
+      },
+      "retrieval_hit": null,
+      "score": {
+        "pass": true,
+        "declined": true,
+        "refusal_text": true,
+        "forbidden_cited": [],
+        "leaked_value": false,
+        "retrieval_hit": null,
+        "expected_docs": []
+      }
+    },
+    {
+      "id": "U04",
+      "category": "unanswerable",
+      "role": "staff",
+      "question": "How many employees work at the Australian subsidiary?",
+      "expected": {
+        "answered": false,
+        "denied": false
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-01/970969.csv",
+          "company/group-02/390979.doc",
+          "company/group-02/390979.doc",
+          "company/group-02/294613.csv",
+          "company/group-02/479434.csv"
+        ],
+        "kinds": [
+          "table_row",
+          "table_row",
+          "table_row",
+          "table_row",
+          "table_row"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "I could not find that in the available documents. The search results do not contain specific information about the number of employees at an Australian subsidiary. The documents appear to contain general economic and labor statistics rather than company-specific employee data for an Australian subsidiary.",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-01/970969.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/137057.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/irs-p15.pdf",
+            "page_start": 48
+          },
+          {
+            "doc_id": "company/group-02/551525.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/551525.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/551525.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/551525.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/551525.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/551525.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/481953.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/466445.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/574787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/137057.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/137057.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/137057.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/137057.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/137057.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/137057.xls",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 3,
+        "notice": ""
+      },
+      "retrieval_hit": null,
+      "score": {
+        "pass": true,
+        "declined": true,
+        "refusal_text": true,
+        "forbidden_cited": [],
+        "leaked_value": false,
+        "retrieval_hit": null,
+        "expected_docs": []
+      }
+    },
+    {
+      "id": "U05",
+      "category": "unanswerable",
+      "role": "staff",
+      "question": "What is on the cafeteria menu this month?",
+      "expected": {
+        "answered": false,
+        "denied": false
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-01/038043.txt",
+          "company/group-01/038043.txt",
+          "company/group-01/038043.txt",
+          "company/group-01/038043.txt",
+          "company/group-01/038043.txt"
+        ],
+        "kinds": [
+          "prose",
+          "prose",
+          "prose",
+          "prose",
+          "prose"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "I could not find that in the available documents. The documents contain references to cafeteria facilities and a note to \"get lunch menu from Mr. Kim,\" but there is no actual cafeteria menu for this month included in the available documents.",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/635350.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/864675.xls",
+            "page_start": 5
+          },
+          {
+            "doc_id": "company/group-01/864675.xls",
+            "page_start": 5
+          },
+          {
+            "doc_id": "company/group-01/038043.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/957302.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/038043.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/038043.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/038043.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/390979.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/390979.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/038043.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/038043.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/864675.xls",
+            "page_start": 2
+          },
+          {
+            "doc_id": "company/group-02/957302.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/957302.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/irs-p15.pdf",
+            "page_start": 44
+          },
+          {
+            "doc_id": "company/group-02/551525.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/551525.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/551525.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/551525.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/635350.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/636901.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/864675.xls",
+            "page_start": 5
+          },
+          {
+            "doc_id": "company/group-01/864675.xls",
+            "page_start": 5
+          }
+        ],
+        "passages": 0,
+        "unsupported": 2,
+        "notice": ""
+      },
+      "retrieval_hit": null,
+      "score": {
+        "pass": true,
+        "declined": true,
+        "refusal_text": true,
+        "forbidden_cited": [],
+        "leaked_value": false,
+        "retrieval_hit": null,
+        "expected_docs": []
+      }
+    },
+    {
+      "id": "U06",
+      "category": "unanswerable",
+      "role": "staff",
+      "question": "What does the solar farm maintenance agreement require?",
+      "expected": {
+        "answered": false,
+        "denied": false
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-02/173609.doc",
+          "company/group-02/173609.doc",
+          "company/group-02/173609.doc",
+          "company/group-02/173609.doc",
+          "company/group-02/173609.doc"
+        ],
+        "kinds": [
+          "prose",
+          "prose",
+          "prose",
+          "prose",
+          "prose"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "I could not find that in the available documents.\n\nThe passages provided discuss NASA Space Act Agreements (SAAs), property management requirements, and contract compliance obligations, but they do not contain any information about solar farm maintenance agreements.",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/173609.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/173609.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/173609.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/173609.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/173609.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/433860.doc",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 2,
+        "notice": ""
+      },
+      "retrieval_hit": null,
+      "score": {
+        "pass": true,
+        "declined": true,
+        "refusal_text": true,
+        "forbidden_cited": [],
+        "leaked_value": false,
+        "retrieval_hit": null,
+        "expected_docs": []
+      }
+    },
+    {
+      "id": "U07",
+      "category": "unanswerable",
+      "role": "staff",
+      "question": "What was Zephyr Holdings' revenue last year?",
+      "expected": {
+        "answered": false,
+        "denied": false
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-01/795128.xls",
+          "company/group-01/795128.xls",
+          "company/group-01/795128.xls",
+          "company/group-01/795128.xls",
+          "company/group-01/795128.xls"
+        ],
+        "kinds": [
+          "table",
+          "table",
+          "table",
+          "table",
+          "table"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "I could not find that in the available documents.\n\nThe passages provided contain financial data for Apple Inc. (passage 1) and various business entities with financial tables (passages 2-6), but none of them identify or contain financial information specifically for \"Zephyr Holdings.\"",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/979151.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/795128.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/795128.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/552515.xls",
+            "page_start": 4
+          },
+          {
+            "doc_id": "company/group-01/795128.xls",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 2,
+        "notice": ""
+      },
+      "retrieval_hit": null,
+      "score": {
+        "pass": true,
+        "declined": true,
+        "refusal_text": true,
+        "forbidden_cited": [],
+        "leaked_value": false,
+        "retrieval_hit": null,
+        "expected_docs": []
+      }
+    },
+    {
+      "id": "U08",
+      "category": "unanswerable",
+      "role": "staff",
+      "question": "What is the company's parental leave policy?",
+      "expected": {
+        "answered": false,
+        "denied": false
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-02/338123.doc",
+          "company/group-02/338123.doc",
+          "company/apple-10k-2024.htm",
+          "company/group-02/957302.doc",
+          "company/group-02/338123.doc"
+        ],
+        "kinds": [
+          "prose",
+          "prose",
+          "prose",
+          "table_row",
+          "prose"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Based on the evidence already retrieved, I can provide you with the company's parental leave policy:\n\nThe company's parental leave policy is based on the Family and Medical Leave Act (FMLA). Eligible employees are entitled to take up to 12 workweeks of unpaid leave for the birth of a son or daughter and to care for the newborn child, or for placement with the employee of a son or daughter for adoption or foster care [1]. The policy applies equally to both male and female employees, meaning fathers as well as mothers can take family leave for the birth, placement for adoption, or foster care of a child [3].\n\nTo be eligible, employees must have been employed by the employer for at least 12 months and must have worked at least 1,250 hours during the previous 12-month period [2]. Additionally, if both spouses are eligible for FMLA leave and employed by the same covered employer, they may be limited to a combined total of 12 weeks of leave during any 12-month period for birth or care of a newborn [2].",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/338123.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/338123.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/338123.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/957302.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/597447.xls",
+            "page_start": 13
+          },
+          {
+            "doc_id": "company/group-02/597447.xls",
+            "page_start": 14
+          }
+        ],
+        "passages": 0,
+        "unsupported": 1,
+        "notice": ""
+      },
+      "retrieval_hit": null,
+      "score": {
+        "pass": false,
+        "declined": false,
+        "refusal_text": false,
+        "forbidden_cited": [],
+        "leaked_value": false,
+        "retrieval_hit": null,
+        "expected_docs": []
+      }
+    },
+    {
+      "id": "X01",
+      "category": "cross_document",
+      "role": "staff",
+      "question": "How much higher is the median household income in the census table reporting 59,473 dollars than in the one reporting 48,240 dollars?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-02/471787.csv",
+          "company/group-02/048411.csv"
+        ],
+        "contains": [
+          "11,233"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-02/471787.csv",
+          "company/group-02/471787.csv",
+          "company/group-02/574787.csv",
+          "company/group-02/574787.csv",
+          "company/group-02/479434.csv"
+        ],
+        "kinds": [
+          "table_row",
+          "table",
+          "table",
+          "table_row",
+          "table_row"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": true,
+        "withheld": 0,
+        "reason": "a passage the 'staff' role may not see matched this question better than any passage it may see, so the answer drawn from what is available is incomplete by construction.",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Based on the evidence already retrieved, I can answer this question directly.\n\nThe median household income in the census table reporting $59,473 is $11,233 higher than in the one reporting $48,240.\n\nThis is calculated as: $59,473 - $48,240 = $11,233\n\nThe evidence shows:\n- [1] reports a median household income of \"48,240\" dollars\n- [2] reports a median household income of \"59,473\" dollars",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/048411.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/471787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/471787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/574787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/574787.csv",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 3,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-02/471787.csv",
+          "company/group-02/048411.csv"
+        ]
+      }
+    },
+    {
+      "id": "X02",
+      "category": "cross_document",
+      "role": "staff",
+      "question": "The census table reporting a median household income of 59,473 reports a mean household income of 77,258; the table reporting 48,240 reports 61,958. What is the difference between the two means?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-02/471787.csv",
+          "company/group-02/048411.csv"
+        ],
+        "contains": [
+          "15,300"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-02/471787.csv",
+          "company/group-02/048411.csv",
+          "company/group-02/471787.csv",
+          "company/group-02/471787.csv",
+          "company/group-02/294613.csv"
+        ],
+        "kinds": [
+          "table",
+          "table_row",
+          "table_row",
+          "table_row",
+          "table"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": true,
+        "withheld": 0,
+        "reason": "a passage the 'staff' role may not see matched this question better than any passage it may see, so the answer drawn from what is available is incomplete by construction.",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Perfect! I found both tables:\n\n- [8] shows the table with median household income of 59,473 and mean household income of 77,258\n- [15] shows the table with median household income of 48,240 and mean household income of 61,958\n\nThe difference between the two means is: 77,258 - 61,958 = **15,300** [8][15]",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/351295.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/574787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/574787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/574787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/574787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/471787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/471787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/774677.xls",
+            "page_start": 3
+          },
+          {
+            "doc_id": "company/group-02/774677.xls",
+            "page_start": 3
+          },
+          {
+            "doc_id": "company/group-02/351295.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/527124.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/048411.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/048411.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/774677.xls",
+            "page_start": 3
+          },
+          {
+            "doc_id": "company/group-02/774677.xls",
+            "page_start": 3
+          },
+          {
+            "doc_id": "company/group-02/527124.csv",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 2,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-02/471787.csv",
+          "company/group-02/048411.csv"
+        ]
+      }
+    },
+    {
+      "id": "X03",
+      "category": "cross_document",
+      "role": "staff",
+      "question": "What is the difference between the median household income of 48,240 dollars and the S0802 median earnings of 31,638 dollars?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-02/048411.csv",
+          "company/group-02/294613.csv"
+        ],
+        "contains": [
+          "16,602"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-02/294613.csv",
+          "company/group-02/294613.csv",
+          "company/group-02/479434.csv",
+          "company/group-02/479434.csv",
+          "company/group-02/479434.csv"
+        ],
+        "kinds": [
+          "table_row",
+          "table",
+          "table",
+          "table_row",
+          "table_row"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Perfect! I now have both values from the evidence:\n\nThe difference between the median household income of $48,240 [7] and the S0802 median earnings of $31,638 [1] is $16,602.\n\n($48,240 - $31,638 = $16,602)",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/048411.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/048411.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/351295.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 3,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-02/048411.csv",
+          "company/group-02/294613.csv"
+        ]
+      }
+    },
+    {
+      "id": "X04",
+      "category": "cross_document",
+      "role": "staff",
+      "question": "What is the difference between the median household income of 48,240 dollars and the S0601 median income of 25,688 dollars?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-02/048411.csv",
+          "company/group-02/294613.csv"
+        ],
+        "contains": [
+          "22,552"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-02/294613.csv",
+          "company/group-02/294613.csv",
+          "company/group-02/294613.csv",
+          "company/group-02/294613.csv",
+          "company/group-02/479434.csv"
+        ],
+        "kinds": [
+          "table_row",
+          "table_row",
+          "table",
+          "table",
+          "table_row"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "I can calculate the difference directly from the evidence provided.\n\nThe difference between the median household income of $48,240 and the S0601 median income of $25,688 is:\n\n$48,240 - $25,688 = **$22,552**\n\nThis is based on the S0601 median income figure of \"25,688\" dollars shown in [3].",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 2,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-02/048411.csv",
+          "company/group-02/294613.csv"
+        ]
+      }
+    },
+    {
+      "id": "X05",
+      "category": "cross_document",
+      "role": "staff",
+      "question": "What is the difference between the DP03 median earnings for female full-time year-round workers of 35,919 dollars and the S0802 female median earnings of 25,307 dollars?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-02/471787.csv",
+          "company/group-02/294613.csv"
+        ],
+        "contains": [
+          "10,612"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-02/471787.csv",
+          "company/group-02/471787.csv",
+          "company/group-02/351295.csv",
+          "company/group-02/527124.csv",
+          "company/group-02/574787.csv"
+        ],
+        "kinds": [
+          "table",
+          "table_row",
+          "table",
+          "table",
+          "table"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Perfect! Now I have found the correct DP03 value. The difference between the DP03 median earnings for female full-time year-round workers of \"35,919\" dollars [7] and the S0802 female median earnings of \"25,307\" dollars [1] is:\n\n$35,919 - $25,307 = **$10,612**",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/574787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/574787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/471787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/471787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/351295.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/250147.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/351295.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/250147.csv",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 3,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-02/471787.csv",
+          "company/group-02/294613.csv"
+        ]
+      }
+    },
+    {
+      "id": "X06",
+      "category": "cross_document",
+      "role": "staff",
+      "question": "Which is higher, the DP03 median earnings for female full-time workers of 35,919 dollars or the S0802 male median earnings of 33,270 dollars, and by how much?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-02/471787.csv",
+          "company/group-02/294613.csv"
+        ],
+        "contains": [
+          "35,919",
+          "2,649"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-02/471787.csv",
+          "company/group-02/471787.csv",
+          "company/group-02/294613.csv",
+          "company/group-02/574787.csv",
+          "company/group-02/351295.csv"
+        ],
+        "kinds": [
+          "table_row",
+          "table",
+          "table",
+          "table_row",
+          "table_row"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "I need to clarify the values mentioned in your question. Looking at the evidence provided:\n\nFrom [1] and [3], I can see:\n- **S0802 male median earnings**: $33,270 [1]\n- **DP03 median earnings for female full-time workers**: $33,568 [3]\n\nHowever, you mentioned $35,919 for the DP03 female figure, which doesn't match the evidence showing $33,568. Let me verify if there's a different DP03 value you're referring to.\n\nBased on the evidence retrieved, the **DP03 median earnings for female full-time, year-round workers is $33,568**, which is **$298 higher** than the S0802 male median earnings of $33,270 [1][3].\n\nIf you have a different figure of $35,919 in mind, please let me know and I can search for that specific value to ensure we're comparing the correct data points.",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/574787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/574787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 5,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": false,
+        "contains_ok": false,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-02/471787.csv",
+          "company/group-02/294613.csv"
+        ]
+      }
+    },
+    {
+      "id": "X07",
+      "category": "cross_document",
+      "role": "staff",
+      "question": "In the DP03 census tables, how many more households earn 200,000 dollars or more in the table reporting 163,932 such households than in the table reporting 14,353?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-02/471787.csv",
+          "company/group-02/048411.csv"
+        ],
+        "contains": [
+          "149,579"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-02/471787.csv",
+          "company/group-02/527124.csv",
+          "company/group-02/351295.csv",
+          "company/group-02/527124.csv",
+          "company/group-02/471787.csv"
+        ],
+        "kinds": [
+          "table_row",
+          "table",
+          "table",
+          "table",
+          "table"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Perfect! Now I have found both values:\n\nFrom [1]: **163,932** households earning $200,000 or more\nFrom [8]: **14,353** households earning $200,000 or more\n\nThe difference is: 163,932 - 14,353 = **149,579** more households earning $200,000 or more in the first table than in the second table.\n\nThe table reporting 163,932 households earning $200,000 or more has **149,579** more such households than the table reporting 14,353 households [1][8].",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/471787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/574787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/351295.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/351295.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/527124.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/471787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/048411.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/048411.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/351295.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/574787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/527124.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/250147.csv",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 3,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-02/471787.csv",
+          "company/group-02/048411.csv"
+        ]
+      }
+    },
+    {
+      "id": "X08",
+      "category": "cross_document",
+      "role": "staff",
+      "question": "In the DP03 census tables, how many more households are in the 150,000 to 199,999 dollar band in the table reporting 166,908 than in the table reporting 15,455?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-02/471787.csv",
+          "company/group-02/048411.csv"
+        ],
+        "contains": [
+          "151,453"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-02/471787.csv",
+          "company/group-02/048411.csv",
+          "company/group-02/574787.csv",
+          "company/group-02/471787.csv",
+          "company/group-02/471787.csv"
+        ],
+        "kinds": [
+          "table_row",
+          "table_row",
+          "table_row",
+          "table",
+          "table"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": true,
+        "withheld": 0,
+        "reason": "a passage the 'staff' role may not see matched this question better than any passage it may see, so the answer drawn from what is available is incomplete by construction.",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Based on the evidence already retrieved, I can answer this question directly.\n\nThe difference in households in the $150,000 to $199,999 dollar band between the two tables is:\n\n166,908 - 15,455 = **151,453 more households** in the table reporting 166,908 than in the table reporting 15,455 [1][2].",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/471787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/048411.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/574787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/471787.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/351295.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/471787.csv",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 2,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-02/471787.csv",
+          "company/group-02/048411.csv"
+        ]
+      }
+    },
+    {
+      "id": "A01",
+      "category": "access_boundary",
+      "role": "staff",
+      "question": "What is the Chief Executive Officer's base salary?",
+      "expected": {
+        "answered": false,
+        "denied": true,
+        "forbidden_docs": [
+          "executive/executive-compensation.md"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/apple-10k-2024.htm",
+          "company/group-02/471787.csv",
+          "company/group-02/294613.csv",
+          "company/group-02/551525.doc",
+          "company/group-02/551525.doc"
+        ],
+        "kinds": [
+          "table_row",
+          "table",
+          "table",
+          "table_row",
+          "table_row"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": true,
+        "withheld": 0,
+        "reason": "a passage the 'staff' role may not see matched this question better than any passage it may see, so the answer drawn from what is available is incomplete by construction.",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "I could not find that in the available documents.",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/597447.xls",
+            "page_start": 22
+          },
+          {
+            "doc_id": "company/group-02/551525.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/551525.doc",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 1,
+        "notice": ""
+      },
+      "retrieval_hit": null,
+      "score": {
+        "pass": true,
+        "declined": true,
+        "refusal_text": true,
+        "forbidden_cited": [],
+        "leaked_value": false,
+        "retrieval_hit": null,
+        "expected_docs": []
+      }
+    },
+    {
+      "id": "A01",
+      "category": "access_boundary",
+      "role": "executive",
+      "question": "What is the Chief Executive Officer's base salary?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "executive/executive-compensation.md"
+        ],
+        "contains": [
+          "418,750"
+        ]
+      },
+      "retrieval": {
+        "role": "executive",
+        "docs": [
+          "executive/executive-compensation.md",
+          "company/apple-10k-2024.htm",
+          "company/group-02/551525.doc",
+          "company/group-02/551525.doc",
+          "company/group-02/551525.doc"
+        ],
+        "kinds": [
+          "prose",
+          "table_row",
+          "table_row",
+          "table_row",
+          "table_row"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "The Chief Executive Officer's base salary is **418,750 dollars per year** [1].",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "executive/executive-compensation.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/group-03/389400.xls",
+            "page_start": 7
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/group-03/389400.xls",
+            "page_start": 5
+          },
+          {
+            "doc_id": "executive/group-03/389400.xls",
+            "page_start": 5
+          }
+        ],
+        "passages": 0,
+        "unsupported": 0,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "executive/executive-compensation.md"
+        ]
+      }
+    },
+    {
+      "id": "A02",
+      "category": "access_boundary",
+      "role": "staff",
+      "question": "What is the Chief Financial Officer's base salary?",
+      "expected": {
+        "answered": false,
+        "denied": true,
+        "forbidden_docs": [
+          "executive/executive-compensation.md"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-02/979151.xls",
+          "company/group-01/795128.xls",
+          "company/irs-p15.pdf",
+          "company/apple-10k-2024.htm",
+          "company/irs-p15.pdf"
+        ],
+        "kinds": [
+          "table",
+          "table",
+          "table_row",
+          "table_row",
+          "table"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            39,
+            39
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            39,
+            39
+          ]
+        ],
+        "denied": true,
+        "withheld": 0,
+        "reason": "a passage the 'staff' role may not see matched this question better than any passage it may see, so the answer drawn from what is available is incomplete by construction.",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "I could not find that in the available documents.",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/879373.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/551525.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/551525.doc",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 1,
+        "notice": ""
+      },
+      "retrieval_hit": null,
+      "score": {
+        "pass": true,
+        "declined": true,
+        "refusal_text": true,
+        "forbidden_cited": [],
+        "leaked_value": false,
+        "retrieval_hit": null,
+        "expected_docs": []
+      }
+    },
+    {
+      "id": "A02",
+      "category": "access_boundary",
+      "role": "executive",
+      "question": "What is the Chief Financial Officer's base salary?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "executive/executive-compensation.md"
+        ],
+        "contains": [
+          "315,400"
+        ]
+      },
+      "retrieval": {
+        "role": "executive",
+        "docs": [
+          "executive/executive-compensation.md",
+          "company/apple-10k-2024.htm",
+          "company/group-02/551525.doc",
+          "company/group-02/551525.doc",
+          "company/group-02/551525.doc"
+        ],
+        "kinds": [
+          "prose",
+          "table_row",
+          "table_row",
+          "table_row",
+          "table_row"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Based on the evidence already retrieved, I can answer your question directly.\n\nThe Chief Financial Officer's base salary is **315,400 dollars per year** [1].",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "executive/executive-compensation.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/879373.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/group-03/389400.xls",
+            "page_start": 7
+          }
+        ],
+        "passages": 0,
+        "unsupported": 1,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "executive/executive-compensation.md"
+        ]
+      }
+    },
+    {
+      "id": "A03",
+      "category": "access_boundary",
+      "role": "staff",
+      "question": "What is the annual bonus target for the Chief Executive Officer?",
+      "expected": {
+        "answered": false,
+        "denied": true,
+        "forbidden_docs": [
+          "executive/executive-compensation.md"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/apple-10k-2024.htm",
+          "company/apple-10k-2024.htm",
+          "company/apple-10k-2024.htm",
+          "company/group-02/551525.doc",
+          "company/apple-10k-2024.htm"
+        ],
+        "kinds": [
+          "table_row",
+          "table",
+          "table",
+          "table_row",
+          "table_row"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": true,
+        "withheld": 0,
+        "reason": "a passage the 'staff' role may not see matched this question better than any passage it may see, so the answer drawn from what is available is incomplete by construction.",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "I could not find that in the available documents.",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/551525.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/216905.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/597447.xls",
+            "page_start": 2
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 1,
+        "notice": ""
+      },
+      "retrieval_hit": null,
+      "score": {
+        "pass": true,
+        "declined": true,
+        "refusal_text": true,
+        "forbidden_cited": [],
+        "leaked_value": false,
+        "retrieval_hit": null,
+        "expected_docs": []
+      }
+    },
+    {
+      "id": "A03",
+      "category": "access_boundary",
+      "role": "executive",
+      "question": "What is the annual bonus target for the Chief Executive Officer?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "executive/executive-compensation.md"
+        ],
+        "contains": [
+          "62.5"
+        ]
+      },
+      "retrieval": {
+        "role": "executive",
+        "docs": [
+          "executive/executive-compensation.md",
+          "company/apple-10k-2024.htm",
+          "company/apple-10k-2024.htm",
+          "company/apple-10k-2024.htm",
+          "company/group-02/551525.doc"
+        ],
+        "kinds": [
+          "prose",
+          "table_row",
+          "table",
+          "table",
+          "table_row"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Based on the evidence already retrieved, I can answer your question directly.\n\nThe annual bonus target for the Chief Executive Officer is **62.5 percent of base salary, payable on achievement of the board's stated objectives** [1].",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "executive/executive-compensation.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/group-03/865770.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/551525.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/216905.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 1,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "executive/executive-compensation.md"
+        ]
+      }
+    },
+    {
+      "id": "A04",
+      "category": "access_boundary",
+      "role": "staff",
+      "question": "What is the Chief Executive Officer's long-term incentive target award for the current year?",
+      "expected": {
+        "answered": false,
+        "denied": true,
+        "forbidden_docs": [
+          "executive/executive-compensation.md"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/apple-10k-2024.htm",
+          "company/apple-10k-2024.htm",
+          "company/apple-10k-2024.htm",
+          "company/apple-10k-2024.htm",
+          "company/group-02/597447.xls"
+        ],
+        "kinds": [
+          "table",
+          "prose",
+          "table_row",
+          "table_row",
+          "table_row"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": true,
+        "withheld": 0,
+        "reason": "a passage the 'staff' role may not see matched this question better than any passage it may see, so the answer drawn from what is available is incomplete by construction.",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "I could not find that in the available documents. The passages list various forms of CEO Performance Award Agreements and CEO Restricted Stock Unit Award Agreements under different employee stock plans, but they do not contain the specific dollar amount or percentage of the CEO's long-term incentive target award for the current year.",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 2,
+        "notice": ""
+      },
+      "retrieval_hit": null,
+      "score": {
+        "pass": true,
+        "declined": true,
+        "refusal_text": true,
+        "forbidden_cited": [],
+        "leaked_value": false,
+        "retrieval_hit": null,
+        "expected_docs": []
+      }
+    },
+    {
+      "id": "A04",
+      "category": "access_boundary",
+      "role": "executive",
+      "question": "What is the Chief Executive Officer's long-term incentive target award for the current year?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "executive/executive-compensation.md"
+        ],
+        "contains": [
+          "1,250,000"
+        ]
+      },
+      "retrieval": {
+        "role": "executive",
+        "docs": [
+          "executive/executive-compensation.md",
+          "company/apple-10k-2024.htm",
+          "company/apple-10k-2024.htm",
+          "company/apple-10k-2024.htm",
+          "company/apple-10k-2024.htm"
+        ],
+        "kinds": [
+          "prose",
+          "prose",
+          "table",
+          "table_row",
+          "table_row"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "The Chief Executive Officer's target award for the current year is 1,250,000 dollars in grant-date value. [1]",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "executive/executive-compensation.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/group-03/865770.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/apple-10k-2024.htm",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 0,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "executive/executive-compensation.md"
+        ]
+      }
+    },
+    {
+      "id": "A05",
+      "category": "access_boundary",
+      "role": "staff",
+      "question": "Under the NESHAP for epoxy resin production, how long must an owner or operator retain the measurements file?",
+      "expected": {
+        "answered": false,
+        "denied": true,
+        "forbidden_docs": [
+          "executive/group-03/543276.doc"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-02/879373.xls",
+          "company/group-01/482784.txt",
+          "company/group-01/482784.txt",
+          "company/group-02/879373.xls",
+          "company/group-02/879373.xls"
+        ],
+        "kinds": [
+          "table_row",
+          "prose",
+          "prose",
+          "table_row",
+          "table_row"
+        ],
+        "pages": [
+          [
+            2,
+            2
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": true,
+        "withheld": 0,
+        "reason": "a passage the 'staff' role may not see matched this question better than any passage it may see, so the answer drawn from what is available is incomplete by construction.",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "I could not find that in the available documents.",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/879373.xls",
+            "page_start": 2
+          },
+          {
+            "doc_id": "company/group-01/482784.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/482784.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/433860.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/879373.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/879373.xls",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 1,
+        "notice": ""
+      },
+      "retrieval_hit": null,
+      "score": {
+        "pass": true,
+        "declined": true,
+        "refusal_text": true,
+        "forbidden_cited": [],
+        "leaked_value": false,
+        "retrieval_hit": null,
+        "expected_docs": []
+      }
+    },
+    {
+      "id": "A05",
+      "category": "access_boundary",
+      "role": "executive",
+      "question": "Under the NESHAP for epoxy resin production, how long must an owner or operator retain the measurements file?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "executive/group-03/543276.doc"
+        ],
+        "contains": [
+          "five years"
+        ]
+      },
+      "retrieval": {
+        "role": "executive",
+        "docs": [
+          "executive/group-03/543276.doc",
+          "executive/group-03/543276.doc",
+          "executive/group-03/543276.doc",
+          "executive/group-03/543276.doc",
+          "executive/group-03/543276.doc"
+        ],
+        "kinds": [
+          "prose",
+          "prose",
+          "prose",
+          "prose",
+          "prose"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Based on the evidence already retrieved, I can answer your question.\n\nUnder the NESHAP for epoxy resin production, an owner or operator must retain the measurements file for **at least five years** following the date of such measurements [1]. This requirement is consistent across the regulation, as the standards require affected facilities to maintain all records, including reports and notifications for at least five years [5].",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "executive/group-03/543276.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/545688.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/group-03/543276.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/group-03/543276.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/group-03/543276.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/group-03/543276.doc",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 1,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "executive/group-03/543276.doc"
+        ]
+      }
+    },
+    {
+      "id": "A06",
+      "category": "access_boundary",
+      "role": "staff",
+      "question": "Under the SDWIS state legal entity rules, what must be unique for a laboratory?",
+      "expected": {
+        "answered": false,
+        "denied": true,
+        "forbidden_docs": [
+          "executive/group-03/491223.doc"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-01/025209.doc",
+          "company/group-01/025209.doc",
+          "company/group-01/025209.doc",
+          "company/group-01/025209.doc",
+          "company/group-02/098627.txt"
+        ],
+        "kinds": [
+          "prose",
+          "prose",
+          "prose",
+          "prose",
+          "table_row"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": true,
+        "withheld": 0,
+        "reason": "a passage the 'staff' role may not see matched this question better than any passage it may see, so the answer drawn from what is available is incomplete by construction.",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "I could not find that in the available documents.\n\nThe passages provided contain information about QWDATA batch-file format, laboratory standard deviations, analyzing entities, and other water quality data management topics, but they do not address SDWIS state legal entity rules or what must be unique for a laboratory under those rules.",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-01/025209.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/025209.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/025209.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/025209.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/025209.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/acurx-pharmaceuticals-inc__S-1__2026-09-08.htm",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 2,
+        "notice": ""
+      },
+      "retrieval_hit": null,
+      "score": {
+        "pass": true,
+        "declined": true,
+        "refusal_text": true,
+        "forbidden_cited": [],
+        "leaked_value": false,
+        "retrieval_hit": null,
+        "expected_docs": []
+      }
+    },
+    {
+      "id": "A06",
+      "category": "access_boundary",
+      "role": "executive",
+      "question": "Under the SDWIS state legal entity rules, what must be unique for a laboratory?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "executive/group-03/491223.doc"
+        ],
+        "contains": [
+          "Laboratory State ID No"
+        ]
+      },
+      "retrieval": {
+        "role": "executive",
+        "docs": [
+          "executive/group-03/491223.doc",
+          "executive/group-03/491223.doc",
+          "executive/group-03/491223.doc",
+          "executive/group-03/491223.doc",
+          "executive/group-03/491223.doc"
+        ],
+        "kinds": [
+          "prose",
+          "prose",
+          "prose",
+          "prose",
+          "prose"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Based on the evidence already retrieved, I can answer your question.\n\nUnder the SDWIS state legal entity rules, the **Laboratory Name must be unique** [1]. The documentation specifically states: \"Laboratory Name must be unique. The following error message will be invoked: Laboratory Name must be unique.\"",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "executive/group-03/491223.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/group-03/491223.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/group-03/491223.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/group-03/491223.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/group-03/491223.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/group-03/491223.doc",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 3,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": false,
+        "contains_ok": false,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "executive/group-03/491223.doc"
+        ]
+      }
+    },
+    {
+      "id": "A07",
+      "category": "access_boundary",
+      "role": "staff",
+      "question": "In the sample post orders, what is the sentry at the post armed with?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-02/104644.doc"
+        ],
+        "contains": [
+          "9mm pistol",
+          "shotgun"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-02/104644.doc",
+          "company/group-02/104644.doc",
+          "company/group-02/104644.doc",
+          "company/group-02/104644.doc",
+          "company/group-02/104644.doc"
+        ],
+        "kinds": [
+          "prose",
+          "table",
+          "prose",
+          "table_row",
+          "table_row"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": true,
+        "withheld": 0,
+        "reason": "a passage the 'staff' role may not see matched this question better than any passage it may see, so the answer drawn from what is available is incomplete by construction.",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Based on the evidence already retrieved, I can answer your question.\n\nIn the sample post orders, the sentry at the post is armed with \"a 9mm pistol and a shotgun\" [3].",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/104644.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/104644.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/104644.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/104644.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/104644.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/104644.doc",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 1,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-02/104644.doc"
+        ]
+      }
+    },
+    {
+      "id": "A07",
+      "category": "access_boundary",
+      "role": "executive",
+      "question": "In the sample post orders, what is the sentry at the post armed with?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-02/104644.doc"
+        ],
+        "contains": [
+          "9mm pistol",
+          "shotgun"
+        ]
+      },
+      "retrieval": {
+        "role": "executive",
+        "docs": [
+          "company/group-02/104644.doc",
+          "company/group-02/104644.doc",
+          "company/group-02/104644.doc",
+          "company/group-02/104644.doc",
+          "company/group-02/104644.doc"
+        ],
+        "kinds": [
+          "prose",
+          "table",
+          "prose",
+          "table_row",
+          "table_row"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Based on the evidence already retrieved, I can answer your question.\n\nIn the sample post orders, the sentry at the post is armed with \"a 9mm pistol and a shotgun\" [4].",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/104644.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/group-03/423868.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/104644.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/104644.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/104644.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/104644.doc",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 1,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-02/104644.doc"
+        ]
+      }
+    },
+    {
+      "id": "A08",
+      "category": "access_boundary",
+      "role": "staff",
+      "question": "According to the proceeding notice, where can interested parties examine the filings?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-02/532049.doc"
+        ],
+        "contains": [
+          "Reference Information Center"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-02/532049.doc",
+          "company/group-02/009872.doc",
+          "company/group-02/009872.doc",
+          "company/group-02/597447.xls",
+          "company/group-02/597447.xls"
+        ],
+        "kinds": [
+          "prose",
+          "prose",
+          "prose",
+          "table_row",
+          "table_row"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            22,
+            22
+          ],
+          [
+            21,
+            21
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Based on the evidence already retrieved, I can answer your question:\n\nAccording to the proceeding notice, interested parties can examine the filings at the Commission's Reference Information Center (Room CY-A257) at its headquarters, located at 445 Twelfth Street, SW, Washington, D.C., during regular business hours [4].",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-01/864675.xls",
+            "page_start": 4
+          },
+          {
+            "doc_id": "company/group-01/864675.xls",
+            "page_start": 3
+          },
+          {
+            "doc_id": "company/group-01/864675.xls",
+            "page_start": 6
+          },
+          {
+            "doc_id": "company/group-02/532049.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/551525.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/767894.doc",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 0,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-02/532049.doc"
+        ]
+      }
+    },
+    {
+      "id": "A08",
+      "category": "access_boundary",
+      "role": "executive",
+      "question": "According to the proceeding notice, where can interested parties examine the filings?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-02/532049.doc"
+        ],
+        "contains": [
+          "Reference Information Center"
+        ]
+      },
+      "retrieval": {
+        "role": "executive",
+        "docs": [
+          "company/group-02/532049.doc",
+          "company/group-02/009872.doc",
+          "company/group-02/009872.doc",
+          "company/group-02/597447.xls",
+          "company/group-02/597447.xls"
+        ],
+        "kinds": [
+          "prose",
+          "prose",
+          "prose",
+          "table_row",
+          "table_row"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            22,
+            22
+          ],
+          [
+            21,
+            21
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Based on the evidence already retrieved, I can answer your question:\n\nAccording to the proceeding notice, interested parties can examine the filings at the Commission's Reference Information Center (Room CY-A257) at its headquarters, located at 445 Twelfth Street, SW, Washington, D.C., during regular business hours [4].",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-01/864675.xls",
+            "page_start": 4
+          },
+          {
+            "doc_id": "company/group-01/864675.xls",
+            "page_start": 3
+          },
+          {
+            "doc_id": "company/group-01/864675.xls",
+            "page_start": 6
+          },
+          {
+            "doc_id": "company/group-02/532049.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/551525.doc",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/767894.doc",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 0,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-02/532049.doc"
+        ]
+      }
+    },
+    {
+      "id": "PR1",
+      "category": "probe_row_normal",
+      "role": "staff",
+      "question": "In the census table that reports a median household income of 48,240 dollars, how many households are in the 150,000 to 199,999 dollar band?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-02/048411.csv"
+        ],
+        "contains": [
+          "15,455"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-01/561157.xls",
+          "company/group-01/561157.xls",
+          "company/group-01/561157.xls",
+          "company/group-02/774677.xls",
+          "company/group-01/561157.xls"
+        ],
+        "kinds": [
+          "table_row",
+          "table_row",
+          "table_row",
+          "table",
+          "table_row"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            3,
+            3
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": true,
+        "withheld": 0,
+        "reason": "a passage the 'staff' role may not see matched this question better than any passage it may see, so the answer drawn from what is available is incomplete by construction.",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Perfect! I found it. Evidence [8] shows the census table with a median household income of $48,240, and it also shows that there are **15,455** households in the $150,000 to $199,999 dollar band [8].\n\nIn the census table that reports a median household income of \"48,240\" dollars, there are **15,455** households in the $150,000 to $199,999 dollar band [8].",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/774677.xls",
+            "page_start": 3
+          },
+          {
+            "doc_id": "company/group-02/466445.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/561157.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/466445.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/048411.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/048411.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/351295.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 2,
+        "notice": ""
+      },
+      "retrieval_hit": false,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-02/048411.csv"
+        ]
+      }
+    },
+    {
+      "id": "PR2",
+      "category": "probe_row_large",
+      "role": "staff",
+      "question": "In the coordinate data of document 410027.txt, what is the third value in the row whose first two values are 228865.1 and 188387.5?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-02/410027.txt"
+        ],
+        "contains": [
+          "6.1"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-02/410027.txt",
+          "company/group-01/502103.txt",
+          "company/group-02/410027.txt",
+          "company/group-02/410027.txt",
+          "company/group-02/410027.txt"
+        ],
+        "kinds": [
+          "table",
+          "prose",
+          "table",
+          "table",
+          "table"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "I could not find that in the available documents.\n\nThe passages provided contain coordinate data with three values per row, but none of them contain a row with the first two values of 228865.1 and 188387.5. While there are rows with first values near 228865 (such as 228865.8 and 228865 in passage [3]), none match the specific pair 228865.1 and 188387.5.",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/410027.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/410027.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/410027.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/410027.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/410027.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/708503.txt",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 3,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": false,
+        "contains_ok": false,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-02/410027.txt"
+        ]
+      }
+    },
+    {
+      "id": "PR3",
+      "category": "probe_dataset_only",
+      "role": "staff",
+      "question": "What beam energy and target material were used in the MARS run?",
+      "expected": {
+        "answered": false,
+        "declined": true
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-02/018638.txt",
+          "company/group-02/018638.txt",
+          "company/group-02/383397.txt",
+          "company/group-02/027094.txt",
+          "company/group-02/383397.txt"
+        ],
+        "kinds": [
+          "prose",
+          "prose",
+          "prose",
+          "prose",
+          "prose"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "I could not find that in the available documents.",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/018638.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/018638.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/383397.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/027094.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/383397.txt",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/536028.doc",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 1,
+        "notice": ""
+      },
+      "retrieval_hit": null,
+      "score": {
+        "pass": true,
+        "declined": true,
+        "refusal_text": true,
+        "forbidden_cited": [],
+        "leaked_value": false,
+        "retrieval_hit": null,
+        "expected_docs": []
+      }
+    },
+    {
+      "id": "PR4",
+      "category": "probe_pollution",
+      "role": "staff",
+      "question": "What is the median earnings figure for workers 16 years and over?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-02/294613.csv"
+        ],
+        "contains": [
+          "31,638"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-01/561157.xls",
+          "company/group-02/294613.csv",
+          "company/group-02/479434.csv",
+          "company/group-02/294613.csv",
+          "company/group-02/479434.csv"
+        ],
+        "kinds": [
+          "table_row",
+          "table_row",
+          "table_row",
+          "table_row",
+          "table_row"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Based on the search results, I found the median earnings figure for workers 16 years and over. The evidence shows two different datasets:\n\nFrom evidence [14], the median earnings for the civilian employed population 16 years and over with earnings is **$31,474** [14], with a margin of error of +/-66.\n\nFrom evidence [10], for a different geographic area, the median earnings for the civilian employed population 16 years and over with earnings is **$25,811** [10], with a margin of error of +/-1,796.\n\nThe most comprehensive figure appears to be **$31,474** from the larger dataset [14].",
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/481953.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-01/561157.xls",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/479434.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/group-02/294613.csv",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 4,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": false,
+        "contains_ok": false,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-02/294613.csv"
+        ]
+      }
+    }
+  ]
+}
