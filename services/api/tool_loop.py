@@ -207,6 +207,12 @@ QUERY_DEFAULT_ROWS = 4
 QUERY_ROW_CHARS = 600
 QUERY_RESPONSE_CHARS = 6000
 QUERY_AMBIGUOUS_DOCS = 3
+# **Rows get a small allowance past the evidence ceiling, and it is not a detail.** The ceiling exists to bound
+# how many passages the citation namespace and the verifier hold, and a search can reach it before a question
+# asks for a row. The first five-run treatment measured one question failing in all five runs because of it: the
+# model kept querying a row that was already returned, the namespace stayed full, the calls matched a row and
+# rendered nothing, and the model read that as absence. Eight slots is one call's default worth of rows.
+QUERY_EXTRA_EVIDENCE = 8
 
 
 # How a figure is written, and how it is compared: commas removed, so a comma-separated figure and a plain one
@@ -333,12 +339,17 @@ class ToolBox:
         self.index: dict[str, int] = {}
 
     # ------------------------------------------------------------------ evidence
-    def add(self, passage) -> int:
+    def add(self, passage, extra_slots: int = 0) -> int:
         """Add a passage to the citation namespace and return its 1-based number.
 
         Deduplicated by chunk id: a model that searches twice with similar wording should not see the same
         passage cited under two numbers, because a client checking a citation would then find two entries for
         one piece of text.
+
+        `extra_slots` raises the ceiling for this call only. The row query uses it because a search can fill
+        the namespace before the question asks for a row, and a row that cannot be numbered is a row the model
+        cannot cite, which reads as absence. The ceiling still applies: the extra allowance is a constant, so
+        repeated calls cannot grow the namespace without bound.
         """
         try:
             key = str(getattr(passage, "chunk_id", "") or "")
@@ -346,7 +357,7 @@ class ToolBox:
             key = ""
         if key and key in self.index:
             return self.index[key]
-        if len(self.evidence) >= self.max_evidence:
+        if len(self.evidence) >= self.max_evidence + max(0, int(extra_slots)):
             return 0
         self.evidence.append(passage)
         if key:
@@ -554,6 +565,13 @@ class ToolBox:
                 break
         self._last_facts["rows_matched"] = len(rows)
         self._last_facts["rows_returned"] = len(lines)
+        # **A matched row that cannot be returned must say why.** The first version answered with a header and
+        # no rows when the evidence namespace was full, and the model read that as "no such row". That is the
+        # failure that cost one question all five runs of the first treatment measurement.
+        if not lines:
+            return json.dumps({"error": "the rows matched, but the evidence list is full, so a new row cannot "
+                                        "be numbered or cited. Answer from the evidence already gathered, or "
+                                        "say what is missing."})
         header = "Rows matching " + json.dumps(values) + ":"
         if len(rows) > len(lines):
             header += (f" ({len(rows)} rows matched and {len(lines)} are shown; add doc_id or another "
@@ -577,7 +595,7 @@ class ToolBox:
             table_id=payload.get("table_id"),
             row_index=row["row_index"],
         )
-        number = self.add(passage)
+        number = self.add(passage, extra_slots=QUERY_EXTRA_EVIDENCE)
         if not number:
             return 0, ""
         where = f"{passage.doc_id} p{passage.page_start}"

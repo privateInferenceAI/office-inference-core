@@ -492,3 +492,47 @@ def test_rows_in_chunk_skips_a_chunk_that_is_not_a_table():
     assert tool_loop.rows_in_chunk(payload("prose text", kind="prose")) == []
     assert tool_loop.rows_in_chunk(payload("marker", kind="table_marker")) == []
 
+
+
+def test_row_evidence_gets_an_allowance_past_the_search_ceiling(monkeypatch):
+    """A search can fill the evidence ceiling before the question asks for a row.
+
+    The first five-run treatment lost one question in all five runs to the old behaviour: the row matched, the
+    namespace was full, the tool rendered nothing, and the model read that as absence. Rows now get a bounded
+    allowance past the ceiling so they can still be numbered and cited.
+    """
+    toolbox = tool_loop.ToolBox(services=object(), permit=FakePermit(), role="staff", max_evidence=2)
+    toolbox._candidate_chunks = lambda values, doc_id="": [("c1", "company/census.csv")]
+    install_payloads(monkeypatch, {"c1": payload("value | 59,473")})
+    toolbox.add(FakePassage("s1", "search one"))
+    toolbox.add(FakePassage("s2", "search two"))
+    out = toolbox.query_rows(["59,473"])
+    assert "59,473" in out, "a row past the search ceiling is still returned and citable"
+    assert len(toolbox.evidence) == 3
+
+
+def test_a_full_evidence_list_answers_the_row_query_with_an_explanation(monkeypatch):
+    """The allowance is bounded, and a matched row that cannot be numbered says why instead of rendering nothing.
+
+    A header with no rows reads as "no such row"; the error says the evidence list is full, which is a different
+    fact and one the model can act on.
+    """
+    payloads = {}
+    candidates = []
+    for index in range(8):
+        key = f"c{index}"
+        payloads[key] = payload(f"row {index} | 59,473", chunk_id=key, row_start=index)
+        candidates.append((key, "company/census.csv"))
+    payloads["c8"] = payload("row eleven | 77,777", chunk_id="c8", row_start=11)
+    toolbox = tool_loop.ToolBox(services=object(), permit=FakePermit(), role="staff", max_evidence=1)
+    toolbox._candidate_chunks = lambda values, doc_id="": list(candidates) if "59,473" in values \
+        else [("c8", "company/census.csv")]
+    install_payloads(monkeypatch, payloads)
+    toolbox.add(FakePassage("s1", "one search result fills the plain ceiling of one"))
+    first = toolbox.query_rows(["59,473"], limit=8)
+    assert "row 7" in first, "eight rows fill the allowance past the ceiling"
+    assert len(toolbox.evidence) == tool_loop.QUERY_EXTRA_EVIDENCE + 1
+    out = tool_loop.json.loads(toolbox.query_rows(["77,777"]))
+    assert "evidence list is full" in out["error"]
+    assert toolbox._last_facts["rows_matched"] == 1
+
