@@ -28,6 +28,22 @@ Each unanswerable question carries an `absent_pattern` that was checked against 
 If the corpus later grows and a pattern starts matching, the question is no longer unanswerable and must be
 replaced, not silently left to fail.
 
+## The five probes
+
+Four probes live in `tests/fixtures/data_suite_run.py`, separate from the forty because they measure a mechanism
+whose expected result changes with the chunking or answer-path policy:
+
+| Probe | Measures | Redesigned 2026-10-19 |
+|---|---|---|
+| PR1 `probe_row_normal` | a pinpoint row in an ordinary table, using a fact no question uses | yes: it had become a duplicate of N07's premise |
+| PR2 `probe_row_large` | a pinpoint row in a 41,000-row table | no |
+| PR3 `probe_dataset_only` | an honest refusal for a question only an unindexed data dump answers | no |
+| PR4 `probe_pollution` | a clean prose count that numeric table dumps compete with | yes: it had become a duplicate of N06 |
+| PR5 `probe_redaction` | the PII gate end to end: a correct answer is masked, a leak is not | new |
+
+PR5 matters because the redaction control is only real if a question that asks for a masked value still answers
+and comes back masked. Its document holds reserved test values, so a leak is unambiguous.
+
 ## How a runner scores it
 
 - `answered`: the system produced an answer grounded in retrieved passages rather than a fallback.
