@@ -89,6 +89,12 @@ degradations, which understate the treatment rather than overstate it.
 So 22 of the 27 remaining failures are deterministic on four questions, and five are infrastructure. The immediate
 next work is not another prompt: it is those four questions, provider fallback, and a fairer probe set.
 
+**Is 46.6 good?** On this instrument, yes: 89.6 percent, against 35.0 single-shot and 40–41 before the tool. It is
+not product accuracy, and it is close to the instrument's ceiling, so do not chase the last few points here by
+tuning. The defensible target after the four specific failures are diagnosed and provider fallback exists is about
+48 to 50 of 52 on this suite, and the number that matters more is how a widened evaluation set scores, because the
+current one cannot distinguish 46 from 48.
+
 **Acceptance probes on the live build are now evidenced**: `docs/reviews/query-tool-2026-10-19/probes/` holds the
 interface (8 rights), activity (8), access (4) and stream (4) outputs, captured against the deployed code.
 
@@ -191,6 +197,9 @@ stream probe 4. Run commands are in `docs/runbook.md` section 6.7. The stream pr
 
 The structured row query is **done and measured** (section 2b). The priorities below replace the old list.
 
+0. **Order of work and expected effect.** Diagnose the four deterministic failures (about two to three points), then
+   provider fallback (one to two), then probe redesign and the wider evaluation set (measurement quality, not score),
+   then the acceptance panel. Do not start another item before the five-run comparison of the previous one.
 1. **Four deterministic question failures are the largest answer-quality gap.** A06/executive (partial answer on
    the SDWIS legal-entity question, 5 of 5), P05 and P06 (wrong content on the post-orders questions, 5 of 5 each),
    and U08 (answers instead of refusing, 4 of 5). Each needs a diagnosis before a fix: is it retrieval, formatting,
@@ -251,7 +260,7 @@ The structured row query is **done and measured** (section 2b). The priorities b
   full evidence namespace silently swallowed a matched row. Rows now get reserve slots and an explicit error.
 - **Do not rewrite the prompt without measuring.** Prompt changes moved the suite by seven points in both
   directions on three-run evidence and netted nothing on five. The prompt currently in main is the one that
-  measured 40.2; treat it as frozen until the query tool exists.
+  measured 40.2; treat it as frozen until the query tool has been measured on a second corpus.
 
 ## 8. What not to misrepresent
 
@@ -309,7 +318,9 @@ Decisions taken while the owner was away on 2026-10-19, updated after the row-qu
 2. **Deployment frozen after each measurement.** It is now on the measured row-query build: main `30b0100`,
    query on, loop on, Claude Haiku, six steps, ten calls, lookup off, honesty on, ceiling 100.
 3. **Rejected files and data-set cards untouched**, pending an owner decision. `rejected/rejected.csv` and
-   `rejected/datasets.csv` are the lists.
+   `rejected/datasets.csv` are the lists. **Recommendation:** exclude the six unreadable files permanently and
+   record the decision without deleting them; leave the six data-set cards as cards, because indexing them as
+   rows is the explosion chunker-v4 removed and the query tool does not reach them.
 4. **Test suite was fixed to be hermetic** (the red test was tests calling the live reranker). It is now 974 passed,
    22 skipped, 0 failed; keep it that way.
 5. **The suite runner is reproducible** (`scripts/run_answer_suite.sh`; the second session fixed a permission bug in
@@ -321,3 +332,29 @@ Decisions taken while the owner was away on 2026-10-19, updated after the row-qu
    decision after a second corpus is measured.
 9. **No prompt tuning is planned.** The remaining points are in specific failures, reliability and a harder
    evaluation set, not in prompt wording.
+
+## 12. What to give the next agent
+
+Give these, in this order. Nothing else is required; the repository, the accounts and the box are described above.
+
+1. This document, as the first read. It is self-contained for state, method, traps and next work.
+2. The three evidence locations, linked from section 4:
+   - `docs/reviews/query-tool-2026-10-19/` (report, `compare.py`, raw runs, probe outputs)
+   - `docs/reviews/experiment-three-configs-2026-10-19.md` (the five-run comparison)
+   - `docs/reviews/experiment-answers-2026-10-19/` (the per-question audit and raw runs)
+3. Repository access: `github.com/privateInferenceAI/office-inference-core`, currently main `fa792e5` or later.
+4. Box access as described in section 10, and the instruction that the deployment is frozen until a five-run
+   comparison justifies a change.
+5. The kick-off message below, or an equivalent in the owner's own words.
+
+Kick-off message:
+
+> Start by reading `docs/handoff-answer-quality-2026-10-19.md` in the repository. It is the complete state of the
+> work: what was built, the correct numbers and where they came from, the measurement rules (five runs minimum,
+> same-day control, frozen configuration), the traps that already caused wrong conclusions, and the first tasks.
+> Verify the live deployment against section 1 before changing anything. The next work is in section 6, in order:
+> diagnose the four deterministic failures (A06 executive, P05, P06, U08), add provider fallback, redesign the two
+> bad probes and widen the evaluation set, then run the acceptance panel. Keep changes to one logical unit per PR
+> with the five-run before and after. The row query is on for the development deployment and opt-in by default in
+> code; do not change its default. Ask the owner before touching the rejected files, the data-set cards, or the
+> corpus.
