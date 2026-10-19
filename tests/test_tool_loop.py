@@ -263,10 +263,25 @@ def test_lookup_value_renders_the_matching_rows():
 def test_the_prompt_carries_the_honesty_rule_for_absent_events():
     # The 2026-10-18 tool runs on the weaker model answered two unanswerable questions from adjacent facts.
     # The rule that stops a related figure being relabelled as the asked-for one lives in the system prompt.
-    prompt = tool_loop.SYSTEM_PROMPT
+    prompt = tool_loop.system_prompt(lookup_enabled=True, honesty_enabled=True)
     assert "specific event, period, meeting or document" in prompt
     assert "Do not infer that a related figure" in prompt
     assert "lookup_value" in prompt
+
+
+def test_the_prompt_only_names_the_tools_that_are_offered():
+    """The prompt once named lookup_value while the tool was switched off, so the model could waste its steps
+    calling a tool that was not there. The prompt and the tool list have to be one fact."""
+    without = tool_loop.system_prompt(lookup_enabled=False, honesty_enabled=True)
+    assert "search_documents" in without and "read_passages" in without
+    assert "lookup_value" not in without
+    with_lookup = tool_loop.system_prompt(lookup_enabled=True, honesty_enabled=True)
+    assert "lookup_value" in with_lookup
+
+
+def test_the_honesty_rule_can_be_measured_off():
+    prompt = tool_loop.system_prompt(lookup_enabled=False, honesty_enabled=False)
+    assert "specific event, period, meeting or document" not in prompt
 
 
 def test_the_flag_defaults_off(monkeypatch):

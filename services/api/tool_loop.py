@@ -86,16 +86,15 @@ TOOLS = [
     },
 ]
 
-SYSTEM_PROMPT = (
+_PROMPT_HEAD = (
     "You answer questions about a client's own documents.\n"
     "You have tools. search_documents searches the documents; read_passages opens a document around a "
-    "result; lookup_value finds the exact place a figure appears (it is for figures that identify a row "
-    "uniquely; if it says a figure appears in many documents, search instead). Use them. If the first search does "
-    "not contain "
-    "the answer, search again with different words. If a result names a table but the excerpt is not enough, read "
-    "that document. If the question quotes a figure and the excerpts do not show that figure, look it up; a row "
-    "described by two figures can be looked up with both in one call. If the question compares two documents, "
-    "search for both.\n"
+    "result{tools}. Use them. If the first search does not contain the answer, search again with different "
+    "words. If a result names a table but the excerpt is not enough, read that document. If the question "
+    "compares two documents, search for both.\n"
+)
+
+_PROMPT_RULES = (
     "Rules for the final answer:\n"
     "1. Put the answer in the first sentence. Quote a figure exactly as it appears in the evidence, with units.\n"
     "2. Cite the evidence number that carries the answer as [n], using the numbers shown in tool results.\n"
@@ -104,12 +103,35 @@ SYSTEM_PROMPT = (
     "4. Do not describe your search. Do not reply with only a citation.\n"
     "5. If the evidence does not contain the answer, reply exactly: I could not find that in the available "
     "documents.\n"
+)
+
+_HONESTY_RULE = (
     "6. If the question asks about a specific event, period, meeting or document that the evidence never "
     "states, refuse even when the evidence contains related facts. Do not infer that a related figure answers "
     "it, and do not relabel a fact as the one that was asked for.\n"
+)
+
+_PROMPT_TAIL = (
     "You have a limited number of tool calls. Answer as soon as the evidence is enough; do not keep searching "
     "for completeness. When you have the answer, reply with no tool call."
 )
+
+
+def system_prompt(lookup_enabled: bool = True, honesty_enabled: bool = True) -> str:
+    """The instruction, built from the tools this deployment actually offers.
+
+    **The prompt once named `lookup_value` even when the tool was switched off**, so the model could spend its
+    limited steps calling something that was not there, and the tool errors then ate the calls meant for the
+    search. Found on 2026-10-18 after the final configuration measured below the Phase A peak: the prompt and the
+    tool list have to be one fact, which is why both now come from this function.
+    """
+    tools = ("; lookup_value finds the exact place a figure appears, for figures that identify a row uniquely"
+             if lookup_enabled else "")
+    rules = _PROMPT_HEAD.format(tools=tools) + _PROMPT_RULES
+    if honesty_enabled:
+        rules += _HONESTY_RULE
+    return rules + _PROMPT_TAIL
+
 
 CORRECTIVE = (
     "Your previous reply was rejected: {reason}. Answer again using the evidence already gathered, or search "
@@ -366,9 +388,12 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
     """
     import answer_contract
 
+    offered = active_tools()
+    lookup_offered = any(schema["function"]["name"] == "lookup_value" for schema in offered)
+    honesty = os.environ.get("OI_TOOL_HONESTY", "on").strip().lower() not in ("off", "0", "false", "no")
     seeded = toolbox.render(list(seed_passages))
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt(lookup_offered, honesty)},
         {"role": "user", "content": (
             f"Question: {question}\n\n"
             + (f"Evidence already retrieved, numbered:\n{seeded}\n\n" if seeded else "")
