@@ -75,10 +75,13 @@ does not move healthy traffic.
 - The fault-injected score is about two points below the healthy baseline. That is Sonnet answering (and taking
   longer, which tightens the loop's clock) rather than answers being lost; the comparison that matters is the
   control, which loses every answer.
-- **The answer and its audit row still name the configured primary model.** The gateway's response carries the
-  model that actually answered (a direct call under fault returned `us.anthropic.claude-sonnet-4-5-...`), but the
-  API reports the manifest model, so a failover is not visible in the record the client sees. That is a real gap
-  against `INF-ROLE-001` and is recorded as follow-up work, not as done.
+- **The answering-model gap in this section is closed.** The measurement above was taken before the attribution
+  change; a follow-up PR makes the API read the gateway's routing headers, so `resolved_model` is the model
+  that answered, `configured_model` is what the manifest names, and `model_group` plus
+  `fallback_used` name the failover. Verified by failing the primary on purpose: the answer reported
+  `bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0` with `analyst-fallback`, and the
+  `model_call` row's `model` column said the same. The fault-injected runs in this folder were
+  measured before that change; their totals stand, they simply could not tell a reader which model answered.
 - One fault shape was measured: a 503 on the primary. The gateway fails over on any exception from the primary,
   but throttles, timeouts and connection errors were not separately measured.
 
@@ -97,7 +100,8 @@ does not move healthy traffic.
 
 The fallback stays configured on the development deployment: Claude Haiku primary, Claude Sonnet 4.5 fallback,
 same account and region. The renderer and validator support stays for the shipped manifests, with Nova Lite to
-Nova Pro as the tracked default pair. The answering-model gap above is the first follow-up.
+Nova Pro as the tracked default pair. The answering-model gap is closed by a follow-up PR, verified under the same
+fault injection.
 
 ## Evidence
 

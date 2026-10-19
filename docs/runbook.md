@@ -3914,6 +3914,13 @@ for quality, and the manual says so rather than implying otherwise.
 could not tell that anything had changed and the swap this entry asks for would have been invisible. The answer
 carries `resolved_model` now, beside the role, because a role is a name in a manifest and a model is what ran.
 
+**A failover is reported the same way.** The gateway sets the routing decision on the response
+(`x-litellm-model-group`, `x-litellm-model-name`, `x-litellm-attempted-fallbacks`), and the API
+reads them. The answer adds `configured_model`, `model_group` and `fallback_used`; the
+`model_call` row's `model` column is the model that answered and its payload keeps the role as
+`model_role`. Before this, an answer served by the fallback credited the primary, which is the one fact an
+auditor would have been misled by.
+
 **Both processes must be restarted, and the failure is silent.** `render_manifest.py` writes the config and
 neither process re-reads it: restart only the gateway and the model genuinely changes at Bedrock while the API
 goes on reporting the old one from the manifest it loaded at startup. That is the worst shape of failure, because
@@ -5713,8 +5720,8 @@ degrading the question. It is a manifest field:
         frontier: bedrock/amazon.nova-lite-v1:0
         fallback: bedrock/amazon.nova-pro-v1:0
 
-Rendering it produces two things, and both are required: a second model group \`analyst-fallback\` and a
-\`litellm_settings.fallbacks\` entry mapping \`analyst\` to it. The gateway does the failover once, so the
+Rendering it produces two things, and both are required: a second model group `analyst-fallback` and a
+`litellm_settings.fallbacks` entry mapping `analyst` to it. The gateway does the failover once, so the
 question path, the stream and every tool-loop call get it without a second implementation. **The retry count
 stays zero**: the gateway makes one attempt per model and then moves on, so a provider that is already struggling
 is not asked three times.
@@ -5725,8 +5732,8 @@ The lifecycle check reads the fallback too, because a deprecated fallback would 
 needed.
 
 **The development deployment overrides the pair.** Its primary is Claude Haiku, so after changing
-\`rendered/litellm.yaml\` for the model (the override described above), add the fallback to the same file and to
-\`rendered/manifest.json\`:
+`rendered/litellm.yaml` for the model (the override described above), add the fallback to the same file and to
+`rendered/manifest.json`:
 
     # rendered/litellm.yaml: after the analyst entry, and inside litellm_settings
     - model_name: analyst-fallback
@@ -5744,8 +5751,8 @@ needed.
       up -d --force-recreate litellm
 
 **Measure it by failing the primary on purpose, not by waiting for a provider blip.** The fault stub in
-\`tests/faultinject/\` speaks the provider's failure shapes, and it takes a default scenario from
-\`OI_STUB_FAULT\` because a request that arrives through the gateway carries no per-request header:
+`tests/faultinject/` speaks the provider's failure shapes, and it takes a default scenario from
+`OI_STUB_FAULT` because a request that arrives through the gateway carries no per-request header:
 
     cd /opt/oi-core
     docker run -d --name oi-fault-stub --network ai-net -e OI_STUB_FAULT=unavailable \
@@ -5764,14 +5771,14 @@ needed.
       up -d --force-recreate litellm
     docker rm -f oi-fault-stub
 
-A run with the primary broken and the fallback in place should produce no \`provider_unavailable\` degradations
+A run with the primary broken and the fallback in place should produce no `provider_unavailable` degradations
 and a score comparable to the healthy baseline. A run with the primary broken and no fallback produces degraded
-answers with that reason, which is the control. \`docs/reviews/provider-fallback-2026-10-19.md\` holds the
+answers with that reason, which is the control. `docs/reviews/provider-fallback-2026-10-19.md` holds the
 measured comparison.
 
 **Roll back.** Flag off for the loop, or the manifest for the model, then recreate only the containers that read
 that configuration. Nothing in the corpus, the vector store or the audit chain changes either way. A fallback is
-removed by deleting its model group and its \`fallbacks\` entry; the primary is untouched.
+removed by deleting its model group and its `fallbacks` entry; the primary is untouched.
 
 **What to watch.** About 1.6 times the suite time (178 to 188 seconds against 110 single-shot) and two to three
 times the model calls per answer. The development analyst ceiling is 100 USD for a 30-day period; a day of suite

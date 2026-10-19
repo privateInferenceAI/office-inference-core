@@ -137,9 +137,14 @@ broken primary with no fallback, degraded every answer. Healthy traffic is uncha
 configured but inert scored 51, 51, 51, 51, 49 (mean 50.6), the same as before the change. The development
 deployment runs Haiku with a Sonnet fallback. Evidence: `docs/reviews/provider-fallback-2026-10-19.md`.
 
-**Known gap, recorded rather than papered over:** the answer and its audit row still name the configured primary
-model, not the fallback that answered; the gateway's response carries the real model. Recording the answering
-model is follow-up work under `INF-ROLE-001`.
+**The answering-model gap is closed (same day, follow-up PR).** The gateway sets the routing decision on every
+response — `x-litellm-model-group`, `x-litellm-model-name`,
+`x-litellm-attempted-fallbacks` — and the API now reads it on the question path, the tool loop, the job path
+and both stream paths. The answer carries `resolved_model` (what answered), `configured_model` (what
+the manifest names), `model_group` and `fallback_used`; the `model_call` row's `model`
+column is the model that answered and its payload keeps the role as `model_role`. Verified by failing the
+primary on purpose: the answer reported `bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0` with
+`model_group: analyst-fallback` and `fallback_used: true`, and the row said the same.
 
 ## 3. What was built, in order, and why
 

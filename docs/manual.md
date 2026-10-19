@@ -1691,8 +1691,10 @@ docker exec postgres psql -U oicore -d oicore -c \
 ```
 
 That is the gateway saying what it asked the provider for. The API's answer carries both facts too: `model` is
-the role the manifest names and `resolved_model` is the provider model it points at, so a response whose two
-fields disagree with the spend log means a process was not restarted.
+the role the manifest names and `resolved_model` is the model that actually answered, so a response whose two
+fields disagree with the spend log means a process was not restarted. **A failover makes the difference visible**:
+`resolved_model` is then the fallback model, `configured_model` is what the manifest names for the role,
+and `fallback_used` says whether the gateway failed over before answering.
 
 Nothing in the application changes, because applications ask for the analyst role rather than for a
 model. Two rules apply. If the client's contract names a single region, an inference-profile-only
@@ -3742,7 +3744,10 @@ Three, and that is deliberate. There is no fourth endpoint until a capability ne
 |---|---|
 | `answer` | The model's text, with `[n]` markers referring to `citations` |
 | `model` | **The role**, as the manifest names it. Not the model that ran — see the next row, and section 18 |
-| `resolved_model` | **Which model actually answered.** A client that reads only `model` cannot tell that a manifest swap took effect |
+| `resolved_model` | **Which model actually answered.** A client that reads only `model` cannot tell that a manifest swap took effect, and under a failover this is the fallback model |
+| `configured_model` | The model the manifest names for the role. Equal to `resolved_model` on a healthy call; different when the gateway answered from a fallback |
+| `model_group` | The gateway group that answered. A value other than the role names a failover |
+| `fallback_used` | True when the gateway failed over before answering, so the answer came from the secondary deployment |
 | `role`, `roots` | What the session held, so a caller can see the permission it was answered under |
 | `citations` | Document, access label and page for each passage the answer could cite |
 | `supported` / `unsupported` | The sentences the retrieved passages do and do not back, with a reason |
@@ -5701,7 +5706,7 @@ one. `lookup_value` finds the exact place a figure appears, comma-insensitive, f
 bad at. Every chunk or row a tool returns is numbered, and the final answer is checked against that evidence by
 the same citation verifier as before, so a citation cannot point at a passage the model never saw.
 
-**The fallback model.** A role can name a second remote model in the manifest (\`models.analyst.fallback\`), and
+**The fallback model.** A role can name a second remote model in the manifest (`models.analyst.fallback`), and
 the gateway fails over to it when the primary deployment fails. The failover happens once per model call, with no
 retry amplification: one attempt at the primary, then one at the fallback. It applies to questions, streams and
 every tool call because all of them go through the gateway. It is a cloud-build setting only, because on an
