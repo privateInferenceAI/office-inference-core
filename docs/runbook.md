@@ -5655,6 +5655,31 @@ analyst team ceiling first: a budget-exhausted lane reports every answer as degr
 gateway numbers in the error are the way to tell that apart from an outage. The per-question evidence behind the
 recorded five-run experiment is in `docs/reviews/experiment-answers-2026-10-19/`.
 
+**The row query (the answer step's third tool).** `query_rows` returns the exact table rows a question
+quotes instead of the passage around them, because the measured failure on exact-number questions was reading the
+neighbouring line of a forty-row group. It is off until a deployment asks for it, and the flag is the rollback:
+
+    cd /opt/oi-core
+    grep -q '^OI_TOOL_QUERY=' rendered/env && sed -i 's/^OI_TOOL_QUERY=.*/OI_TOOL_QUERY=on/' rendered/env \
+      || echo 'OI_TOOL_QUERY=on' >> rendered/env
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env up -d --force-recreate api
+    docker exec api printenv OI_TOOL_QUERY        # expect: on
+
+Ask a question whose answer is a row and confirm the call reached the audit chain. Every tool call is a
+`tool_call` row; the row query carries its own counts, so a refusal or a wrong row can be checked later:
+
+    docker exec -i postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select id, outcome, \
+      payload->>'candidate_chunks' as chunks, payload->>'rows_matched' as matched, \
+      payload->>'rows_returned' as shown from audit_events where event_type='tool_call' \
+      and tool='query_rows' order by id desc limit 5;"
+
+The bounds are constants in `services/api/tool_loop.py`: 400 chunks scanned, 8 rows returned (4 by default), 600
+characters a row, 6,000 characters a response. The query is one parameterised SELECT with the session's access
+roots in its where clause, and an unscoped match that spans more than three documents is refused with examples
+rather than anchored on the first. Nothing in the corpus, the vector store or the audit chain changes when the
+flag is turned off again. The five-run comparison of on against off is
+`docs/reviews/query-tool-2026-10-19.md`.
+
 **Test the streaming opt-in.** The old frames are unchanged unless the client asks for tools:
 
     ... ask_client.py -q "In the census table reporting a median household income of 59,473 dollars, what is

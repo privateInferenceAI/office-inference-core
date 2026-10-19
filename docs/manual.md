@@ -5683,12 +5683,14 @@ The step that turns retrieved passages into an answer has two modes, and the dep
 **Single-shot (the older mode, `OI_TOOL_LOOP=off`).** Retrieval returns passages, they go into one prompt, the
 model answers once. It is the cheapest and it is what every deployment gets by default.
 
-**Tools (`OI_TOOL_LOOP=on`).** The model gets two or three tools and a bounded loop. `search_documents` runs the
-same hybrid retrieval under the session's access roots. `read_passages` opens a document around a hit, the rest of
-a table, or the next page. `lookup_value` finds the exact place a figure appears, comma-insensitive, for the
-figures embeddings are bad at. Every chunk a tool returns is numbered, and the final answer is checked against
-that evidence by the same citation verifier as before, so a citation cannot point at a passage the model never
-saw.
+**Tools (`OI_TOOL_LOOP=on`).** The model gets two, three or four tools and a bounded loop. `search_documents`
+runs the same hybrid retrieval under the session's access roots. `read_passages` opens a document around a hit,
+the rest of a table, or the next page. `query_rows` returns the exact table rows that contain a figure or a row
+label the question quotes, which is how a figure is confirmed before it is answered; it scans at most 400
+chunks, returns at most 8 rows, and refuses a match that spans more than three documents unless the query names
+one. `lookup_value` finds the exact place a figure appears, comma-insensitive, for the figures embeddings are
+bad at. Every chunk or row a tool returns is numbered, and the final answer is checked against that evidence by
+the same citation verifier as before, so a citation cannot point at a passage the model never saw.
 
 **The bounds, all set in the environment and visible to an operator.**
 
@@ -5699,6 +5701,7 @@ saw.
 | `OI_TOOL_MAX_CALLS` | 10 | tool calls per answer, capped at 24 |
 | `OI_TOOL_SEARCH_LIMIT` | 8 | results a search may add |
 | `OI_TOOL_LOOKUP` | off | enables the literal figure lookup tool; measured neutral to negative on duplicated census data |
+| `OI_TOOL_QUERY` | off | enables the structured row query; every call is audited as a `tool_call` with its candidate and returned-row counts |
 
 The wall clock is the same request budget the single-shot path uses. Any loop failure, cap, provider error or
 exception falls back to the single-shot answer with the passages retrieval already chose, so enabling the loop
@@ -5726,9 +5729,10 @@ the `us.` inference profile rather than the raw model id.
     # back to the cheaper model (then re-render, and recreate litellm and api)
     # analyst.frontier: bedrock/amazon.nova-lite-v1:0 in manifests/dev-cloud.yaml
 
-**How it is measured.** The same forty questions, three runs per configuration, scored by
-`tests/fixtures/data_suite_run.py`. The numbers that led to the current mode are in
-`docs/reviews/answer-quality-day-2026-10-18.md` and `docs/reviews/phase-b-c-2026-10-18.md`: single-shot 29 to 36,
-the tool loop 37 to 44 depending on configuration, with run-to-run variance of several points. The final
-configuration (six steps, ten calls, lookup off) measured 41, 40, 39 of 52. A single run is not enough to compare
-configurations; use three and read the range.
+**How it is measured.** The same forty questions and four probes, scored by `tests/fixtures/data_suite_run.py`,
+five runs per configuration from `scripts/run_answer_suite.sh`. Five is the minimum: five identical runs of one
+configuration have spanned 33 to 45 of 52, so a three-run difference of a few points is noise. The numbers that
+led to the current mode are in `docs/reviews/experiment-three-configs-2026-10-19.md`: single-shot Claude Haiku
+35.0, the tool loop 40.2 to 41.2, five runs each, and the Phase A peak of 44, 44, 42 was the top of a
+distribution rather than a configuration that beat the final one. Read the range and the mean; a single run is
+never enough to compare configurations.
