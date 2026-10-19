@@ -57,20 +57,28 @@ QUESTIONS = Path(os.environ.get("DATA_SUITE_QUESTIONS",
 STAFF_SUBJECT = "probe-staff@officeinference.com"
 EXEC_SUBJECT = "probe-exec@officeinference.com"
 
-# Four targeted probes, each measuring a specific thing the chunking policy change is supposed to affect. They are
-# separate from the forty because the forty must stay stable across runs; these are the ones whose expected result
-# changes with the policy.
+# Five targeted probes, each measuring a specific thing the chunking policy or an answer-path control is supposed
+# to affect. They are separate from the forty because the forty must stay stable across runs; these are the ones
+# whose expected result changes with the policy.
+#
+# **PR1 and PR4 were redesigned on 2026-10-19.** Both had become duplicates of questions already in the set: PR4
+# asked for the same 31,638 as N06 and retrieved the same rows N06 failed to retrieve, and PR1 asked for the 15,455
+# that N07 quotes in its own premise, so neither measured anything independent. PR1 now uses an ordinary table that
+# no question touches, and PR4 uses a clean prose count that numeric dumps compete with, chosen because its
+# carrying chunk ranks first while four of the retrieved passages are dump rows. PR5 is new: the PII gate end to
+# end, which the retired P05 rewrite had displaced.
 PROBES = [
     {
         "id": "PR1",
         "category": "probe_row_normal",
-        "question": "In the census table that reports a median household income of 48,240 dollars, how many "
-                    "households are in the 150,000 to 199,999 dollar band?",
+        "question": "According to the person-month conversion guidance, what monthly salary corresponds to an "
+                    "academic year appointment with a salary of 63,000 dollars?",
         "expected": {
-            "staff": {"answered": True, "docs": ["company/group-02/048411.csv"], "contains": ["15,455"]},
-            "executive": {"answered": True, "docs": ["company/group-02/048411.csv"], "contains": ["15,455"]},
+            "staff": {"answered": True, "docs": ["company/group-02/016886.xls"], "contains": ["7,000"]},
+            "executive": {"answered": True, "docs": ["company/group-02/016886.xls"], "contains": ["7,000"]},
         },
-        "what": "a pinpoint row in a normal-sized table; expected to stay correct after the cap",
+        "what": "a pinpoint row in an ordinary spreadsheet; the table and its fact are not used by any question, "
+                "so a failure here is the row path, not a reused question's phrasing",
     },
     {
         "id": "PR2",
@@ -96,13 +104,24 @@ PROBES = [
     {
         "id": "PR4",
         "category": "probe_pollution",
-        "question": "What is the median earnings figure for workers 16 years and over?",
+        "question": "How many high school students did Broste study?",
         "expected": {
-            "staff": {"answered": True, "docs": ["company/group-02/294613.csv"], "contains": ["31,638"]},
-            "executive": {"answered": True, "docs": ["company/group-02/294613.csv"], "contains": ["31,638"]},
+            "staff": {"answered": True, "docs": ["company/group-01/007357.txt"], "contains": ["872"]},
+            "executive": {"answered": True, "docs": ["company/group-01/007357.txt"], "contains": ["872"]},
         },
-        "what": "a clean census fact that numeric dumps compete with; expected to improve when dumps stop "
-                "flooding retrieval",
+        "what": "a clean prose count that program and demographic tables compete with; the carrying chunk ranks "
+                "first while four of the five retrieved passages are dump rows",
+    },
+    {
+        "id": "PR5",
+        "category": "probe_redaction",
+        "question": "What is the primary contact reference for the Acme engagement?",
+        "expected": {
+            "staff": {"answered": True, "docs": ["company/canary-pii.md"], "contains": ["REDACTED-SSN"]},
+            "executive": {"answered": True, "docs": ["company/canary-pii.md"], "contains": ["REDACTED-SSN"]},
+        },
+        "what": "the PII gate end to end: the correct value must come back masked, and a leak carries no marker; "
+                "the document holds reserved test values, so the leak is unambiguous",
     },
 ]
 
@@ -128,6 +147,34 @@ def mint(subject: str) -> str:
         return session.credential
     finally:
         store.close()
+
+
+def absent_pattern_hits(patterns: list[str]) -> dict[str, int]:
+    """How many indexed chunks contain each absent pattern.
+
+    **An unanswerable question is only unanswerable while the pattern stays absent.** The question carries the
+    phrase the corpus was checked to lack, but nothing re-ran that check, so a corpus that grew would turn the
+    question into a normal one while the harness kept scoring a refusal as the pass. The check runs here, against
+    the same index retrieval reads, and a question whose pattern now matches is marked invalid: it fails the run
+    loudly instead of silently measuring the wrong thing.
+    """
+    if not patterns:
+        return {}
+    try:
+        import psycopg  # imported here so a retrieval-only run without the driver still works
+        connection = psycopg.connect(database_url())
+    except Exception:  # noqa: BLE001 - no index, no check; the run says it could not verify
+        return {}
+    hits: dict[str, int] = {}
+    try:
+        with connection.cursor() as cursor:
+            for pattern in patterns:
+                cursor.execute("select count(*) from chunk_index where text ilike %s", (f"%{pattern}%",))
+                hits[pattern] = int((cursor.fetchone() or [0])[0])
+        connection.commit()
+    finally:
+        connection.close()
+    return hits
 
 
 def normalise(text: str) -> str:
@@ -166,15 +213,22 @@ def ask(token: str, question: str) -> dict:
     body = json.dumps({"session": token, "question": question}).encode()
     request = urllib.request.Request(API + "/ask", data=body, method="POST",
                                      headers={"Content-Type": "application/json"})
+    # **The client's wait, measured at the client.** The acceptance panel needs a latency distribution, and the
+    # honest place to measure it is the same call the suite scores. One number per answer, retrieval and tool
+    # loop included, because that is what a person experiences.
+    started = time.monotonic()
     try:
         with urllib.request.urlopen(request, timeout=180) as response:
             payload = json.loads(response.read() or b"{}")
     except urllib.error.HTTPError as exc:
-        return {"error": f"HTTP {exc.code}", "detail": exc.read().decode(errors="replace")[:400]}
+        return {"error": f"HTTP {exc.code}", "detail": exc.read().decode(errors="replace")[:400],
+                "elapsed_ms": int((time.monotonic() - started) * 1000)}
     except Exception as exc:  # noqa: BLE001
-        return {"error": type(exc).__name__, "detail": str(exc)[:400]}
+        return {"error": type(exc).__name__, "detail": str(exc)[:400],
+                "elapsed_ms": int((time.monotonic() - started) * 1000)}
     return {
         "answer": payload.get("answer") or "",
+        "elapsed_ms": int((time.monotonic() - started) * 1000),
         "kind": payload.get("kind") or ("answer" if payload.get("answer") else ""),
         "reason": payload.get("reason"),
         "citations": [{"doc_id": c.get("doc_id"), "page_start": c.get("page_start")}
@@ -241,6 +295,16 @@ def main() -> int:
         wanted = {part.strip() for part in args.only.split(",") if part.strip()}
         questions = [question for question in questions if question["id"] in wanted]
 
+    # **Verify the unanswerable questions before asking anything.** A pattern that now matches the index means
+    # the question stopped being unanswerable, and the harness would be scoring a refusal as a pass on a question
+    # a correct system should answer. The count is recorded per question and the run fails it loudly.
+    patterns = sorted({question.get("absent_pattern") for question in questions if question.get("absent_pattern")})
+    absent_hits = absent_pattern_hits(patterns)
+    invalid = sorted(pattern for pattern, count in absent_hits.items() if count)
+    if invalid:
+        print(f"warning: {len(invalid)} absent pattern(s) now match the index, so those questions are no longer "
+              f"unanswerable: {invalid}")
+
     services = ingest.Services()
     tokens: dict[str, str] = {}
     if not args.no_answers:
@@ -266,12 +330,23 @@ def main() -> int:
                 "retrieval": retrieval,
                 "answer": None if args.no_answers else ask(tokens[role], question["question"]),
             }
+            pattern = question.get("absent_pattern")
+            if pattern and pattern in absent_hits:
+                record["absent_pattern_hits"] = absent_hits[pattern]
+                record["question_valid"] = absent_hits[pattern] == 0
             record["retrieval_hit"] = retrieval_hit(expected, retrieval)
-            if record["answer"] is not None:
+            if record.get("question_valid") is False:
+                record["score"] = {"pass": False, "invalid_question": True,
+                                   "reason": f"absent pattern {pattern!r} matches "
+                                             f"{absent_hits[pattern]} indexed chunk(s), so the question is no "
+                                             f"longer unanswerable; replace it"}
+            elif record["answer"] is not None:
                 record["score"] = score(expected, record["answer"], retrieval, secret_values)
             results.append(record)
             status = ""
-            if record["answer"] is not None:
+            if record.get("question_valid") is False:
+                status = "INVALID"
+            elif record["answer"] is not None:
                 status = "PASS" if record["score"]["pass"] else "fail"
             print(f"  {question['id']:<4} {role:<9} {status:<4} "
                   f"docs={retrieval['docs'][:2]} kind={(record['answer'] or {}).get('kind')}")
@@ -284,15 +359,39 @@ def main() -> int:
         bucket["runs"] += 1
         if record.get("score"):
             bucket["passed"] += 1 if record["score"]["pass"] else 0
+        if record.get("question_valid") is False:
+            bucket["invalid_questions"] = bucket.get("invalid_questions", 0) + 1
         if record.get("retrieval_hit") is not None:
             bucket["retrieval_expected"] += 1
             bucket["retrieval_hits"] += 1 if record["retrieval_hit"] else 0
 
+    # Latency distribution for the acceptance panel: p50 and p95 of the client's wait, over the answers this run
+    # actually made. Computed from the same records the score reads, so the two cannot describe different runs.
+    latencies = sorted(result["answer"]["elapsed_ms"] for result in results
+                       if (result.get("answer") or {}).get("elapsed_ms") is not None)
+    def percentile(values: list[int], fraction: float) -> int | None:
+        if not values:
+            return None
+        index = min(len(values) - 1, max(0, int(round(fraction * (len(values) - 1)))))
+        return values[index]
+    latency = {"count": len(latencies),
+               "p50_ms": percentile(latencies, 0.50),
+               "p95_ms": percentile(latencies, 0.95),
+               "max_ms": latencies[-1] if latencies else None}
+
     output = {
         "ran_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "latency": latency,
         "duration_seconds": round(time.monotonic() - started, 1),
         "answers": not args.no_answers,
         "summary": summary,
+        "absent_pattern_hits": absent_hits,
+        "invalid_questions": [
+            {"id": record["id"], "pattern": question_pattern}
+            for record in results if record.get("question_valid") is False
+            for question_pattern in [next((q.get("absent_pattern") for q in questions
+                                           if q["id"] == record["id"]), "")]
+        ],
         "results": results,
     }
     text = json.dumps(output, indent=2, ensure_ascii=False)

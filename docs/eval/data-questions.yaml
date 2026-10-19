@@ -210,7 +210,10 @@ questions:
   - id: U05
     category: unanswerable
     question: "What is on the cafeteria menu this month?"
-    absent_pattern: "cafeteria"
+    # The pattern is the phrase that would make the question answerable, not the topic word. "cafeteria"
+    # matched nine chunks of cafeteria-plan tax text and a school pesticide table, so the scorer flagged the
+    # question as no longer unanswerable; "cafeteria menu" matches nothing, and the question is unchanged.
+    absent_pattern: "cafeteria menu"
     expected:
       staff: {answered: false, denied: false}
       executive: {answered: false, denied: false}
