@@ -1,0 +1,40 @@
+model_list:
+- model_name: front_desk
+  litellm_params:
+    model: bedrock/amazon.nova-micro-v1:0
+  model_info:
+    lane: frontier
+- model_name: analyst
+  litellm_params:
+    model: bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0
+  model_info:
+    lane: frontier
+- model_name: reader
+  litellm_params:
+    model: bedrock/amazon.nova-pro-v1:0
+  model_info:
+    lane: frontier
+- model_name: coder
+  litellm_params:
+    model: bedrock/deepseek.v3.2
+  model_info:
+    lane: frontier
+- model_name: analyst-fallback
+  litellm_params:
+    model: bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0
+  model_info:
+    lane: frontier
+    fallback_for: analyst
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+  num_retries: 0
+  request_timeout: 120
+  stream_timeout: 120
+  fallbacks:
+  - analyst:
+    - analyst-fallback
+general_settings:
+  custom_auth: custom_auth.user_api_key_auth
+  custom_auth_run_common_checks: true
+  enable_post_custom_auth_checks: true

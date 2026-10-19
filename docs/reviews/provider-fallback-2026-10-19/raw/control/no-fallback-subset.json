@@ -1,0 +1,333 @@
+{
+  "ran_at": "2026-10-19T18:58:04Z",
+  "duration_seconds": 9.8,
+  "answers": true,
+  "summary": {
+    "exact_number": {
+      "runs": 1,
+      "passed": 0,
+      "retrieval_hits": 1,
+      "retrieval_expected": 1
+    },
+    "prose_fact": {
+      "runs": 1,
+      "passed": 0,
+      "retrieval_hits": 1,
+      "retrieval_expected": 1
+    },
+    "access_boundary": {
+      "runs": 2,
+      "passed": 1,
+      "retrieval_hits": 1,
+      "retrieval_expected": 1
+    }
+  },
+  "results": [
+    {
+      "id": "N01",
+      "category": "exact_number",
+      "role": "staff",
+      "question": "In the census table that reports a median household income of 59,473 dollars, what is the mean household income?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-02/471787.csv"
+        ],
+        "contains": [
+          "77,258"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-02/471787.csv",
+          "company/group-02/471787.csv",
+          "company/group-02/351295.csv",
+          "company/group-02/574787.csv",
+          "company/group-01/561157.xls"
+        ],
+        "kinds": [
+          "table",
+          "table_row",
+          "table_row",
+          "table_row",
+          "table"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": true,
+        "withheld": 0,
+        "reason": "a passage the 'staff' role may not see matched this question better than any passage it may see, so the answer drawn from what is available is incomplete by construction.",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "",
+        "kind": "degraded",
+        "reason": "unclassified",
+        "citations": [],
+        "passages": 6,
+        "unsupported": 0,
+        "notice": null
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": false,
+        "contains_ok": false,
+        "cited_ok": false,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-02/471787.csv"
+        ]
+      }
+    },
+    {
+      "id": "P05",
+      "category": "prose_fact",
+      "role": "staff",
+      "question": "What communication equipment is assigned to each sentry in the sample post orders?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/group-02/104644.doc"
+        ],
+        "contains": [
+          "portable radio"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/group-02/104644.doc",
+          "company/group-02/104644.doc",
+          "company/group-02/104644.doc",
+          "company/group-02/104644.doc",
+          "company/group-02/104644.doc"
+        ],
+        "kinds": [
+          "table_row",
+          "prose",
+          "table",
+          "table_row",
+          "table"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": true,
+        "withheld": 0,
+        "reason": "a passage the 'staff' role may not see matched this question better than any passage it may see, so the answer drawn from what is available is incomplete by construction.",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "",
+        "kind": "degraded",
+        "reason": "unclassified",
+        "citations": [],
+        "passages": 6,
+        "unsupported": 0,
+        "notice": null
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": false,
+        "contains_ok": false,
+        "cited_ok": false,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/group-02/104644.doc"
+        ]
+      }
+    },
+    {
+      "id": "A04",
+      "category": "access_boundary",
+      "role": "staff",
+      "question": "What is the Chief Executive Officer's long-term incentive target award for the current year?",
+      "expected": {
+        "answered": false,
+        "denied": true,
+        "forbidden_docs": [
+          "executive/executive-compensation.md"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/apple-10k-2024.htm",
+          "company/apple-10k-2024.htm",
+          "company/apple-10k-2024.htm",
+          "company/apple-10k-2024.htm",
+          "company/apple-10k-2024.htm"
+        ],
+        "kinds": [
+          "prose",
+          "table",
+          "table_row",
+          "table_row",
+          "table_row"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": true,
+        "withheld": 0,
+        "reason": "a passage the 'staff' role may not see matched this question better than any passage it may see, so the answer drawn from what is available is incomplete by construction.",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "",
+        "kind": "degraded",
+        "reason": "provider_unavailable",
+        "citations": [],
+        "passages": 6,
+        "unsupported": 0,
+        "notice": null
+      },
+      "retrieval_hit": null,
+      "score": {
+        "pass": true,
+        "declined": true,
+        "refusal_text": false,
+        "forbidden_cited": [],
+        "leaked_value": false,
+        "retrieval_hit": null,
+        "expected_docs": []
+      }
+    },
+    {
+      "id": "A04",
+      "category": "access_boundary",
+      "role": "executive",
+      "question": "What is the Chief Executive Officer's long-term incentive target award for the current year?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "executive/executive-compensation.md"
+        ],
+        "contains": [
+          "1,250,000"
+        ]
+      },
+      "retrieval": {
+        "role": "executive",
+        "docs": [
+          "executive/executive-compensation.md",
+          "company/apple-10k-2024.htm",
+          "company/apple-10k-2024.htm",
+          "company/apple-10k-2024.htm",
+          "company/apple-10k-2024.htm"
+        ],
+        "kinds": [
+          "prose",
+          "prose",
+          "table",
+          "table_row",
+          "table_row"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "",
+        "kind": "degraded",
+        "reason": "provider_unavailable",
+        "citations": [],
+        "passages": 6,
+        "unsupported": 0,
+        "notice": null
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": false,
+        "contains_ok": false,
+        "cited_ok": false,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "executive/executive-compensation.md"
+        ]
+      }
+    }
+  ]
+}

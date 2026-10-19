@@ -998,6 +998,28 @@ items:
       could not write its output directory as the eval image's non-root user, and the API never passed --tool to
       the audit tool, so every tool_call row in the chain named no tool.
 
+  - id: AGENT-FALLBACK-001
+    title: A failed primary model fails over once to a declared second model
+    tier: [cloud, hosted]
+    phase: C6
+    verify: >-
+      a manifest role declaring fallback renders a second gateway model group and a litellm_settings.fallbacks
+      mapping; a question, a stream and a tool-loop call all still answer when the primary deployment fails; the
+      gateway makes one attempt per model rather than multiplying retries on the failed primary; and the validator
+      refuses a fallback on a non-cloud profile and holds the fallback model to the same residency and lifecycle
+      rules as the primary.
+    status: verified
+    note: >-
+      Built and measured 2026-10-19 (PR #189, docs/reviews/provider-fallback-2026-10-19.md). The primary was failed
+      on purpose with the repository's fault stub returning 503 on the path the deployed gateway calls: five runs
+      scored 49, 49, 49, 48, 49 (mean 48.8, zero degraded) with 847 failed primary attempts all answered by the
+      fallback, against a four-question control with no fallback where every answer degraded. Healthy traffic is
+      unchanged: five runs with the fallback configured but inert scored 51, 51, 51, 51, 49 (mean 50.6), the same
+      as the corrected instrument before the change. Fault runs took about 550 to 580 seconds against about 370 to
+      390 healthy, and the analyst spend moved about 20 USD across the two measurements because the fallback model
+      is Sonnet. Known gap: the answer and its audit row report the configured primary model, not the fallback that
+      answered; recording the answering model is follow-up work for INF-ROLE-001.
+
   - id: BUDGET-IDENTITY-001
     title: A gateway identity charges one spend counter and enforces the role ceiling, not the remainder
     tier: [cloud, hosted, office]
