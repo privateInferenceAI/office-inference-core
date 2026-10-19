@@ -41,7 +41,7 @@ script could not write its output directory as the eval image's non-root user, a
 | Control | `OI_TOOL_QUERY` unset: the tool is not offered and the answer path is the measured configuration |
 | Treatment | `OI_TOOL_QUERY=on`: the tool is offered; nothing else changes |
 | Flags in both | loop on, six steps, ten calls, lookup off, honesty rule on |
-| Build | `4805ca2` on `feat/structured-query-tool` for the reported treatment; the control needs no changed code path |
+| Build | control `59c17dc`, treatment `4805ca2`, both on `feat/structured-query-tool`; the only code difference between them is the row evidence allowance, which is unreachable while `OI_TOOL_QUERY` is off |
 | Window | control 2026-10-19 14:20Z to 14:56Z, treatment 15:40Z to 16:16Z |
 
 **The suite script had to be fixed to run this.** The eval image runs as uid 10003 and the output directory
