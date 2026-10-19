@@ -67,6 +67,38 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "query_rows",
+            "description": (
+                "Query the rows of the indexed tables directly and get back the exact rows that match, rather "
+                "than a whole passage. Use it whenever a question quotes a figure or a row label that "
+                "identifies the answer row, and confirm the row before answering. Every string in match must "
+                "appear in the same row. Pass doc_id to restrict the query to the document a search result "
+                "named."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "match": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": ("one to four strings that must all appear in the same row, for example "
+                                        "[\"228865.1\", \"188387.5\"] or [\"Mean household income\"]"),
+                    },
+                    "doc_id": {
+                        "type": "string",
+                        "description": "optional: only this document, exactly as a search result returned it",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "optional: how many rows to return, at most 8",
+                    },
+                },
+                "required": ["match"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "lookup_value",
             "description": (
                 "Find the exact place a figure appears in the documents, comma-insensitive. Use it when the "
@@ -126,16 +158,26 @@ _PROMPT_TAIL = (
 )
 
 
-def system_prompt(lookup_enabled: bool = True, honesty_enabled: bool = True) -> str:
+def system_prompt(lookup_enabled: bool = True, honesty_enabled: bool = True,
+                  query_enabled: bool = False) -> str:
     """The instruction, built from the tools this deployment actually offers.
 
     **The prompt once named `lookup_value` even when the tool was switched off**, so the model could spend its
     limited steps calling something that was not there, and the tool errors then ate the calls meant for the
     search. Found on 2026-10-18 after the final configuration measured below the Phase A peak: the prompt and the
     tool list have to be one fact, which is why both now come from this function.
+
+    **`query_rows` is named here for the same reason the other two tools are.** It is the one tool that returns
+    a row instead of a passage, so the model has to be told it exists and what it is for; the description of the
+    tool alone sits after the rules and was not enough to steer a model that had already settled on an answer.
     """
-    tools = ("; lookup_value finds the exact place a figure appears, for figures that identify a row uniquely"
-             if lookup_enabled else "")
+    tools = ""
+    if query_enabled:
+        tools += ("; query_rows returns the exact table rows that contain the values or labels you give it, "
+                  "which is how a figure is confirmed before it is answered")
+    if lookup_enabled:
+        tools += ("; lookup_value finds the exact place a figure appears, for figures that identify a row "
+                  "uniquely")
     rules = _PROMPT_HEAD.format(tools=tools) + _PROMPT_RULES + _TABLE_RULE
     if honesty_enabled:
         rules += _HONESTY_RULE
@@ -153,6 +195,19 @@ MAX_EVIDENCE_CHARS = 9000
 _REFUSAL_PHRASE = "could not find that in the available documents"
 SNIPPET_CHARS = 700
 
+# --------------------------------------------------------------------------- structured row query bounds
+#
+# Every one of these is a bound on what a model can make the row query do. The scan bound is the one that
+# matters: a figure like 59,473 appears in twenty tables, so without a cap one call could pull every matching
+# chunk in the corpus and filter a megabyte of rows in Python. Four hundred chunks is enough to find any row a
+# question can identify, and small enough that a call returns in a few hundred milliseconds.
+QUERY_SCAN_LIMIT = 400
+QUERY_ROW_CAP = 8
+QUERY_DEFAULT_ROWS = 4
+QUERY_ROW_CHARS = 600
+QUERY_RESPONSE_CHARS = 6000
+QUERY_AMBIGUOUS_DOCS = 3
+
 
 # How a figure is written, and how it is compared: commas removed, so a comma-separated figure and a plain one
 # are the same figure. Kept at module level so a test can hold the comparison without a database.
@@ -163,6 +218,98 @@ _FIGURES = _re.compile(r"\d[\d,]*(?:\.\d+)?")
 
 def _figures_in(value: str) -> list[str]:
     return [match.replace(",", "") for match in _FIGURES.findall(value or "")]
+
+
+def _normal_for_match(value: str) -> str:
+    """A match string as the row query compares it: lower case, commas gone, whitespace collapsed.
+
+    Comma-insensitivity is the property the whole tool rests on. A figure is written 77,258 in a table row and
+    77258 or 77,258 in a question, and the stored text is the parser's, so the only comparison that is stable
+    across both is one with the separators removed.
+    """
+    return " ".join(str(value or "").split()).lower().replace(",", "")
+
+
+def _shorten(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[: max(1, limit - 1)].rstrip() + "…"
+
+
+def row_query(match: list[str], doc_id: str, roots, scan_limit: int = QUERY_SCAN_LIMIT) -> tuple:
+    """The row query as SQL and its parameters: one SELECT, parameterised, ACL-filtered, bounded.
+
+    **Why this is a function and not a string inside the tool.** Two properties of the query are requirements
+    rather than implementation: it reads and never writes, and every value from the model is a bound parameter
+    and never a fragment of SQL. Both are testable only if the query can be inspected without a database, so it
+    is built here and the tool executes what this returns. The access label is in the first clause for the same
+    reason the retriever's queries carry it: this is a second path to content, and a second path is where a
+    missing filter hides.
+    """
+    clauses = ["acl = any(%(roots)s)"]
+    params: dict = {"roots": sorted(roots), "limit": max(1, int(scan_limit))}
+    for index, value in enumerate(match):
+        key = f"v{index}"
+        # `position` rather than LIKE so the value cannot act as a wildcard. A model that sends '%' should get
+        # rows containing a per cent sign, not every row in the corpus.
+        clauses.append(f"position(%({key})s in lower(replace(text, ',', ''))) > 0")
+        params[key] = _normal_for_match(value)
+    if doc_id:
+        clauses.append("doc_id = %(doc)s")
+        params["doc"] = doc_id
+    sql = ("select chunk_id, doc_id from chunk_index where " + " and ".join(clauses)
+           + " order by doc_id, page_start, chunk_id limit %(limit)s")
+    return sql, params
+
+
+def _query_values(match) -> list[str] | str:
+    """The validated match strings, or an error message.
+
+    A list is the success case and a string is the error case, so the tool has one branch to write. The bounds
+    live here rather than in the SQL for the same reason the scan bound is a constant: a model cannot widen them.
+    """
+    if isinstance(match, str):
+        match = [match]
+    if not isinstance(match, (list, tuple)):
+        return "match must be a list of one to four strings"
+    values = [" ".join(str(value or "").split())[:200] for value in match]
+    values = [value for value in values if value]
+    if not values or len(values) > 4:
+        return "match must be a list of one to four non-empty strings"
+    return values
+
+
+def rows_in_chunk(payload: dict) -> list[dict]:
+    """The row lines of one table chunk, each with the row ordinal it can be cited by.
+
+    The ordinal is derived the way the chunker wrote the chunk: a `table_row` chunk IS one row and carries
+    `row_index`; a `table` chunk carries its rows in order and `row_start` (None when the table was small
+    enough to be one chunk, in which case its first line is row zero). The heading prefix the chunker prepends is
+    removed before the offset is counted, or every row under a section heading would be cited one row early.
+    """
+    kind = payload.get("kind") or ""
+    text = payload.get("text") or ""
+    if kind == "table_row":
+        lines = [text]
+        base = payload.get("row_index")
+        base = int(base) if isinstance(base, int) else None
+    elif kind == "table":
+        lines = text.split("\n")
+        headings = payload.get("headings") or []
+        prefix = " > ".join(headings).strip() if headings else ""
+        if prefix and lines and lines[0].strip() == prefix:
+            lines = lines[1:]
+        base = payload.get("row_start")
+        base = int(base) if isinstance(base, int) else 0
+    else:
+        return []
+    rows = []
+    for offset, line in enumerate(lines):
+        line = " ".join(line.split())
+        if not line:
+            continue
+        rows.append({"payload": payload, "line": line,
+                     "haystack": line.lower().replace(",", ""),
+                     "row_index": (base + offset) if base is not None else None})
+    return rows
 
 
 class ToolBox:
@@ -341,6 +488,153 @@ class ToolBox:
             print(f"lookup_value unavailable: {type(exc).__name__}: {exc}")
             return []
 
+    # ------------------------------------------------------------------ structured rows
+    def query_rows(self, match, doc_id: str = "", limit=None) -> str:
+        """Return the exact table rows that contain every string in `match`.
+
+        **Why a row and not a passage.** The Phase B measurement made this gap concrete: `lookup_value` finds
+        the chunk where a figure appears, but the answer row can sit in a forty-row group of near-identical
+        lines, and the model read the neighbouring line. Its own words were that none of the passages contained
+        a row with the first two values 228865.1 and 188387.5 while the row was in the passage. A tool that
+        returns the row, not the group, removes the reading step that failed.
+
+        **What keeps it a query and not a filter language.** `match` is one to four literal strings; a row
+        matches when every one of them is a substring of it, comma-insensitive. There is no column syntax, no
+        expression, no ordering the caller controls, and the scan, row and byte bounds are constants in this
+        module. A column index was left out deliberately: the row text is the parser's cells joined by a
+        separator, header names are folded into only some rows, and a cell index would therefore be a contract
+        the store cannot keep. A model that knows the label writes the label.
+
+        The matching rows are added to the evidence namespace, so a citation to the row resolves and the answer
+        contract can check the figure against it. That is the verification step: the figure the answer states
+        has to appear in the row the tool returned.
+        """
+        values = _query_values(match)
+        if isinstance(values, str):
+            return json.dumps({"error": values})
+        try:
+            wanted = int(limit) if limit is not None else QUERY_DEFAULT_ROWS
+        except (TypeError, ValueError):
+            wanted = QUERY_DEFAULT_ROWS
+        wanted = max(1, min(wanted, QUERY_ROW_CAP))
+        doc = str(doc_id or "").strip()
+        candidates = self._candidate_chunks(values, doc)
+        if candidates is None:
+            return json.dumps({"error": "the document store could not be read"})
+        self._last_facts = {"query": len(values), "scoped_document": bool(doc),
+                            "candidate_chunks": len(candidates)}
+        if not candidates:
+            where = f" in document {doc}" if doc else ""
+            return json.dumps({"error": "no table row" + where + " states "
+                                        + " and ".join(repr(value) for value in values)})
+        rows = self._matching_rows(candidates, values)
+        if not rows:
+            return json.dumps({"error": "the values matched a chunk but no single row states "
+                                        + " and ".join(repr(value) for value in values)})
+        documents = {row["payload"].get("doc_id") or "" for row in rows}
+        # **A value that identifies rows in many documents is not an anchor, and pretending it is produces the
+        # confident wrong answer the Phase B run measured.** The tool says so and names documents instead of
+        # letting the model pick the first of twenty census tables. With a doc_id the count is exact, so the
+        # guard only fires on an unscoped query.
+        if not doc and len(documents) > QUERY_AMBIGUOUS_DOCS:
+            examples = sorted(documents)[:5]
+            self._last_facts["documents"] = len(documents)
+            return json.dumps({
+                "note": f"the values match rows in {len(documents)} documents, so they do not identify one "
+                        f"row. Pass doc_id to scope the query to the document the question names. "
+                        f"Examples: {examples}"})
+        shown = rows[:wanted]
+        lines: list[str] = []
+        for row in shown:
+            number, printed = self._add_row(row)
+            if not number:
+                break
+            lines.append(printed)
+            if sum(len(item) + 1 for item in lines) > QUERY_RESPONSE_CHARS:
+                break
+        self._last_facts["rows_matched"] = len(rows)
+        self._last_facts["rows_returned"] = len(lines)
+        header = "Rows matching " + json.dumps(values) + ":"
+        if len(rows) > len(lines):
+            header += (f" ({len(rows)} rows matched and {len(lines)} are shown; add doc_id or another "
+                       f"string to narrow it)")
+        return header + "\n" + "\n".join(lines)
+
+    def _add_row(self, row: dict) -> tuple[int, str]:
+        """Number one matched row as evidence and render it with the row number it can be cited by."""
+        import retriever
+
+        payload = row["payload"]
+        passage = retriever.Passage(
+            doc_id=payload.get("doc_id") or "",
+            acl=payload.get("acl") or "",
+            text=row["line"],
+            page_start=int(payload.get("page_start") or 1),
+            page_end=int(payload.get("page_end") or 1),
+            kind="table_row",
+            chunk_id=f"{payload.get('chunk_id') or ''}:row:{row['row_index']}",
+            parse_score=(float(payload["parse_score"]) if payload.get("parse_score") is not None else None),
+            table_id=payload.get("table_id"),
+            row_index=row["row_index"],
+        )
+        number = self.add(passage)
+        if not number:
+            return 0, ""
+        where = f"{passage.doc_id} p{passage.page_start}"
+        if row["row_index"] is not None:
+            where += f" row {row['row_index']}"
+            total_rows = payload.get("table_rows")
+            if total_rows:
+                where += f" of {total_rows}"
+        return number, f"[{number}] {where}: {_shorten(row['line'], QUERY_ROW_CHARS)}"
+
+    def _candidate_chunks(self, values: list[str], doc_id: str = "") -> list[tuple[str, str]] | None:
+        """The chunks whose text could hold a matching row, or None when the store could not be read."""
+        import psycopg2
+
+        dsn = getattr(self.services, "database_url", "")
+        if not dsn:
+            return None
+        sql, params = row_query(values, doc_id, self.roots)
+        try:
+            with psycopg2.connect(dsn) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(sql, params)
+                    return [(row[0], row[1]) for row in cursor.fetchall()]
+        except Exception as exc:  # noqa: BLE001
+            print(f"query_rows unavailable: {type(exc).__name__}: {exc}")
+            return None
+
+    def _matching_rows(self, candidates: list[tuple[str, str]], values: list[str]) -> list[dict]:
+        """The rows that contain every value, deduplicated and in a stable order.
+
+        A row can appear twice in the store: once in the whole-table chunk and once as its own row entry. The
+        duplicate is collapsed so the model is not asked to choose between two identical lines, and the entry
+        that survives is the one carrying an exact `row_index`, because that is what a citation needs.
+        """
+        import retriever
+
+        payloads = retriever._fetch_payloads(self.services, [chunk_id for chunk_id, _ in candidates],
+                                             self.roots)
+        wanted = [_normal_for_match(value) for value in values]
+        unique: dict[tuple, dict] = {}
+        for chunk_id, _doc in candidates:
+            payload = payloads.get(chunk_id)
+            if not payload:
+                continue
+            for row in rows_in_chunk(payload):
+                if not all(value in row["haystack"] for value in wanted):
+                    continue
+                document = payload.get("doc_id") or ""
+                key = (document, row["row_index"]) if row["row_index"] is not None \
+                    else (document, row["haystack"])
+                existing = unique.get(key)
+                if existing is None or (existing["row_index"] is None and row["row_index"] is not None):
+                    unique[key] = row
+        return sorted(unique.values(), key=lambda row: (
+            row["payload"].get("doc_id") or "", int(row["payload"].get("page_start") or 0),
+            row["row_index"] if row["row_index"] is not None else 0, row["haystack"]))
+
     def execute(self, name: str, arguments: str) -> str:
         """Run one tool call. A malformed call or a failing tool is returned to the model as an error, because a
         model that sees its own mistake can correct it; the loop's caps stop a model that cannot."""
@@ -351,6 +645,7 @@ class ToolBox:
         if not isinstance(args, dict):
             return json.dumps({"error": "arguments must be a JSON object"})
         started = time.monotonic()
+        self._last_facts = {}
         try:
             if name == "search_documents":
                 out = self.search_documents(str(args.get("query") or ""))
@@ -359,28 +654,47 @@ class ToolBox:
                                          args.get("page_end"), str(args.get("chunk_id") or ""))
             elif name == "lookup_value":
                 out = self.lookup_value(str(args.get("value") or ""), str(args.get("doc_id") or ""))
+            elif name == "query_rows":
+                out = self.query_rows(args.get("match"), str(args.get("doc_id") or ""),
+                                      args.get("limit"))
             else:
                 out = json.dumps({"error": f"unknown tool {name!r}; available: search_documents, "
-                                           f"read_passages, lookup_value"})
+                                           f"read_passages, query_rows, lookup_value"})
         except Exception as exc:  # noqa: BLE001 - a tool failure must not end the request
             out = json.dumps({"error": f"the tool failed: {type(exc).__name__}"})
         if self.audit is not None:
             try:
+                payload = {"tool": name, "argument_chars": len(arguments or ""),
+                           "results": len(self.evidence),
+                           "elapsed_ms": round((time.monotonic() - started) * 1000)}
+                # **A query's own count is the audit fact worth having.** A tool that returns rows can scan far
+                # more than it shows, and the record of how many rows matched is what lets somebody check a
+                # refusal or a wrong row later.
+                payload.update(getattr(self, "_last_facts", {}) or {})
                 self.audit("tool_call", "", "", "ok" if not out.startswith('{"error"') else "error",
-                           {"tool": name, "argument_chars": len(arguments or ""),
-                            "results": len(self.evidence),
-                            "elapsed_ms": round((time.monotonic() - started) * 1000)},
-                           tool=name)
+                           payload, tool=name)
             except Exception:  # noqa: BLE001 - the audit is not allowed to break a request
                 pass
         return out
 
 
+def _flag(name: str, default: str) -> bool:
+    return os.environ.get(name, default).strip().lower() not in ("off", "0", "false", "no")
+
+
 def active_tools() -> list:
-    """The tools this deployment offers, so a measurement can turn one off without a code change."""
-    if os.environ.get("OI_TOOL_LOOKUP", "on").strip().lower() in ("off", "0", "false", "no"):
-        return [schema for schema in TOOLS if schema["function"]["name"] != "lookup_value"]
-    return TOOLS
+    """The tools this deployment offers, so a measurement can turn one off without a code change.
+
+    **`query_rows` is off until a deployment asks for it.** The tool changes the answer path the measured
+    configuration was frozen on, so merging it must not silently change what the deployment offers: the flag is
+    how the five-run comparison turns it on, and how a rollback turns it off again without a revert.
+    """
+    offered = list(TOOLS)
+    if not _flag("OI_TOOL_QUERY", "off"):
+        offered = [schema for schema in offered if schema["function"]["name"] != "query_rows"]
+    if not _flag("OI_TOOL_LOOKUP", "on"):
+        offered = [schema for schema in offered if schema["function"]["name"] != "lookup_value"]
+    return offered
 
 
 def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
@@ -399,10 +713,11 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
 
     offered = active_tools()
     lookup_offered = any(schema["function"]["name"] == "lookup_value" for schema in offered)
+    query_offered = any(schema["function"]["name"] == "query_rows" for schema in offered)
     honesty = os.environ.get("OI_TOOL_HONESTY", "on").strip().lower() not in ("off", "0", "false", "no")
     seeded = toolbox.render(list(seed_passages))
     messages = [
-        {"role": "system", "content": system_prompt(lookup_offered, honesty)},
+        {"role": "system", "content": system_prompt(lookup_offered, honesty, query_offered)},
         {"role": "user", "content": (
             f"Question: {question}\n\n"
             + (f"Evidence already retrieved, numbered:\n{seeded}\n\n" if seeded else "")

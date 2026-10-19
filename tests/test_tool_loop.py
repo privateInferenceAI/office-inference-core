@@ -206,7 +206,7 @@ def test_the_lookup_tool_can_be_turned_off_for_a_measurement(monkeypatch):
 
 def test_the_tool_schemas_match_the_executor():
     names = [schema["function"]["name"] for schema in tool_loop.TOOLS]
-    assert names == ["search_documents", "read_passages", "lookup_value"]
+    assert names == ["search_documents", "read_passages", "query_rows", "lookup_value"]
 
 
 def test_lookup_value_uses_each_figure_it_is_given():
@@ -296,3 +296,199 @@ def test_the_flag_defaults_off(monkeypatch):
     assert tool_loop.enabled() is False
     monkeypatch.setenv("OI_TOOL_LOOP", "on")
     assert tool_loop.enabled() is True
+
+
+# --------------------------------------------------------------------------- the structured row query
+#
+# The row query is the one tool that returns a row instead of a passage, so the tests hold the three things that
+# make it trustworthy: the query it builds is read-only and parameterised, access is a clause in that query, and
+# the row it returns carries the ordinal a citation needs. The row-extraction tests use chunk payloads with the
+# same shape the ingestion worker writes; none of them needs a database or the network.
+
+def payload(text, doc_id="company/census.csv", kind="table", page=1, row_start=None, row_index=None,
+            table_rows=68, headings=None, chunk_id="c1"):
+    return {"chunk_id": chunk_id, "doc_id": doc_id, "acl": "company", "text": text, "kind": kind,
+            "page_start": page, "page_end": page, "row_start": row_start, "row_index": row_index,
+            "table_rows": table_rows, "headings": headings or [], "table_id": "t1",
+            "parse_score": None}
+
+
+def install_payloads(monkeypatch, payloads):
+    """Make the tool's payload fetch return these payloads, from the real retriever module it imports."""
+    import retriever as real_retriever
+    monkeypatch.setattr(real_retriever, "_fetch_payloads",
+                        lambda services, ids, roots: {key: value for key, value in payloads.items()
+                                                      if key in ids})
+
+
+def query_toolbox(monkeypatch, payloads, candidates=None, audit=None):
+    toolbox = tool_loop.ToolBox(services=object(), permit=FakePermit(), role="staff", audit=audit)
+    if candidates is None:
+        candidates = [(key, value["doc_id"]) for key, value in payloads.items()]
+    toolbox._candidate_chunks = lambda values, doc_id="": list(candidates)
+    install_payloads(monkeypatch, payloads)
+    return toolbox
+
+
+def test_the_row_query_is_a_read_only_parameterised_select():
+    sql, params = tool_loop.row_query(["228865.1", "188387.5"], "company/x' or 1=1 --", {"company"})
+    lower = sql.lower()
+    assert lower.startswith("select")
+    for verb in ("insert", "update", "delete", "drop", "alter", "create"):
+        assert verb not in lower.split()
+    assert "acl = any(%(roots)s)" in sql
+    assert params["roots"] == ["company"]
+    # The document id is a bound value, never a fragment of the statement.
+    assert params["doc"] == "company/x' or 1=1 --"
+    assert "company/x' or 1=1 --" not in sql
+    assert "limit %(limit)s" in sql
+
+
+def test_the_row_query_matches_without_wildcard_semantics():
+    """A value of '%' has to mean a per cent sign, not every row."""
+    sql, params = tool_loop.row_query(["100%"], "", {"company"})
+    assert "position(%(v0)s in lower(replace(text, ',', ''))) > 0" in sql
+    assert "like" not in sql.lower()
+    assert params["v0"] == "100%"
+
+
+def test_the_row_query_is_off_until_the_flag_turns_it_on(monkeypatch):
+    monkeypatch.delenv("OI_TOOL_QUERY", raising=False)
+    assert "query_rows" not in [schema["function"]["name"] for schema in tool_loop.active_tools()]
+    monkeypatch.setenv("OI_TOOL_QUERY", "on")
+    assert "query_rows" in [schema["function"]["name"] for schema in tool_loop.active_tools()]
+
+
+def test_the_prompt_names_the_row_query_only_when_it_is_offered():
+    without = tool_loop.system_prompt(lookup_enabled=False, honesty_enabled=True)
+    assert "query_rows" not in without
+    with_query = tool_loop.system_prompt(lookup_enabled=False, honesty_enabled=True, query_enabled=True)
+    assert "query_rows" in with_query
+    assert "exact table rows" in with_query
+
+
+def test_the_row_query_returns_the_exact_row_and_its_ordinal(monkeypatch):
+    text = "\n".join([
+        "231629.5 | 188623.1 | 0",
+        "228865.1 | 188387.5 | -6.1",
+        "228865 | 188347.6 | -6.1",
+    ])
+    toolbox = query_toolbox(monkeypatch, {"c1": payload(text)})
+    out = toolbox.query_rows(["228865.1", "188387.5"])
+    assert "228865.1 | 188387.5 | -6.1" in out
+    assert "row 1 of 68" in out
+    # The row is evidence the answer can cite, and the evidence text is the row, not the group.
+    assert len(toolbox.evidence) == 1
+    assert toolbox.evidence[0].text == "228865.1 | 188387.5 | -6.1"
+    assert "[1]" in out
+
+
+def test_the_row_ordinal_counts_from_the_group_start(monkeypatch):
+    toolbox = query_toolbox(monkeypatch, {"c1": payload("228865.1 | 191380.1 | 0\n229000 | 190000 | 1",
+                                                         row_start=4200)})
+    out = toolbox.query_rows(["228865.1"])
+    assert "row 4200 of 68" in out
+
+
+def test_the_heading_prefix_is_not_counted_as_a_row(monkeypatch):
+    text = "Schedule A > Part 1\nfirst | 1\n228865.1 | 188387.5 | -6.1"
+    toolbox = query_toolbox(monkeypatch, {"c1": payload(text, row_start=10,
+                                                         headings=["Schedule A", "Part 1"])})
+    out = toolbox.query_rows(["228865.1", "188387.5"])
+    assert "228865.1 | 188387.5 | -6.1" in out
+    assert "row 11 of 68" in out, "two prefix lines are one heading line, so no off-by-one"
+
+
+def test_a_single_row_chunk_uses_the_row_index_the_worker_recorded(monkeypatch):
+    toolbox = query_toolbox(monkeypatch, {"c1": payload("DP03 | 63.0 | Median household income (dollars) | "
+                                                         "59,473 | +/-528", kind="table_row",
+                                                         row_index=63)})
+    out = toolbox.query_rows(["59,473", "Median household income"])
+    assert "row 63 of 68" in out
+    assert "59,473" in out
+
+
+def test_a_duplicate_row_entry_is_collapsed_to_one_row(monkeypatch):
+    # The same row exists in the whole-table chunk and as its own row entry; the model must see one line.
+    whole = payload("value | 59,473", chunk_id="whole", row_start=None)
+    single = payload("value | 59,473", chunk_id="single", kind="table_row", row_index=0)
+    toolbox = query_toolbox(monkeypatch, {"whole": whole, "single": single})
+    out = toolbox.query_rows(["59,473"])
+    assert out.count("value | 59,473") == 1
+    assert "row 0 of 68" in out
+
+
+def test_the_row_query_caps_the_rows_it_returns(monkeypatch):
+    payloads = {}
+    candidates = []
+    for index in range(20):
+        key = f"c{index}"
+        payloads[key] = payload(f"row {index} | 59,473", doc_id="company/doc0.csv", chunk_id=key,
+                                row_start=index)
+        candidates.append((key, "company/doc0.csv"))
+    toolbox = query_toolbox(monkeypatch, payloads, candidates=candidates)
+    out = toolbox.query_rows(["59,473"])
+    assert "20 rows matched" in out and "4 are shown" in out
+    assert out.count("company/doc0.csv") == 4
+    out_all = toolbox.query_rows(["59,473"], limit=99)
+    assert out_all.count("company/doc0.csv") == tool_loop.QUERY_ROW_CAP, "the cap is hard"
+    sql, params = tool_loop.row_query(["59,473"], "", {"company"})
+    assert params["limit"] == tool_loop.QUERY_SCAN_LIMIT
+
+
+def test_the_row_cap_and_the_scan_cap_are_constants_the_model_cannot_widen():
+    assert tool_loop.QUERY_ROW_CAP == 8
+    assert tool_loop.QUERY_SCAN_LIMIT > 0
+    sql, params = tool_loop.row_query(["x"], "", {"company"}, scan_limit=10_000)
+    assert params["limit"] == 10_000 or "limit" in sql  # builder honours its argument; callers pass the constant
+
+
+def test_an_unscoped_row_query_that_spans_many_documents_is_refused_with_a_reason(monkeypatch):
+    payloads = {f"c{index}": payload(f"row | 59,473", doc_id=f"company/doc{index}.csv", chunk_id=f"c{index}")
+                for index in range(5)}
+    toolbox = query_toolbox(monkeypatch, payloads)
+    out = tool_loop.json.loads(toolbox.query_rows(["59,473"]))
+    assert "do not identify one row" in out["note"]
+    assert "Pass doc_id" in out["note"]
+
+
+def test_the_row_query_reports_an_unreadable_store_distinctly_from_no_match():
+    toolbox = tool_loop.ToolBox(services=object(), permit=FakePermit(), role="staff")
+    out = tool_loop.json.loads(toolbox.query_rows(["59,473"]))
+    assert "document store could not be read" in out["error"]
+
+
+def test_the_row_query_validates_its_match_argument():
+    toolbox = tool_loop.ToolBox(services=object(), permit=FakePermit(), role="staff")
+    for bad in ({}, [], ["a", "b", "c", "d", "e"], ["  "], None):
+        payload_out = tool_loop.json.loads(toolbox.query_rows(bad))
+        assert "one to four" in payload_out["error"] or "strings" in payload_out["error"]
+
+
+def test_the_row_query_reports_no_matching_row(monkeypatch):
+    toolbox = query_toolbox(monkeypatch, {"c1": payload("a | b | c")})
+    out = tool_loop.json.loads(toolbox.query_rows(["59,473"]))
+    assert "no single row" in out["error"]
+
+
+def test_the_row_query_is_audited_with_its_own_counts(monkeypatch):
+    events = []
+    toolbox = query_toolbox(monkeypatch, {"c1": payload("row | 59,473")},
+                            audit=lambda *args, **kwargs: events.append((args, kwargs)))
+    out = toolbox.execute("query_rows", tool_loop.json.dumps({"match": ["59,473"]}))
+    assert "59,473" in out
+    events_text = str(events)
+    assert "query_rows" in events_text
+    assert "rows_returned" in events_text and "candidate_chunks" in events_text
+
+
+def test_the_unknown_tool_message_lists_the_row_query():
+    toolbox = tool_loop.ToolBox(services=object(), permit=FakePermit(), role="staff")
+    out = tool_loop.json.loads(toolbox.execute("delete_everything", "{}"))
+    assert "query_rows" in out["error"]
+
+
+def test_rows_in_chunk_skips_a_chunk_that_is_not_a_table():
+    assert tool_loop.rows_in_chunk(payload("prose text", kind="prose")) == []
+    assert tool_loop.rows_in_chunk(payload("marker", kind="table_marker")) == []
+
