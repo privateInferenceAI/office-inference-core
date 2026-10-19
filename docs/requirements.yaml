@@ -1003,11 +1003,14 @@ items:
     tier: [cloud, hosted]
     phase: C6
     verify: >-
-      a manifest role declaring fallback renders a second gateway model group and a litellm_settings.fallbacks
-      mapping; a question, a stream and a tool-loop call all still answer when the primary deployment fails; the
-      gateway makes one attempt per model rather than multiplying retries on the failed primary; and the validator
-      refuses a fallback on a non-cloud profile and holds the fallback model to the same residency and lifecycle
-      rules as the primary.
+      a manifest role declaring fallback renders one gateway model group per entry and a
+      litellm_settings.fallbacks mapping that lists them in order; an entry carrying an @region suffix renders
+      with the region on the gateway entry, so the same model is tried from that Region before a different model
+      is tried; a question, a stream and a tool-loop call all still answer when the primary deployment fails; the
+      gateway makes one attempt per model rather than multiplying retries on the failed primary; the validator
+      bounds the chain length, refuses an invalid Region, refuses an entry that repeats the primary in the same
+      Region, refuses a fallback on a non-cloud profile, and holds every entry to the same residency and
+      lifecycle rules as the primary.
     status: verified
     note: >-
       Built and measured 2026-10-19 (PR #190, docs/reviews/provider-fallback-2026-10-19.md). The primary was failed
@@ -1020,7 +1023,11 @@ items:
       is Sonnet. The answering-model gap recorded here was closed the same day: the API reads the gateway's routing
       headers, so resolved_model is the model that answered, configured_model is what the manifest names, and
       model_group plus fallback_used name the failover in both the answer and the model_call row. Verified by
-      failing the primary on purpose.
+      failing the primary on purpose. A further follow-up made the fallback a chain: the same model from a second
+      Region first, then a different model. The development deployment's model and chain are tracked in
+      manifests/dev-cloud-claude.yaml instead of an untracked rendered override, and scripts/model_admin.py is the
+      supported procedure for a client to change a model after installation. A client installation must allow the
+      profile ARN in the fallback Region in its own account; the runbook's installation section says so.
 
   - id: BUDGET-IDENTITY-001
     title: A gateway identity charges one spend counter and enforces the role ceiling, not the remainder

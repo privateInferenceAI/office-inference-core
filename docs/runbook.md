@@ -5731,24 +5731,31 @@ lane, and failing over to a remote model would send a client's content off the b
 The lifecycle check reads the fallback too, because a deprecated fallback would stop working exactly when it is
 needed.
 
-**The development deployment overrides the pair.** Its primary is Claude Haiku, so after changing
-`rendered/litellm.yaml` for the model (the override described above), add the fallback to the same file and to
-`rendered/manifest.json`:
+**A chain, and the development deployment's is tracked.** The field also takes a list, tried in order. An
+entry may carry an `@<region>` suffix: the same model, invoked through that Region's endpoint, which is the
+cheapest recovery because the model, the answer quality and the price stay the same. The development
+deployment's manifest is tracked, `manifests/dev-cloud-claude.yaml`, and it declares:
 
-    # rendered/litellm.yaml: after the analyst entry, and inside litellm_settings
-    - model_name: analyst-fallback
-      litellm_params:
-        model: bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0
-      model_info:
-        lane: frontier
-        fallback_for: analyst
-    litellm_settings:
-      fallbacks:
-      - analyst:
-        - analyst-fallback
+    models:
+      analyst:
+        frontier: bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0
+        fallback:
+          - bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0@us-east-2   # same model, other Region
+          - bedrock/amazon.nova-pro-v1:0                                    # different model
 
+The rendered gateway config gets `analyst-fallback` and `analyst-fallback-2` in that order.
+**Hand-editing `rendered/litellm.yaml` for models is over**: the deployment renders from its tracked manifest, so
+a re-render cannot silently revert the model or drop the chain. Render and recreate both processes:
+
+    python3 scripts/render_manifest.py --manifest manifests/dev-cloud-claude.yaml --root /opt/oi-core
     docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
-      up -d --force-recreate litellm
+      up -d --force-recreate litellm api
+
+**Installation: the client's instance role must allow both Regions.** Both Claude entries are inference-profile
+only, and a geographic profile is resolved from the Region the call is made in. The role needs the profile ARN in
+the home Region and in the fallback Region, plus the foundation-model ARNs the profile routes to.
+`oi-core-dev-bedrock-invoke` v6 is the shape to copy. A client installation that skips this step has a
+second fallback entry that fails with AccessDenied at the moment the first one is needed.
 
 **Measure it by failing the primary on purpose, not by waiting for a provider blip.** The fault stub in
 `tests/faultinject/` speaks the provider's failure shapes, and it takes a default scenario from
@@ -5763,22 +5770,38 @@ needed.
     # litellm_params, then:
     docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
       up -d --force-recreate litellm
-    scripts/run_answer_suite.sh 5 /tmp/oic-fault-fallback        # every answer should come via the fallback
-    docker logs litellm 2>&1 | grep -i fallback | tail            # the gateway records the failover
+    scripts/run_answer_suite.sh 5 /tmp/oic-fault-chain          # every answer should come via the first entry
+    # to exercise the second entry, also point analyst-fallback at the stub, then repeat
     # restore and recreate the gateway before doing anything else
     cp /tmp/litellm.yaml.before-fault rendered/litellm.yaml
     docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
       up -d --force-recreate litellm
     docker rm -f oi-fault-stub
 
-A run with the primary broken and the fallback in place should produce no `provider_unavailable` degradations
-and a score comparable to the healthy baseline. A run with the primary broken and no fallback produces degraded
-answers with that reason, which is the control. `docs/reviews/provider-fallback-2026-10-19.md` holds the
-measured comparison.
+A run with the primary broken and the chain in place should produce no `provider_unavailable` degradations
+and a score comparable to the healthy baseline: the first entry answers with the same model. Pointing the first
+entry at the stub as well should still answer, from the second entry's different model. A run with no fallback
+produces degraded answers with that reason, which is the control.
+`docs/reviews/provider-fallback-2026-10-19.md` holds the measured comparison.
 
 **Roll back.** Flag off for the loop, or the manifest for the model, then recreate only the containers that read
 that configuration. Nothing in the corpus, the vector store or the audit chain changes either way. A fallback is
 removed by deleting its model group and its `fallbacks` entry; the primary is untouched.
+
+**Changing a model after installation.** Models are deprecated on the provider's schedule, and the client may
+run the deployment without us. `scripts/model_admin.py` is the supported procedure:
+
+    python3 scripts/model_admin.py list --manifest manifests/<deployment>.yaml
+    python3 scripts/model_admin.py check manifests/<deployment>.yaml
+    python3 scripts/model_admin.py set manifests/<deployment>.yaml --role analyst \
+        --model bedrock/... --fallback bedrock/...@us-east-2
+    # then render and recreate both processes, as above
+
+It lists the models the lifecycle table knows and their status, refuses a change that would leave the manifest
+invalid, writes only the models block, and never calls AWS. The table `data/model-lifecycle.json` is what makes
+the check meaningful: refresh it from the provider API first (`docs/model-lifecycle.md`), or the tool will refuse
+the new model as unknown. **Restart both processes.** The API reports the model from the manifest it loaded at
+startup, so a gateway-only restart leaves the record disagreeing with the request.
 
 **What to watch.** About 1.6 times the suite time (178 to 188 seconds against 110 single-shot) and two to three
 times the model calls per answer. The development analyst ceiling is 100 USD for a 30-day period; a day of suite

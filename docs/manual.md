@@ -1319,7 +1319,7 @@ validator refuses, because an appliance that can reach a provider is not an offi
 | `offsite` | Where evidence ships, and which artifacts may leave: `anchors`, `exports`, `backups`. `backups` is accepted today and nothing consumes it until C8 |
 | `support.response_window`, `support.remote_access`, `support.drift_reporting` | What the client is promised about support, recorded in the contract. No service reads them |
 | `compliance.baa_with_provider`, `compliance.worm_storage` | Recorded intent for agreements and write-once storage. Described in the schema and read by nothing |
-| `models.<role>.fallback` | Intended as a second model for a role, for when the first is unavailable. It renders nothing and nothing routes to it |
+| `models.<role>.fallback` | A second model for a role, tried when the primary deployment fails; a list is a chain tried in order, and an entry may carry `@<region>` for the same model in another Region. Cloud builds only, validated and lifecycle-checked |
 | `integrations`, `interface` | Reserved and unimplemented |
 
 Those last four rows matter when you write a manifest for a client: a field can be in the schema, pass
@@ -5706,12 +5706,17 @@ one. `lookup_value` finds the exact place a figure appears, comma-insensitive, f
 bad at. Every chunk or row a tool returns is numbered, and the final answer is checked against that evidence by
 the same citation verifier as before, so a citation cannot point at a passage the model never saw.
 
-**The fallback model.** A role can name a second remote model in the manifest (`models.analyst.fallback`), and
-the gateway fails over to it when the primary deployment fails. The failover happens once per model call, with no
-retry amplification: one attempt at the primary, then one at the fallback. It applies to questions, streams and
+**The fallback chain.** A role can name a second remote model in the manifest
+(`models.analyst.fallback`), and the gateway fails over to it when the primary deployment fails. The field also
+takes a list, tried in order, and an entry may carry `@<region>`: the same model, invoked through another
+Region's endpoint, which keeps the model and the answer quality while changing the endpoint. The development
+deployment's chain is Haiku 4.5 (us), then the same Haiku from us-east-2, then Nova Pro. The failover happens
+once per model call, with no retry amplification: one attempt per model. It applies to questions, streams and
 every tool call because all of them go through the gateway. It is a cloud-build setting only, because on an
 office build a local primary failing over to a remote model would send a client's content off the box. The
-lifecycle check covers the fallback model, so a deprecated recovery path cannot sit unnoticed in a manifest.
+lifecycle check covers every entry, so a deprecated recovery path cannot sit unnoticed in a manifest. A client
+whose deployment we do not service changes models with `scripts/model_admin.py`, documented in the runbook's
+installation section.
 
 **The bounds, all set in the environment and visible to an operator.**
 

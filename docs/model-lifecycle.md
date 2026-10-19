@@ -48,16 +48,19 @@ Then update `data/model-lifecycle.json`, set `verified_on` to today, and run
 
 ## The models this deployment names today
 
-Verified 2026-10-11 against `bedrock:GetFoundationModel` in us-east-1.
+Verified 2026-10-11 against `bedrock:GetFoundationModel` in us-east-1, with the two Claude 4.5 entries added
+on 2026-10-19 when the development deployment's tracked manifest named them.
 
 | Model | Provider | Status | Tier |
 |---|---|---|---|
 | `amazon.nova-micro-v1:0` | Amazon | ACTIVE | `front_desk`, cheap |
-| `amazon.nova-lite-v1:0` | Amazon | ACTIVE | `analyst`, cheap |
-| `amazon.nova-pro-v1:0` | Amazon | ACTIVE | `reader`, cheap |
+| `amazon.nova-lite-v1:0` | Amazon | ACTIVE | `analyst` in the smoke-test manifests, cheap |
+| `amazon.nova-pro-v1:0` | Amazon | ACTIVE | `reader` and the last fallback entry, cheap |
 | `deepseek.v3.2` | DeepSeek | ACTIVE | `coder`, cheap |
+| `anthropic.claude-haiku-4-5-20251001-v1:0` | Anthropic | ACTIVE | the development deployment's `analyst` primary and its first fallback, in us-east-2 |
+| `anthropic.claude-sonnet-4-5-20250929-v1:0` | Anthropic | LEGACY | the deployment's fallback until 2026-10-19; replaced in the chain by Nova Pro |
 | `anthropic.claude-haiku-5-5` | Anthropic | ACTIVE | `front_desk`, frontier |
-| `anthropic.claude-sonnet-5` | Anthropic | ACTIVE | `analyst` and `reader`, frontier |
+| `anthropic.claude-sonnet-5` | Anthropic | ACTIVE | `analyst` and `reader` in the example manifests, frontier |
 | `anthropic.claude-opus-5-5` | Anthropic | ACTIVE | hybrid example, frontier |
 
 The four cheap-tier models are `ON_DEMAND`, which means they survive the single-Region residency rule
@@ -99,3 +102,31 @@ The office build names no remote models, so the check reports zero for it and pa
 file we choose to serve, with no vendor end-of-life to track. What it does have is a *hardware* and
 *quantisation* lifecycle, which is a different problem and belongs with the office build's own
 runbook rather than here.
+
+## Changing a model on a deployment we do not service
+
+**The client owns this after installation, so the procedure is a tool rather than a paragraph.** Models are
+deprecated on the provider's schedule. When that happens the client's operator has to move a role to another
+model, validate the result, render it and restart the two processes that read it. None of that should mean
+editing a gateway config by hand.
+
+1. Refresh the lifecycle table from the provider API for the model you intend to use (the command is above),
+   and add its entry. The check refuses a model the table does not know on purpose: a new model should be a
+   decision with a date, not an accident.
+2. List what is available and what the deployment names:
+
+       python3 scripts/model_admin.py list --manifest manifests/<deployment>.yaml
+
+3. Change one role. The tool runs the validator and the lifecycle check on the whole candidate manifest and
+   refuses to write a change that would leave it invalid:
+
+       python3 scripts/model_admin.py set manifests/<deployment>.yaml --role analyst \
+           --model bedrock/<model-id> --fallback bedrock/<model-id>@<region>
+
+4. Render and recreate both the gateway and the API (the runbook's model-swap section has the commands). Both,
+   because the API reports the model from the manifest it loaded at startup.
+
+**Installation dependency.** If the new model, or the fallback entry, is an inference-profile-only model in a
+second Region, the client's instance role must allow the profile ARN in that Region before the change is
+useful. That is an installation checklist item, not a change-time one, because discovering it during an outage
+is the same as not having a fallback.

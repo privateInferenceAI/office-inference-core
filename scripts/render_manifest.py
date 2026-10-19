@@ -33,6 +33,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import yaml  # noqa: E402
 
+from manifest_fields import fallback_chain, split_fallback  # noqa: E402
+from manifest_fields import fallback_chain, split_fallback  # noqa: E402
 from validate_manifests import check, load_catalog_packs  # noqa: E402
 
 # The access model is defined once, in the module the retriever and the session tool both read. The renderer
@@ -97,12 +99,14 @@ def build_litellm_config(manifest: dict, env: dict[str, str]) -> dict:
     client's own account.
 
     **A role may also declare a `fallback`**, a second remote model the gateway routes to when the
-    primary deployment fails. It renders as its own model group (`<role>-fallback`) plus a
-    `litellm_settings.fallbacks` entry, so the gateway does the failover once and every caller —
-    question, stream and tool loop — gets it without a second implementation. It is cloud-only on
-    purpose: silently moving a local-lane question to a remote model would break the residency
-    promise, so the validator refuses a fallback on a non-cloud profile and this loop would not
-    emit one there anyway.
+    primary deployment fails, or a list of them tried in order. It renders as its own model groups
+    (`<role>-fallback`, `<role>-fallback-2`, ...) plus a `litellm_settings.fallbacks` entry
+    listing them in order, so the gateway does the failover once and every caller — question, stream
+    and tool loop — gets it without a second implementation. An entry may carry `@<region>` to ask
+    for the same model in another Region, which is the cheapest recovery: same model, same answer
+    quality, different regional endpoint. It is cloud-only on purpose: silently moving a local-lane
+    question to a remote model would break the residency promise, so the validator refuses a fallback
+    on a non-cloud profile and this loop would not emit one there anyway.
     """
     models = []
     fallbacks: list[dict] = []
@@ -135,16 +139,32 @@ def build_litellm_config(manifest: dict, env: dict[str, str]) -> dict:
                 "model_info": {"lane": "frontier"},
             })
 
-        fallback = entry.get("fallback") or ""
-        if fallback and primary_emitted:
-            fallback_id = fallback.split("/", 1)[1] if fallback.startswith("bedrock/") else fallback
-            fallback_name = f"{role}-fallback"
-            models.append({
-                "model_name": fallback_name,
-                "litellm_params": {"model": f"bedrock/{fallback_id}"},
-                "model_info": {"lane": "frontier", "fallback_for": primary_name},
-            })
-            fallbacks.append({primary_name: [fallback_name]})
+        if primary_emitted:
+            names = []
+            for rank, raw in enumerate(fallback_chain(entry)):
+                fallback_model, region = split_fallback(raw)
+                fallback_id = (fallback_model.split("/", 1)[1]
+                               if fallback_model.startswith("bedrock/") else fallback_model)
+                if not fallback_id:
+                    continue
+                # `<role>-fallback` for the first entry keeps the name the single-fallback shape
+                # produced, so existing evidence and dashboards still point at the same group.
+                fallback_name = f"{role}-fallback" if rank == 0 else f"{role}-fallback-{rank + 1}"
+                params = {"model": f"bedrock/{fallback_id}"}
+                if region:
+                    # **The same model, invoked from another Region.** A geographic inference profile
+                    # resolves from the Region the call is made in, so naming the Region is what makes
+                    # Bedrock's regional routing the first recovery step; a different model is second.
+                    params["aws_region_name"] = region
+                models.append({
+                    "model_name": fallback_name,
+                    "litellm_params": params,
+                    "model_info": {"lane": "frontier", "fallback_for": primary_name,
+                                   "fallback_rank": rank + 1},
+                })
+                names.append(fallback_name)
+            if names:
+                fallbacks.append({primary_name: names})
     settings: dict = {
         "drop_params": True,
         "set_verbose": False,

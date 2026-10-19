@@ -27,6 +27,8 @@ OFFSITE_ARTIFACTS = frozenset({"anchors", "exports", "backups"})
 CONTENT_MODES = frozenset({"hash", "redacted", "full"})
 DATA_CLASSES = frozenset({"public", "internal", "confidential", "regulated"})
 
+from manifest_fields import MAX_FALLBACKS, fallback_chain, is_region, split_fallback  # noqa: E402
+
 # The data classes in order of sensitivity. This exists so a divergence can be reported as a DIRECTION
 # rather than as two lists that differ, which is the difference between a warning somebody reads and one
 # they learn to ignore. `regulated` is most sensitive, `public` least.
@@ -317,20 +319,42 @@ def check(manifest: dict, packs: set[str], path: Path) -> list[str]:
     for role, entry in (models or {}).items():
         if not isinstance(entry, dict):
             continue
-        fallback = entry.get("fallback")
-        if fallback is None:
+        raw = entry.get("fallback")
+        if raw is None:
             continue
-        if not isinstance(fallback, str) or not fallback.strip():
-            problems.append(f"models.{role}.fallback must be a non-empty model id or absent")
+        if not isinstance(raw, (str, list)) or not fallback_chain(entry):
+            problems.append(
+                f"models.{role}.fallback must be a non-empty model id, a list of them, or absent")
             continue
         if profile != "cloud":
             problems.append(
                 f"models.{role}.fallback is declared on a {profile!r} build, but a fallback is a remote "
                 f"model and a local primary failing over to it would be an undeclared egress path. "
                 f"Fallbacks are cloud-only")
-        if not fallback.startswith("bedrock/"):
+        chain = fallback_chain(entry)
+        if len(chain) > MAX_FALLBACKS:
             problems.append(
-                f"models.{role}.fallback must name a Bedrock model as bedrock/<id>, got {fallback!r}")
+                f"models.{role}.fallback declares {len(chain)} entries; the gateway chain is bounded "
+                f"at {MAX_FALLBACKS} because each entry is a provider call in the failure path")
+        primary = (entry.get("frontier") or "").strip()
+        seen: set[str] = set()
+        for index, item in enumerate(chain):
+            label = f"models.{role}.fallback[{index}]"
+            model, region = split_fallback(item)
+            if not model.startswith("bedrock/"):
+                problems.append(f"{label} must name a Bedrock model as bedrock/<id>, got {item!r}")
+                continue
+            if region and not is_region(region):
+                problems.append(
+                    f"{label} names a region {region!r} that is not an AWS Region code; "
+                    f"write it like us-east-2, or omit the @region suffix")
+            if primary and model == primary and not region:
+                problems.append(
+                    f"{label} repeats the primary model in the same Region, so a failover to it would "
+                    f"answer nothing; give it a region or choose another model")
+            if item in seen:
+                problems.append(f"{label} repeats an earlier entry in the same chain")
+            seen.add(item)
 
     # The two compliance profiles that make no regulated-data claim. Read by the account-owner
     # rule below and by the residency rules after it.
@@ -421,12 +445,13 @@ def check(manifest: dict, packs: set[str], path: Path) -> list[str]:
         # prompt goes when the primary fails, so a global profile hidden in a fallback field routes a
         # prompt just as far as one in the primary field would. Checking only the primary would leave
         # the one field a reviewer looks at last as the way around the rule.
-        for field in ("frontier", "fallback"):
-            frontier = ((entry or {}).get(field) or "")
+        candidates = [(f"models.{role}", (entry or {}).get("frontier") or "")]
+        for index, item in enumerate(fallback_chain(entry)):
+            candidates.append((f"models.{role}.fallback[{index}]", split_fallback(item)[0]))
+        for label, frontier in candidates:
             if not frontier.startswith("bedrock/"):
                 continue
             model_id = frontier.split("/", 1)[1]
-            label = f"models.{role}" if field == "frontier" else f"models.{role}.fallback"
             if model_id.startswith("global.") and compliance_for_residency not in unrestricted:
                 problems.append(
                     f"{label}: a global inference profile ({model_id}) can route a prompt to any "
