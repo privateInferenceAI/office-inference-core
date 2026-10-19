@@ -1010,7 +1010,7 @@ items:
       rules as the primary.
     status: verified
     note: >-
-      Built and measured 2026-10-19 (PR #189, docs/reviews/provider-fallback-2026-10-19.md). The primary was failed
+      Built and measured 2026-10-19 (PR #190, docs/reviews/provider-fallback-2026-10-19.md). The primary was failed
       on purpose with the repository's fault stub returning 503 on the path the deployed gateway calls: five runs
       scored 49, 49, 49, 48, 49 (mean 48.8, zero degraded) with 847 failed primary attempts all answered by the
       fallback, against a four-question control with no fallback where every answer degraded. Healthy traffic is

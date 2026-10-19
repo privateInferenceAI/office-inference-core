@@ -1,6 +1,6 @@
 # Provider fallback: a second model behind the gateway
 
-Written 2026-10-19. This is the measurement for the fallback added by PR #189. The raw runs, the exact rendered
+Written 2026-10-19. This is the measurement for the fallback added by PR #190. The raw runs, the exact rendered
 gateway configuration for each measurement, and the no-fallback control are committed beside this document.
 
 ## What was built
