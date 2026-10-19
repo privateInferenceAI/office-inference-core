@@ -213,15 +213,22 @@ def ask(token: str, question: str) -> dict:
     body = json.dumps({"session": token, "question": question}).encode()
     request = urllib.request.Request(API + "/ask", data=body, method="POST",
                                      headers={"Content-Type": "application/json"})
+    # **The client's wait, measured at the client.** The acceptance panel needs a latency distribution, and the
+    # honest place to measure it is the same call the suite scores. One number per answer, retrieval and tool
+    # loop included, because that is what a person experiences.
+    started = time.monotonic()
     try:
         with urllib.request.urlopen(request, timeout=180) as response:
             payload = json.loads(response.read() or b"{}")
     except urllib.error.HTTPError as exc:
-        return {"error": f"HTTP {exc.code}", "detail": exc.read().decode(errors="replace")[:400]}
+        return {"error": f"HTTP {exc.code}", "detail": exc.read().decode(errors="replace")[:400],
+                "elapsed_ms": int((time.monotonic() - started) * 1000)}
     except Exception as exc:  # noqa: BLE001
-        return {"error": type(exc).__name__, "detail": str(exc)[:400]}
+        return {"error": type(exc).__name__, "detail": str(exc)[:400],
+                "elapsed_ms": int((time.monotonic() - started) * 1000)}
     return {
         "answer": payload.get("answer") or "",
+        "elapsed_ms": int((time.monotonic() - started) * 1000),
         "kind": payload.get("kind") or ("answer" if payload.get("answer") else ""),
         "reason": payload.get("reason"),
         "citations": [{"doc_id": c.get("doc_id"), "page_start": c.get("page_start")}
@@ -358,8 +365,23 @@ def main() -> int:
             bucket["retrieval_expected"] += 1
             bucket["retrieval_hits"] += 1 if record["retrieval_hit"] else 0
 
+    # Latency distribution for the acceptance panel: p50 and p95 of the client's wait, over the answers this run
+    # actually made. Computed from the same records the score reads, so the two cannot describe different runs.
+    latencies = sorted(result["answer"]["elapsed_ms"] for result in results
+                       if (result.get("answer") or {}).get("elapsed_ms") is not None)
+    def percentile(values: list[int], fraction: float) -> int | None:
+        if not values:
+            return None
+        index = min(len(values) - 1, max(0, int(round(fraction * (len(values) - 1)))))
+        return values[index]
+    latency = {"count": len(latencies),
+               "p50_ms": percentile(latencies, 0.50),
+               "p95_ms": percentile(latencies, 0.95),
+               "max_ms": latencies[-1] if latencies else None}
+
     output = {
         "ran_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "latency": latency,
         "duration_seconds": round(time.monotonic() - started, 1),
         "answers": not args.no_answers,
         "summary": summary,
