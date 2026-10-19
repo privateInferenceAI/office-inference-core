@@ -1266,3 +1266,19 @@ phase report is superseded by docs/reviews/experiment-three-configs-2026-10-19.m
 Exact-number questions are the loop's real contribution: 5.4 to 6.0 of 8 against 0.8 single-shot. The honesty
 categories are where single-shot is nominally ahead, which is the trade to watch. Deployment left running current
 main with the loop on; next work is the structured query tool.
+
+## 2026-10-19, afternoon: the row query, and the hand-off brought current
+
+A second session built the structured row query from the hand-off's first open item: `query_rows`, one to four
+literal strings, exact rows back with document, page and ordinal, numbered into the citation evidence, bounded and
+access-filtered, audited, off by default behind OI_TOOL_QUERY. It measured 46.6 of 52 over five runs against a
+same-day control of 43.0 with non-overlapping ranges; exact-number questions went from 4.8 to 7.4 of 8 and the
+large-table probe from 0 to 4 of 5. The same session found and fixed two infrastructure defects the hand-off left
+behind (the suite script could not write its output directory as the container user; the audit tool column was
+never populated), and fixed a tool defect where a full evidence namespace swallowed a queried row.
+
+The hand-off was brought current: the milestone, its numbers, the honest control-drift caveat, the concentrated
+remaining failures (27 failing runs of 260, of which 22 sit on four questions and 5 are provider blips), the
+acceptance-probe evidence for the live build, and the revised next-work list. The remaining work is not prompt
+tuning: diagnose A06, P05, P06 and U08, add provider fallback, redesign the two bad probes, and widen the
+evaluation set before claiming more.

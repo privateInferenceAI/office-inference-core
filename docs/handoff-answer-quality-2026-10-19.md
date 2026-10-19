@@ -12,16 +12,17 @@ answers questions through a bounded tool loop rather than a single retrieval-and
 | Thing | State |
 |---|---|
 | Model answering questions | Claude Haiku 4.5 on Bedrock, inference profile `us.anthropic.claude-haiku-4-5-20251001-v1:0` |
-| Answer path | Tool loop on, six steps, ten tool calls, three tools available but lookup disabled |
-| Flags | `OI_TOOL_LOOP=on`, `OI_TOOL_MAX_STEPS=6`, `OI_TOOL_MAX_CALLS=10`, `OI_TOOL_LOOKUP=off`, `OI_TOOL_HONESTY=on` |
-| Corpus | 539 documents, 100,477 chunks, six data-set cards, six dead letters. Frozen since 2026-10-18 |
-| Measured quality | Tool loop **40.2–41.2 of 52** depending on build; single-shot **35.0 of 52**. Five runs each |
+| Answer path | Tool loop on, six steps, ten tool calls. `search_documents`, `read_passages` and the row query are offered; `lookup_value` is off |
+| Flags | `OI_TOOL_LOOP=on`, `OI_TOOL_MAX_STEPS=6`, `OI_TOOL_MAX_CALLS=10`, `OI_TOOL_QUERY=on`, `OI_TOOL_LOOKUP=off`, `OI_TOOL_HONESTY=on` |
+| Corpus | 539 documents, 100,478 chunks, six data-set cards, six dead letters. Frozen since 2026-10-18 |
+| Measured quality | Row query on: **46.6 of 52** (five runs) against a same-day control of **43.0**; historical pre-query means 40.2–41.2 and single-shot 35.0 are not comparable across days |
 | Measurement set | 40 questions + 4 probes, 52 role-runs per suite run |
 | Development budget | Analyst team ceiling 100 USD per 30 days, about 0.4 USD per suite run |
-| Repo state | `main` at the commit that merged this hand-off; see `git log --oneline -10` |
+| Repo state | `main` at `30b0100` plus this update; 974 tests pass, zero open PRs |
 
-The one-line finding: **retrieval works; the answer layer was the problem; the loop fixed about five points of it,
-and the remaining gap is that the model cannot query structured data, only read search results.**
+The one-line finding, updated: **retrieval works; the answer layer was the problem; the tool loop fixed about five
+points of it, and the structured row query built on 2026-10-19 added another 3.6 on a same-day control. The
+remaining points are concentrated in four specific questions, provider reliability and a harder evaluation set.**
 
 ## 2. The problem, and the numbers that define it
 
@@ -47,6 +48,50 @@ analysis is `docs/reviews/experiment-three-configs-2026-10-19.md`.
 **Read this before quoting a number:** a three-run comparison looked like a regression and was not. Five runs are
 now the minimum for any configuration claim. Runs vary between 33 and 45 out of 52 for the same build.
 
+## 2b. Update 2026-10-19 afternoon: the row query tool
+
+A second session read this hand-off and built the item that was first in section 6: a read-only structured row
+query (`query_rows`, PR #183, one-line evidence fix in #184). The tool takes one to four literal strings and returns
+the exact table rows containing all of them, with document, page and row ordinal, numbered into the evidence the
+citation verifier checks. One parameterised SELECT over `chunk_index` with the session's access roots in the where
+clause; constants bound the scan, rows and bytes; a match spanning more than three documents without a `doc_id` is
+refused with examples instead of anchored. Every call is an audited `tool_call`. Off by default behind
+`OI_TOOL_QUERY`; the flag is the rollback.
+
+| Configuration | Totals | Mean | Range | Degraded |
+|---|---|---|---|---|
+| Query off (same-day control) | 43, 44, 43, 43, 42 | 43.0 | 42 to 44 | 7, all unsupported number |
+| Query on (measurement of record) | 47, 45, 47, 47, 47 | **46.6** | 45 to 47 | 11, all provider unavailable |
+
+Ranges do not overlap. Exact-number questions went from 4.8 to 7.4 of 8; the large-table pinpoint probe from 0 to
+4 of 5; the control's seven unsupported-number refusals became zero. Details and raw runs:
+`docs/reviews/query-tool-2026-10-19/`. A first treatment (46.4) exposed a tool defect where a full evidence
+namespace silently swallowed the queried row; it was fixed, re-measured, and both result sets are kept in the
+evidence folder.
+
+**The control measured 43.0 while the frozen mean for the same configuration was 40.2.** Same flags, same model,
+one day apart, so the environment drifted. That is why the comparison is against a same-day control; absolute
+scores from different days are not comparable. The treatment window also carried eleven `provider_unavailable`
+degradations, which understate the treatment rather than overstate it.
+
+**What still fails, counted from the five treatment runs (27 failing runs of 260, 89.6 percent pass):**
+
+| Failure | Runs | What it is |
+|---|---|---|
+| `provider_unavailable` blips | 5 | A04 exec, A07 staff, N02, N03, PR2; infrastructure, not answers |
+| A06 executive | 5/5 | Persistent partial answer on the SDWIS legal-entity question; a real answer-quality gap |
+| P05 | 5/5 | Persistent wrong content on the post-orders question; retrieval/answer gap |
+| P06 | 5/5 | Persistent wrong content on the post-orders question; retrieval/answer gap |
+| U08 | 4/5 | Answers instead of refusing; the honesty trade |
+| PR4 | 2/5 | Known-imperfect probe; not clean evidence |
+| N04 | 1/5 | One refusal despite the value being in context |
+
+So 22 of the 27 remaining failures are deterministic on four questions, and five are infrastructure. The immediate
+next work is not another prompt: it is those four questions, provider fallback, and a fairer probe set.
+
+**Acceptance probes on the live build are now evidenced**: `docs/reviews/query-tool-2026-10-19/probes/` holds the
+interface (8 rights), activity (8), access (4) and stream (4) outputs, captured against the deployed code.
+
 ## 3. What was built, in order, and why
 
 All pull requests are in `privateInferenceAI/office-inference-core`.
@@ -71,6 +116,9 @@ All pull requests are in `privateInferenceAI/office-inference-core`.
 | #177 | Phase B/C report and register rows | `docs/reviews/phase-b-c-2026-10-18.md` |
 | #180 | Five-run experiment and corrections | `docs/reviews/experiment-three-configs-2026-10-19.md` |
 | this hand-off | Answer audit bundle, generator, hand-off | `docs/reviews/experiment-answers-2026-10-19/`, `scripts/build_answer_audit.py` |
+| #183 | `query_rows` structured row query, safe bounds, audit, tests, docs | The 3.6-point milestone; off by default behind `OI_TOOL_QUERY` |
+| #184 | Evidence record names the build each configuration ran on | Makes the comparison auditable |
+| #185 | This update, probe evidence, hand-off corrections | The starting point for the next agent |
 
 ## 4. Where everything lives
 
@@ -97,9 +145,10 @@ LiteLLM gateway (`litellm` container, `services/gateway/custom_auth.py`) → Bed
 response.
 
 **Documentation map:** `docs/reviews/` holds every measurement. Start with:
-`experiment-three-configs-2026-10-19.md` (what the numbers are), `phase-b-c-2026-10-18.md` (what was built and the
-limits), `answer-quality-day-2026-10-18.md` (the single-day progression), and the audit bundle for evidence. The
-operator docs are `docs/manual.md` section 13n and `docs/runbook.md` section 6.7.
+`experiment-three-configs-2026-10-19.md` (the five-run configuration comparison), `query-tool-2026-10-19/`
+(the row query: report, `compare.py`, raw runs and now the probe evidence), `phase-b-c-2026-10-18.md` (what was
+built and the limits), `answer-quality-day-2026-10-18.md` (the single-day progression), and the audit bundle for
+per-question evidence. The operator docs are `docs/manual.md` section 13n and `docs/runbook.md` section 6.7.
 
 ## 5. How to measure anything (do this before and after any change)
 
@@ -123,6 +172,10 @@ Rules established from experience:
 - **Keep the raw JSON.** The audit generator reads frozen result files and produces a per-question table; it never
   edits answers. Do not regenerate numbers by re-running retrieval for a comparison; re-retrieval is a different
   measurement.
+- **Use a same-day control.** The same configuration measured 40.2 one day and 43.0 the next. A comparison
+  across days is not a comparison; run the control beside the treatment.
+- **Probe evidence lives with the milestone.** The four acceptance probes were run against this build and their
+  outputs are in `docs/reviews/query-tool-2026-10-19/probes/`.
 - **Check for degraded runs.** A budget or provider failure turns answers into `degraded` and deflates totals. The
   suite records `kind`, and the acceptance run that looked like an outage was an exhausted team budget on
   2026-10-18. Check `analyst` team spend against its ceiling before blaming the model.
@@ -136,30 +189,30 @@ stream probe 4. Run commands are in `docs/runbook.md` section 6.7. The stream pr
 
 ## 6. Known limits and open work, in priority order
 
-1. **Structured data questions cannot be answered well.** This is the biggest remaining gap and the reason the
-   owner can answer the questions by hand but the stack cannot. The model sees at most a few passages per search,
-   cannot query rows by column, cannot verify a figure with a second independent query, and has no way to write a
-   filter. The proposed next milestone is a **read-only table-query tool**: a constrained query interface over
-   `chunk_index` (and any future row store) scoped by the session's access roots, with row caps and audit, plus a
-   verification step that re-checks a figure before answering. Expected effect: exact-number rows from about 5–6
-   of 8 to 7–8 of 8, and the large-table probe to start passing. Design constraints: read-only, ACL-filtered,
-   max rows and bytes, no arbitrary SQL, every call audited.
-2. **A pinpoint row inside a very large table still fails.** Rows above the v4 cap are not individually indexed;
-   the model reads a bounded group and can pick the wrong line. Possible fixes: store the row ordinal in
-   `chunk_index` (it exists in the payload but is not a column) so a row can be fetched exactly, or a table-aware
-   read tool. The evidence file for the probe shows the row text the model needed; it was in the group.
-3. **Honesty trade.** Single-shot scores marginally better on the answer-that-should-be-a-refusal categories
-   (unanswerable 8.0 vs 7.0–7.4; access 15.0 vs 14.4–14.8). The loop answers a little more, including a little
-   more than it should. The honesty rule in the loop prompt is the current mitigation; it is a prompt rule, not a
-   machine check.
-4. **Token streaming with tools is not implemented.** The opt-in tool stream trades token streaming for progress
-   frames because the loop needs complete messages to parse tool calls. Normal clients are unaffected.
-5. **A provider layer other than Bedrock is parked** as `INF-PROVIDER-001` in `docs/requirements.yaml`. Direction
-   approved, not built. LiteLLM is the abstraction; the work is manifest provider blocks, renderer support, key
-   handling in `rendered/env`, and a profile gate that refuses external providers on the office profile.
-6. **The data path for the six data-set cards is C6 work.** A file classified as a data set contributes one card
-   and is not searchable; asking its contents needs the structured data path above.
-7. **The six unreadable files** in `rejected/rejected.csv` need a human decision to replace or exclude.
+The structured row query is **done and measured** (section 2b). The priorities below replace the old list.
+
+1. **Four deterministic question failures are the largest answer-quality gap.** A06/executive (partial answer on
+   the SDWIS legal-entity question, 5 of 5), P05 and P06 (wrong content on the post-orders questions, 5 of 5 each),
+   and U08 (answers instead of refusing, 4 of 5). Each needs a diagnosis before a fix: is it retrieval, formatting,
+   an over-strict expected value, or a genuine model failure? Fix them as product bugs, one at a time, with a
+   five-run before and after.
+2. **Provider reliability.** Five of the 27 remaining failing runs were `provider_unavailable`, and the treatment
+   window carried eleven degradations. A fallback model or route (for example to the global profile or Sonnet) on
+   a classified provider failure would recover up to two points and improve the client experience. Measure it the
+   same way.
+3. **Redesign the two bad probes.** `probe_row_normal` and `probe_pollution` are known-imperfect; replace them
+   before they influence another decision.
+4. **A harder, wider evaluation set.** The current instrument is near its ceiling for some categories (cross-document
+   8 of 8, prose 6 of 6). Add questions that require aggregating several rows, date arithmetic, and documents the
+   current set does not touch, so the next improvement is measurable rather than invisible.
+5. **The acceptance panel on the finished corpus**, including p95 latency and cost per answer. The loop costs about
+   365 seconds per 52-question suite against 112 single-shot; that is a product decision the panel should see.
+6. **Row-query default policy.** Keep it opt-in in code; a deployment turns it on after measuring its own corpus
+   (the development deployment has it on; its evidence is one corpus).
+7. **`lookup_value` is superseded for table rows.** Keep it implemented and off; plan retirement once `query_rows`
+   has been measured on a second corpus.
+8. **Provider layer (`INF-PROVIDER-001`), data-set path, and the six rejected files** remain as before. The data-set
+   cards are not reachable by the row query because they have no rows; a data path is a separate piece of work.
 
 ## 7. Traps, written down so they are not repeated
 
@@ -188,6 +241,14 @@ stream probe 4. Run commands are in `docs/runbook.md` section 6.7. The stream pr
 - **The four probes are not equal.** `probe_row_normal` (PR1) and `probe_pollution` (PR4) are known imperfect
   probes; their failures are not clean system evidence and should be redesigned before they are used to judge a
   change.
+- **Absolute scores drift between days.** The same build measured 40.2 and 43.0 on consecutive days. Use a
+  same-day control; never compare a number in an old report to a number today and call it a regression.
+- **Two infrastructure defects were found by the second session, both fixed.** The committed suite script could
+  not write its own output directory as the eval image's non-root user, and the API never passed `--tool` to
+  the audit tool, so every tool-call row had an empty `tool` column. If you see either symptom again, check the
+  current code before diagnosing the component.
+- **A tool that returns no rendered lines is not absence.** The first row-query treatment lost N06 because a
+  full evidence namespace silently swallowed a matched row. Rows now get reserve slots and an explicit error.
 - **Do not rewrite the prompt without measuring.** Prompt changes moved the suite by seven points in both
   directions on three-run evidence and netted nothing on five. The prompt currently in main is the one that
   measured 40.2; treat it as frozen until the query tool exists.
@@ -198,27 +259,31 @@ stream probe 4. Run commands are in `docs/runbook.md` section 6.7. The stream pr
 - The Phase A build and current main are **equivalent**; there is no evidence that either is better.
 - **No configuration has reproduced 44, 44, 42 as a mean.** That triple was the top of a distribution.
 - `lookup_value` is implemented, tested, and **default off** because it measured neutral to negative on this
-  corpus of duplicated census figures. It is not evidence that exact lookups are impossible; the structured query
-  tool is the proposed answer.
+  corpus of duplicated census figures. It is not evidence that exact lookups are impossible: the structured row
+  query (`query_rows`) is the answer that worked, and it is now the measured tool for table rows.
 - The cross-document category is genuinely fixed (2–4 of 8 to 6–8 of 8). The honesty categories are slightly worse
   with the loop, which is a real trade rather than a rounding error.
+- The row query is worth **3.6 points against a same-day control** (46.6 against 43.0), not 3.6 against the
+  frozen 40.2. It removes the unsupported-number failure class on this corpus and brings exact-number questions
+  to 7.4 of 8, while the remaining failures are concentrated on four specific questions.
+- **46.6 of 52 is 89.6 percent on this instrument, not product accuracy.** One corpus, five runs, and 22 of the
+  27 remaining failing runs are deterministic on four questions. Do not quote it as a general capability number.
 - The corpus is complete by policy: 539 indexed, six data-set cards, six rejected files for a human. It is not
   "544 of 544 indexed".
 
 ## 9. First tasks for the next agent
 
-1. Read this document and the three reports named in section 4. Open the audit bundle and spot-check five
-   questions against `answers.csv`; confirm the numbers reproduce from the raw files with
-   `python3 scripts/build_answer_audit.py`.
-2. Verify the live configuration matches the table in section 1 (`docker exec api printenv`, `docker logs api |
-   grep tool-loop`, one question through `ask_client.py`). If it does not, restore it before changing anything.
-3. Design the structured query tool (section 6.1) as one PR: tool schema, executor with ACL and row caps, audit
-   events, tests, and a five-run comparison against the current configuration. Do not retune the prompt in the
-   same change.
-4. Keep the PR discipline: branch, why/what/how-checked/risk in the body, merge, squash; evidence in
-   `docs/reviews/`.
-5. Ask the owner about the six rejected files and the six data-set cards when the corpus comes up; both are
-   waiting on a human decision.
+1. Read this document, section 2b, and `docs/reviews/query-tool-2026-10-19/README.md`. Spot-check the query-tool
+   numbers with `python3 docs/reviews/query-tool-2026-10-19/compare.py` and the probe evidence in
+   `docs/reviews/query-tool-2026-10-19/probes/`.
+2. Verify the live configuration matches section 1, including `OI_TOOL_QUERY=on`, and ask one question that needs
+   a table row to see the tool in the audit chain (`select tool, count(*) from audit_events group by tool`).
+3. Diagnose the four deterministic failures in section 6 item 1, one at a time, with five-run before and after.
+   Do not bundle them with a prompt rewrite.
+4. Add the provider fallback and measure it (section 6 item 2), then redesign the two bad probes and run the
+   acceptance panel with latency and cost.
+5. Extend the evaluation set (section 6 item 4) before claiming further improvement.
+6. Keep the PR discipline and evidence rules from section 5.
 
 ## 10. Environment facts worth writing down
 
@@ -226,32 +291,33 @@ stream probe 4. Run commands are in `docs/runbook.md` section 6.7. The stream pr
   owner decides when to stop it.
 - Claude access commands (render, override, restart) are in `docs/runbook.md` section 6.7.
 - Analyst team ceiling: `update "LiteLLM_TeamTable" set max_budget = 100 where team_id = 'analyst'` (and the
-  manifest `budgets` block says 100 for dev).
+  manifest `budgets` block says 100 for dev). Development spend was about 34 USD when this update was written.
+- The row query flag is `OI_TOOL_QUERY`; the development deployment has it on, the code default is off.
+- Tool-call audit rows now carry the tool name: `select tool, count(*) from audit_events group by tool`.
+- Acceptance-probe evidence for the current build is committed under
+  `docs/reviews/query-tool-2026-10-19/probes/`.
 - The data suite output files used for this hand-off are also committed under
   `docs/reviews/experiment-answers-2026-10-19/raw/` so the experiment is reproducible without the box.
 - Repo: `github.com/privateInferenceAI/office-inference-core`, `gh` authenticated as `anthonystachowitz-wq`.
 
-## 11. Decisions taken while the owner was away (2026-10-19)
+## 11. Decisions and their state
 
-The owner asked for the remaining decisions to be made and reported. These are the ones taken, with the reasoning,
-so a later reader can reverse any of them deliberately.
+Decisions taken while the owner was away on 2026-10-19, updated after the row-query milestone:
 
-1. **The box is left running.** The next piece of work (the structured query tool) needs the deployment, and
-   starting and stopping an instance between sessions costs more time than the idle hours. Cost is recorded in
-   section 10; the owner stops it when the work pauses.
-2. **The deployment is frozen on the measured configuration** from section 1. No prompt, cap, model or flag was
-   changed after the five-run experiment. The only changes after the experiment were documentation, the answer
-   audit, this hand-off, the hermetic test fix and the suite script.
-3. **The six rejected files and the six data-set cards are left untouched.** Both need a human decision (replace or
-   exclude; convert or leave) and deleting client-like material without the owner is the wrong direction. They are
-   listed at `/opt/oi-core/rejected/rejected.csv` and `/opt/oi-core/rejected/datasets.csv`.
-4. **The pre-existing test failure was fixed, as a test defect rather than a retriever defect.** The suite is now
-   953 passed, 22 skipped, 0 failed. The reranker is switched off for tests that are not about reranking.
-5. **The suite runner is reproducible from the repository.** `scripts/run_answer_suite.sh` replaces a command that
-   depended on a staged file in `/tmp`, so a measurement can be regenerated from the repository on any machine with
-   the deployment.
-6. **The recommendation in the reply stands: begin the next milestone with a fresh agent**, using this document as
-   its starting point. The first tasks are section 9. Nothing in the plan depends on the previous session's memory.
-7. **No new measurement was taken.** The frozen fifteen-run experiment remains the evidence of record; the audit
-   bundle under `docs/reviews/experiment-answers-2026-10-19/` is the per-question backing for it.
-
+1. **Box running.** Still running; the next pieces of work (reliability, the four failures, acceptance panel) need
+   it. Cost about 0.81 USD per hour; the owner decides when to pause.
+2. **Deployment frozen after each measurement.** It is now on the measured row-query build: main `30b0100`,
+   query on, loop on, Claude Haiku, six steps, ten calls, lookup off, honesty on, ceiling 100.
+3. **Rejected files and data-set cards untouched**, pending an owner decision. `rejected/rejected.csv` and
+   `rejected/datasets.csv` are the lists.
+4. **Test suite was fixed to be hermetic** (the red test was tests calling the live reranker). It is now 974 passed,
+   22 skipped, 0 failed; keep it that way.
+5. **The suite runner is reproducible** (`scripts/run_answer_suite.sh`; the second session fixed a permission bug in
+   it). Five runs minimum, same-day control.
+6. **A new agent can start from this document**, as recommended. The first tasks are section 9.
+7. **Row query remains opt-in by default in code**; the development deployment has it on. Promotion to default is a
+   per-deployment decision after that deployment's own five-run measurement.
+8. **`lookup_value` remains implemented and off**, superseded for table rows by `query_rows`; retirement is a later
+   decision after a second corpus is measured.
+9. **No prompt tuning is planned.** The remaining points are in specific failures, reliability and a harder
+   evaluation set, not in prompt wording.

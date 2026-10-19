@@ -1,0 +1,10 @@
+ok   ANSWER     [200] 6 citation(s), lane='frontier'
+ok   NO-JUDGE   escalated=False trigger='' notice=False
+ok   TRIGGERS   task 'draft' -> 'agentic_task', stronger -> 'user_requested_stronger'
+ok   FACTS      6 row(s), asked true and false both present, every row names a lane
+ok   LANE-AGREE answer lane='frontier', row lane='frontier', egress_allowed=True for request 26620ac9eb15
+ok   TOLD       notice=True kind=None
+ok   STREAM     17 frame(s), first delta at 1808ms, total 1648ms
+ok   DEGRADED   the last recorded degradation carries reason, attempts, threshold, partial_output, lane, data_class, taxonomy_version, remaining_ms
+
+PASSED: 8 right(s) held against the documented interface
