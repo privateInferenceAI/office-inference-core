@@ -223,6 +223,12 @@ def audit(event: str, actor: str, actor_role: str, outcome: str, payload: dict, 
                "--payload", json.dumps(payload, sort_keys=True)]
     if extra.get("model"):
         command += ["--model", extra["model"]]
+    # **The tool name, for the same reason as the model name.** Every `tool_call` row has a `tool` column and
+    # the audit tool has accepted `--tool` all along; the answer loop passed `tool=name` to this function and
+    # this function never read it, so the chain could not say which tool ran. Found on 2026-10-19 while adding
+    # the row query, whose comparison counts its own calls and found every tool column empty.
+    if extra.get("tool"):
+        command += ["--tool", str(extra["tool"])]
     # **The columns the record has and the API was leaving empty.** Section 13e promises that the data
     # class, the egress verdict and the redaction counts have columns of their own, and the tool has
     # had the flags all along: the API simply never passed them, so 7,679 of 7,691 model-call rows

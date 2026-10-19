@@ -5668,7 +5668,9 @@ neighbouring line of a forty-row group. It is off until a deployment asks for it
 Ask a question whose answer is a row and confirm the call reached the audit chain. Every tool call is a
 `tool_call` row; the row query carries its own counts, so a refusal or a wrong row can be checked later:
 
-    docker exec -i postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select id, outcome, \
+    docker exec -i postgres psql \
+      -U "$(grep -E '^POSTGRES_USER=' rendered/env | cut -d= -f2)" \
+      -d "$(grep -E '^POSTGRES_DB=' rendered/env | cut -d= -f2)" -c "select id, outcome, \
       payload->>'candidate_chunks' as chunks, payload->>'rows_matched' as matched, \
       payload->>'rows_returned' as shown from audit_events where event_type='tool_call' \
       and tool='query_rows' order by id desc limit 5;"
