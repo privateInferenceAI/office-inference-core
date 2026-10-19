@@ -1398,3 +1398,70 @@ def test_the_data_set_report_lists_classified_files(tmp_path):
     rows = (out / "datasets.csv").read_text(encoding="utf-8").splitlines()
     assert "big.csv" in rows[1]
     assert "notes.txt" not in (out / "datasets.csv").read_text(encoding="utf-8")
+
+
+def test_an_owner_exclusion_leaves_the_worklist_and_is_recorded(tmp_path):
+    """The owner's decision has to change the worklist, or the pipeline is still asking a question that was
+    answered. The file itself stays on disk; only its classification changes."""
+    class FakeManifest:
+        def failed_documents(self):
+            return [
+                {"relpath": "company/broken.xls", "root": "company", "bytes": 12288,
+                 "failure_count": 2, "failure_kind": "permanent",
+                 "last_error": "RuntimeError: the parser failed: cannot open the document",
+                 "updated_at": "2026-10-17T09:00:00"},
+                {"relpath": "executive/missing.xls", "root": "executive", "bytes": 4096,
+                 "failure_count": 2, "failure_kind": "permanent",
+                 "last_error": "RuntimeError: the parser failed: cannot open the document",
+                 "updated_at": "2026-10-17T09:00:00"},
+            ]
+
+    (tmp_path / "exclusions.csv").write_text(
+        "relpath,reason,decided_by,decided_at\n"
+        "company/broken.xls,unreadable and not needed,owner,2026-10-19\n",
+        encoding="utf-8")
+    report = ingest.write_rejected_report(FakeManifest(), tmp_path)
+
+    assert [record["relpath"] for record in report["rejected"]] == ["executive/missing.xls"]
+    assert [record["relpath"] for record in report["excluded"]] == ["company/broken.xls"]
+    assert report["excluded"][0]["reason"] == "unreadable and not needed"
+    assert report["excluded"][0]["decided_by"] == "owner"
+
+    worklist = (tmp_path / "rejected.csv").read_text(encoding="utf-8")
+    assert "company/broken.xls" not in worklist
+    assert "executive/missing.xls" in worklist
+    payload = json.loads((tmp_path / "rejected.json").read_text(encoding="utf-8"))
+    assert payload["excluded"][0]["relpath"] == "company/broken.xls"
+    assert payload["excluded"][0]["decided_at"] == "2026-10-19"
+
+
+def test_an_exclusion_is_not_claimed_for_a_file_that_indexed_successfully(tmp_path):
+    """A decision names a dead letter. If a replacement at that path indexed, it is in the corpus and must not be
+    reported as left out, which is what matching the decision by path alone would do."""
+    class FakeManifest:
+        def failed_documents(self):
+            return []
+
+    (tmp_path / "exclusions.csv").write_text(
+        "relpath,reason,decided_by,decided_at\ncompany/broken.xls,replaced,owner,2026-10-19\n",
+        encoding="utf-8")
+    report = ingest.write_rejected_report(FakeManifest(), tmp_path)
+    assert report["rejected"] == [] and report["excluded"] == []
+
+
+def test_a_malformed_exclusion_row_is_reported_and_ignored(tmp_path, capsys):
+    """A records problem must not become a corpus-load failure: the report is written, the bad row is named, and
+    the dead letter stays on the worklist because no decision applied to it."""
+    class FakeManifest:
+        def failed_documents(self):
+            return [{"relpath": "company/broken.xls", "root": "company", "bytes": 12288,
+                     "failure_count": 2, "failure_kind": "permanent",
+                     "last_error": "cannot open the document", "updated_at": "2026-10-17T09:00:00"}]
+
+    (tmp_path / "exclusions.csv").write_text(
+        "relpath,reason,decided_by,decided_at\n,no path,owner,2026-10-19\n", encoding="utf-8")
+    report = ingest.write_rejected_report(FakeManifest(), tmp_path)
+    assert [record["relpath"] for record in report["rejected"]] == ["company/broken.xls"]
+    assert report["excluded"] == []
+    assert "has no relpath" in capsys.readouterr().out
+
