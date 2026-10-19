@@ -1017,8 +1017,10 @@ items:
       unchanged: five runs with the fallback configured but inert scored 51, 51, 51, 51, 49 (mean 50.6), the same
       as the corrected instrument before the change. Fault runs took about 550 to 580 seconds against about 370 to
       390 healthy, and the analyst spend moved about 20 USD across the two measurements because the fallback model
-      is Sonnet. Known gap: the answer and its audit row report the configured primary model, not the fallback that
-      answered; recording the answering model is follow-up work for INF-ROLE-001.
+      is Sonnet. The answering-model gap recorded here was closed the same day: the API reads the gateway's routing
+      headers, so resolved_model is the model that answered, configured_model is what the manifest names, and
+      model_group plus fallback_used name the failover in both the answer and the model_call row. Verified by
+      failing the primary on purpose.
 
   - id: BUDGET-IDENTITY-001
     title: A gateway identity charges one spend counter and enforces the role ceiling, not the remainder

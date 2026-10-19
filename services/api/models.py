@@ -113,6 +113,14 @@ class Answer(BaseModel):
     resolved_model: str = Field(
         description="the provider model behind that role. A client reading only `model` cannot see a "
                     "manifest swap take effect")
+    configured_model: str = Field(
+        description="the model the deployment's manifest names for the role. Equal to resolved_model on a "
+                    "healthy call; different when the gateway answered from a fallback")
+    model_group: str = Field(
+        description="the gateway model group that answered. A value other than the role names a failover")
+    fallback_used: bool = Field(
+        description="true when the gateway failed over before answering, so the answer came from the "
+                    "secondary deployment")
     role: str
     roots: list[str]
     citations: list[Citation]
