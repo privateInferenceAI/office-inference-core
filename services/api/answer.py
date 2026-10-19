@@ -233,8 +233,40 @@ def prepare(*, token: str, question: str, body: dict, ctx: Context, resolve, mod
     return session, permit, model, result, decision, data_class
 
 
+def model_facts(role: str, configured_model: str, attributed: dict | None = None) -> dict:
+    """The configured model and the model that actually answered.
+
+    **Two facts, because a failover makes them different.** `configured_model` is what the deployment's
+    manifest names for the role; `resolved_model` is what the gateway reports it used, taken from
+    `x-litellm-model-name` on the response. `model_group` is the gateway group that answered, so a value other
+    than the role names a failover, and `fallback_used` is that comparison stated plainly. This is the fact the
+    audit row and the answer were missing: under failover both said the primary model, and INF-ROLE-001 is
+    exactly the claim that the answer names the model that ran.
+    """
+    configured = str(configured_model or role)
+    reported = str((attributed or {}).get("model") or "").strip()
+    actual = reported or configured
+    # The manifest writes `bedrock/<id>`; the gateway header is the bare provider id. Normalising to the
+    # manifest's spelling keeps the field format stable between a healthy call and a failover.
+    if reported and configured.startswith("bedrock/") and not reported.startswith("bedrock/"):
+        actual = "bedrock/" + reported
+    group = str((attributed or {}).get("model_group") or "")
+    try:
+        attempted = int((attributed or {}).get("fallbacks_attempted") or 0)
+    except (TypeError, ValueError):
+        attempted = 0
+    return {
+        "configured_model": configured,
+        "resolved_model": actual,
+        "model_group": group or role,
+        "fallback_used": bool(group and group != role),
+        "fallbacks_attempted": attempted,
+    }
+
+
 def finish(*, question: str, answer: str, session, permit, model, result, decision, data_class,
-           request_budget, redaction_report, audit, resolved_model, request_id: str = "") -> Answer:
+           request_budget, redaction_report, audit, resolved_model, attributed: dict | None = None,
+           request_id: str = "") -> Answer:
     """Steps 6 to 8: redact, check the citations against what is sent, and record it.
 
     **The redaction happens before the checks, and the order was a defect.** A citation verified in text
@@ -259,13 +291,17 @@ def finish(*, question: str, answer: str, session, permit, model, result, decisi
             unverified_cards=report.unverified_cards + redaction_report.unverified_cards)
 
     verified = citations_module.verify(answer, result.passages)
+    facts = model_facts(model, resolved_model(model), attributed)
     payload = {
         "answer": answer,
         # **The role and the model are different facts.** `model` is what the manifest names;
         # `resolved_model` is what actually ran. An answer carrying only the role made a manifest swap
         # invisible, which is the seam INF-ROLE-001 is proved through.
         "model": model,
-        "resolved_model": resolved_model(model),
+        "resolved_model": facts["resolved_model"],
+        "configured_model": facts["configured_model"],
+        "model_group": facts["model_group"],
+        "fallback_used": facts["fallback_used"],
         "role": session.role,
         "roots": sorted(permit.roots),
         "citations": [{"index": n + 1, "doc_id": p.doc_id, "acl": p.acl,
@@ -287,11 +323,12 @@ def finish(*, question: str, answer: str, session, permit, model, result, decisi
         payload["request_id"] = request_id
 
     audit("model_call", session.subject, session.role, "ok",
-          {"stage": "ask", "model": model, "passages": len(result.passages),
+          {"stage": "ask", "model_role": model, **facts, "passages": len(result.passages),
            "supported": len(payload["supported"]), "unsupported": len(payload["unsupported"]),
            "roots": sorted(permit.roots),
            **routing.audit_facts(decision, data_class)},
-          model=model, data_class=data_class, egress_allowed=(decision.lane == "frontier"),
+          model=facts["resolved_model"], data_class=data_class,
+          egress_allowed=(decision.lane == "frontier"),
           redactions=report.counts, unverified_card_shapes=report.unverified_cards,
           request_id=request_id, prompt=safe_question)
 

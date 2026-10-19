@@ -237,6 +237,11 @@
             "title": "Citations",
             "type": "array"
           },
+          "configured_model": {
+            "description": "the model the deployment's manifest names for the role. Equal to resolved_model on a healthy call; different when the gateway answered from a fallback",
+            "title": "Configured Model",
+            "type": "string"
+          },
           "denied": {
             "description": "whether passages outside the role matched",
             "title": "Denied",
@@ -249,6 +254,11 @@
           },
           "escalated": {
             "title": "Escalated",
+            "type": "boolean"
+          },
+          "fallback_used": {
+            "description": "true when the gateway failed over before answering, so the answer came from the secondary deployment",
+            "title": "Fallback Used",
             "type": "boolean"
           },
           "kind": {
@@ -276,6 +286,11 @@
           "model": {
             "description": "the ROLE, as the manifest names it, not the model that ran",
             "title": "Model",
+            "type": "string"
+          },
+          "model_group": {
+            "description": "the gateway model group that answered. A value other than the role names a failover",
+            "title": "Model Group",
             "type": "string"
           },
           "notice": {
@@ -344,6 +359,9 @@
           "answer",
           "model",
           "resolved_model",
+          "configured_model",
+          "model_group",
+          "fallback_used",
           "role",
           "roots",
           "citations",

@@ -743,6 +743,10 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
     ]
     stats = {"steps": 0, "tool_calls": 0, "corrections": 0, "auto_lookups": 0}
     limit_error = ""
+    # **What the gateway says answered, per call, so the answer can name the model that ran.** The reply
+    # that produces the answer carries it; a failover means this is a different model group from the
+    # manifest's primary, and the caller reports both facts.
+    attribution: dict = {}
     lookup_enabled = any(schema["function"]["name"] == "lookup_value" for schema in active_tools())
 
     while stats["steps"] < max_steps:
@@ -755,6 +759,7 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
         reply = call_model(messages, active_tools())
         if reply.get("error"):
             return {"answer": None, "reason": reply["error"], "evidence": toolbox.evidence, **stats}
+        attribution = dict(reply.get("attribution") or attribution)
         calls = reply.get("tool_calls") or []
         if not calls:
             content = (reply.get("content") or "").strip()
@@ -791,7 +796,8 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
                 messages.append({"role": "user", "content": CORRECTIVE.format(
                     reason=failure, instruction=answer_contract.corrective_message(failure))})
                 continue
-            return {"answer": content, "reason": None, "evidence": toolbox.evidence, **stats}
+            return {"answer": content, "reason": None, "evidence": toolbox.evidence,
+                    "attribution": attribution, **stats}
 
         messages.append({
             "role": "assistant", "content": reply.get("content") or "",

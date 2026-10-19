@@ -148,6 +148,39 @@ def resolved_model(role: str) -> str:
     return str(entry.get("frontier") or entry.get("local") or role)
 
 
+def attribution_from(headers) -> dict:
+    """What answered, from the headers the gateway sets on a successful call.
+
+    **The manifest model is not enough once a failover exists.** A fallback answers under a different model
+    group, and the manifest names the primary for the role, so an answer that reported only the manifest model
+    would credit the model that did not run. LiteLLM puts the routing decision on every response:
+    `x-litellm-model-group` is the configured group that answered, so a failover names itself;
+    `x-litellm-model-name` is the provider model underneath; and `x-litellm-attempted-fallbacks` is how many
+    fallbacks were tried first. Reading them is what closes INF-ROLE-001 under failover.
+    """
+    if not headers:
+        return {}
+    try:
+        lower = {str(key).lower(): str(value) for key, value in headers.items()}
+    except Exception:  # noqa: BLE001 - attribution must never fail an answer
+        return {}
+    group = lower.get("x-litellm-model-group") or ""
+    model = lower.get("x-litellm-model-name") or ""
+    if not group and not model:
+        # Nothing to attribute. An empty dict is the honest answer, and callers fall back to the manifest.
+        return {}
+    attribution: dict = {}
+    if group:
+        attribution["model_group"] = group
+    if model:
+        attribution["model"] = model
+    try:
+        attribution["fallbacks_attempted"] = int(lower.get("x-litellm-attempted-fallbacks") or 0)
+    except ValueError:
+        attribution["fallbacks_attempted"] = 0
+    return attribution
+
+
 def role_lane(role: str) -> str:
     """Where the model this role points at actually runs, from the manifest.
 
@@ -389,6 +422,10 @@ async def ask(request: Request):
 
     request_budget = budget_module.Budget.for_lane(decision.lane, started=asked_at)
     question_text = (body.get("question") or "").strip()
+    # **What answered, not what was configured.** The gateway reports the model group and provider model on
+    # every successful call (`attribution_from`), so a failover names itself in the answer and in the audit
+    # row instead of being credited to the primary. Empty until a call succeeds.
+    attribution: dict = {}
     if tool_loop.enabled():
         try:
             loop = _generate_with_tools(session, permit, model, question_text, result, request_budget)
@@ -397,6 +434,7 @@ async def ask(request: Request):
             loop = {"answer": None, "reason": "tool_loop_error", "evidence": []}
         if loop.get("answer") is not None:
             generated, generation = loop["answer"], None
+            attribution = dict(loop.get("attribution") or {})
             if loop.get("evidence"):
                 # **The citations are verified against what the model actually read.** Without this the
                 # verifier would check tool-derived citations against the original five passages and refuse
@@ -404,11 +442,11 @@ async def ask(request: Request):
                 import dataclasses
                 result = dataclasses.replace(result, passages=loop["evidence"])
         else:
-            generated, generation = _generate(session, permit, model, question_text, result.passages,
-                                              request_budget)
+            generated, generation, attribution = _generate(
+                session, permit, model, question_text, result.passages, request_budget)
     else:
-        generated, generation = _generate(session, permit, model, question_text, result.passages,
-                                          request_budget)
+        generated, generation, attribution = _generate(
+            session, permit, model, question_text, result.passages, request_budget)
     if generated is None:
         reason, kind, attempts, attempt_errors = generation if isinstance(generation, tuple) else (
             "unclassified", {}, 1, [])
@@ -428,7 +466,7 @@ async def ask(request: Request):
         question=(body.get("question") or "").strip(), answer=generated, session=session, permit=permit,
         model=model, result=result, decision=decision, data_class=data_class,
         request_budget=request_budget, redaction_report=None, audit=audit,
-        resolved_model=resolved_model, request_id=request_id)
+        resolved_model=resolved_model, attributed=attribution, request_id=request_id)
     return JSONResponse(decided.payload, status_code=decided.status)
 
 
@@ -536,7 +574,8 @@ def _step_once(job, attempt):
 
     asked_at = time.monotonic()
     request_budget = budget_module.Budget.for_lane(decision.lane, started=asked_at)
-    generated, generation = _generate(session, permit, model, job.input, result.passages, request_budget)
+    generated, generation, attribution = _generate(session, permit, model, job.input, result.passages,
+                                                   request_budget)
     if generated is None:
         reason, kind, attempts, attempt_errors = generation if isinstance(generation, tuple) else (
             "unclassified", {}, 1, [])
@@ -559,7 +598,7 @@ def _step_once(job, attempt):
     decided = answer_module.finish(
         question=job.input, answer=generated, session=session, permit=permit, model=model, result=result,
         decision=decision, data_class=data_class, request_budget=request_budget, redaction_report=None,
-        audit=audit, resolved_model=resolved_model, request_id=job.job_id)
+        audit=audit, resolved_model=resolved_model, attributed=attribution, request_id=job.job_id)
     return jobs_module.StepOutcome(ok=True, name="answer", lane=decided.lane, model=model,
                                    result=decided.payload, notice=decided.notice or "")
 
@@ -1005,9 +1044,9 @@ async def decide_job(job_id: str, request: Request):
 def _generate(session, permit, model: str, question: str, passages: list, budget=None):
     """The model call, bounded, retried only while it is safe, and classified when it fails.
 
-    Returns `(answer, error)`. Exactly one is None. A failure that is worth waiting for is retried inside the
-    same budget rather than a fresh one, and a failure that can never succeed is not retried at all, because
-    the wait would come out of the budget the degraded answer needs.
+    Returns `(answer, error, attribution)`. Exactly one of the first two is None; `attribution` is the
+    gateway's account of what answered (see `attribution_from`), or an empty dict when nothing did. It rides
+    with the result because a failover makes "the manifest model" the wrong thing to report.
     """
     import urllib.error
     import urllib.request
@@ -1032,6 +1071,7 @@ def _generate(session, permit, model: str, question: str, passages: list, budget
 
     errors: list = []
     attempt = 0
+    attribution: dict = {}
     while attempt < budget_module.MAX_ATTEMPTS:
         attempt += 1
         if budget.past_reserve():
@@ -1045,9 +1085,10 @@ def _generate(session, permit, model: str, question: str, passages: list, budget
         try:
             with urllib.request.urlopen(request, timeout=max(1.0, budget.remaining())) as r:
                 data = json.load(r)
+                attribution = attribution_from(r.headers)
             choices = data.get("choices") or []
             if not choices:
-                return None, ("unclassified", "the gateway returned no choices", attempt, errors)
+                return None, ("unclassified", "the gateway returned no choices", attempt, errors), attribution
             content = (choices[0].get("message") or {}).get("content", "")
             # **The answer is checked before it is returned.** A citation with no answer, an empty reply, or a
             # figure present nowhere in the passages is sent back once with a corrective instruction. If the
@@ -1058,11 +1099,11 @@ def _generate(session, permit, model: str, question: str, passages: list, budget
                                "matched": "", "retryable": True})
                 if attempt >= budget_module.MAX_ATTEMPTS:
                     return None, (failure, {"reason": failure, "matched": "", "retryable": False},
-                                  attempt, errors)
+                                  attempt, errors), attribution
                 payload["messages"] = [{"role": "user",
                                         "content": prompt + "\n\n" + answer_contract.corrective_message(failure)}]
                 continue
-            return content, None
+            return content, None, attribution
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode(errors="replace")[:400]
             kind = budget_module.classify(detail)
@@ -1070,20 +1111,20 @@ def _generate(session, permit, model: str, question: str, passages: list, budget
                            "matched": kind["matched"], "retryable": kind["retryable"]})
             retry_after = exc.headers.get("Retry-After") if exc.headers else None
             if not kind["retryable"]:
-                return None, (kind["reason"], kind, attempt, errors)
+                return None, (kind["reason"], kind, attempt, errors), attribution
             if attempt >= budget_module.MAX_ATTEMPTS:
-                return None, (kind["reason"], kind, attempt, errors)
+                return None, (kind["reason"], kind, attempt, errors), attribution
             wait = _backoff(attempt, retry_after)
             if wait >= budget.remaining() - budget.reserve:
                 # The wait itself would eat the delivery reserve, so waiting is the wrong answer.
-                return None, (kind["reason"], kind, attempt, errors)
+                return None, (kind["reason"], kind, attempt, errors), attribution
             time.sleep(wait)
         except Exception as exc:  # noqa: BLE001 - a transport failure is a classification too
             kind = budget_module.classify(type(exc).__name__)
             errors.append({"attempt": attempt, "status": 0, "reason": kind["reason"],
                            "matched": kind["matched"], "retryable": kind["retryable"]})
             if not kind["retryable"] or attempt >= budget_module.MAX_ATTEMPTS:
-                return None, (kind["reason"], kind, attempt, errors)
+                return None, (kind["reason"], kind, attempt, errors), attribution
             time.sleep(_backoff(attempt, None))
 
     # **Three values, and the last classification is never discarded.** The first version returned a
@@ -1091,11 +1132,11 @@ def _generate(session, permit, model: str, question: str, passages: list, budget
     # the loop broke before recording anything — so a provider throttle could still be recorded as an
     # unrecognised failure, which is the defect the retry fix was meant to remove.
     if errors:
-        last = dict(errors[-1])
-        return None, (last["reason"], last, attempt, errors)
+        return None, (errors[-1]["reason"], dict(errors[-1]), attempt, errors), attribution
     # No attempt was made at all: the deadline left no room. That is a timeout, and saying so is more
     # honest than `unclassified`, which reads as a failure nobody understands.
-    return None, ("timeout", {"reason": "timeout", "matched": "", "retryable": True}, attempt, errors)
+    return None, ("timeout", {"reason": "timeout", "matched": "", "retryable": True}, attempt,
+                  errors), attribution
 
 
 def _tool_chat(session, model: str, messages: list, tools, request_budget):
@@ -1104,6 +1145,9 @@ def _tool_chat(session, model: str, messages: list, tools, request_budget):
     Deliberately simpler than `_generate`: the loop itself is the retry structure, so a provider failure here is
     classified and returned rather than slept on. The assertion is minted per attempt for the same reason it is
     in `_generate`: a statement is spent by its first presentation.
+
+    The reply carries `attribution` when the gateway answered, so the loop can report the model group and
+    provider model that actually answered rather than the manifest's primary.
     """
     import urllib.error
     import urllib.request
@@ -1128,6 +1172,7 @@ def _tool_chat(session, model: str, messages: list, tools, request_budget):
         try:
             with urllib.request.urlopen(request, timeout=max(1.0, request_budget.remaining())) as response:
                 data = json.load(response)
+                attribution = attribution_from(response.headers)
             choices = data.get("choices") or []
             if not choices:
                 return {"error": "unclassified"}
@@ -1137,7 +1182,8 @@ def _tool_chat(session, model: str, messages: list, tools, request_budget):
                 function = call.get("function") or {}
                 calls.append({"id": call.get("id") or "", "name": function.get("name") or "",
                               "arguments": function.get("arguments") or "{}"})
-            return {"content": message.get("content") or "", "tool_calls": calls, "error": None}
+            return {"content": message.get("content") or "", "tool_calls": calls, "error": None,
+                    "attribution": attribution}
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode(errors="replace")[:300]
             kind = budget_module.classify(detail)
@@ -1476,6 +1522,8 @@ async def _tool_frames(session, permit, model: str, question: str, result, reque
 
     loop = holder.get("loop") or {"answer": None, "reason": holder.get("error") or "tool_loop_error",
                                   "evidence": []}
+    facts = answer_module.model_facts(model, resolved_model(model),
+                                      dict(loop.get("attribution") or {}))
     started = time.monotonic()
     if loop.get("answer") is None:
         reason = loop.get("reason") or "unclassified"
@@ -1511,15 +1559,19 @@ async def _tool_frames(session, permit, model: str, question: str, result, reque
         yield frame("delta", {"text": tail})
     report = redactor.report()
     audit("model_call", session.subject, session.role, "ok",
-          {"stage": "ask_stream_tools", "model": model, "deltas": deltas,
+          {"stage": "ask_stream_tools", "model_role": model, **facts, "deltas": deltas,
            "passages": len(evidence), "steps": loop.get("steps"),
            "tool_calls": loop.get("tool_calls"), "corrections": loop.get("corrections"),
-           "redactions": report["redactions"], "holdback": report["holdback"]}, model=model,
+           "redactions": report["redactions"], "holdback": report["holdback"]},
+          model=facts["resolved_model"],
           data_class=data_class, egress_allowed=(lane == "frontier"),
           redactions=report["redactions"],
           unverified_card_shapes=report.get("unverified_card_shapes", 0),
           prompt=redaction.redact(question)[0])
     yield frame("done", {"deltas": deltas, "redactions": report["redactions"],
+                         "resolved_model": facts["resolved_model"],
+                         "model_group": facts["model_group"],
+                         "fallback_used": facts["fallback_used"],
                          "retrieval_ms": int((started - requested_at) * 1000),
                          "ttft_ms": int((first_token_at - requested_at) * 1000) if first_token_at else None,
                          "model_first_ms": int((first_token_at - started) * 1000) if first_token_at else None,
@@ -1603,12 +1655,14 @@ async def _frames(session, permit, model: str, question: str, result, requested_
     # idempotent. After the first delta the rule is unchanged: an error event, never a retry.
     attempt = 0
     response = None
+    attribution: dict = {}
     while attempt < budget_module.MAX_ATTEMPTS:
         attempt += 1
         if request_budget.past_reserve():
             break
         try:
             response = _open()
+            attribution = attribution_from(response.headers)
             break
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode(errors="replace")[:400]
@@ -1709,10 +1763,11 @@ async def _frames(session, permit, model: str, question: str, result, requested_
         return
 
     report = redactor.report()
+    facts = answer_module.model_facts(model, resolved_model(model), attribution)
     audit("model_call", session.subject, session.role, "ok",
-          {"stage": "ask_stream", "model": model, "deltas": deltas,
+          {"stage": "ask_stream", "model_role": model, **facts, "deltas": deltas,
            "passages": len(result.passages), "redactions": report["redactions"],
-           "holdback": report["holdback"]}, model=model,
+           "holdback": report["holdback"]}, model=facts["resolved_model"],
           data_class=((STATE.get("manifest") or {}).get("access") or {}).get("data_class")
                      or "regulated",
           egress_allowed=(lane == "frontier"),
@@ -1720,6 +1775,9 @@ async def _frames(session, permit, model: str, question: str, result, requested_
           unverified_card_shapes=report.get("unverified_card_shapes", 0),
           prompt=redaction.redact(question)[0])
     yield frame("done", {"deltas": deltas, "redactions": report["redactions"],
+                         "resolved_model": facts["resolved_model"],
+                         "model_group": facts["model_group"],
+                         "fallback_used": facts["fallback_used"],
                          # Time to first token as the caller experiences it, retrieval included. The
                          # model's own share sits beside it so a budget can tell the two apart.
                          "retrieval_ms": retrieval_ms,

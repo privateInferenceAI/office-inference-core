@@ -536,3 +536,21 @@ def test_a_full_evidence_list_answers_the_row_query_with_an_explanation(monkeypa
     assert "evidence list is full" in out["error"]
     assert toolbox._last_facts["rows_matched"] == 1
 
+
+
+def test_the_loop_carries_the_gateways_attribution_into_the_answer():
+    """A failover answers from another model group; the loop has to pass that fact to the caller or the
+    answer credits the primary model."""
+    toolbox = make_toolbox()
+    toolbox.add(FakePassage("c1", "the standard mileage rate is 67 cents per mile"))
+    replies = iter([
+        {"content": "The standard mileage rate is 67 cents per mile [1].", "tool_calls": [], "error": None,
+         "attribution": {"model_group": "analyst-fallback",
+                         "model": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                         "fallbacks_attempted": 1}},
+    ])
+    result = tool_loop.run_loop(lambda messages, tools: next(replies), toolbox, "What is the mileage rate?")
+    assert result["answer"].startswith("The standard mileage rate")
+    assert result["attribution"]["model_group"] == "analyst-fallback"
+    assert result["attribution"]["fallbacks_attempted"] == 1
+
