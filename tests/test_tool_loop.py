@@ -578,3 +578,25 @@ def test_the_policy_clause_is_behind_the_honesty_flag():
     without_flag = tool_loop.system_prompt(lookup_enabled=False, honesty_enabled=False)
     assert "policy, procedure or plan" in with_flag
     assert "policy, procedure or plan" not in without_flag
+
+
+def test_the_prompt_says_the_corpus_is_not_the_company_handbook():
+    """The failure was the model treating a filing and a court opinion as if they were the company's own
+    policy. Saying what the corpus is attacks the prior that generates the answer."""
+    prompt = tool_loop.system_prompt(lookup_enabled=False, honesty_enabled=True)
+    assert "not the company's internal handbook" in prompt
+    assert "A question asking for a company policy is answerable only when a document explicitly states that" in prompt
+
+
+def test_the_prompt_says_a_law_or_clause_is_not_the_company_policy():
+    prompt = tool_loop.system_prompt(lookup_enabled=False, honesty_enabled=True)
+    assert "A law, regulation, court opinion, form, template or contract clause is not the company's" in prompt
+
+
+def test_refusal_is_the_last_thing_the_prompt_says():
+    """Recency matters: the failure mode was ending the turn with an answer, and the rule that names refusing
+    as correct has to be the last instruction it reads."""
+    prompt = tool_loop.system_prompt(lookup_enabled=False, honesty_enabled=True)
+    tail = prompt[-320:]
+    assert "I could not find that in the available documents" in tail
+    assert "correct answer, not a failure" in tail

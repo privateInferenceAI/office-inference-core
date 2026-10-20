@@ -120,6 +120,10 @@ TOOLS = [
 
 _PROMPT_HEAD = (
     "You answer questions about a client's own documents.\n"
+    "The documents are filings, reports, contracts, forms, tables and other reference material. They are not "
+    "the company's internal handbook, and they do not state the company's own policies. A question asking for "
+    "a company policy is answerable only when a document explicitly states that policy; otherwise it is not in "
+    "the evidence.\n"
     "You have tools. search_documents searches the documents; read_passages opens a document around a "
     "result{tools}. Use them. If the first search does not contain the answer, search again with different "
     "words. If a result names a table but the excerpt is not enough, read that document. If the question "
@@ -150,14 +154,17 @@ _HONESTY_RULE = (
     "7. If the question asks about a specific event, period, meeting or document that the evidence never "
     "states, refuse even when the evidence contains related facts. A question that asks for a policy, "
     "procedure or plan the documents do not state is the same case: refuse rather than answering from general "
-    "knowledge. Do not infer that a related figure answers it, and do not relabel a fact as the one that was "
-    "asked for.\n"
+    "knowledge. A law, regulation, court opinion, form, template or contract clause is not the company's "
+    "policy; do not present one as the answer. Do not infer that a related figure answers it, do not relabel a "
+    "fact as the one that was asked for, and do not attach a citation to a sentence the passage does not "
+    "contain.\n"
 )
 
 _PROMPT_TAIL = (
     "You have a limited number of tool calls. Answer as soon as the evidence is enough; do not keep searching "
     "for completeness. When you have the answer, or when the documents do not contain it, reply with no tool "
-    "call."
+    "call. If the documents do not state the answer, reply exactly: I could not find that in the available "
+    "documents. That is a correct answer, not a failure, and general knowledge is not a substitute for it."
 )
 
 

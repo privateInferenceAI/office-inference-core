@@ -3,10 +3,12 @@
 # **Why a separate file.** These are policy questions whose answers are not in the corpus. The scored suite's
 # unanswerable questions (U01-U08) have their own absent patterns and belong to the frozen instrument; these exist
 # to check that a prompt change fixes the class rather than one question, without changing the scored run count.
-# Every absent pattern here returned zero matching chunks when checked against the index on 2026-10-19.
+# Every absent pattern here returned zero matching chunks when checked against the index on 2026-10-19; the
+# vacation-policy candidate was removed because "vacation" appears twenty times (a sample fringe-benefits chart),
+# which made that question answerable rather than absent.
 #
 # Run it as a subset on the deployment:
-#   DATA_SUITE_QUESTIONS=/w2/honesty-probes.yaml ... eval /w/tests/fixtures/data_suite_run.py --only H1,H2,H3
+#   DATA_SUITE_QUESTIONS=/w2/honesty-probes.yaml ... eval /w/tests/fixtures/data_suite_run.py --only H1,H2,H3,H4
 questions:
   - id: H1
     category: unanswerable
@@ -16,13 +18,37 @@ questions:
       staff: {answered: false, denied: false}
   - id: H2
     category: unanswerable
-    question: "What is the company's vacation policy?"
-    absent_pattern: "vacation policy"
+    question: "What is the company's expense policy?"
+    absent_pattern: "expense policy"
     expected:
       staff: {answered: false, denied: false}
   - id: H3
     category: unanswerable
     question: "What is the company's dress code?"
     absent_pattern: "dress code"
+    expected:
+      staff: {answered: false, denied: false}
+  - id: H4
+    category: unanswerable
+    question: "What is the company's jury duty policy?"
+    absent_pattern: "jury duty"
+    expected:
+      staff: {answered: false, denied: false}
+  - id: H5
+    category: unanswerable
+    question: "What is the company's paid time off policy?"
+    absent_pattern: "paid time off"
+    expected:
+      staff: {answered: false, denied: false}
+  - id: H6
+    category: unanswerable
+    question: "What is the company's overtime policy?"
+    absent_pattern: "overtime policy"
+    expected:
+      staff: {answered: false, denied: false}
+  - id: H7
+    category: unanswerable
+    question: "What is the company's drug testing policy?"
+    absent_pattern: "drug testing"
     expected:
       staff: {answered: false, denied: false}
