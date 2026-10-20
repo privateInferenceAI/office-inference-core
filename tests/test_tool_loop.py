@@ -170,7 +170,7 @@ def test_a_provider_error_returns_a_reason_not_an_exception():
 
 def test_the_tool_schemas_match_the_executor():
     names = [schema["function"]["name"] for schema in tool_loop.TOOLS]
-    assert names == ["search_documents", "read_passages", "query_rows"]
+    assert names == ["search_documents", "search_exact", "read_passages", "query_rows"]
 
 
 def test_the_prompt_carries_the_honesty_rule_for_absent_events():
@@ -456,3 +456,60 @@ def test_the_loop_carries_the_gateways_attribution_into_the_answer():
     assert result["attribution"]["model_group"] == "analyst-fallback"
     assert result["attribution"]["fallbacks_attempted"] == 1
 
+
+
+def test_the_exact_query_is_parameterised_and_acl_filtered():
+    sql, params = tool_loop.exact_query("Current Termination Date", "", ["company"])
+    assert "acl = any(%(roots)s)" in sql
+    assert "position(%(needle)s" in sql
+    assert "%" not in params["needle"]
+    assert params["needle"] == "current termination date"
+    sql_with_doc, params_with_doc = tool_loop.exact_query("visitor badge", "company/doc.md", ["company"])
+    assert "doc_id = %(doc)s" in sql_with_doc
+    assert params_with_doc["doc"] == "company/doc.md"
+
+
+def test_the_exact_excerpt_is_centred_on_the_match():
+    text = ("A" * 600) + " the Current Termination Date is August 27, 2029 " + ("B" * 600)
+    excerpt = tool_loop.exact_excerpt(text, "Current Termination Date")
+    assert "Current Termination Date is August 27, 2029" in excerpt
+    assert excerpt.startswith("...") and excerpt.endswith("...")
+
+
+def test_the_exact_tool_is_off_until_the_flag_turns_it_on(monkeypatch):
+    monkeypatch.delenv("OI_TOOL_EXACT", raising=False)
+    assert "search_exact" not in [schema["function"]["name"] for schema in tool_loop.active_tools()]
+    monkeypatch.setenv("OI_TOOL_EXACT", "on")
+    assert "search_exact" in [schema["function"]["name"] for schema in tool_loop.active_tools()]
+
+
+def test_the_prompt_names_the_exact_tool_only_when_it_is_offered():
+    without = tool_loop.system_prompt(honesty_enabled=True)
+    assert "search_exact" not in without
+    with_exact = tool_loop.system_prompt(honesty_enabled=True, exact_enabled=True)
+    assert "search_exact" in with_exact
+
+
+def test_exact_search_rejects_a_short_phrase():
+    toolbox = make_toolbox()
+    payload = json.loads(toolbox.search_exact("x"))
+    assert "at least two characters" in payload["error"]
+
+
+def test_exact_search_renders_a_centred_excerpt_and_numbers_the_evidence():
+    toolbox = make_toolbox()
+    toolbox._exact_matches = lambda phrase, doc_id="": ["chunk-1"]
+    import retriever as real_retriever
+    original = real_retriever._fetch_payloads
+    real_retriever._fetch_payloads = lambda services, wanted, roots: {
+        "chunk-1": {"chunk_id": "chunk-1", "doc_id": "company/doc.md", "acl": "company",
+                    "text": ("filler " * 100) + "visitor badges are valid for 24 hours maximum " + ("tail " * 100),
+                    "page_start": 3, "page_end": 3, "kind": "prose"}}
+    try:
+        out = toolbox.search_exact("24 hours maximum")
+    finally:
+        real_retriever._fetch_payloads = original
+    assert "Passages containing" in out
+    assert "24 hours maximum" in out
+    assert "company/doc.md p3" in out
+    assert len(toolbox.evidence) == 1

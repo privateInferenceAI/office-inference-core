@@ -46,6 +46,25 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "search_exact",
+            "description": (
+                "Find passages that state an exact phrase: a heading, a defined term, a model number or a "
+                "quoted phrase. Use it when a question names a term whose wording matters and ordinary "
+                "search returns near matches. Returns an excerpt centred on the match."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "phrase": {"type": "string", "description": "the words to find, literally"},
+                    "doc_id": {"type": "string",
+                               "description": "optional: search only this document"},
+                },
+                "required": ["phrase"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "read_passages",
             "description": (
                 "Read the document around a search result: the rest of a table, the neighbouring rows, or the "
@@ -138,7 +157,7 @@ _PROMPT_TAIL = (
 )
 
 
-def system_prompt(honesty_enabled: bool = True, query_enabled: bool = False) -> str:
+def system_prompt(honesty_enabled: bool = True, query_enabled: bool = False, exact_enabled: bool = False) -> str:
     """The instruction, built from the tools this deployment actually offers.
 
     **The prompt and the tool list have to be one fact.** A tool the prompt does not name is used late or
@@ -150,6 +169,9 @@ def system_prompt(honesty_enabled: bool = True, query_enabled: bool = False) -> 
     both directions: name what is offered, and offer what is named.
     """
     tools = ""
+    if exact_enabled:
+        tools += ("; search_exact finds passages that state a phrase literally, for headings and defined "
+                  "terms that ordinary search ranks low")
     if query_enabled:
         tools += ("; query_rows returns the exact table rows that contain the values or labels you give it, "
                   "which is how a figure is confirmed before it is answered")
@@ -188,6 +210,19 @@ QUERY_AMBIGUOUS_DOCS = 3
 # model kept querying a row that was already returned, the namespace stayed full, the calls matched a row and
 # rendered nothing, and the model read that as absence. Eight slots is one call's default worth of rows.
 QUERY_EXTRA_EVIDENCE = 8
+
+# --------------------------------------------------------------------------- exact phrase bounds
+#
+# A phrase search is the fix for a measured recall gap: on the second corpus the carrying chunk of two
+# needles ranked below the cut while the document itself ranked first, and retrieval offered nearby rules
+# instead. The phrase is matched literally against stored text, comma-insensitive, so a heading or a defined
+# term is found regardless of embedding rank. The excerpt is centred on the match because the wider-set
+# Apple snippet was truncated before the figure that answered the question.
+EXACT_RESULT_CAP = 6
+EXACT_WINDOW = 380
+EXACT_MIN_CHARS = 2
+EXACT_MAX_CHARS = 120
+EXACT_EXTRA_EVIDENCE = 6
 
 
 def _normal_for_match(value: str) -> str:
@@ -282,6 +317,38 @@ def rows_in_chunk(payload: dict) -> list[dict]:
     return rows
 
 
+def exact_query(phrase: str, doc_id: str, roots, limit: int = EXACT_RESULT_CAP) -> tuple:
+    # The phrase search as SQL and its parameters: one SELECT, parameterised, ACL-filtered, bounded.
+    params = {"roots": sorted(roots), "needle": _normal_for_match(phrase), "limit": max(1, int(limit))}
+    clauses = ["acl = any(%(roots)s)", "position(%(needle)s in lower(replace(text, ',', ''))) > 0"]
+    if doc_id:
+        clauses.append("doc_id = %(doc)s")
+        params["doc"] = doc_id
+    sql = ("select chunk_id, doc_id from chunk_index where " + " and ".join(clauses)
+           + " order by doc_id, page_start, chunk_id limit %(limit)s")
+    return sql, params
+
+
+def exact_excerpt(text: str, phrase: str, window: int = EXACT_WINDOW) -> str:
+    # A window of text centred on the phrase, or on its first word when the exact form is not literal.
+    needle = " ".join(phrase.split()).lower()
+    lowered = text.lower()
+    index = lowered.find(needle)
+    if index < 0:
+        first = needle.split()[0] if needle.split() else needle
+        index = lowered.find(first)
+    if index < 0:
+        return ""
+    start = max(0, index - window // 2)
+    end = min(len(text), index + len(needle) + window // 2)
+    excerpt = " ".join(text[start:end].split())
+    if start > 0:
+        excerpt = "..." + excerpt
+    if end < len(text):
+        excerpt = excerpt + "..."
+    return excerpt
+
+
 class ToolBox:
     """The tools, the evidence they produce, and the access rules they apply.
 
@@ -351,6 +418,54 @@ class ToolBox:
         rendered = self.render(result.passages)
         return ("Search results for " + json.dumps(query) + ":\n" + rendered) if rendered \
             else "No results for " + json.dumps(query) + "."
+
+    def search_exact(self, phrase: str, doc_id: str = "") -> str:
+        # Find chunks stating a phrase, literally and comma-insensitively, with a centred excerpt.
+        cleaned = " ".join(str(phrase or "").split())
+        if len(cleaned) < EXACT_MIN_CHARS:
+            return json.dumps({"error": "phrase must contain at least two characters"})
+        cleaned = cleaned[:EXACT_MAX_CHARS]
+        ids = self._exact_matches(cleaned, doc_id)
+        self._last_facts = {"exact_matches": len(ids)}
+        if not ids:
+            return json.dumps({"error": "no passage states that phrase in the documents this session may read"})
+        import retriever
+        payloads = retriever._fetch_payloads(self.services, ids, self.roots)
+        passages = [retriever.Passage.from_payload(payloads[key], None, 0.0)
+                    for key in ids if key in payloads]
+        rendered = []
+        for passage in passages:
+            text = getattr(passage, "text", "") or ""
+            excerpt = exact_excerpt(text, cleaned)
+            if not excerpt:
+                excerpt = " ".join(text.split())[:EXACT_WINDOW]
+            number = self.add(passage, extra_slots=EXACT_EXTRA_EVIDENCE)
+            if not number:
+                continue
+            rendered.append("[" + str(number) + "] " + passage.doc_id + " p"
+                            + str(passage.page_start) + " kind=" + str(passage.kind)
+                            + ": " + excerpt)
+        if not rendered:
+            return json.dumps({"error": "the phrase was indexed but the passages could not be read"})
+        header = "Passages containing " + json.dumps(cleaned) + ":" + chr(10)
+        return header + chr(10).join(rendered)
+
+    def _exact_matches(self, phrase: str, doc_id: str = "") -> list[str]:
+        # The literal-match query, split out so a test can hold it without a database.
+        import psycopg2
+
+        dsn = getattr(self.services, "database_url", "")
+        if not dsn:
+            return []
+        sql, params = exact_query(phrase, doc_id, self.roots)
+        try:
+            with psycopg2.connect(dsn) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(sql, params)
+                    return [row[0] for row in cursor.fetchall()]
+        except Exception as exc:
+            print("search_exact unavailable: " + type(exc).__name__ + ": " + str(exc))
+            return []
 
     def read_passages(self, doc_id: str, page_start: int | None = None, page_end: int | None = None,
                       chunk_id: str = "") -> str:
@@ -567,12 +682,14 @@ class ToolBox:
             elif name == "read_passages":
                 out = self.read_passages(str(args.get("doc_id") or ""), args.get("page_start"),
                                          args.get("page_end"), str(args.get("chunk_id") or ""))
+            elif name == "search_exact":
+                out = self.search_exact(str(args.get("phrase") or ""), str(args.get("doc_id") or ""))
             elif name == "query_rows":
                 out = self.query_rows(args.get("match"), str(args.get("doc_id") or ""),
                                       args.get("limit"))
             else:
                 out = json.dumps({"error": f"unknown tool {name!r}; available: search_documents, "
-                                           f"read_passages, query_rows"})
+                                           f"search_documents, search_exact, read_passages, query_rows"})
         except Exception as exc:  # noqa: BLE001 - a tool failure must not end the request
             out = json.dumps({"error": f"the tool failed: {type(exc).__name__}"})
         if self.audit is not None:
@@ -605,6 +722,8 @@ def active_tools() -> list:
     offered = list(TOOLS)
     if not _flag("OI_TOOL_QUERY", "off"):
         offered = [schema for schema in offered if schema["function"]["name"] != "query_rows"]
+    if not _flag("OI_TOOL_EXACT", "off"):
+        offered = [schema for schema in offered if schema["function"]["name"] != "search_exact"]
     return offered
 
 
@@ -624,10 +743,11 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
 
     offered = active_tools()
     query_offered = any(schema["function"]["name"] == "query_rows" for schema in offered)
+    exact_offered = any(schema["function"]["name"] == "search_exact" for schema in offered)
     honesty = os.environ.get("OI_TOOL_HONESTY", "on").strip().lower() not in ("off", "0", "false", "no")
     seeded = toolbox.render(list(seed_passages))
     messages = [
-        {"role": "system", "content": system_prompt(honesty, query_offered)},
+        {"role": "system", "content": system_prompt(honesty, query_offered, exact_offered)},
         {"role": "user", "content": (
             f"Question: {question}\n\n"
             + (f"Evidence already retrieved, numbered:\n{seeded}\n\n" if seeded else "")

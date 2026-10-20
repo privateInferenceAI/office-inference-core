@@ -992,6 +992,25 @@ items:
       could not write its output directory as the eval image's non-root user, and the API never passed --tool to
       the audit tool, so every tool_call row in the chain named no tool.
 
+  - id: AGENT-EXACT-001
+    title: An exact-phrase search tool for headings and defined terms that embedding rank buries
+    tier: [cloud, hosted]
+    phase: C6
+    verify: >-
+      with OI_TOOL_EXACT on, the model can search for a literal phrase and receives up to six passages
+      containing it, comma-insensitively, inside the session's access roots, each rendered as an excerpt
+      centred on the match and numbered into the citation evidence; the phrase is a bound parameter, the
+      query is one SELECT, and when a phrase is empty or shorter than two characters the tool returns an
+      error rather than scanning.
+    status: experimental
+    note: >-
+      Built 2026-10-20 from the needle diagnosis: on the second corpus the carrying chunk of two needles
+      ranked below the retrieval cut while the right document ranked first, and the wider-set Apple needle
+      ranked first but its excerpt was truncated before the figure. The tool adds candidates and does not
+      change what search_documents returns, which is the additive property the regression plan requires.
+      Default off; acceptance is a five-run needle set and both corpora with the flag on against the flag
+      off. Evidence will live in docs/reviews/exact-phrase-2026-10-20.md.
+
   - id: AGENT-FALLBACK-001
     title: A failed primary model fails over once to a declared second model
     tier: [cloud, hosted]
