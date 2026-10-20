@@ -176,6 +176,28 @@ answers through their operands. It is not the scored instrument yet.
 
 **Chain measurement** (instrument = the redesigned probes): healthy five runs scored 52, 52, 52, 52, 52 of 53 with zero of 492 model calls failing over. With the primary failed on purpose, five runs scored the same 52, 52, 52, 52, 52, zero degraded answers, and every one of the 265 answer rows came through the us-east-2 Haiku entry. With both that entry and the primary failed, four of four answers came from Nova Pro (two of four questions correct: the third leg works, and it is a last resort). Cost per answer about 0.0134 USD, p95 about 12 seconds. Evidence: `docs/reviews/regional-fallback-2026-10-19.md`.
 
+## 2f. Update 2026-10-19 late: the honesty gate
+
+U08 was called a genuine honesty failure, and it was, but the mechanism was narrower than "the model lies": the
+corpus contains a document that mentions the FMLA (49 chunks) and a contractor clause about uniforms, and the model
+relabelled related material as the company's own policy, citing a document that does not state it. The earlier
+diagnosis had checked only the phrase "parental leave", which was absent while FMLA and "parental" were present.
+Two prompt iterations were measured and both were rejected. Iteration 1 named policies in the honesty rule and made
+refusal terminal: U08 still failed 5 of 5 and N05 failed 4 of 5 (more searching, step limits), mean 51.2 against
+the 51.8 baseline. Iteration 2 said what the corpus is and that a law is not the company's policy: U08 declined 5
+of 5, but N07 and X07 failed 5 of 5 each, mean 51.0. A fix that buys one question with two others is not a fix.
+
+The shipped answer is a deterministic gate: a question phrased as an attribute of the company is refused when no
+retrieved passage contains the subject phrase. It runs before the JSON answer is returned, before the tool-stream
+answer is emitted, and before the single-shot stream calls the model; it rides `OI_TOOL_HONESTY`; the audit row
+carries `honesty_gate`. Seven policy-absence probes (remote work, expense, dress code, jury duty, paid time off,
+overtime, drug testing), every pattern checked at zero hits, refuse 7 of 7 under the gate against 6 of 7 before.
+Five runs of the scored suite: **53, 53, 53, 52, 53 of 53 (mean 52.8)**, U08 passing in every run and the only failure one A04 run (the known retrieval/tool-loop flake class). N05, N07 and X07, which the prompt iterations broke, pass in all five. Evidence: `docs/reviews/honesty-gate-2026-10-19.md`.
+
+**The prompt freeze exception is recorded and closed.** The owner approved one measured prompt attempt as an
+exception; it was measured twice and reverted. The prompt shipped is the pre-experiment prompt, so no unmeasured
+prompt change remains in the deployment.
+
 ## 3. What was built, in order, and why
 
 All pull requests are in `privateInferenceAI/office-inference-core`.
@@ -279,10 +301,11 @@ The structured row query is **done and measured** (section 2b). The priorities b
 0. **Order of work and expected effect.** Diagnose the four deterministic failures (about two to three points), then
    provider fallback (one to two), then probe redesign and the wider evaluation set (measurement quality, not score),
    then the acceptance panel. Do not start another item before the five-run comparison of the previous one.
-1. **The four deterministic question failures are diagnosed.** Three were instrument defects and their questions
-   were corrected (A06, P05, P06); U08 is a genuine honesty failure, deferred with a defined retest. See section 2c
-   and `docs/reviews/deterministic-failures-2026-10-19.md`. The corrected instrument measures 50.6 of 52, so the
-   next score claim needs a wider instrument rather than another prompt or tool change.
+1. **The four deterministic question failures are diagnosed and closed.** Three were instrument defects and their
+   questions were corrected (A06, P05, P06). U08 was a genuine relabelling failure: the corpus mentions the FMLA
+   and the model presented the law as the company's policy. Two measured prompt iterations were rejected (section
+   2f) and the fix is a deterministic honesty gate, measured on the scored suite. See sections 2c, 2f and
+   `docs/reviews/deterministic-failures-2026-10-19.md`.
 2. **Provider reliability is built, measured, and credited.** The fallback is a chain: the same model from
    another Region first, then a different model (section 2e). The answer and its audit row credit the model that
    answered (section 2d). The deployment renders from `manifests/dev-cloud-claude.yaml`, and
@@ -416,8 +439,14 @@ Decisions taken while the owner was away on 2026-10-19, updated after the row-qu
 8. **`lookup_value` remains implemented, tested and off**, superseded for table rows by `query_rows`; retirement is
    planned after the row query is measured on a second corpus. **Confirmed by the owner 2026-10-19; do not delete
    it yet.**
-9. **No prompt tuning is planned.** The remaining points are in specific failures, reliability and a harder
-   evaluation set, not in prompt wording.
+9. **Prompt tuning stays frozen, with one measured exception now closed.** The owner approved one measured prompt
+   attempt for U08; two iterations were run and both reverted, and the shipped answer is a deterministic gate
+   instead (section 2f). The prompt in the deployment is the pre-experiment prompt.
+10. **The development analyst ceiling was raised to 200 USD** for the honesty measurement cycle (2026-10-19), so
+    the experiment would not be shaped by budget. Production manifests set their own ceiling per contract.
+11. **The honesty gate is a product control, not an instrument patch.** It covers the class "the company's own
+    attribute, which no passage states", records `honesty_gate` on the model-call row, and rides
+    `OI_TOOL_HONESTY`. The stated boundary is that a differently worded question is not covered.
 
 ## 12. What to give the next agent
 

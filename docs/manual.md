@@ -5718,6 +5718,12 @@ lifecycle check covers every entry, so a deprecated recovery path cannot sit unn
 whose deployment we do not service changes models with `scripts/model_admin.py`, documented in the runbook's
 installation section.
 
+**The honesty gate.** A question phrased as an attribute of the company (`the company's leave policy`, `the
+firm's dress code`) is refused when no retrieved passage contains the subject phrase: the answer becomes
+`I could not find that in the available documents.` and the audit row carries `honesty_gate`. It is mechanical, not a
+model instruction, and it runs on the JSON answer, a job, and both stream paths. It rides `OI_TOOL_HONESTY`,
+which is also the rollback. The boundary is deliberate: a question worded differently is not gated.
+
 **The bounds, all set in the environment and visible to an operator.**
 
 | Variable | Default | Meaning |
