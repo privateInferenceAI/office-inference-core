@@ -202,6 +202,29 @@ Five runs of the scored suite: **53, 53, 53, 52, 53 of 53 (mean 52.8)**, U08 pas
 exception; it was measured twice and reverted. The prompt shipped is the pre-experiment prompt, so no unmeasured
 prompt change remains in the deployment.
 
+## 2g. Update 2026-10-20: the second corpus
+
+A second corpus was built and measured on a dedicated EC2 instance (m7i.4xlarge, us-east-1b, same instance role),
+so the development deployment and its evidence stayed untouched. It has 80 documents and 24,295 chunks: 40 real
+public documents (14 US issuers across seven industries, plus 10 US government PDFs) and 40 labelled synthetic
+documents for a fictional small business, including a policy-rich handbook, a 35,600-word facilities manual and a
+6,010-row ledger. Provenance and scope are committed under docs/eval/corpora/second-corpus/.
+
+35 questions, all mechanically validated against the second index after two rounds of question fixes (27 of 35
+passed before the fixes; the failures were our wording, not the system). Two five-run phases, only the row-query
+flag changing: **31.0 of 37 with the row query off, 31.8 of 37 with it on**. The query fixed the plain table-number
+question (Target net sales) five runs out of five and removed no correct answer. It did not fix the long-document
+needles, the wrong-table answers, the leverage-ratio ambiguity or the board-ceiling answer. The honesty gate held
+in both directions: stated policies answered, absent policies refused (20 of 20 refusals in both phases).
+
+Two findings matter. **The row query now has two-corpus evidence**, so the opt-in default stays and lookup_value's
+retirement condition is met. **Large tables have a measured data gap**: a table over 5,000 rows keeps bounded row
+groups up to 200 chunks and records the omission in a table_marker chunk; on the ledger, rows 0 to 2,412 are
+searchable and 3,600 rows are not reachable by retrieval or by the row query. The long-document needle failure
+from the wider set reproduced here with a different long document, which makes it the next instrument target.
+Evidence: docs/reviews/second-corpus-2026-10-20/README.md. The instance is stopped after the measurement.
+
+
 ## 3. What was built, in order, and why
 
 All pull requests are in `privateInferenceAI/office-inference-core`.
@@ -323,14 +346,17 @@ The structured row query is **done and measured** (section 2b). The priorities b
 5. **The acceptance panel.** Latency is now captured per answer and summarised (p50, p95) by the runner, and
    `scripts/acceptance_panel.py` joins the runs to the gateway's spend records for cost per answer,
    `docs/reviews/acceptance-panel-2026-10-19.md` carries the numbers.
-6. **Row-query default policy.** Keep it opt-in in code; a deployment turns it on after measuring its own corpus
-   (the development deployment has it on; its evidence is one corpus).
-7. **`lookup_value` is superseded for table rows.** Keep it implemented and off; plan retirement once `query_rows`
-   has been measured on a second corpus.
-8. **Provider layer (`INF-PROVIDER-001`) remains parked.** The six rejected files are now excluded by owner
-   decision and need no further action unless a replacement arrives. The data-set cards stay cards: they are not
-   reachable by the row query because they have no rows, and a data path is a separate piece of work with no client
-   requirement behind it yet.
+6. **Row-query default policy.** Keep it opt-in in code; a deployment turns it on after measuring its own corpus.
+   It now has two-corpus evidence: 43.0 to 46.6 of 52 on the first corpus and 31.0 to 31.8 of 37 on the second,
+   with the second-corpus gain on the plain table-number question. The development deployment has it on.
+7. **`lookup_value` should be retired.** The second-corpus measurement was the stated condition, and it is done:
+   the row query covers the table-row case, lookup_value has never measured a gain, and it stays off. Removal is
+   recommended as dead-code cleanup pending the owner's sign-off; do not delete it without that sign-off.
+8. **Provider layer (`INF-PROVIDER-001`) remains parked.** The six rejected files are excluded by owner decision
+   and need no further action unless a replacement arrives. The data-set cards stay cards, but the second corpus
+   measured the cost: a table over 5,000 rows keeps bounded row groups (200 chunks) and records the omission in a
+   table_marker chunk, so 3,600 ledger rows are invisible to retrieval and to the row query. A data path now has a
+   measured motivation, but it stays a product decision with no client requirement behind it yet.
 
 ## 7. Traps, written down so they are not repeated
 
@@ -369,7 +395,7 @@ The structured row query is **done and measured** (section 2b). The priorities b
   full evidence namespace silently swallowed a matched row. Rows now get reserve slots and an explicit error.
 - **Do not rewrite the prompt without measuring.** Prompt changes moved the suite by seven points in both
   directions on three-run evidence and netted nothing on five. The prompt currently in main is the one that
-  measured 40.2; treat it as frozen until the query tool has been measured on a second corpus.
+   measured 40.2; that was frozen until the query tool had a second corpus, which is now done (section 2g).
 
 ## 8. What not to misrepresent
 
@@ -440,9 +466,9 @@ Decisions taken while the owner was away on 2026-10-19, updated after the row-qu
 6. **A new agent can start from this document**, as recommended. The first tasks are section 9.
 7. **Row query remains opt-in by default in code**; the development deployment has it on. Promotion to default is a
    per-deployment decision after that deployment's own five-run measurement. **Confirmed by the owner 2026-10-19.**
-8. **`lookup_value` remains implemented, tested and off**, superseded for table rows by `query_rows`; retirement is
-   planned after the row query is measured on a second corpus. **Confirmed by the owner 2026-10-19; do not delete
-   it yet.**
+8. **`lookup_value` is recommended for retirement, pending the owner's decision.** The row query is measured on a
+   second corpus (section 2g), which was the stated condition. It remains implemented, tested and off; do not
+   delete it without the owner's sign-off.
 9. **Prompt tuning stays frozen, with one measured exception now closed.** The owner approved one measured prompt
    attempt for U08; two iterations were run and both reverted, and the shipped answer is a deterministic gate
    instead (section 2f). The prompt in the deployment is the pre-experiment prompt.
@@ -451,6 +477,11 @@ Decisions taken while the owner was away on 2026-10-19, updated after the row-qu
 11. **The honesty gate is a product control, not an instrument patch.** It covers the class "the company's own
     attribute, which no passage states", records `honesty_gate` on the model-call row, and rides
     `OI_TOOL_HONESTY`. The stated boundary is that a differently worded question is not covered.
+12. **The second corpus is measured and the instance is stopped (2026-10-20).** 80 documents, 35 validated
+    questions, two five-run phases: 31.0 of 37 with the row query off and 31.8 with it on. The row query has
+    two-corpus evidence; lookup_value's retirement condition is met (item 8); long-document needle retrieval and
+    large-table row access are the next measured targets. Evidence: docs/reviews/second-corpus-2026-10-20/.
+
 
 ## 12. What to give the next agent
 

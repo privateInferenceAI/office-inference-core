@@ -1,0 +1,793 @@
+version: 1
+corpus: second-corpus
+authored: '2026-10-20'
+notes:
+- 'Second-corpus acceptance set: 12 questions on the 40 real public documents,'
+- 20 on the synthetic Northwind corpus, and 3 mechanism probes.
+- IDs are prefixed PUB_ and SYN_ because both authoring passes started at N01.
+questions:
+- id: PUB_N01
+  category: exact_number
+  question: What net sales did Target Corporation report for fiscal 2025 in its consolidated
+    statements of operations, in millions?
+  expected:
+    staff:
+      answered: true
+      docs:
+      - company/second-public/company/target-corp/10-K_2026-03-11_annual-report.htm
+      contains:
+      - 104,780
+  source_quote: Net sales | $ | 104,780 | $ | 106,566 | $ | 107,412
+  evidence: '{"source_file": "company/target-corp/10-K_2026-03-11_annual-report.htm",
+    "locator": "Consolidated Statements of Operations, fiscal 2025 column (extracted
+    line 1122); repeated in the MD&A summary at line 1340", "method": "html.parser,
+    table cells joined with '' | ''", "command": "python3 verify.py company/target-corp/10-K_2026-03-11_annual-report.htm
+    ''Net sales | $ | 104,780 | $ | 106,566 | $ | 107,412''", "result": "OK line 1122
+    (also line 1340)"}'
+- id: PUB_N02
+  category: exact_number
+  question: What profit did Caterpillar's Construction Industries segment report for
+    2025, in millions of dollars?
+  expected:
+    staff:
+      answered: true
+      docs:
+      - company/second-public/company/caterpillar-inc/10-K_2026-02-13_annual-report.htm
+      contains:
+      - 4,675
+  source_quote: Construction Industries | $ | 4,675 | $ | 6,165 | $ | (1,490) | (24
+    | %)
+  evidence: '{"source_file": "company/caterpillar-inc/10-K_2026-02-13_annual-report.htm",
+    "locator": "Profit (Loss) by Segment table, 2025 column (extracted line 691);
+    prose confirmation at line 716", "method": "html.parser, table cells joined with
+    '' | ''", "command": "python3 verify.py company/caterpillar-inc/10-K_2026-02-13_annual-report.htm
+    ''Construction Industries | $ | 4,675 | $ | 6,165 | $ | (1,490) | (24 | %)''",
+    "result": "OK line 691"}'
+- id: PUB_N03
+  category: exact_number
+  question: For the six months ended June 30, 2026, what net income attributable to
+    DaVita Inc. did DaVita report, in thousands?
+  expected:
+    staff:
+      answered: true
+      docs:
+      - company/second-public/company/davita-inc/10-Q_2026-08-04_quarterly-report.htm
+      contains:
+      - 462,927
+  source_quote: Net income attributable to DaVita Inc. | $ | 265,397 | $ | 199,337
+    | $ | 462,927 | $ | 362,254
+  evidence: '{"source_file": "company/davita-inc/10-Q_2026-08-04_quarterly-report.htm",
+    "locator": "Consolidated Statements of Income, six months ended June 30, 2026
+    column (extracted line 108; repeated at line 459)", "method": "html.parser, table
+    cells joined with '' | ''", "command": "python3 verify.py company/davita-inc/10-Q_2026-08-04_quarterly-report.htm
+    ''Net income attributable to DaVita Inc. | $ | 265,397 | $ | 199,337 | $ | 462,927
+    | $ | 362,254''", "result": "OK line 108 (also line 459)"}'
+- id: PUB_N04
+  category: exact_number
+  question: For the three months ended June 30, 2026, what total revenues did C.H.
+    Robinson Worldwide report, in thousands?
+  expected:
+    staff:
+      answered: true
+      docs:
+      - company/second-public/company/c-h-robinson-worldwide-inc/10-Q_2026-07-31_quarterly-report.htm
+      contains:
+      - 4,934,098
+  source_quote: Total revenues | 4,934,098 | 4,136,543 | 8,947,032 | 8,183,283
+  evidence: '{"source_file": "company/c-h-robinson-worldwide-inc/10-Q_2026-07-31_quarterly-report.htm",
+    "locator": "Condensed Consolidated Statements of Operations and Comprehensive
+    Income, three months ended June 30, 2026 column (extracted line 149; repeated
+    at line 771)", "method": "html.parser, table cells joined with '' | ''", "command":
+    "python3 verify.py company/c-h-robinson-worldwide-inc/10-Q_2026-07-31_quarterly-report.htm
+    ''Total revenues | 4,934,098 | 4,136,543 | 8,947,032 | 8,183,283''", "result":
+    "OK line 149 (also line 771)"}'
+- id: PUB_P01
+  category: contract_clause
+  question: Under Intuit's Credit Agreement dated January 9, 2026, what is the base
+    maximum Leverage Ratio the company may not exceed at the end of any four-consecutive-fiscal-quarter
+    period, before any acquisition-related increase?
+  expected:
+    staff:
+      answered: true
+      docs:
+      - company/second-public/company/intuit-inc/EX-10_2026-01-12_credit-agreement.htm
+      contains:
+      - '4.00'
+  source_quote: The Company will not permit, as of the last day of any period of four
+    consecutive fiscal quarters of the Company for which the financial statements
+    have been, or are required to be, delivered pursuant to Section 5.08(a) or 5.08(b),
+    the Leverage Ratio to be greater than 4.00 to 1.00
+  evidence: '{"source_file": "company/intuit-inc/EX-10_2026-01-12_credit-agreement.htm",
+    "locator": "Section 6.06 Maximum Leverage Ratio (extracted line 863)", "method":
+    "html.parser, paragraph text", "command": "python3 verify.py company/intuit-inc/EX-10_2026-01-12_credit-agreement.htm
+    ''The Company will not permit, as of the last day of any period of four consecutive
+    fiscal quarters of the Company for which the financial statements have been, or
+    are required to be, delivered pursuant to Section 5.08(a) or 5.08(b), the Leverage
+    Ratio to be greater than 4.00 to 1.00''", "result": "OK line 863", "note": "The
+    same sentence continues with a proviso allowing a 0.50 increase after a Qualified
+    Material Acquisition; that is why the question asks for the base ratio."}'
+- id: PUB_P02
+  category: prose_fact
+  question: According to HCA Healthcare's 2025 Form 10-K, which hurricanes caused
+    an estimated $250 million in additional expenses and lost revenues in 2024?
+  expected:
+    staff:
+      answered: true
+      docs:
+      - company/second-public/company/hca-healthcare-inc/10-K_2026-02-10_annual-report.htm
+      contains:
+      - Helene
+      - Milton
+  source_quote: The 2024 results also include additional expenses and losses of revenues
+    estimated at approximately $250 million, or $0.73 per diluted share, related to
+    Hurricanes Helene and Milton, which impacted our facilities in North Carolina
+    and certain facilities in Florida.
+  evidence: '{"source_file": "company/hca-healthcare-inc/10-K_2026-02-10_annual-report.htm",
+    "locator": "MD&A, results of operations paragraph (extracted line 1122; repeated
+    at line 1649)", "method": "html.parser, paragraph text", "command": "python3 verify.py
+    company/hca-healthcare-inc/10-K_2026-02-10_annual-report.htm ''The 2024 results
+    also include additional expenses and losses of revenues estimated at approximately
+    $250 million, or $0.73 per diluted share, related to Hurricanes Helene and Milton,
+    which impacted our facilities in North Carolina and certain facilities in Florida.''",
+    "result": "OK line 1122 (also line 1649)"}'
+- id: PUB_P03
+  category: government_finding
+  question: What limitation does GAO identify in the primary federal procurement database's
+    information about the origin of defense goods?
+  expected:
+    staff:
+      answered: true
+      docs:
+      - company/second-public/government/gao/gao-25-107283-defense-industrial-base.pdf
+      contains:
+      - limited information
+  source_quote: provides limited information about the countries of origin for these
+    goods
+  evidence: '{"source_file": "government/gao/gao-25-107283-defense-industrial-base.pdf",
+    "locator": "GAO-25-107283, ''What GAO Found'' on the Highlights page (extracted
+    lines 30-32)", "method": "pdftotext -enc UTF-8 (default reading order, no -layout)",
+    "command": "python3 verify.py government/gao/gao-25-107283-defense-industrial-base.pdf
+    ''The primary procurement database for the federal government, however, provides
+    little visibility into where these goods are manufactured or whether materials
+    and parts suppliers are domestic or foreign.''", "result": "OK lines 30-32 (whitespace-normalized)"}'
+- id: PUB_X01
+  category: cross_document
+  question: Using the 2025 figures reported in millions, how much higher were Caterpillar's
+    total sales and revenues than Union Pacific's operating revenues?
+  expected:
+    staff:
+      answered: true
+      docs:
+      - company/second-public/company/caterpillar-inc/10-K_2026-02-13_annual-report.htm
+      - company/second-public/company/union-pacific-corp/10-K_2026-02-06_annual-report.htm
+      contains:
+      - 43,079
+  source_quote: Total sales and revenues | 67,589 | 64,809 | 67,060 ... Total operating
+    revenues | 24,510 | 24,250 | 24,119
+  evidence: '{"source_files": ["company/caterpillar-inc/10-K_2026-02-13_annual-report.htm",
+    "company/union-pacific-corp/10-K_2026-02-06_annual-report.htm"], "locator": "Caterpillar
+    Consolidated Results of Operations (line 1316); Union Pacific Consolidated Statements
+    of Income (line 934)", "method": "html.parser, both values in USD millions, both
+    years ended December 31, 2025", "command": "python3 verify.py company/caterpillar-inc/10-K_2026-02-13_annual-report.htm
+    ''Total sales and revenues | 67,589 | 64,809 | 67,060'' && python3 verify.py company/union-pacific-corp/10-K_2026-02-06_annual-report.htm
+    ''Total operating revenues | 24,510 | 24,250 | 24,119''", "result": "OK lines
+    1316 and 934; 67,589 - 24,510 = 43,079"}'
+  derivation:
+    operands:
+    - 67,589
+    - 24,510
+    operation: difference
+    result: 43,079
+- id: PUB_X02
+  category: cross_document
+  question: For the six months ended June 30, 2026, how much higher were C.H. Robinson's
+    total revenues than DaVita's, using the figures in thousands reported in each
+    10-Q?
+  expected:
+    staff:
+      answered: true
+      docs:
+      - company/second-public/company/c-h-robinson-worldwide-inc/10-Q_2026-07-31_quarterly-report.htm
+      - company/second-public/company/davita-inc/10-Q_2026-08-04_quarterly-report.htm
+      contains:
+      - 1,977,400
+  source_quote: Total revenues | 4,934,098 | 4,136,543 | 8,947,032 | 8,183,283 ...
+    Total revenues | 3,554,084 | 3,379,526 | 6,969,632 | 6,603,055
+  evidence: '{"source_files": ["company/c-h-robinson-worldwide-inc/10-Q_2026-07-31_quarterly-report.htm",
+    "company/davita-inc/10-Q_2026-08-04_quarterly-report.htm"], "locator": "C.H. Robinson
+    statement of operations, six months ended June 30, 2026 column (line 149); DaVita
+    statement of income, same column (line 93)", "method": "html.parser, both values
+    in USD thousands, both six months ended June 30, 2026", "command": "python3 verify.py
+    company/c-h-robinson-worldwide-inc/10-Q_2026-07-31_quarterly-report.htm ''Total
+    revenues | 4,934,098 | 4,136,543 | 8,947,032 | 8,183,283'' && python3 verify.py
+    company/davita-inc/10-Q_2026-08-04_quarterly-report.htm ''Total revenues | 3,554,084
+    | 3,379,526 | 6,969,632 | 6,603,055''", "result": "OK lines 149 and 93; 8,947,032
+    - 6,969,632 = 1,977,400"}'
+  derivation:
+    operands:
+    - 8,947,032
+    - 6,969,632
+    operation: difference
+    result: 1,977,400
+- id: PUB_D01
+  category: date
+  question: What is the effective date of the 2026 Restatement of the Xcel Energy
+    Inc. Nonqualified Deferred Compensation Plan?
+  expected:
+    staff:
+      answered: true
+      docs:
+      - company/second-public/company/xcel-energy-inc/EX-10_2026-07-30_deferred-compensation-plan.htm
+      contains:
+      - August 1, 2026
+  source_quote: The Effective Date of this Restatement is August 1, 2026, except as
+    otherwise provided herein.
+  evidence: '{"source_file": "company/xcel-energy-inc/EX-10_2026-07-30_deferred-compensation-plan.htm",
+    "locator": "Section 1.2.12 Effective Date (extracted line 50); cover page also
+    states ''restated effective ... August 1, 2026'' at line 10", "method": "html.parser,
+    paragraph text", "command": "python3 verify.py company/xcel-energy-inc/EX-10_2026-07-30_deferred-compensation-plan.htm
+    ''The Effective Date of this Restatement is August 1, 2026''", "result": "OK line
+    50"}'
+- id: PUB_L01
+  category: long_document
+  question: Under Caterpillar's Fifth Amended and Restated Credit Agreement (Three-Year
+    Facility), what is the Current Termination Date?
+  expected:
+    staff:
+      answered: true
+      docs:
+      - company/second-public/company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm
+      contains:
+      - August 27, 2029
+  source_quote: "\u201CCurrent Termination Date\u201D means, with respect to any Bank\
+    \ at any time, August 27, 2029, or such later date to which the \u201CCurrent\
+    \ Termination Date\u201D shall then have been extended with the consent of such\
+    \ Bank pursuant to Section 2.16."
+  evidence: "{\"source_file\": \"company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm\"\
+    , \"locator\": \"Definitions, Current Termination Date (extracted lines 749-751);\
+    \ agreement cover date August 27, 2026 at line 12\", \"method\": \"html.parser,\
+    \ paragraph text\", \"command\": \"python3 verify.py company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm\
+    \ '\u201CCurrent Termination Date\u201D means, with respect to any Bank at any\
+    \ time, August 27, 2029, or such later date to which the \u201CCurrent Termination\
+    \ Date\u201D shall then have been extended with the consent of such Bank pursuant\
+    \ to Section 2.16.'\", \"result\": \"OK lines 749-751 (whitespace-normalized)\"\
+    }"
+- id: PUB_L02
+  category: long_document
+  question: In Duke Energy's 2025 Form 10-K, how much Duke Energy Carolinas first
+    mortgage bond debt matures in December 2026 and is classified as a current maturity?
+  expected:
+    staff:
+      answered: true
+      docs:
+      - company/second-public/company/duke-energy-corp/10-K_2026-02-26_annual-report.htm
+      contains:
+      - '600'
+  source_quote: 'First Mortgage Bonds
+
+    Duke Energy Carolinas
+
+    December 2026
+
+    2.950 | % | 600'
+  evidence: '{"source_file": "company/duke-energy-corp/10-K_2026-02-26_annual-report.htm",
+    "locator": "Current Maturities of Long-Term Debt table, First Mortgage Bonds section,
+    lines 6180-6183; table header ''(in millions)'' at line 6172", "method": "html.parser,
+    table cells joined with '' | ''", "command": "python3 verify.py --lines 6180-6183
+    company/duke-energy-corp/10-K_2026-02-26_annual-report.htm", "result": "OK lines
+    6180-6183: First Mortgage Bonds / Duke Energy Carolinas / December 2026 / 2.950
+    | % | 600"}'
+- id: SYN_N01
+  category: exact_number
+  question: How many PTO days does an employee with 7 completed years of service accrue
+    in a year, and how many hours is that per biweekly pay period?
+  expected:
+    staff:
+      answered: true
+      docs:
+      - company/second-synthetic/employee-handbook.md
+      contains:
+      - 25 days
+      - '7.69'
+    executive:
+      answered: true
+      docs:
+      - company/second-synthetic/employee-handbook.md
+      contains:
+      - 25 days
+      - '7.69'
+  source_quote: '| 6 to 9 years | 25 days | 7.69 hours | 200 hours | 300 hours |'
+  evidence: employee-handbook.md:368; `grep -Fn '| 6 to 9 years | 25 days | 7.69 hours
+    | 200 hours | 300 hours |' company/employee-handbook.md` returns line 368. Seven
+    completed years falls in the 6 to 9 band.
+- id: SYN_N02
+  category: exact_number
+  question: What is the daily per diem for a domestic Tier 1 or Tier 2 city, a domestic
+    Tier 3 city, and international travel?
+  expected:
+    staff:
+      answered: true
+      docs:
+      - company/second-synthetic/employee-handbook.md
+      - company/second-synthetic/travel-and-expense-policy.md
+      contains:
+      - '65'
+      - '55'
+      - '110'
+    executive:
+      answered: true
+      docs:
+      - company/second-synthetic/employee-handbook.md
+      - company/second-synthetic/travel-and-expense-policy.md
+      contains:
+      - '65'
+      - '55'
+      - '110'
+  source_quote: '| Domestic, Tier 1 or Tier 2 city | 65 USD | ... | Domestic, Tier
+    3 city | 55 USD | ... | International | 110 USD |'
+  evidence: employee-handbook.md:634-636; three `grep -Fn` checks each return the
+    quoted row. travel-and-expense-policy.md:60-62 states the same 65, 55 and 110
+    USD rates.
+- id: SYN_N03
+  category: exact_number
+  question: I'm filing an expense report for 120 business miles and a 20 USD parking
+    charge. What mileage rate applies, and what is the receipt threshold?
+  expected:
+    staff:
+      answered: true
+      docs:
+      - company/second-synthetic/employee-handbook.md
+      - company/second-synthetic/travel-and-expense-policy.md
+      contains:
+      - '0.67'
+      - '25'
+    executive:
+      answered: true
+      docs:
+      - company/second-synthetic/employee-handbook.md
+      - company/second-synthetic/travel-and-expense-policy.md
+      contains:
+      - '0.67'
+      - '25'
+  source_quote: A receipt is required for every expense of **25 USD or more**. ...
+    8.5.1 Personal vehicle mileage is reimbursed at **0.67 USD per mile** for approved
+    business travel.
+  evidence: employee-handbook.md:626 and :642; `grep -Fn` returns both quoted sentences.
+    travel-and-expense-policy.md:99 and :79 restate the 25 USD threshold and 0.67
+    USD rate.
+- id: SYN_N04
+  category: exact_number
+  question: What is the total FY2025 operating budget across all 12 departments?
+  expected:
+    staff:
+      answered: true
+      docs:
+      - company/second-synthetic/budget.csv
+      - company/second-synthetic/fy2025-budget.xlsx
+      contains:
+      - 11,000,000
+    executive:
+      answered: true
+      docs:
+      - company/second-synthetic/budget.csv
+      - company/second-synthetic/fy2025-budget.xlsx
+      contains:
+      - 11,000,000
+  source_quote: TOTAL,120,944364.00,881960.00,934453.00,919843.00,924034.00,918312.00,912709.00,918683.00,953410.00,930817.00,886209.00,875206.00,11000000.00
+  evidence: budget.csv:15; the 12 department rows sum to 11,000,000.00 in `awk`, and
+    the 12 monthly columns also sum to 11,000,000.00. fy2025-budget.xlsx sheet Budget
+    FY2025 has the same 11000000 total.
+- id: SYN_N05
+  category: exact_number
+  question: In the FY2025 transaction ledger, which vendor and approver are recorded
+    on the 921.82 line dated 2025-01-02 for Waste and Recycling?
+  expected:
+    staff:
+      answered: true
+      docs:
+      - company/second-synthetic/transaction-ledger.csv
+      contains:
+      - '921.82'
+      - Copperfield Waste & Recycling
+      - Camille Duval
+    executive:
+      answered: true
+      docs:
+      - company/second-synthetic/transaction-ledger.csv
+      contains:
+      - '921.82'
+      - Copperfield Waste & Recycling
+      - Camille Duval
+  source_quote: 2025-01-02 | Copperfield Waste & Recycling | Service Delivery & Facilities
+    Operations | 6240 Waste & Recycling | 921.82 | Camille Duval | Approved
+  evidence: 'transaction-ledger.csv line 5. The original target, the 12,345.67 row
+    at line 3,062, is beyond the indexed row range: the chunker treats a table over
+    5,000 rows as a data dump, keeps bounded row groups up to its 200-chunk limit
+    (indexed dates 2025-01-02 to 2025-05-28) and records the omission in a table_marker
+    chunk. That limit is written up in the second-corpus evidence; this question was
+    retargeted to an indexed row.'
+- id: SYN_N06
+  category: exact_number
+  question: What does the 2025 customer price list charge per fixture for an LED troffer
+    retrofit, and what is the minimum charge for that service?
+  expected:
+    staff:
+      answered: true
+      docs:
+      - company/second-synthetic/customer-price-list.csv
+      contains:
+      - '148'
+      - '592'
+    executive:
+      answered: true
+      docs:
+      - company/second-synthetic/customer-price-list.csv
+      contains:
+      - '148'
+      - '592'
+  source_quote: SVC-114,LED Troffer Retrofit,"2x4 troffer, 4000K, labor included",fixture,148.00,592.00,Electrical
+  evidence: customer-price-list.csv:16; `grep -Fn 'SVC-114' company/customer-price-list.csv`
+    returns one row with unit price 148.00 and minimum 592.00.
+- id: SYN_P01
+  category: prose_fact
+  question: How many days per week may an eligible employee work remotely, and who
+    must approve the schedule?
+  expected:
+    staff:
+      answered: true
+      docs:
+      - company/second-synthetic/employee-handbook.md
+      contains:
+      - two days
+      - manager
+    executive:
+      answered: true
+      docs:
+      - company/second-synthetic/employee-handbook.md
+      contains:
+      - two days
+      - manager
+  source_quote: 3.3.1 Eligible employees may work remotely up to **two days per week**,
+    with **manager approval**. The remaining days are worked at the assigned Northwind
+    location unless the role is designated fully remote.
+  evidence: employee-handbook.md:228; `grep -Fn` returns the sentence. Section 3.3.3
+    adds that the manager records the approved days in the HR system.
+- id: SYN_P02
+  category: prose_fact
+  question: Which fire alarm panel model is installed at the Riverton HQ, and how
+    many addressable devices does it monitor?
+  expected:
+    staff:
+      answered: true
+      docs:
+      - company/second-synthetic/facilities-and-safety-manual.md
+      contains:
+      - FX-4200
+      - '412'
+    executive:
+      answered: true
+      docs:
+      - company/second-synthetic/facilities-and-safety-manual.md
+      contains:
+      - FX-4200
+      - '412'
+  source_quote: '| Riverton HQ | **Sentinel FX-4200** | 2019 | 412 | Central station,
+    account NW-4401 |'
+  evidence: facilities-and-safety-manual.md:651; `grep -Fn` returns the row. The same
+    manual restates the panel and device count at line 657 and line 1184.
+- id: SYN_P03
+  category: prose_fact
+  question: How often is the generator load bank test performed, and at what load
+    and duration?
+  expected:
+    staff:
+      answered: true
+      docs:
+      - company/second-synthetic/facilities-and-safety-manual.md
+      contains:
+      - 26 weeks
+      - '100'
+      - 2 hours
+    executive:
+      answered: true
+      docs:
+      - company/second-synthetic/facilities-and-safety-manual.md
+      contains:
+      - 26 weeks
+      - '100'
+      - 2 hours
+  source_quote: 6.7.2 A **load bank test is performed every 26 weeks** at 100 percent
+    rated load for 2 hours. The test is performed by the generator vendor, with a
+    written report.
+  evidence: facilities-and-safety-manual.md:727; `grep -Fn` returns the sentence.
+    The PM calendar repeats Every 26 weeks at lines 1667, 1734, 1818, 1891 and 2379.
+- id: SYN_P04
+  category: prose_fact
+  question: When is the elevator recall test performed?
+  expected:
+    staff:
+      answered: true
+      docs:
+      - company/second-synthetic/facilities-and-safety-manual.md
+      contains:
+      - first Tuesday
+      - '6:30'
+    executive:
+      answered: true
+      docs:
+      - company/second-synthetic/facilities-and-safety-manual.md
+      contains:
+      - first Tuesday
+      - '6:30'
+  source_quote: 6.6.2 Elevator recall testing is performed on the **first Tuesday
+    of each quarter at 06:30**, before the building opens. The test confirms that
+    the cars recall on fire alarm activation and that the shunt trip works.
+  evidence: facilities-and-safety-manual.md:709; `grep -Fn` returns the sentence.
+    SOP-19 at line 2952 repeats first Tuesday of the quarter at 06:30.
+- id: SYN_U01
+  category: unanswerable
+  question: What is the company's bereavement leave policy?
+  absent_pattern: bereavement leave policy
+  expected:
+    staff:
+      answered: false
+      denied: false
+    executive:
+      answered: false
+      denied: false
+  evidence: Absent by design. `grep -ril 'bereavement leave policy' /tmp/second-corpus/synthetic
+    | wc -l` returns 0. The broader `bereave` matches only README.md section 4, which
+    lists the topic as not stated; no company/ or executive/ document matches.
+- id: SYN_U02
+  category: unanswerable
+  question: How many weeks of sabbatical does our sabbatical program offer after ten
+    years of service?
+  absent_pattern: sabbatical program
+  expected:
+    staff:
+      answered: false
+      denied: false
+    executive:
+      answered: false
+      denied: false
+  evidence: Absent by design. `grep -ril 'sabbatical program' /tmp/second-corpus/synthetic
+    | wc -l` returns 0. The broader `sabbatical` matches only README.md section 4;
+    no company/ or executive/ document matches.
+- id: SYN_U03
+  category: unanswerable
+  question: What is the policy on personal social media accounts for employees?
+  absent_pattern: social media accounts
+  expected:
+    staff:
+      answered: false
+      denied: false
+    executive:
+      answered: false
+      denied: false
+  evidence: Absent by design. `grep -ril 'social media accounts' /tmp/second-corpus/synthetic
+    | wc -l` returns 0. The broader `social media` matches only README.md section
+    4; no company/ or executive/ document matches.
+- id: SYN_U04
+  category: unanswerable
+  question: What company match does Northwind's employee stock purchase plan (ESPP)
+    provide?
+  absent_pattern: ESPP company match
+  expected:
+    staff:
+      answered: false
+      denied: false
+    executive:
+      answered: false
+      denied: false
+  evidence: Absent by design. `grep -ril 'ESPP' /tmp/second-corpus/synthetic | wc
+    -l` returns 0, including README.md. A text extraction of the 40 company/ and executive/
+    documents, including docx, xlsx and pdf, also returns 0.
+- id: SYN_X01
+  category: cross_document
+  question: The FY2025 operating budget totals 11,000,000 USD, and the income statement
+    reports actual total operating expenses of 10,942,300 USD. How much under budget
+    were operating expenses?
+  expected:
+    staff:
+      answered: true
+      docs:
+      - company/second-synthetic/budget.csv
+      - company/second-synthetic/fy2025-pl-and-balance-sheet.csv
+      contains:
+      - 57,700
+    executive:
+      answered: true
+      docs:
+      - company/second-synthetic/budget.csv
+      - company/second-synthetic/fy2025-pl-and-balance-sheet.csv
+      contains:
+      - 57,700
+  source_quote: TOTAL | 120 | 944364.00 | 881960.00 | 934453.00 | 919843.00 | 924034.00
+    | 918312.00 | 912709.00 | 918683.00 | 953410.00 | 930817.00 | 886209.00 | 875206.00
+    | 11000000.00 ... income_statement | Totals | Total operating expenses | 10942300.00
+    | 11000000.00
+  evidence: budget.csv:15 and fy2025-pl-and-balance-sheet.csv:26; both `grep -Fn`
+    checks return the quoted rows. 11,000,000.00 - 10,942,300.00 = 57,700.00.
+  derivation:
+    operands:
+    - '11000000.00'
+    - '10942300.00'
+    operation: difference
+    result: 57,700
+- id: SYN_X02
+  category: cross_document
+  question: Invoice INV-2025-001 totals 13,512.00 USD and invoice INV-2025-002 totals
+    11,297.94 USD. What is the difference between the two totals?
+  expected:
+    staff:
+      answered: true
+      docs:
+      - company/second-synthetic/invoice-2025-001.md
+      - company/second-synthetic/invoice-2025-002.md
+      contains:
+      - 2,214.06
+    executive:
+      answered: true
+      docs:
+      - company/second-synthetic/invoice-2025-001.md
+      - company/second-synthetic/invoice-2025-002.md
+      contains:
+      - 2,214.06
+  source_quote: Total due | 13,512.00 ... Total due | 11,297.94
+  evidence: invoice-2025-001.md:29 and invoice-2025-002.md:35; both totals confirmed
+    by `grep -Fn`. 13,512.00 - 11,297.94 = 2,214.06.
+  derivation:
+    operands:
+    - 13,512.00
+    - 11,297.94
+    operation: difference
+    result: 2,214.06
+- id: SYN_D01
+  category: date_arithmetic
+  question: How many paid holidays does the employee handbook say Northwind observes
+    in 2025, and on what date does its holiday table place Juneteenth?
+  expected:
+    staff:
+      answered: true
+      docs:
+      - company/second-synthetic/employee-handbook.md
+      contains:
+      - 11 paid holidays
+      - Juneteenth
+    executive:
+      answered: true
+      docs:
+      - company/second-synthetic/employee-handbook.md
+      contains:
+      - 11 paid holidays
+      - Juneteenth
+  source_quote: 5.5.1 Northwind observes **11 paid holidays** in 2025. ... | 19 June
+    2025 | Juneteenth | Thursday |
+  evidence: employee-handbook.md:412 and :420; both `grep -Fn` checks return the quoted
+    lines. holiday-schedule-2025.html:26 and :35 corroborate 11 holidays and 2025-06-19.
+- id: SYN_D02
+  category: date_arithmetic
+  question: By what date must the annual backflow preventer test be completed?
+  expected:
+    staff:
+      answered: true
+      docs:
+      - company/second-synthetic/facilities-and-safety-manual.md
+      - company/second-synthetic/facilities-inspection-schedule-2025.pdf
+      contains:
+      - 30 June
+    executive:
+      answered: true
+      docs:
+      - company/second-synthetic/facilities-and-safety-manual.md
+      - company/second-synthetic/facilities-inspection-schedule-2025.pdf
+      contains:
+      - 30 June
+  source_quote: '| Backflow preventer test | **Annually**, before 30 June | Licensed
+    tester | Certificate filed with the water utility |'
+  evidence: facilities-and-safety-manual.md:683; `grep -Fn` returns the row. `pdftotext
+    company/facilities-inspection-schedule-2025.pdf - | grep -n -A2 'Backflow preventer
+    test'` shows Annually, before 30 June at PDF text line 64.
+- id: SYN_A01
+  category: access_boundary
+  question: What is the Chief Executive Officer's base salary?
+  expected:
+    staff:
+      answered: false
+      denied: true
+      forbidden_docs:
+      - executive/second-synthetic/executive-compensation-2025.md
+      - executive/second-synthetic/board-minutes-2025-03.md
+    executive:
+      answered: true
+      docs:
+      - executive/second-synthetic/executive-compensation-2025.md
+      - executive/second-synthetic/board-minutes-2025-03.md
+      contains:
+      - 385,000
+  source_quote: '| Dana Whitfield | Chief Executive Officer | 385,000 | 40 | 154,000
+    | 539,000 | 12,000 |'
+  evidence: 'executive-compensation-2025.md:24; `grep -Fn` returns the row. `grep
+    -rn ''385,000'' company executive` returns only executive/ lines: executive-compensation-2025.md:24
+    and :40, and board-minutes-2025-03.md:75. Both files are forbidden to staff.'
+- id: SYN_A02
+  category: access_boundary
+  question: What enterprise value ceiling did the board authorize for the acquisition
+    of Tidewater Facility Partners?
+  expected:
+    staff:
+      answered: false
+      denied: true
+      forbidden_docs:
+      - executive/second-synthetic/board-minutes-2025-03.md
+      - executive/second-synthetic/acquisition-target-assessment.md
+    executive:
+      answered: true
+      docs:
+      - executive/second-synthetic/board-minutes-2025-03.md
+      - executive/second-synthetic/acquisition-target-assessment.md
+      contains:
+      - 5,500,000
+  source_quote: After discussion, **Resolution 2025-08** authorized management to
+    continue due diligence and to negotiate a non-binding letter of intent for the
+    acquisition of Tidewater Facility Partners, at an enterprise value **not to exceed
+    5,500,000 USD**, with any earn-out capped at 600,000 USD and subject to a final
+    board vote before signing.
+  evidence: 'board-minutes-2025-03.md:99; `grep -Fn` returns the sentence. `grep -rn
+    ''5,500,000'' company executive` returns only executive/ lines: board-minutes-2025-03.md:99
+    and acquisition-target-assessment.md:20, :34 and :188. Both files are forbidden
+    to staff.'
+- id: SC_PROBE_ROW
+  category: probe_row_normal
+  question: In the FY2025 transaction ledger, what department and account are recorded
+    on the 1,293.79 line dated 2025-01-02 from BlueLine Electrical Contractors?
+  expected:
+    staff:
+      answered: true
+      docs:
+      - company/second-synthetic/transaction-ledger.csv
+      contains:
+      - Corporate Facilities & Real Estate
+      - 6220 Electrical Service
+    executive:
+      answered: true
+      docs:
+      - company/second-synthetic/transaction-ledger.csv
+      contains:
+      - Corporate Facilities & Real Estate
+      - 6220 Electrical Service
+  what: a pinpoint row in the 6,010-line ledger, using a line no question uses; measures
+    whether a single CSV row survives chunking and retrieval.
+  source_quote: 2025-01-02 | BlueLine Electrical Contractors | Corporate Facilities
+    & Real Estate | 6220 Electrical Service | 1293.79 | Derek Ahn | Paid
+- id: SC_PROBE_NEEDLE
+  category: probe_long_document
+  question: How long is a visitor badge valid at Northwind?
+  expected:
+    staff:
+      answered: true
+      docs:
+      - company/second-synthetic/facilities-and-safety-manual.md
+      contains:
+      - 24 hours
+    executive:
+      answered: true
+      docs:
+      - company/second-synthetic/facilities-and-safety-manual.md
+      contains:
+      - 24 hours
+  what: a needle in the 35,600-word facilities manual, section 3.3.2; separate from
+    the three needle questions, it measures retrieval of a badge rule without a scoped
+    hint.
+  source_quote: 24 hours maximum
+- id: SC_PROBE_ABSENCE
+  category: probe_policy_absence
+  question: What is Northwind's tuition reimbursement policy?
+  expected:
+    staff:
+      answered: false
+    executive:
+      answered: false
+  what: a policy the corpus deliberately does not state; a confident answer or a citation
+    to training support is a failure.
+  absent_pattern: Northwind tuition
