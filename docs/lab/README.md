@@ -14,6 +14,8 @@ It is not a second product deployment. It has no clients, no traffic, no backup 
 | `SECTION-TEMPLATE.md` | Definition of done, the evidence required, the decision-record format, the gate report, the stop rules | Agent uses per section |
 | `BOOTSTRAP.md` | Getting a fresh instance to the reference starting line, including the corpus package and the exact verification counts | Agent executes once |
 | `KICKOFF-PROMPT.md` | The paste-ready prompt that starts the bootstrap agent | Owner pastes to the agent |
+| `FINISH-SCOPE.md` | What "finished" means: the remaining requirements, the suggested sections, the definition of done, and what is owner-owned or out of scope | Owner and agent share |
+| `FINISH-PROMPT.md` | The paste-ready build prompt: mission, scope, method, and how to use the harness's teams, sub-agents, workflows, background jobs, schedules, skills and AWS tools | Owner pastes when the search work is done |
 
 Supporting references: `docs/handoff-answer-quality-2026-10-19.md` (state of the reference stack),
 `docs/runbook.md` sections 6.7 and 19 (operator procedure), and `docs/reviews/` (every measurement the reference
