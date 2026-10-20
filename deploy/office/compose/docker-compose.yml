@@ -505,6 +505,7 @@ services:
       # passages, so it changes the answer path the measured configuration was frozen on. The flag is both the
       # opt-in and the rollback; the five-run comparison is docs/reviews/query-tool-2026-10-19.md.
       OI_TOOL_QUERY: ${OI_TOOL_QUERY:-off}
+      OI_TOOL_EXACT: ${OI_TOOL_EXACT:-off}
       # The honesty rule for questions that name an event the evidence never states. On by default; switchable so
       # its effect can be measured rather than assumed.
       OI_TOOL_HONESTY: ${OI_TOOL_HONESTY:-on}

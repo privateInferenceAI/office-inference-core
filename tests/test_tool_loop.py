@@ -456,3 +456,106 @@ def test_the_loop_carries_the_gateways_attribution_into_the_answer():
     assert result["attribution"]["model_group"] == "analyst-fallback"
     assert result["attribution"]["fallbacks_attempted"] == 1
 
+
+
+def test_the_exact_query_is_parameterised_and_acl_filtered():
+    sql, params = tool_loop.exact_query("Current Termination Date", "", ["company"])
+    assert "acl = any(%(roots)s)" in sql
+    assert "position(%(needle)s" in sql
+    assert "%" not in params["needle"]
+    assert params["needle"] == "current termination date"
+    sql_with_doc, params_with_doc = tool_loop.exact_query("visitor badge", "company/doc.md", ["company"])
+    assert "doc_id = %(doc)s" in sql_with_doc
+    assert params_with_doc["doc"] == "company/doc.md"
+
+
+def test_the_exact_excerpt_is_centred_on_the_match():
+    text = ("A" * 600) + " the Current Termination Date is August 27, 2029 " + ("B" * 600)
+    excerpt = tool_loop.exact_excerpt(text, "Current Termination Date")
+    assert "Current Termination Date is August 27, 2029" in excerpt
+    assert excerpt.startswith("...") and excerpt.endswith("...")
+
+
+def test_a_refusal_gets_one_deterministic_exact_retry(monkeypatch):
+    toolbox = make_toolbox()
+    toolbox.exact_phrase_for_question = lambda question: "visitor badge"
+    calls = []
+
+    def fake_exact(phrase, doc_id="", limit=6):
+        calls.append(phrase)
+        number = toolbox.add(FakePassage("c2", "visitor badges are valid for 24 hours maximum"))
+        return "Passages containing " + phrase + ": [" + str(number) + "] company/manual.md p3: " + \
+               "visitor badges are valid for 24 hours maximum"
+
+    toolbox.search_exact = fake_exact
+    replies = iter([
+        answer_reply("I could not find that in the available documents."),
+        answer_reply("Visitor badges are valid for 24 hours [1]."),
+    ])
+    monkeypatch.setenv("OI_TOOL_EXACT", "on")
+    result = tool_loop.run_loop(lambda messages, tools: next(replies), toolbox,
+                                "How long is a visitor badge valid?")
+    assert calls == ["visitor badge"]
+    assert result["auto_exact"] == 1
+    assert "24 hours" in result["answer"]
+
+
+def test_the_exact_retry_does_not_fire_when_the_flag_is_off(monkeypatch):
+    toolbox = make_toolbox()
+    toolbox.exact_phrase_for_question = lambda question: "visitor badge"
+    calls = []
+    toolbox.search_exact = lambda phrase, doc_id="", limit=6: calls.append(phrase) or "Passages containing nothing"
+    replies = iter([
+        answer_reply("I could not find that in the available documents."),
+        answer_reply("I could not find that in the available documents."),
+    ])
+    monkeypatch.delenv("OI_TOOL_EXACT", raising=False)
+    tool_loop.run_loop(lambda messages, tools: next(replies), toolbox,
+                       "How long is a visitor badge valid?")
+    assert calls == []
+
+
+def test_the_phrase_picker_prefers_the_rarest_plausible_phrase():
+    toolbox = make_toolbox()
+    counts = {
+        "Current Termination Date": 12,
+        "Credit Agreement": 4,
+    }
+    toolbox._exact_count = lambda phrase, doc_id="": counts.get(phrase, 500)
+    phrase = toolbox.exact_phrase_for_question("Under the Credit Agreement, what is the Current "
+                                              "Termination Date?")
+    assert phrase == "Credit Agreement"
+
+def test_exact_search_rejects_a_short_phrase():
+    toolbox = make_toolbox()
+    payload = json.loads(toolbox.search_exact("x"))
+    assert "at least two characters" in payload["error"]
+
+
+def test_exact_search_renders_a_centred_excerpt_and_numbers_the_evidence():
+    toolbox = make_toolbox()
+    toolbox._exact_matches = lambda phrase, doc_id="", limit=6: ["chunk-1"]
+    import retriever as real_retriever
+    original = real_retriever._fetch_payloads
+    real_retriever._fetch_payloads = lambda services, wanted, roots: {
+        "chunk-1": {"chunk_id": "chunk-1", "doc_id": "company/doc.md", "acl": "company",
+                    "text": ("filler " * 100) + "visitor badges are valid for 24 hours maximum " + ("tail " * 100),
+                    "page_start": 3, "page_end": 3, "kind": "prose"}}
+    try:
+        out = toolbox.search_exact("24 hours maximum")
+    finally:
+        real_retriever._fetch_payloads = original
+    assert "Passages containing" in out
+    assert "24 hours maximum" in out
+    assert "company/doc.md p3" in out
+    assert len(toolbox.evidence) == 1
+
+
+def test_exact_search_points_at_the_row_query_when_the_phrase_is_too_broad():
+    toolbox = make_toolbox()
+    toolbox._exact_matches = lambda phrase, doc_id="", limit=6: ["chunk-1"]
+    toolbox._exact_count = lambda phrase, doc_id="": 500
+    payload = json.loads(toolbox.search_exact("net sales"))
+    assert "does not identify a heading" in payload["note"]
+    assert "query_rows" in payload["note"]
+

@@ -992,6 +992,24 @@ items:
       could not write its output directory as the eval image's non-root user, and the API never passed --tool to
       the audit tool, so every tool_call row in the chain named no tool.
 
+  - id: AGENT-EXACT-001
+    title: A deterministic exact-phrase fallback when the tool loop is about to refuse
+    tier: [cloud, hosted]
+    phase: C6
+    verify: >-
+      with OI_TOOL_EXACT on, when the tool loop is about to answer with a refusal, or reaches within two
+      steps of its cap without a row-query call, it extracts the rarest literal phrase from the question
+      that matches between one and sixteen chunks, searches it comma-insensitively inside the session's
+      access roots, adds up to ten match-centred excerpts to the evidence, and lets the model answer once
+      more. Exactly one retry.
+    status: experimental
+    note: >-
+      Built 2026-10-20 from the needle diagnosis. Corpus-2 needles went from 23 of 30 to 30 of 30 with the
+      live aggregate unchanged at 31.8 of 37; the corpus-1 Apple needle went from 0 of 5 to 5 of 5 with one
+      recorded per-question regression. The corpus-1 live control was unstable in this window even with the
+      flag off, so the corpus-1 aggregate gate is not certified and the flag stays off on every deployment.
+      Evidence: docs/reviews/exact-phrase-2026-10-20/README.md.
+
   - id: AGENT-FALLBACK-001
     title: A failed primary model fails over once to a declared second model
     tier: [cloud, hosted]
