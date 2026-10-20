@@ -5702,8 +5702,7 @@ runs the same hybrid retrieval under the session's access roots. `read_passages`
 the rest of a table, or the next page. `query_rows` returns the exact table rows that contain a figure or a row
 label the question quotes, which is how a figure is confirmed before it is answered; it scans at most 400
 chunks, returns at most 8 rows, and refuses a match that spans more than three documents unless the query names
-one. `lookup_value` finds the exact place a figure appears, comma-insensitive, for the figures embeddings are
-bad at. Every chunk or row a tool returns is numbered, and the final answer is checked against that evidence by
+Every chunk or row a tool returns is numbered, and the final answer is checked against that evidence by
 the same citation verifier as before, so a citation cannot point at a passage the model never saw.
 
 **The fallback chain.** A role can name a second remote model in the manifest
@@ -5732,7 +5731,6 @@ which is also the rollback. The boundary is deliberate: a question worded differ
 | `OI_TOOL_MAX_STEPS` | 6 | model turns per answer, capped at 12 |
 | `OI_TOOL_MAX_CALLS` | 10 | tool calls per answer, capped at 24 |
 | `OI_TOOL_SEARCH_LIMIT` | 8 | results a search may add |
-| `OI_TOOL_LOOKUP` | off | enables the literal figure lookup tool; measured neutral to negative on duplicated census data |
 | `OI_TOOL_QUERY` | off | enables the structured row query; every call is audited as a `tool_call` with its candidate and returned-row counts |
 
 The wall clock is the same request budget the single-shot path uses. Any loop failure, cap, provider error or

@@ -5812,8 +5812,8 @@ model. It rides `OI_TOOL_HONESTY` and the audit row carries `honesty_gate`; the 
 **What to watch.** About 1.6 times the suite time (178 to 188 seconds against 110 single-shot) and two to three
 times the model calls per answer. The development analyst ceiling is 100 USD for a 30-day period; a day of suite
 runs costs about 0.4 USD per run. The step and call caps bound it; a question that hits the cap returns the single-shot answer rather
-than failing. The large-table row cap still means pinpoint rows in very large tables are found by `lookup_value`,
-not by reading every row.
+The large-table row cap still means rows beyond a data dump's indexed range are not reachable by the row
+query; the second-corpus measurement records that limit and the marker chunk says it in the corpus.
 
 ## Standing rules
 

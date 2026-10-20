@@ -12,8 +12,8 @@ answers questions through a bounded tool loop rather than a single retrieval-and
 | Thing | State |
 |---|---|
 | Model answering questions | Claude Haiku 4.5 on Bedrock, inference profile `us.anthropic.claude-haiku-4-5-20251001-v1:0` |
-| Answer path | Tool loop on, six steps, ten tool calls. `search_documents`, `read_passages` and the row query are offered; `lookup_value` is off. The gateway fails over to the same Haiku from us-east-2 and then to Nova Pro if the primary deployment fails |
-| Flags | `OI_TOOL_LOOP=on`, `OI_TOOL_MAX_STEPS=6`, `OI_TOOL_MAX_CALLS=10`, `OI_TOOL_QUERY=on`, `OI_TOOL_LOOKUP=off`, `OI_TOOL_HONESTY=on` |
+| Answer path | Tool loop on, six steps, ten tool calls. `search_documents`, `read_passages` and the row query are offered; `lookup_value` was removed on 2026-10-20. The gateway fails over to the same Haiku from us-east-2 and then to Nova Pro if the primary deployment fails |
+| Flags | `OI_TOOL_LOOP=on`, `OI_TOOL_MAX_STEPS=6`, `OI_TOOL_MAX_CALLS=10`, `OI_TOOL_QUERY=on`, `OI_TOOL_HONESTY=on` |
 | Corpus | 539 documents, 100,478 chunks, six data-set cards, six dead letters excluded by owner decision (0003). Frozen since 2026-10-18 |
 | Measured quality | On the corrected instrument (2026-10-19 evening): **50.6 of 52** (52, 50, 51, 51, 49). The row-query milestone measured 46.6 against a same-day control of 43.0 on the old instrument; the two are not comparable because three questions were corrected (section 2c) |
 | Measurement set | 40 questions + 4 probes, 52 role-runs per suite run |
@@ -349,9 +349,10 @@ The structured row query is **done and measured** (section 2b). The priorities b
 6. **Row-query default policy.** Keep it opt-in in code; a deployment turns it on after measuring its own corpus.
    It now has two-corpus evidence: 43.0 to 46.6 of 52 on the first corpus and 31.0 to 31.8 of 37 on the second,
    with the second-corpus gain on the plain table-number question. The development deployment has it on.
-7. **`lookup_value` should be retired.** The second-corpus measurement was the stated condition, and it is done:
-   the row query covers the table-row case, lookup_value has never measured a gain, and it stays off. Removal is
-   recommended as dead-code cleanup pending the owner's sign-off; do not delete it without that sign-off.
+7. **Done: `lookup_value` was removed (PR #203).** The row query had already superseded it for table
+   rows; the second-corpus measurement met the owner's stated retirement condition and the owner approved
+   deletion. The capability's history, including the measurement that kept it off, stays in the requirements
+   register (AGENT-LOOKUP-001, status retired).
 8. **Provider layer (`INF-PROVIDER-001`) remains parked.** The six rejected files are excluded by owner decision
    and need no further action unless a replacement arrives. The data-set cards stay cards, but the second corpus
    measured the cost: a table over 5,000 rows keeps bounded row groups (200 chunks) and records the omission in a
@@ -402,11 +403,9 @@ The structured row query is **done and measured** (section 2b). The priorities b
 - The tool loop is worth about **five points**, not eight: 40.2–41.2 against 35.0, five runs each.
 - The Phase A build and current main are **equivalent**; there is no evidence that either is better.
 - **No configuration has reproduced 44, 44, 42 as a mean.** That triple was the top of a distribution.
-- `lookup_value` is implemented, tested, and **default off** because it measured neutral to negative on this
-  corpus of duplicated census figures. It is not evidence that exact lookups are impossible: the structured row
-  query (`query_rows`) is the answer that worked, and it is now the measured tool for table rows.
-- The cross-document category is genuinely fixed (2–4 of 8 to 6–8 of 8). The honesty categories are slightly worse
-  with the loop, which is a real trade rather than a rounding error.
+- `lookup_value` was implemented, tested, and default off because it measured neutral to negative on
+  this corpus of duplicated census figures. It was removed on 2026-10-20 after the row query was measured
+  on a second corpus; it was not evidence that exact lookups are impossible.
 - The row query is worth **3.6 points against a same-day control** (46.6 against 43.0), not 3.6 against the
   frozen 40.2. It removes the unsupported-number failure class on this corpus and brings exact-number questions
   to 7.4 of 8, while the remaining failures are concentrated on four specific questions.
@@ -466,9 +465,9 @@ Decisions taken while the owner was away on 2026-10-19, updated after the row-qu
 6. **A new agent can start from this document**, as recommended. The first tasks are section 9.
 7. **Row query remains opt-in by default in code**; the development deployment has it on. Promotion to default is a
    per-deployment decision after that deployment's own five-run measurement. **Confirmed by the owner 2026-10-19.**
-8. **`lookup_value` is recommended for retirement, pending the owner's decision.** The row query is measured on a
-   second corpus (section 2g), which was the stated condition. It remains implemented, tested and off; do not
-   delete it without the owner's sign-off.
+8. **`lookup_value` was removed on 2026-10-20 (PR #203).** The row query measured on a second corpus
+   met the stated condition and the owner approved deletion; the code, tests, prompt references and flag are
+   gone.
 9. **Prompt tuning stays frozen, with one measured exception now closed.** The owner approved one measured prompt
    attempt for U08; two iterations were run and both reverted, and the shipped answer is a deterministic gate
    instead (section 2f). The prompt in the deployment is the pre-experiment prompt.
@@ -482,6 +481,10 @@ Decisions taken while the owner was away on 2026-10-19, updated after the row-qu
     two-corpus evidence; lookup_value's retirement condition is met (item 8); long-document needle retrieval and
     large-table row access are the next measured targets. Evidence: docs/reviews/second-corpus-2026-10-20/.
 
+
+13. **`lookup_value` is gone.** Removed 2026-10-20 with the owner's approval after the
+    second-corpus measurement (section 2g). The two-corpus row-query evidence is unchanged; long-document
+    needle retrieval and large-table row access are the next measured targets.
 
 ## 12. What to give the next agent
 

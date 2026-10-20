@@ -152,7 +152,7 @@ t = t.replace("bedrock/amazon.nova-lite-v1:0",
 l.write_text(t)
 PY
 
-for pair in OI_TOOL_LOOP=on OI_TOOL_QUERY=on OI_TOOL_LOOKUP=off OI_TOOL_HONESTY=on \
+for pair in OI_TOOL_LOOP=on OI_TOOL_QUERY=on OI_TOOL_HONESTY=on \
             OI_TOOL_MAX_STEPS=6 OI_TOOL_MAX_CALLS=10; do
   k=${pair%%=*}; v=${pair#*=}
   grep -q "^$k=" rendered/env && sed -i "s/^$k=.*/$k=$v/" rendered/env || echo "$k=$v" >> rendered/env

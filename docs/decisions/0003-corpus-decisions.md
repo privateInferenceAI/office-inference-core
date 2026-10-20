@@ -54,9 +54,10 @@ pauses rather than between sessions. The box was running when the decision was t
 after that deployment's own five-run measurement. The development deployment has it on. The evidence is one
 corpus, so the measurement is the gate, not the code default.
 
-**5. `lookup_value` stays implemented, tested and off.** It is superseded for table rows by `query_rows` and is
-not deleted. Retirement is planned after the row query has been measured on a second corpus; until then the tool
-is the fallback instrument for a future provider layer and its tests protect the literal-match behaviour.
+**5. `lookup_value` was removed on 2026-10-20.** It had stayed implemented, tested and off since the row
+query superseded it for table rows. The second corpus met the retirement condition the owner set, and the
+owner approved deletion. The measurement that kept it off stays in the requirements register
+(AGENT-LOOKUP-001, status retired).
 
 ## Consequences
 
