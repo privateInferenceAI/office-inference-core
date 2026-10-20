@@ -77,6 +77,32 @@ offers many similar-looking financial passages and retrieval missed the headcoun
 the first measurement of a real limit (needle retrieval in very long documents), and it is the kind of thing the
 next test corpus is being built to explore.
 
+## Results: the second corpus
+
+A second corpus was built to test whether the first corpus's results generalise, and to settle the row-query
+question on a different document mix: 40 real public documents (14 US public companies across seven industries,
+filings and contracts, plus 10 US government PDFs) and 40 labelled synthetic small-business documents, including a
+policy-rich handbook, a 35,600-word facilities manual and a 6,010-row transaction ledger. 80 documents, 24,295
+passages.
+
+35 questions, every value read from the documents and mechanically validated against the index. Five repeat runs
+with the structured row query off and five with it on, same configuration otherwise:
+
+| Phase | Five runs | Mean | Latency p50 | Latency p95 | Cost per answer |
+|---|---|---|---|---|---|
+| Row query off | 30, 32, 31, 31, 31 | **31.0 of 37** | 2.27 s | 12.25 s | 0.01471 USD |
+| Row query on | 32, 32, 32, 31, 32 | **31.8 of 37** | 2.37 s | 12.03 s | 0.01349 USD |
+
+The questions are deliberately harder than the acceptance set, so the score is not comparable to the 53 of 53
+figure. What matters is the difference: the row query fixed the plain table-number question in all five runs and
+removed no correct answer. It did not fix the long-document needles, which reproduced the wider set's finding on
+a different long document. The honesty check held in both directions: stated policies were answered, and absent
+policies were refused in all 20 refusal runs.
+
+One measured limit came out of the corpus: a table over 5,000 rows keeps bounded row groups and records the
+omission, so on the 6,010-row ledger rows 0 to 2,412 are searchable and the remaining 3,600 are not reachable by
+retrieval or by the row query. That is recorded as the next data-path question, not hidden in an average.
+
 ## Search and retrieval quality
 
 The questions above are answered through retrieval. Three measurements describe the search behaviour directly:

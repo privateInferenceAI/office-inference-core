@@ -18,14 +18,12 @@ questions:
       contains:
       - 104,780
   source_quote: Net sales | $ | 104,780 | $ | 106,566 | $ | 107,412
-  evidence:
-    source_file: company/target-corp/10-K_2026-03-11_annual-report.htm
-    locator: Consolidated Statements of Operations, fiscal 2025 column (extracted
-      line 1122); repeated in the MD&A summary at line 1340
-    method: html.parser, table cells joined with ' | '
-    command: python3 verify.py company/target-corp/10-K_2026-03-11_annual-report.htm
-      'Net sales | $ | 104,780 | $ | 106,566 | $ | 107,412'
-    result: OK line 1122 (also line 1340)
+  evidence: '{"source_file": "company/target-corp/10-K_2026-03-11_annual-report.htm",
+    "locator": "Consolidated Statements of Operations, fiscal 2025 column (extracted
+    line 1122); repeated in the MD&A summary at line 1340", "method": "html.parser,
+    table cells joined with '' | ''", "command": "python3 verify.py company/target-corp/10-K_2026-03-11_annual-report.htm
+    ''Net sales | $ | 104,780 | $ | 106,566 | $ | 107,412''", "result": "OK line 1122
+    (also line 1340)"}'
 - id: PUB_N02
   category: exact_number
   question: What profit did Caterpillar's Construction Industries segment report for
@@ -39,14 +37,12 @@ questions:
       - 4,675
   source_quote: Construction Industries | $ | 4,675 | $ | 6,165 | $ | (1,490) | (24
     | %)
-  evidence:
-    source_file: company/caterpillar-inc/10-K_2026-02-13_annual-report.htm
-    locator: Profit (Loss) by Segment table, 2025 column (extracted line 691); prose
-      confirmation at line 716
-    method: html.parser, table cells joined with ' | '
-    command: python3 verify.py company/caterpillar-inc/10-K_2026-02-13_annual-report.htm
-      'Construction Industries | $ | 4,675 | $ | 6,165 | $ | (1,490) | (24 | %)'
-    result: OK line 691
+  evidence: '{"source_file": "company/caterpillar-inc/10-K_2026-02-13_annual-report.htm",
+    "locator": "Profit (Loss) by Segment table, 2025 column (extracted line 691);
+    prose confirmation at line 716", "method": "html.parser, table cells joined with
+    '' | ''", "command": "python3 verify.py company/caterpillar-inc/10-K_2026-02-13_annual-report.htm
+    ''Construction Industries | $ | 4,675 | $ | 6,165 | $ | (1,490) | (24 | %)''",
+    "result": "OK line 691"}'
 - id: PUB_N03
   category: exact_number
   question: For the six months ended June 30, 2026, what net income attributable to
@@ -60,15 +56,12 @@ questions:
       - 462,927
   source_quote: Net income attributable to DaVita Inc. | $ | 265,397 | $ | 199,337
     | $ | 462,927 | $ | 362,254
-  evidence:
-    source_file: company/davita-inc/10-Q_2026-08-04_quarterly-report.htm
-    locator: Consolidated Statements of Income, six months ended June 30, 2026 column
-      (extracted line 108; repeated at line 459)
-    method: html.parser, table cells joined with ' | '
-    command: python3 verify.py company/davita-inc/10-Q_2026-08-04_quarterly-report.htm
-      'Net income attributable to DaVita Inc. | $ | 265,397 | $ | 199,337 | $ | 462,927
-      | $ | 362,254'
-    result: OK line 108 (also line 459)
+  evidence: '{"source_file": "company/davita-inc/10-Q_2026-08-04_quarterly-report.htm",
+    "locator": "Consolidated Statements of Income, six months ended June 30, 2026
+    column (extracted line 108; repeated at line 459)", "method": "html.parser, table
+    cells joined with '' | ''", "command": "python3 verify.py company/davita-inc/10-Q_2026-08-04_quarterly-report.htm
+    ''Net income attributable to DaVita Inc. | $ | 265,397 | $ | 199,337 | $ | 462,927
+    | $ | 362,254''", "result": "OK line 108 (also line 459)"}'
 - id: PUB_N04
   category: exact_number
   question: For the three months ended June 30, 2026, what total revenues did C.H.
@@ -81,15 +74,13 @@ questions:
       contains:
       - 4,934,098
   source_quote: Total revenues | 4,934,098 | 4,136,543 | 8,947,032 | 8,183,283
-  evidence:
-    source_file: company/c-h-robinson-worldwide-inc/10-Q_2026-07-31_quarterly-report.htm
-    locator: Condensed Consolidated Statements of Operations and Comprehensive Income,
-      three months ended June 30, 2026 column (extracted line 149; repeated at line
-      771)
-    method: html.parser, table cells joined with ' | '
-    command: python3 verify.py company/c-h-robinson-worldwide-inc/10-Q_2026-07-31_quarterly-report.htm
-      'Total revenues | 4,934,098 | 4,136,543 | 8,947,032 | 8,183,283'
-    result: OK line 149 (also line 771)
+  evidence: '{"source_file": "company/c-h-robinson-worldwide-inc/10-Q_2026-07-31_quarterly-report.htm",
+    "locator": "Condensed Consolidated Statements of Operations and Comprehensive
+    Income, three months ended June 30, 2026 column (extracted line 149; repeated
+    at line 771)", "method": "html.parser, table cells joined with '' | ''", "command":
+    "python3 verify.py company/c-h-robinson-worldwide-inc/10-Q_2026-07-31_quarterly-report.htm
+    ''Total revenues | 4,934,098 | 4,136,543 | 8,947,032 | 8,183,283''", "result":
+    "OK line 149 (also line 771)"}'
 - id: PUB_P01
   category: contract_clause
   question: Under Intuit's Credit Agreement dated January 9, 2026, what is the base
@@ -106,19 +97,15 @@ questions:
     consecutive fiscal quarters of the Company for which the financial statements
     have been, or are required to be, delivered pursuant to Section 5.08(a) or 5.08(b),
     the Leverage Ratio to be greater than 4.00 to 1.00
-  evidence:
-    source_file: company/intuit-inc/EX-10_2026-01-12_credit-agreement.htm
-    locator: Section 6.06 Maximum Leverage Ratio (extracted line 863)
-    method: html.parser, paragraph text
-    command: python3 verify.py company/intuit-inc/EX-10_2026-01-12_credit-agreement.htm
-      'The Company will not permit, as of the last day of any period of four consecutive
-      fiscal quarters of the Company for which the financial statements have been,
-      or are required to be, delivered pursuant to Section 5.08(a) or 5.08(b), the
-      Leverage Ratio to be greater than 4.00 to 1.00'
-    result: OK line 863
-    note: The same sentence continues with a proviso allowing a 0.50 increase after
-      a Qualified Material Acquisition; that is why the question asks for the base
-      ratio.
+  evidence: '{"source_file": "company/intuit-inc/EX-10_2026-01-12_credit-agreement.htm",
+    "locator": "Section 6.06 Maximum Leverage Ratio (extracted line 863)", "method":
+    "html.parser, paragraph text", "command": "python3 verify.py company/intuit-inc/EX-10_2026-01-12_credit-agreement.htm
+    ''The Company will not permit, as of the last day of any period of four consecutive
+    fiscal quarters of the Company for which the financial statements have been, or
+    are required to be, delivered pursuant to Section 5.08(a) or 5.08(b), the Leverage
+    Ratio to be greater than 4.00 to 1.00''", "result": "OK line 863", "note": "The
+    same sentence continues with a proviso allowing a 0.50 increase after a Qualified
+    Material Acquisition; that is why the question asks for the base ratio."}'
 - id: PUB_P02
   category: prose_fact
   question: According to HCA Healthcare's 2025 Form 10-K, which hurricanes caused
@@ -135,17 +122,14 @@ questions:
     estimated at approximately $250 million, or $0.73 per diluted share, related to
     Hurricanes Helene and Milton, which impacted our facilities in North Carolina
     and certain facilities in Florida.
-  evidence:
-    source_file: company/hca-healthcare-inc/10-K_2026-02-10_annual-report.htm
-    locator: MD&A, results of operations paragraph (extracted line 1122; repeated
-      at line 1649)
-    method: html.parser, paragraph text
-    command: python3 verify.py company/hca-healthcare-inc/10-K_2026-02-10_annual-report.htm
-      'The 2024 results also include additional expenses and losses of revenues estimated
-      at approximately $250 million, or $0.73 per diluted share, related to Hurricanes
-      Helene and Milton, which impacted our facilities in North Carolina and certain
-      facilities in Florida.'
-    result: OK line 1122 (also line 1649)
+  evidence: '{"source_file": "company/hca-healthcare-inc/10-K_2026-02-10_annual-report.htm",
+    "locator": "MD&A, results of operations paragraph (extracted line 1122; repeated
+    at line 1649)", "method": "html.parser, paragraph text", "command": "python3 verify.py
+    company/hca-healthcare-inc/10-K_2026-02-10_annual-report.htm ''The 2024 results
+    also include additional expenses and losses of revenues estimated at approximately
+    $250 million, or $0.73 per diluted share, related to Hurricanes Helene and Milton,
+    which impacted our facilities in North Carolina and certain facilities in Florida.''",
+    "result": "OK line 1122 (also line 1649)"}'
 - id: PUB_P03
   category: government_finding
   question: What limitation does GAO identify in the primary federal procurement database's
@@ -156,20 +140,16 @@ questions:
       docs:
       - company/second-public/government/gao/gao-25-107283-defense-industrial-base.pdf
       contains:
-      - little visibility
-  source_quote: The primary procurement database for the federal government, however,
-    provides little visibility into where these goods are manufactured or whether
-    materials and parts suppliers are domestic or foreign.
-  evidence:
-    source_file: government/gao/gao-25-107283-defense-industrial-base.pdf
-    locator: GAO-25-107283, 'What GAO Found' on the Highlights page (extracted lines
-      30-32)
-    method: pdftotext -enc UTF-8 (default reading order, no -layout)
-    command: python3 verify.py government/gao/gao-25-107283-defense-industrial-base.pdf
-      'The primary procurement database for the federal government, however, provides
-      little visibility into where these goods are manufactured or whether materials
-      and parts suppliers are domestic or foreign.'
-    result: OK lines 30-32 (whitespace-normalized)
+      - limited information
+  source_quote: provides limited information about the countries of origin for these
+    goods
+  evidence: '{"source_file": "government/gao/gao-25-107283-defense-industrial-base.pdf",
+    "locator": "GAO-25-107283, ''What GAO Found'' on the Highlights page (extracted
+    lines 30-32)", "method": "pdftotext -enc UTF-8 (default reading order, no -layout)",
+    "command": "python3 verify.py government/gao/gao-25-107283-defense-industrial-base.pdf
+    ''The primary procurement database for the federal government, however, provides
+    little visibility into where these goods are manufactured or whether materials
+    and parts suppliers are domestic or foreign.''", "result": "OK lines 30-32 (whitespace-normalized)"}'
 - id: PUB_X01
   category: cross_document
   question: Using the 2025 figures reported in millions, how much higher were Caterpillar's
@@ -182,23 +162,22 @@ questions:
       - company/second-public/company/union-pacific-corp/10-K_2026-02-06_annual-report.htm
       contains:
       - 43,079
-  source_quote: 'Caterpillar: Total sales and revenues | 67,589 | 64,809 | 67,060
-
-    Union Pacific: Total operating revenues | 24,510 | 24,250 | 24,119
-
-    67,589 - 24,510 = 43,079'
-  evidence:
-    source_files:
-    - company/caterpillar-inc/10-K_2026-02-13_annual-report.htm
-    - company/union-pacific-corp/10-K_2026-02-06_annual-report.htm
-    locator: Caterpillar Consolidated Results of Operations (line 1316); Union Pacific
-      Consolidated Statements of Income (line 934)
-    method: html.parser, both values in USD millions, both years ended December 31,
-      2025
-    command: python3 verify.py company/caterpillar-inc/10-K_2026-02-13_annual-report.htm
-      'Total sales and revenues | 67,589 | 64,809 | 67,060' && python3 verify.py company/union-pacific-corp/10-K_2026-02-06_annual-report.htm
-      'Total operating revenues | 24,510 | 24,250 | 24,119'
-    result: OK lines 1316 and 934; 67,589 - 24,510 = 43,079
+  source_quote: Total sales and revenues | 67,589 | 64,809 | 67,060 ... Total operating
+    revenues | 24,510 | 24,250 | 24,119
+  evidence: '{"source_files": ["company/caterpillar-inc/10-K_2026-02-13_annual-report.htm",
+    "company/union-pacific-corp/10-K_2026-02-06_annual-report.htm"], "locator": "Caterpillar
+    Consolidated Results of Operations (line 1316); Union Pacific Consolidated Statements
+    of Income (line 934)", "method": "html.parser, both values in USD millions, both
+    years ended December 31, 2025", "command": "python3 verify.py company/caterpillar-inc/10-K_2026-02-13_annual-report.htm
+    ''Total sales and revenues | 67,589 | 64,809 | 67,060'' && python3 verify.py company/union-pacific-corp/10-K_2026-02-06_annual-report.htm
+    ''Total operating revenues | 24,510 | 24,250 | 24,119''", "result": "OK lines
+    1316 and 934; 67,589 - 24,510 = 43,079"}'
+  derivation:
+    operands:
+    - 67,589
+    - 24,510
+    operation: difference
+    result: 43,079
 - id: PUB_X02
   category: cross_document
   question: For the six months ended June 30, 2026, how much higher were C.H. Robinson's
@@ -212,25 +191,24 @@ questions:
       - company/second-public/company/davita-inc/10-Q_2026-08-04_quarterly-report.htm
       contains:
       - 1,977,400
-  source_quote: 'C.H. Robinson: Total revenues | 4,934,098 | 4,136,543 | 8,947,032
-    | 8,183,283
-
-    DaVita: Total revenues | 3,554,084 | 3,379,526 | 6,969,632 | 6,603,055
-
-    8,947,032 - 6,969,632 = 1,977,400'
-  evidence:
-    source_files:
-    - company/c-h-robinson-worldwide-inc/10-Q_2026-07-31_quarterly-report.htm
-    - company/davita-inc/10-Q_2026-08-04_quarterly-report.htm
-    locator: C.H. Robinson statement of operations, six months ended June 30, 2026
-      column (line 149); DaVita statement of income, same column (line 93)
-    method: html.parser, both values in USD thousands, both six months ended June
-      30, 2026
-    command: python3 verify.py company/c-h-robinson-worldwide-inc/10-Q_2026-07-31_quarterly-report.htm
-      'Total revenues | 4,934,098 | 4,136,543 | 8,947,032 | 8,183,283' && python3
-      verify.py company/davita-inc/10-Q_2026-08-04_quarterly-report.htm 'Total revenues
-      | 3,554,084 | 3,379,526 | 6,969,632 | 6,603,055'
-    result: OK lines 149 and 93; 8,947,032 - 6,969,632 = 1,977,400
+  source_quote: Total revenues | 4,934,098 | 4,136,543 | 8,947,032 | 8,183,283 ...
+    Total revenues | 3,554,084 | 3,379,526 | 6,969,632 | 6,603,055
+  evidence: '{"source_files": ["company/c-h-robinson-worldwide-inc/10-Q_2026-07-31_quarterly-report.htm",
+    "company/davita-inc/10-Q_2026-08-04_quarterly-report.htm"], "locator": "C.H. Robinson
+    statement of operations, six months ended June 30, 2026 column (line 149); DaVita
+    statement of income, same column (line 93)", "method": "html.parser, both values
+    in USD thousands, both six months ended June 30, 2026", "command": "python3 verify.py
+    company/c-h-robinson-worldwide-inc/10-Q_2026-07-31_quarterly-report.htm ''Total
+    revenues | 4,934,098 | 4,136,543 | 8,947,032 | 8,183,283'' && python3 verify.py
+    company/davita-inc/10-Q_2026-08-04_quarterly-report.htm ''Total revenues | 3,554,084
+    | 3,379,526 | 6,969,632 | 6,603,055''", "result": "OK lines 149 and 93; 8,947,032
+    - 6,969,632 = 1,977,400"}'
+  derivation:
+    operands:
+    - 8,947,032
+    - 6,969,632
+    operation: difference
+    result: 1,977,400
 - id: PUB_D01
   category: date
   question: What is the effective date of the 2026 Restatement of the Xcel Energy
@@ -244,14 +222,12 @@ questions:
       - August 1, 2026
   source_quote: The Effective Date of this Restatement is August 1, 2026, except as
     otherwise provided herein.
-  evidence:
-    source_file: company/xcel-energy-inc/EX-10_2026-07-30_deferred-compensation-plan.htm
-    locator: Section 1.2.12 Effective Date (extracted line 50); cover page also states
-      'restated effective ... August 1, 2026' at line 10
-    method: html.parser, paragraph text
-    command: python3 verify.py company/xcel-energy-inc/EX-10_2026-07-30_deferred-compensation-plan.htm
-      'The Effective Date of this Restatement is August 1, 2026'
-    result: OK line 50
+  evidence: '{"source_file": "company/xcel-energy-inc/EX-10_2026-07-30_deferred-compensation-plan.htm",
+    "locator": "Section 1.2.12 Effective Date (extracted line 50); cover page also
+    states ''restated effective ... August 1, 2026'' at line 10", "method": "html.parser,
+    paragraph text", "command": "python3 verify.py company/xcel-energy-inc/EX-10_2026-07-30_deferred-compensation-plan.htm
+    ''The Effective Date of this Restatement is August 1, 2026''", "result": "OK line
+    50"}'
 - id: PUB_L01
   category: long_document
   question: Under Caterpillar's Fifth Amended and Restated Credit Agreement (Three-Year
@@ -267,17 +243,15 @@ questions:
     \ at any time, August 27, 2029, or such later date to which the \u201CCurrent\
     \ Termination Date\u201D shall then have been extended with the consent of such\
     \ Bank pursuant to Section 2.16."
-  evidence:
-    source_file: company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm
-    locator: Definitions, Current Termination Date (extracted lines 749-751); agreement
-      cover date August 27, 2026 at line 12
-    method: html.parser, paragraph text
-    command: "python3 verify.py company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm\
-      \ '\u201CCurrent Termination Date\u201D means, with respect to any Bank at any\
-      \ time, August 27, 2029, or such later date to which the \u201CCurrent Termination\
-      \ Date\u201D shall then have been extended with the consent of such Bank pursuant\
-      \ to Section 2.16.'"
-    result: OK lines 749-751 (whitespace-normalized)
+  evidence: "{\"source_file\": \"company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm\"\
+    , \"locator\": \"Definitions, Current Termination Date (extracted lines 749-751);\
+    \ agreement cover date August 27, 2026 at line 12\", \"method\": \"html.parser,\
+    \ paragraph text\", \"command\": \"python3 verify.py company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm\
+    \ '\u201CCurrent Termination Date\u201D means, with respect to any Bank at any\
+    \ time, August 27, 2029, or such later date to which the \u201CCurrent Termination\
+    \ Date\u201D shall then have been extended with the consent of such Bank pursuant\
+    \ to Section 2.16.'\", \"result\": \"OK lines 749-751 (whitespace-normalized)\"\
+    }"
 - id: PUB_L02
   category: long_document
   question: In Duke Energy's 2025 Form 10-K, how much Duke Energy Carolinas first
@@ -296,14 +270,13 @@ questions:
     December 2026
 
     2.950 | % | 600'
-  evidence:
-    source_file: company/duke-energy-corp/10-K_2026-02-26_annual-report.htm
-    locator: Current Maturities of Long-Term Debt table, First Mortgage Bonds section,
-      lines 6180-6183; table header '(in millions)' at line 6172
-    method: html.parser, table cells joined with ' | '
-    command: python3 verify.py --lines 6180-6183 company/duke-energy-corp/10-K_2026-02-26_annual-report.htm
-    result: 'OK lines 6180-6183: First Mortgage Bonds / Duke Energy Carolinas / December
-      2026 / 2.950 | % | 600'
+  evidence: '{"source_file": "company/duke-energy-corp/10-K_2026-02-26_annual-report.htm",
+    "locator": "Current Maturities of Long-Term Debt table, First Mortgage Bonds section,
+    lines 6180-6183; table header ''(in millions)'' at line 6172", "method": "html.parser,
+    table cells joined with '' | ''", "command": "python3 verify.py --lines 6180-6183
+    company/duke-energy-corp/10-K_2026-02-26_annual-report.htm", "result": "OK lines
+    6180-6183: First Mortgage Bonds / Duke Energy Carolinas / December 2026 / 2.950
+    | % | 600"}'
 - id: SYN_N01
   category: exact_number
   question: How many PTO days does an employee with 7 completed years of service accrue
@@ -407,28 +380,32 @@ questions:
 - id: SYN_N05
   category: exact_number
   question: In the FY2025 transaction ledger, which vendor and approver are recorded
-    on the 12,345.67 office supplies transaction posted on 2025-07-14?
+    on the 921.82 line dated 2025-01-02 for Waste and Recycling?
   expected:
     staff:
       answered: true
       docs:
       - company/second-synthetic/transaction-ledger.csv
       contains:
-      - 12,345.67
-      - Cascade Paper & Packaging
-      - Monica Sayers
+      - '921.82'
+      - Copperfield Waste & Recycling
+      - Camille Duval
     executive:
       answered: true
       docs:
       - company/second-synthetic/transaction-ledger.csv
       contains:
-      - 12,345.67
-      - Cascade Paper & Packaging
-      - Monica Sayers
-  source_quote: 2025-07-14,Cascade Paper & Packaging,Service Delivery & Facilities
-    Operations,6100 Office Supplies,12345.67,Monica Sayers,Approved
-  evidence: transaction-ledger.csv:3062; `grep -rn '12345.67' company executive` returns
-    exactly this line, so the amount is unique in the corpus.
+      - '921.82'
+      - Copperfield Waste & Recycling
+      - Camille Duval
+  source_quote: 2025-01-02 | Copperfield Waste & Recycling | Service Delivery & Facilities
+    Operations | 6240 Waste & Recycling | 921.82 | Camille Duval | Approved
+  evidence: 'transaction-ledger.csv line 5. The original target, the 12,345.67 row
+    at line 3,062, is beyond the indexed row range: the chunker treats a table over
+    5,000 rows as a data dump, keeps bounded row groups up to its 200-chunk limit
+    (indexed dates 2025-01-02 to 2025-05-28) and records the omission in a table_marker
+    chunk. That limit is written up in the second-corpus evidence; this question was
+    retargeted to an indexed row.'
 - id: SYN_N06
   category: exact_number
   question: What does the 2025 customer price list charge per fixture for an LED troffer
@@ -462,14 +439,14 @@ questions:
       - company/second-synthetic/employee-handbook.md
       contains:
       - two days
-      - manager approval
+      - manager
     executive:
       answered: true
       docs:
       - company/second-synthetic/employee-handbook.md
       contains:
       - two days
-      - manager approval
+      - manager
   source_quote: 3.3.1 Eligible employees may work remotely up to **two days per week**,
     with **manager approval**. The remaining days are worked at the assigned Northwind
     location unless the role is designated fully remote.
@@ -592,9 +569,9 @@ questions:
     4; no company/ or executive/ document matches.
 - id: SYN_U04
   category: unanswerable
-  question: Does Northwind offer an employee stock purchase plan (ESPP) with a company
-    match?
-  absent_pattern: ESPP
+  question: What company match does Northwind's employee stock purchase plan (ESPP)
+    provide?
+  absent_pattern: ESPP company match
   expected:
     staff:
       answered: false
@@ -625,11 +602,18 @@ questions:
       - company/second-synthetic/fy2025-pl-and-balance-sheet.csv
       contains:
       - 57,700
-  source_quote: 'budget.csv: TOTAL,120,944364.00,881960.00,934453.00,919843.00,924034.00,918312.00,912709.00,918683.00,953410.00,930817.00,886209.00,875206.00,11000000.00
-    | fy2025-pl-and-balance-sheet.csv: income_statement,Totals,Total operating expenses,10942300.00,11000000.00,
-    | 11,000,000 - 10,942,300 = 57,700'
+  source_quote: TOTAL | 120 | 944364.00 | 881960.00 | 934453.00 | 919843.00 | 924034.00
+    | 918312.00 | 912709.00 | 918683.00 | 953410.00 | 930817.00 | 886209.00 | 875206.00
+    | 11000000.00 ... income_statement | Totals | Total operating expenses | 10942300.00
+    | 11000000.00
   evidence: budget.csv:15 and fy2025-pl-and-balance-sheet.csv:26; both `grep -Fn`
     checks return the quoted rows. 11,000,000.00 - 10,942,300.00 = 57,700.00.
+  derivation:
+    operands:
+    - '11000000.00'
+    - '10942300.00'
+    operation: difference
+    result: 57,700
 - id: SYN_X02
   category: cross_document
   question: Invoice INV-2025-001 totals 13,512.00 USD and invoice INV-2025-002 totals
@@ -649,11 +633,15 @@ questions:
       - company/second-synthetic/invoice-2025-002.md
       contains:
       - 2,214.06
-  source_quote: 'invoice-2025-001.md: | | | | | **Total due** | **13,512.00** | |
-    invoice-2025-002.md: | **Total due** | **11,297.94** | | 13,512.00 - 11,297.94
-    = 2,214.06'
+  source_quote: Total due | 13,512.00 ... Total due | 11,297.94
   evidence: invoice-2025-001.md:29 and invoice-2025-002.md:35; both totals confirmed
     by `grep -Fn`. 13,512.00 - 11,297.94 = 2,214.06.
+  derivation:
+    operands:
+    - 13,512.00
+    - 11,297.94
+    operation: difference
+    result: 2,214.06
 - id: SYN_D01
   category: date_arithmetic
   question: How many paid holidays does the employee handbook say Northwind observes
@@ -665,14 +653,14 @@ questions:
       - company/second-synthetic/employee-handbook.md
       contains:
       - 11 paid holidays
-      - 19 June 2025
+      - Juneteenth
     executive:
       answered: true
       docs:
       - company/second-synthetic/employee-handbook.md
       contains:
       - 11 paid holidays
-      - 19 June 2025
+      - Juneteenth
   source_quote: 5.5.1 Northwind observes **11 paid holidays** in 2025. ... | 19 June
     2025 | Juneteenth | Thursday |
   evidence: employee-handbook.md:412 and :420; both `grep -Fn` checks return the quoted
@@ -749,7 +737,7 @@ questions:
     ''5,500,000'' company executive` returns only executive/ lines: board-minutes-2025-03.md:99
     and acquisition-target-assessment.md:20, :34 and :188. Both files are forbidden
     to staff.'
-- id: PR1
+- id: SC_PROBE_ROW
   category: probe_row_normal
   question: In the FY2025 transaction ledger, what department and account are recorded
     on the 1,293.79 line dated 2025-01-02 from BlueLine Electrical Contractors?
@@ -770,8 +758,9 @@ questions:
       - 6220 Electrical Service
   what: a pinpoint row in the 6,010-line ledger, using a line no question uses; measures
     whether a single CSV row survives chunking and retrieval.
-  source_quote: '1293.79'
-- id: PR2
+  source_quote: 2025-01-02 | BlueLine Electrical Contractors | Corporate Facilities
+    & Real Estate | 6220 Electrical Service | 1293.79 | Derek Ahn | Paid
+- id: SC_PROBE_NEEDLE
   category: probe_long_document
   question: How long is a visitor badge valid at Northwind?
   expected:
@@ -791,9 +780,9 @@ questions:
     the three needle questions, it measures retrieval of a badge rule without a scoped
     hint.
   source_quote: 24 hours maximum
-- id: PR3
+- id: SC_PROBE_ABSENCE
   category: probe_policy_absence
-  question: Does Northwind reimburse tuition for employees?
+  question: What is Northwind's tuition reimbursement policy?
   expected:
     staff:
       answered: false
@@ -801,4 +790,4 @@ questions:
       answered: false
   what: a policy the corpus deliberately does not state; a confident answer or a citation
     to training support is a failure.
-  absent_pattern: tuition
+  absent_pattern: Northwind tuition
