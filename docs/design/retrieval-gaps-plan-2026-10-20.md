@@ -1,7 +1,7 @@
 # Closing the two measured retrieval gaps: plan and regression controls
 
-**Status:** proposal, 2026-10-20. **Owner decisions needed:** order of work (this plan recommends needles
-first), and whether the large-table data path gets built. No code changes are in this document.
+**Status:** accepted 2026-10-20. Needles first, dataset sidecar approved, minimal gate with escalation path.
+See docs/decisions/0004-retrieval-gaps.md. No code changes are in this document.
 
 ## What is broken, measured
 
