@@ -1158,9 +1158,12 @@ def _tool_chat(session, model: str, messages: list, tools, request_budget):
         "messages": messages,
         "max_tokens": int(os.environ.get("OI_MAX_TOKENS", "700")),
         "temperature": 0,
-        "tools": tools,
-        "tool_choice": "auto",
     }
+    # A synthesis turn has no tools. Some providers reject an empty tools list, so omit both fields rather
+    # than sending an empty array.
+    if tools:
+        payload["tools"] = tools
+        payload["tool_choice"] = "auto"
     attempts = 0
     while attempts < 2:
         attempts += 1

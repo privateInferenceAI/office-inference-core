@@ -59,3 +59,23 @@ an effect of this change, but it means the corpus-1 aggregate gate cannot be cer
 - Question sets: docs/eval/data-questions.yaml, docs/eval/data-questions-wider.yaml,
   docs/eval/corpora/second-corpus/questions.yaml.
 - Dispatches behind this record: the branch history of PR #206.
+
+
+## Late update, 2026-10-20: the real cause of the unstable live suite
+
+The corpus-1 instability that blocked the gate was **measurement contention**, not the exact fallback. Two series
+of five runs on an otherwise idle box scored 53, 53, 53, 53, 53 with the flag off, and the same configuration had
+scored 48 and 49 while two evaluation suites ran at once. The flaky questions were the anchor-number table
+questions N03, N06 and N07, whose failure mode is the tool loop reaching its step cap and the caller discarding the
+evidence the loop had gathered.
+
+Two follow-ups are in flight as their own units:
+
+1. **Measurement hygiene, merged (#210).** A host flock, a Postgres advisory lock, load and memory admission gates,
+   and a run-context file now stop two suites from sharing a deployment and record the conditions of every run.
+2. **Loop-cap rescue, PR pending (#211).** When the loop is about to exit at the step or call cap, it makes one
+   final no-tools call using the evidence it already gathered, verified by the same answer contract. Unit tests
+   pass; its five-run acceptance is the next measurement, now enforceable under the new hygiene rules.
+
+The exact fallback stays default off. The cue-restricted version measured 50, 53, 53 on three live-on runs before
+the run was stopped for time; that is not a certification, and no deployment enables the flag.

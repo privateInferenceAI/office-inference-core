@@ -559,3 +559,61 @@ def test_exact_search_points_at_the_row_query_when_the_phrase_is_too_broad():
     assert "does not identify a heading" in payload["note"]
     assert "query_rows" in payload["note"]
 
+
+
+def test_the_fallback_ignores_questions_without_an_exact_phrase_cue():
+    toolbox = make_toolbox()
+    toolbox._exact_count = lambda phrase, doc_id="": 2
+    question = ("In the census table that reports male median earnings of 33,270 dollars, what is the "
+                "overall median earnings figure for workers 16 years and over?")
+    assert toolbox.exact_phrase_for_question(question) == ""
+
+
+def test_the_fallback_recognises_a_hyphenated_cue():
+    toolbox = make_toolbox()
+    toolbox._exact_count = lambda phrase, doc_id="": 3
+    phrase = toolbox.exact_phrase_for_question("How many full-time equivalent employees did Apple "
+                                               "report as of September 28, 2024?")
+    assert phrase
+
+
+def test_a_capped_loop_answers_from_the_evidence_it_gathered():
+    toolbox = make_toolbox()
+
+    def fake_search(query):
+        number = toolbox.add(FakePassage("c1", "the answer row"))
+        return "[" + str(number) + "] company/doc.md: the answer row"
+
+    toolbox.search_documents = fake_search
+    seen_tools = []
+
+    def model(messages, tools):
+        seen_tools.append(list(tools))
+        if tools:
+            return tool_reply("search_documents", json.dumps({"query": "again"}))
+        return answer_reply("The answer is here [1].")
+
+    result = tool_loop.run_loop(model, toolbox, "q", max_steps=2)
+    assert result["answer"] is not None
+    assert result["synthesis"] == 1
+    assert seen_tools[-1] == [], "the synthesis turn must not offer tools"
+
+
+def test_a_failed_synthesis_keeps_the_old_none_result():
+    toolbox = make_toolbox()
+
+    def fake_search(query):
+        number = toolbox.add(FakePassage("c1", "the answer row"))
+        return "[" + str(number) + "] company/doc.md: the answer row"
+
+    toolbox.search_documents = fake_search
+
+    def model(messages, tools):
+        if tools:
+            return tool_reply("search_documents", json.dumps({"query": "again"}))
+        return answer_reply("The figure is 999,999 [1].")
+
+    result = tool_loop.run_loop(model, toolbox, "q", max_steps=2)
+    assert result["answer"] is None
+    assert result["synthesis"] == 1
+    assert result["reason"] in ("tool_step_limit", "tool_budget", "tool_error")
