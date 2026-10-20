@@ -170,7 +170,7 @@ def test_a_provider_error_returns_a_reason_not_an_exception():
 
 def test_the_tool_schemas_match_the_executor():
     names = [schema["function"]["name"] for schema in tool_loop.TOOLS]
-    assert names == ["search_documents", "search_exact", "read_passages", "query_rows"]
+    assert names == ["search_documents", "read_passages", "query_rows"]
 
 
 def test_the_prompt_carries_the_honesty_rule_for_absent_events():
@@ -476,19 +476,55 @@ def test_the_exact_excerpt_is_centred_on_the_match():
     assert excerpt.startswith("...") and excerpt.endswith("...")
 
 
-def test_the_exact_tool_is_off_until_the_flag_turns_it_on(monkeypatch):
-    monkeypatch.delenv("OI_TOOL_EXACT", raising=False)
-    assert "search_exact" not in [schema["function"]["name"] for schema in tool_loop.active_tools()]
+def test_a_refusal_gets_one_deterministic_exact_retry(monkeypatch):
+    toolbox = make_toolbox()
+    toolbox.exact_phrase_for_question = lambda question: "visitor badge"
+    calls = []
+
+    def fake_exact(phrase, doc_id="", limit=6):
+        calls.append(phrase)
+        number = toolbox.add(FakePassage("c2", "visitor badges are valid for 24 hours maximum"))
+        return "Passages containing " + phrase + ": [" + str(number) + "] company/manual.md p3: " + \
+               "visitor badges are valid for 24 hours maximum"
+
+    toolbox.search_exact = fake_exact
+    replies = iter([
+        answer_reply("I could not find that in the available documents."),
+        answer_reply("Visitor badges are valid for 24 hours [1]."),
+    ])
     monkeypatch.setenv("OI_TOOL_EXACT", "on")
-    assert "search_exact" in [schema["function"]["name"] for schema in tool_loop.active_tools()]
+    result = tool_loop.run_loop(lambda messages, tools: next(replies), toolbox,
+                                "How long is a visitor badge valid?")
+    assert calls == ["visitor badge"]
+    assert result["auto_exact"] == 1
+    assert "24 hours" in result["answer"]
 
 
-def test_the_prompt_names_the_exact_tool_only_when_it_is_offered():
-    without = tool_loop.system_prompt(honesty_enabled=True)
-    assert "search_exact" not in without
-    with_exact = tool_loop.system_prompt(honesty_enabled=True, exact_enabled=True)
-    assert "search_exact" in with_exact
+def test_the_exact_retry_does_not_fire_when_the_flag_is_off(monkeypatch):
+    toolbox = make_toolbox()
+    toolbox.exact_phrase_for_question = lambda question: "visitor badge"
+    calls = []
+    toolbox.search_exact = lambda phrase, doc_id="", limit=6: calls.append(phrase) or "Passages containing nothing"
+    replies = iter([
+        answer_reply("I could not find that in the available documents."),
+        answer_reply("I could not find that in the available documents."),
+    ])
+    monkeypatch.delenv("OI_TOOL_EXACT", raising=False)
+    tool_loop.run_loop(lambda messages, tools: next(replies), toolbox,
+                       "How long is a visitor badge valid?")
+    assert calls == []
 
+
+def test_the_phrase_picker_prefers_the_rarest_plausible_phrase():
+    toolbox = make_toolbox()
+    counts = {
+        "Current Termination Date": 12,
+        "Credit Agreement": 4,
+    }
+    toolbox._exact_count = lambda phrase, doc_id="": counts.get(phrase, 500)
+    phrase = toolbox.exact_phrase_for_question("Under the Credit Agreement, what is the Current "
+                                              "Termination Date?")
+    assert phrase == "Credit Agreement"
 
 def test_exact_search_rejects_a_short_phrase():
     toolbox = make_toolbox()
@@ -498,7 +534,7 @@ def test_exact_search_rejects_a_short_phrase():
 
 def test_exact_search_renders_a_centred_excerpt_and_numbers_the_evidence():
     toolbox = make_toolbox()
-    toolbox._exact_matches = lambda phrase, doc_id="": ["chunk-1"]
+    toolbox._exact_matches = lambda phrase, doc_id="", limit=6: ["chunk-1"]
     import retriever as real_retriever
     original = real_retriever._fetch_payloads
     real_retriever._fetch_payloads = lambda services, wanted, roots: {
@@ -513,3 +549,13 @@ def test_exact_search_renders_a_centred_excerpt_and_numbers_the_evidence():
     assert "24 hours maximum" in out
     assert "company/doc.md p3" in out
     assert len(toolbox.evidence) == 1
+
+
+def test_exact_search_points_at_the_row_query_when_the_phrase_is_too_broad():
+    toolbox = make_toolbox()
+    toolbox._exact_matches = lambda phrase, doc_id="", limit=6: ["chunk-1"]
+    toolbox._exact_count = lambda phrase, doc_id="": 500
+    payload = json.loads(toolbox.search_exact("net sales"))
+    assert "does not identify a heading" in payload["note"]
+    assert "query_rows" in payload["note"]
+

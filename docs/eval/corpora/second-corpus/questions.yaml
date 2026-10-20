@@ -762,7 +762,8 @@ questions:
     & Real Estate | 6220 Electrical Service | 1293.79 | Derek Ahn | Paid
 - id: SC_PROBE_NEEDLE
   category: probe_long_document
-  question: How long is a visitor badge valid at Northwind?
+  question: What is the maximum number of hours a visitor badge can stay valid at
+    Northwind?
   expected:
     staff:
       answered: true

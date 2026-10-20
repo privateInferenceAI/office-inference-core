@@ -993,23 +993,24 @@ items:
       the audit tool, so every tool_call row in the chain named no tool.
 
   - id: AGENT-EXACT-001
-    title: An exact-phrase search tool for headings and defined terms that embedding rank buries
+    title: A deterministic exact-phrase fallback when the tool loop is about to refuse
     tier: [cloud, hosted]
     phase: C6
     verify: >-
-      with OI_TOOL_EXACT on, the model can search for a literal phrase and receives up to six passages
-      containing it, comma-insensitively, inside the session's access roots, each rendered as an excerpt
-      centred on the match and numbered into the citation evidence; the phrase is a bound parameter, the
-      query is one SELECT, and when a phrase is empty or shorter than two characters the tool returns an
-      error rather than scanning.
+      with OI_TOOL_EXACT on, when the tool loop is about to answer with a refusal, or reaches within two
+      steps of its cap, it extracts the rarest literal phrase from the question that matches between one and
+      sixteen chunks, searches it comma-insensitively inside the session's access roots, adds up to ten
+      excerpts centred on the match to the evidence, and lets the model answer once more. Exactly one retry.
     status: experimental
     note: >-
-      Built 2026-10-20 from the needle diagnosis: on the second corpus the carrying chunk of two needles
-      ranked below the retrieval cut while the right document ranked first, and the wider-set Apple needle
-      ranked first but its excerpt was truncated before the figure. The tool adds candidates and does not
-      change what search_documents returns, which is the additive property the regression plan requires.
-      Default off; acceptance is a five-run needle set and both corpora with the flag on against the flag
-      off. Evidence will live in docs/reviews/exact-phrase-2026-10-20.md.
+      Built 2026-10-20 after the needle diagnosis: on the second corpus the carrying chunk of two needles
+      ranked below the retrieval cut while the right document ranked first; on the first corpus the carrying
+      chunk ranked first but its excerpt was truncated before the figure. Two model-facing designs (a sixth
+      tool, then an exact mode on search_documents) were measured and rejected because they changed tool
+      choice and destabilised the Target table question. The deterministic fallback keeps the tool list and
+      prompt unchanged: Caterpillar's termination-date needle went from 0 of 5 to 5 of 5 while the Target
+      question stayed 5 of 5. The Northwind visitor-badge needle remains open and is an instrument/probe
+      question. Default off until the five-run acceptance is recorded.
 
   - id: AGENT-FALLBACK-001
     title: A failed primary model fails over once to a declared second model

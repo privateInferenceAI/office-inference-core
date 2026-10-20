@@ -47,7 +47,8 @@ If the agent believes a fixed constraint should change, it writes the argument a
 **Section 0: the plan.** Before building, the agent reads the repository and the reference documents and writes a
 plan: the sections it proposes, their order, the scope of each, the definition of done for each, the risks, the
 budget per section, and what it expects to learn or improve. The owner accepts or adjusts the plan. No section
-starts before the plan is accepted.
+starts before the plan is accepted. The scope map to build against is `FINISH-SCOPE.md`; the paste-ready build
+instruction is `FINISH-PROMPT.md`.
 
 **Sections 1 to N.** One section at a time. A section is a coherent capability, not a folder of code: for example
 "a workflow engine with one connector", "a provider layer with one non-Bedrock provider", "a data path for data

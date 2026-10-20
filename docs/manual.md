@@ -5732,7 +5732,7 @@ which is also the rollback. The boundary is deliberate: a question worded differ
 | `OI_TOOL_MAX_CALLS` | 10 | tool calls per answer, capped at 24 |
 | `OI_TOOL_SEARCH_LIMIT` | 8 | results a search may add |
 | `OI_TOOL_QUERY` | off | enables the structured row query; every call is audited as a `tool_call` with its candidate and returned-row counts |
-| `OI_TOOL_EXACT` | off | enables the exact-phrase search tool, for headings and defined terms that ordinary search ranks low; off until its five-run comparison |
+| `OI_TOOL_EXACT` | off | enables the deterministic exact-phrase fallback: when a refusal is imminent, the loop searches the rarest literal phrase from the question, adds centred excerpts, and retries once; off until measured |
 
 The wall clock is the same request budget the single-shot path uses. Any loop failure, cap, provider error or
 exception falls back to the single-shot answer with the passages retrieval already chose, so enabling the loop
