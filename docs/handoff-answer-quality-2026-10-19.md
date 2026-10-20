@@ -170,9 +170,13 @@ cafeteria-plan tax text); it now reads "cafeteria menu". Five runs on the new in
 53 (mean 51.8)**, all five probes passing in every run, all eight absent patterns at zero, U08 failing in all five
 and N04 in one. This is a new baseline, not an improvement claim, because the run set changed.
 
-**A wider evaluation set is ready (PR #193).** 66 questions: the live 40 plus 26 authored from index-verified facts
-(aggregation, date arithmetic, multi-hop, untouched-document coverage), with a validator that proves computed
-answers through their operands. It is not the scored instrument yet.
+**The wider evaluation set is measured (PR #193, measured in PR #199).** 72 questions: the live 40 plus 26
+authored from index-verified facts plus six policy-absence phrasings for the honesty gate, with a validator that
+proves computed answers through their operands. Five runs: **84, 84, 85, 84, 84 of 85 (mean 84.2)**. Aggregation,
+date arithmetic, multi-hop, cross-document, access boundary and every refusal question passed 100 percent; the only
+failure is one long-document needle (Apple 10-K headcount) in four runs, where the carrying chunk is indexed but
+retrieval returned financial tables from the same file. That is the next instrument's target. p50 2.8 s, p95 13.6 s,
+0.0118 USD per answer. Evidence: docs/reviews/wider-set-2026-10-19.md.
 
 **Chain measurement** (instrument = the redesigned probes): healthy five runs scored 52, 52, 52, 52, 52 of 53 with zero of 492 model calls failing over. With the primary failed on purpose, five runs scored the same 52, 52, 52, 52, 52, zero degraded answers, and every one of the 265 answer rows came through the us-east-2 Haiku entry. With both that entry and the primary failed, four of four answers came from Nova Pro (two of four questions correct: the third leg works, and it is a last resort). Cost per answer about 0.0134 USD, p95 about 12 seconds. Evidence: `docs/reviews/regional-fallback-2026-10-19.md`.
 
@@ -314,8 +318,8 @@ The structured row query is **done and measured** (section 2b). The priorities b
 3. **Done: the bad probes are redesigned (PR #192).** PR1 and PR4 are independent of the question set, PR5 was
    added for the PII gate, and unanswerable questions are re-verified against the index every run. All five probes
    passed in every run of the new baseline.
-4. **Done: a wider evaluation set is ready (PR #193).** 66 questions, 26 of them new, every one mechanically
-   validated against the index. It is not the scored instrument yet; measuring it is the next work.
+4. **Done: the wider evaluation set is measured (PR #193, PR #199).** 72 questions, 26 of them new, five runs
+   at mean 84.2 of 85. The one failure is long-document needle retrieval, which is the next instrument's target.
 5. **The acceptance panel.** Latency is now captured per answer and summarised (p50, p95) by the runner, and
    `scripts/acceptance_panel.py` joins the runs to the gateway's spend records for cost per answer,
    `docs/reviews/acceptance-panel-2026-10-19.md` carries the numbers.
