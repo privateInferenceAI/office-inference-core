@@ -190,6 +190,24 @@ QUERY_AMBIGUOUS_DOCS = 3
 QUERY_EXTRA_EVIDENCE = 8
 
 
+# --------------------------------------------------------------------------- exact phrase bounds
+#
+# A phrase search is the fix for a measured recall gap: on the second corpus the carrying chunk of two
+# needles ranked below the cut while the document itself ranked first, and retrieval offered nearby rules
+# instead. The phrase is matched literally against stored text, comma-insensitive, so a heading or a defined
+# term is found regardless of embedding rank. The excerpt is centred on the match because the wider-set
+# Apple snippet was truncated before the figure that answered the question.
+EXACT_RESULT_CAP = 6
+EXACT_WINDOW = 380
+EXACT_MIN_CHARS = 2
+EXACT_MAX_CHARS = 120
+EXACT_EXTRA_EVIDENCE = 12
+EXACT_AMBIGUOUS_CHUNKS = 24
+EXACT_AUTO_MAX_MATCHES = 16
+EXACT_AUTO_CANDIDATES = 14
+EXACT_FALLBACK_RESULTS = 10
+
+
 def _normal_for_match(value: str) -> str:
     """A match string as the row query compares it: lower case, commas gone, whitespace collapsed.
 
@@ -282,6 +300,38 @@ def rows_in_chunk(payload: dict) -> list[dict]:
     return rows
 
 
+def exact_query(phrase: str, doc_id: str, roots, limit: int = EXACT_RESULT_CAP) -> tuple:
+    # The phrase search as SQL and its parameters: one SELECT, parameterised, ACL-filtered, bounded.
+    params = {"roots": sorted(roots), "needle": _normal_for_match(phrase), "limit": max(1, int(limit))}
+    clauses = ["acl = any(%(roots)s)", "position(%(needle)s in lower(replace(text, ',', ''))) > 0"]
+    if doc_id:
+        clauses.append("doc_id = %(doc)s")
+        params["doc"] = doc_id
+    sql = ("select chunk_id, doc_id from chunk_index where " + " and ".join(clauses)
+           + " order by doc_id, page_start, chunk_id limit %(limit)s")
+    return sql, params
+
+
+def exact_excerpt(text: str, phrase: str, window: int = EXACT_WINDOW) -> str:
+    # A window of text centred on the phrase, or on its first word when the exact form is not literal.
+    needle = " ".join(phrase.split()).lower()
+    lowered = text.lower()
+    index = lowered.find(needle)
+    if index < 0:
+        first = needle.split()[0] if needle.split() else needle
+        index = lowered.find(first)
+    if index < 0:
+        return ""
+    start = max(0, index - window // 2)
+    end = min(len(text), index + len(needle) + window // 2)
+    excerpt = " ".join(text[start:end].split())
+    if start > 0:
+        excerpt = "..." + excerpt
+    if end < len(text):
+        excerpt = excerpt + "..."
+    return excerpt
+
+
 class ToolBox:
     """The tools, the evidence they produce, and the access rules they apply.
 
@@ -301,6 +351,7 @@ class ToolBox:
         self.roots = frozenset(getattr(permit, "roots", ()) or ())
         self.evidence: list = []
         self.index: dict[str, int] = {}
+        self.query_rows_called = 0
 
     # ------------------------------------------------------------------ evidence
     def add(self, passage, extra_slots: int = 0) -> int:
@@ -351,6 +402,171 @@ class ToolBox:
         rendered = self.render(result.passages)
         return ("Search results for " + json.dumps(query) + ":\n" + rendered) if rendered \
             else "No results for " + json.dumps(query) + "."
+
+    def read_passages(self, doc_id: str, page_start: int | None = None, page_end: int | None = None,
+                      chunk_id: str = "") -> str:
+        if not doc_id:
+            return json.dumps({"error": "doc_id is required"})
+        import psycopg2
+
+        dsn = getattr(self.services, "database_url", "")
+        if not dsn:
+            return json.dumps({"error": "the document store is unavailable"})
+        start = int(page_start or 1)
+        end = int(page_end or start)
+        try:
+            with psycopg2.connect(dsn) as connection:
+                with connection.cursor() as cursor:
+                    if chunk_id:
+                        cursor.execute(
+                            "select page_start, page_end from chunk_index "
+                            "where chunk_id = %s and doc_id = %s and acl = any(%s)",
+                            (chunk_id, doc_id, sorted(self.roots)))
+                        found = cursor.fetchone()
+                        if not found:
+                            return json.dumps({"error": "no such chunk in the documents this session may read"})
+                        start, end = int(found[0]), int(found[1])
+                    cursor.execute(
+                        "select chunk_id from chunk_index "
+                        "where doc_id = %s and acl = any(%s) "
+                        "and page_end >= %s and page_start <= %s "
+                        "order by page_start, chunk_id limit %s",
+                        (doc_id, sorted(self.roots), start, end, self.read_limit))
+                    ids = [row[0] for row in cursor.fetchall()]
+        except Exception as exc:  # noqa: BLE001
+            return json.dumps({"error": f"the document store could not be read: {type(exc).__name__}"})
+        if not ids:
+            return json.dumps({"error": "no passages found at that location for this document, or it is a "
+                                        "data set rather than a readable document"})
+        import retriever
+
+        payloads = retriever._fetch_payloads(self.services, ids, self.roots)
+        passages = [retriever.Passage.from_payload(payloads[key], None, 0.0)
+                    for key in ids if key in payloads]
+        rendered = self.render(passages)
+        return (f"Passages from {doc_id} pages {start}-{end}:\n{rendered}") if rendered \
+            else json.dumps({"error": "no readable passages at that location"})
+
+    def search_exact(self, phrase: str, doc_id: str = "", limit: int = EXACT_RESULT_CAP) -> str:
+        # Find chunks stating a phrase, literally and comma-insensitively, with a centred excerpt.
+        cleaned = " ".join(str(phrase or "").split())
+        if len(cleaned) < EXACT_MIN_CHARS:
+            return json.dumps({"error": "phrase must contain at least two characters"})
+        cleaned = cleaned[:EXACT_MAX_CHARS]
+        total = self._exact_count(cleaned, doc_id)
+        if total > EXACT_AMBIGUOUS_CHUNKS and not doc_id:
+            return json.dumps({"note": "the phrase matches " + str(total) + " passages, so it does not "
+                    "identify a heading or a defined term. Add doc_id to scope it, or use query_rows for a "
+                    "figure from a table."})
+        ids = self._exact_matches(cleaned, doc_id, limit)
+        self._last_facts = {"exact_matches": len(ids)}
+        if not ids:
+            return json.dumps({"error": "no passage states that phrase in the documents this session may read"})
+        import retriever
+        payloads = retriever._fetch_payloads(self.services, ids, self.roots)
+        passages = [retriever.Passage.from_payload(payloads[key], None, 0.0)
+                    for key in ids if key in payloads]
+        rendered = []
+        for passage in passages:
+            text = getattr(passage, "text", "") or ""
+            excerpt = exact_excerpt(text, cleaned)
+            if not excerpt:
+                excerpt = " ".join(text.split())[:EXACT_WINDOW]
+            number = self.add(passage, extra_slots=EXACT_EXTRA_EVIDENCE)
+            if not number:
+                continue
+            rendered.append("[" + str(number) + "] " + passage.doc_id + " p"
+                            + str(passage.page_start) + " kind=" + str(passage.kind)
+                            + ": " + excerpt)
+        if not rendered:
+            return json.dumps({"error": "the phrase was indexed but the passages could not be read"})
+        header = "Passages containing " + json.dumps(cleaned) + ":" + chr(10)
+        return header + chr(10).join(rendered)
+
+    def exact_phrase_for_question(self, question: str) -> str:
+        # The rarest literal phrase from the question, used only when the loop is about to refuse.
+        # Capitalised runs catch a heading or a defined term ("Current Termination Date"); content
+        # n-grams catch a rule name ("visitor badge", "full-time equivalent"). A phrase that matches
+        # too much (or nothing) is rejected, so the fallback cannot pull half the corpus.
+        tokens = [token for token in question.replace("?", " ").replace(",", " ").split()]
+        from_words = []
+        stop = {"the", "a", "an", "of", "for", "and", "or", "to", "in", "on", "at", "by", "with",
+                "what", "which", "who", "how", "many", "much", "is", "are", "was", "were", "did",
+                "does", "do", "its", "their", "our", "your", "this", "that", "these", "those"}
+        capitalised = []
+        for token in tokens:
+            stripper = chr(46) + chr(95) + chr(40) + chr(41) + chr(91) + chr(93) + chr(59) + chr(58) + chr(39) + chr(34)
+            clean = token.strip(stripper)
+            if len(clean) < 2:
+                continue
+            if clean[0].isupper() and clean.lower().strip(".") not in stop:
+                capitalised.append(clean)
+            elif capitalised:
+                if len(capitalised) >= 2:
+                    from_words.append(" ".join(capitalised))
+                capitalised = []
+        if len(capitalised) >= 2:
+            from_words.append(" ".join(capitalised))
+        words = [token.strip(stripper).lower() for token in tokens]
+        words = [word for word in words if len(word) >= 3 and word not in stop]
+        for size in (3, 2):
+            for start in range(0, max(1, len(words) - size + 1)):
+                phrase = " ".join(words[start:start + size])
+                if len(phrase) >= 6:
+                    from_words.append(phrase)
+        seen = set()
+        best = ""
+        best_count = None
+        for phrase in from_words[:EXACT_AUTO_CANDIDATES]:
+            if phrase in seen:
+                continue
+            seen.add(phrase)
+            count = self._exact_count(phrase)
+            if count < 1 or count > EXACT_AUTO_MAX_MATCHES:
+                continue
+            if best_count is None or count < best_count:
+                best = phrase
+                best_count = count
+        return best
+
+    def _exact_count(self, phrase: str, doc_id: str = "") -> int:
+        # How many chunks state the phrase, so an over-broad phrase can be answered with a note.
+        import psycopg2
+
+        dsn = getattr(self.services, "database_url", "")
+        if not dsn:
+            return 0
+        params = {"roots": sorted(self.roots), "needle": _normal_for_match(phrase)}
+        sql = "select count(*) from chunk_index where acl = any(%(roots)s) "
+        sql += "and position(%(needle)s in lower(replace(text, ',', ''))) > 0"
+        if doc_id:
+            sql += " and doc_id = %(doc)s"
+            params["doc"] = doc_id
+        try:
+            with psycopg2.connect(dsn) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(sql, params)
+                    row = cursor.fetchone()
+                    return int(row[0]) if row else 0
+        except Exception:
+            return 0
+
+    def _exact_matches(self, phrase: str, doc_id: str = "", limit: int = EXACT_RESULT_CAP) -> list[str]:
+        # The literal-match query, split out so a test can hold it without a database.
+        import psycopg2
+
+        dsn = getattr(self.services, "database_url", "")
+        if not dsn:
+            return []
+        sql, params = exact_query(phrase, doc_id, self.roots, limit=limit)
+        try:
+            with psycopg2.connect(dsn) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(sql, params)
+                    return [row[0] for row in cursor.fetchall()]
+        except Exception as exc:
+            print("search_exact unavailable: " + type(exc).__name__ + ": " + str(exc))
+            return []
 
     def read_passages(self, doc_id: str, page_start: int | None = None, page_end: int | None = None,
                       chunk_id: str = "") -> str:
@@ -568,6 +784,7 @@ class ToolBox:
                 out = self.read_passages(str(args.get("doc_id") or ""), args.get("page_start"),
                                          args.get("page_end"), str(args.get("chunk_id") or ""))
             elif name == "query_rows":
+                self.query_rows_called += 1
                 out = self.query_rows(args.get("match"), str(args.get("doc_id") or ""),
                                       args.get("limit"))
             else:
@@ -633,7 +850,7 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
             + (f"Evidence already retrieved, numbered:\n{seeded}\n\n" if seeded else "")
             + "Search if this is not enough, then answer.")},
     ]
-    stats = {"steps": 0, "tool_calls": 0, "corrections": 0}
+    stats = {"steps": 0, "tool_calls": 0, "corrections": 0, "auto_exact": 0}
     limit_error = ""
     # **What the gateway says answered, per call, so the answer can name the model that ran.** The reply
     # that produces the answer carries it; a failover means this is a different model group from the
@@ -655,6 +872,26 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
         if not calls:
             content = (reply.get("content") or "").strip()
             failure = answer_contract.violation(content, toolbox.texts())
+            # **A refusal gets one deterministic exact-phrase retry.** Two measured needles failed
+            # because the carrying chunk ranked below the retrieval cut, and a model-facing tool proved
+            # too variable in tool choice to fix it. The loop takes the step itself: the rarest literal
+            # phrase from the question is searched exactly, its passages are added, and the model answers
+            # once more. Once only, so a genuinely absent answer still ends in a refusal.
+            if _REFUSAL_PHRASE in content.lower() and stats["auto_exact"] == 0 \
+                    and toolbox.query_rows_called == 0 \
+                    and _flag("OI_TOOL_EXACT", "off"):
+                phrase = toolbox.exact_phrase_for_question(question)
+                if phrase:
+                    stats["auto_exact"] = 1
+                    found = toolbox.search_exact(phrase, "", EXACT_FALLBACK_RESULTS)
+                    if not found.startswith('"error"'):
+                        messages.append({"role": "assistant", "content": content})
+                        messages.append({"role": "user", "content": (
+                            "An exact search for " + json.dumps(phrase) + " found this evidence:" + chr(10)
+                            + found + chr(10) + "Answer the question again using it, or refuse if it "
+                            "does not answer the question.")})
+                        continue
+
             if failure and stats["steps"] < max_steps:
                 stats["corrections"] += 1
                 messages.append({"role": "assistant", "content": content})
@@ -682,6 +919,19 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
                              "content": result})
             if isinstance(result, str) and result.startswith('{"error"'):
                 limit_error = "tool_error"
+            if (stats["steps"] >= max_steps - 2 and stats["auto_exact"] == 0
+                    and toolbox.query_rows_called == 0 and _flag("OI_TOOL_EXACT", "off")):
+                # **The exact fallback also runs before the step limit.** A needle question ends with the
+                # model still searching, not with a refusal, so waiting for a refusal never fired. Two
+                # steps before the limit the loop adds the rarest exact phrase from the question, once.
+                phrase = toolbox.exact_phrase_for_question(question)
+                if phrase:
+                    stats["auto_exact"] = 1
+                    found = toolbox.search_exact(phrase, "", EXACT_FALLBACK_RESULTS)
+                    if not found.startswith('"error"'):
+                        messages.append({"role": "user", "content": (
+                            "An exact search for " + json.dumps(phrase) + " found this evidence:" + chr(10)
+                            + found + chr(10) + "Use it if it answers the question, then answer or refuse.")})
     return {"answer": None, "reason": limit_error or "tool_step_limit", "evidence": toolbox.evidence, **stats}
 
 
