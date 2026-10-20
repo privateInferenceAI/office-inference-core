@@ -171,7 +171,8 @@ def system_prompt(honesty_enabled: bool = True, query_enabled: bool = False, exa
     tools = ""
     if exact_enabled:
         tools += ("; search_exact finds passages that state a phrase literally, for headings and defined "
-                  "terms that ordinary search ranks low")
+                  "terms that ordinary search ranks low. Use it when a question names a term and the results "
+                  "mention it without defining it, or when two documents give different versions of a rule")
     if query_enabled:
         tools += ("; query_rows returns the exact table rows that contain the values or labels you give it, "
                   "which is how a figure is confirmed before it is answered")
