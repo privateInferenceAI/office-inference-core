@@ -303,6 +303,15 @@ Rules established from experience:
 - **Five runs minimum per configuration.** Three-run differences of three to five points are noise. The spread
   across five identical runs was 33 to 45 of 52.
 - **Freeze everything else.** Corpus, model, gateway image, flags. Change one thing at a time.
+- **Never run two suites against one deployment.** On 2026-10-20 the same configuration measured 53 of 53 five
+  times while the box was idle and 48 to 51 of 53 while a second suite ran, with N06 and N07 failing in the lower
+  window. Two runs under contention disqualify both. `scripts/run_answer_suite.sh` holds `/tmp/oi-suite.lock`
+  for its life and exits 3 if another suite holds it; the runner holds a Postgres advisory lock, so a direct
+  `docker run` of `tests/fixtures/data_suite_run.py` is caught too. The script refuses to start above
+  `OI_SUITE_MAX_LOAD` (default 2.0) or below `OI_SUITE_MIN_AVAILABLE_MB` (default 2048), and it writes
+  `run-context.json` with the commit, the answer flags, the api and eval image identities, load and memory. Each
+  run's JSON carries the same record under `context`, and `scripts/acceptance_panel.py` warns when it is
+  missing or shows contention. The rule is `docs/decisions/0005-measurement-hygiene.md`.
 - **Keep the raw JSON.** The audit generator reads frozen result files and produces a per-question table; it never
   edits answers. Do not regenerate numbers by re-running retrieval for a comparison; re-retrieval is a different
   measurement.
