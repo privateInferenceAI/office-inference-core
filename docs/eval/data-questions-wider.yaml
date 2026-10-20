@@ -1,9 +1,9 @@
 # Wider data-question set for future measurement, assembled 2026-10-19.
 #
 # This is the live forty (docs/eval/data-questions.yaml, reproduced unchanged below) plus the
-# twenty-six candidates from docs/eval/candidates/ at commit da08258 that passed mechanical validation:
-# 66 questions in
-# all. It is not the frozen instrument: the forty stay frozen for comparisons with earlier runs, and
+# twenty-six candidates from docs/eval/candidates/ at commit da08258 that passed mechanical validation,
+# plus six policy-absence questions that keep the honesty gate's phrasing boundary measured:
+# 72 questions in all. It is not the frozen instrument: the forty stay frozen for comparisons with earlier runs, and
 # this file is what a future, harder measurement should point at. The per-candidate verdicts are in
 # docs/eval/candidates/VALIDATION.md.
 #
@@ -13,12 +13,15 @@
 # value; a question without a derivation still needs the value literally in source_quote or in the
 # document. The section on derivation in VALIDATION.md states the rules.
 #
-# **Known baseline failure, left unchanged on purpose.** U05's absent_pattern "cafeteria" matches nine
-# chunks in the current index: seven in IRS Publication 15's "cafeteria plan" tax text and two in a
-# Minnesota school pesticide table's "Cafeteria and kitchen" cell. The question is still substantively
-# unanswerable (no menu is indexed), but the suite's own rule says an absent_pattern must match zero
-# chunks, so the validator reports U05 as failing. The forty are frozen for this change; replacing
-# U05 is a separate edit to docs/eval/data-questions.yaml.
+# **U05's absent pattern was corrected on 2026-10-19.** It read "cafeteria", which matches nine chunks
+# of cafeteria-plan tax text and a school pesticide table; it now reads "cafeteria menu", which matches
+# nothing. The live forty and this copy agree, and the validator passes.
+#
+# **The last six questions keep the honesty gate honest.** The gate shipped on 2026-10-19 refuses a
+# question about the company's own attribute when no retrieved passage states it, but its first version
+# only read "the company's". Probes for "our" and "the policy on X" showed those shapes still answered
+# from general knowledge, so those phrasings are now part of this set: if a future change narrows the
+# gate again, these six fail and say so.
 #
 # The accepted candidates keep their own category names: aggregation, date_arithmetic, multi_hop and
 # coverage. None of them duplicates a live question id; no id was rewritten.
@@ -822,3 +825,44 @@ questions:
       operation: difference
       result: "3"
     evidence: "select doc_id, chunk_id, left(text, 380) from chunk_index where doc_id in ('company/group-02/173609.doc','company/group-02/069856.doc') and (text ilike '%5-year terms%' or text ilike '%granted by the Commission for eight years%') order by doc_id returns both sentences; 8 - 5 = 3 years."
+
+  # ---------------------------------------------------------------- honesty-gate phrasing probes (6)
+  # The same absent company attribute in the shapes an operator types. Every absent pattern was
+  # checked at zero matching chunks on 2026-10-19. The gate shipped that day reads all three shapes
+  # and refuses each of these questions; a measurement that sees one answered has found a regression.
+  - id: W_P1
+    category: unanswerable
+    question: "What is our parental leave policy?"
+    absent_pattern: "parental leave"
+    expected:
+      staff: {answered: false, denied: false}
+  - id: W_P2
+    category: unanswerable
+    question: "What is the policy on parental leave?"
+    absent_pattern: "parental leave"
+    expected:
+      staff: {answered: false, denied: false}
+  - id: W_P3
+    category: unanswerable
+    question: "What is the policy regarding jury duty?"
+    absent_pattern: "jury duty"
+    expected:
+      staff: {answered: false, denied: false}
+  - id: W_P4
+    category: unanswerable
+    question: "What does the company's employee handbook say about parental leave?"
+    absent_pattern: "employee handbook"
+    expected:
+      staff: {answered: false, denied: false}
+  - id: W_P5
+    category: unanswerable
+    question: "What is our dress code?"
+    absent_pattern: "dress code"
+    expected:
+      staff: {answered: false, denied: false}
+  - id: W_P6
+    category: unanswerable
+    question: "What is the company's remote work policy?"
+    absent_pattern: "remote work"
+    expected:
+      staff: {answered: false, denied: false}

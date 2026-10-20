@@ -117,7 +117,7 @@ rejected. No candidate failed for an unindexed operand or an ambiguous operation
 
 ## Validation run
 
-The full wider file returns `66 questions: 65 passed, 1 failed`. Every derived candidate passes.
+The full wider file returns `72 questions: 65 passed, 1 failed`. Every derived candidate passes.
 
 A control run of the 13 derived candidates with their `derivation` blocks removed returns
 `13 questions: 0 passed, 13 failed`, with the first-pass failures reproduced. The derivation is
