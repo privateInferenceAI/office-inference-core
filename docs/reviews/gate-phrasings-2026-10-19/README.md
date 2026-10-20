@@ -44,8 +44,7 @@ P1 refused, P2 refused, P3 refused, P4 refused, P5 refused, P6 refused
 
 ## Regression measurement
 
-Five runs of the scored suite (53 role-runs, the same instrument as the honesty-gate measurement): **(pending,
-filled before merge)**.
+Five runs of the scored suite (53 role-runs, the same instrument as the honesty-gate measurement): **53, 53, 53, 53, 53 of 53**, no failures in any run. The widened gate changed no scored outcome; the six phrasing probes are the measured difference.
 
 ## The wider set now keeps this measured
 
