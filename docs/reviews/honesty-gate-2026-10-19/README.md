@@ -65,7 +65,7 @@ each with an absent pattern checked at zero hits on 2026-10-19:
 | Prompt iteration 2 | 6 of 7 (dress code still fabricated) |
 | **Gate (this change)** | **7 of 7** |
 
-Five-run suite with the gate: **(pending, filled before merge)**.
+Five-run suite with the gate: **53, 53, 53, 52, 53 of 53 (mean 52.8)**. U08 passes in all five runs. The only failure is A04 in one run, an access-boundary question whose executive session answered "could not find" and cited the wrong document: the known retrieval/tool-loop flake class, and the same question passed in the other four runs. N05, N07 and X07, which the two prompt iterations broke, pass in all five.
 
 ## What this does not claim
 

@@ -192,7 +192,7 @@ retrieved passage contains the subject phrase. It runs before the JSON answer is
 answer is emitted, and before the single-shot stream calls the model; it rides `OI_TOOL_HONESTY`; the audit row
 carries `honesty_gate`. Seven policy-absence probes (remote work, expense, dress code, jury duty, paid time off,
 overtime, drug testing), every pattern checked at zero hits, refuse 7 of 7 under the gate against 6 of 7 before.
-Five runs of the scored suite: **(pending)**. Evidence: `docs/reviews/honesty-gate-2026-10-19.md`.
+Five runs of the scored suite: **53, 53, 53, 52, 53 of 53 (mean 52.8)**, U08 passing in every run and the only failure one A04 run (the known retrieval/tool-loop flake class). N05, N07 and X07, which the prompt iterations broke, pass in all five. Evidence: `docs/reviews/honesty-gate-2026-10-19.md`.
 
 **The prompt freeze exception is recorded and closed.** The owner approved one measured prompt attempt as an
 exception; it was measured twice and reverted. The prompt shipped is the pre-experiment prompt, so no unmeasured
