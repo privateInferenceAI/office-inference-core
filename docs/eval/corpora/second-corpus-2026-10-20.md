@@ -48,9 +48,16 @@ gate was built for.
 
 ## Deployment and ingestion
 
-A second, temporary deployment on the same box, isolated from the development deployment: its own root
-(`/opt/oi-core2`), its own Postgres, Qdrant, gateway, API and rendered secrets, on the network `ai-net2`. The
-development corpus and every measurement taken on it are untouched.
+A **dedicated EC2 instance** (m7i.4xlarge, same AMI, security group, key pair and Bedrock instance profile as the
+development box; tagged `oi-core-second-corpus`, instance `i-05fa6edd5284b7881`), not a second stack on the
+development box. Two full stacks on the development box left about 14 GB available before any second-corpus
+ingestion, because each stack holds an embedding service and a parser (46 GB used of 61 GB), and running the
+second-corpus measurement there would have put memory pressure and CPU contention under the very latency and
+accuracy numbers the exercise exists to produce.
+
+The new instance has its own root (`/opt/oi-core2`), Postgres, Qdrant, gateway, API and rendered secrets, on the
+network `ai-net2`. The development deployment stays untouched and available. The instance costs about 0.81 USD an
+hour while it runs and is stopped or terminated when the second-corpus work is finished and its evidence captured.
 
 Ingestion goes through the same worker and chunker as the development corpus. The pipeline was smoke-tested on a
 single synthetic document before the bulk load: parse, chunk, embed, write, then an answer through the second API
