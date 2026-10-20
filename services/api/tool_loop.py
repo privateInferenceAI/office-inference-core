@@ -96,26 +96,6 @@ TOOLS = [
             },
         },
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "lookup_value",
-            "description": (
-                "Find the exact place a figure appears in the documents, comma-insensitive. Use it when the "
-                "question quotes a number, or when a value sits in a very large table whose rows are not "
-                "searchable individually."),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "value": {"type": "string",
-                              "description": "the figure exactly as it appears, for example 59,473"},
-                    "doc_id": {"type": "string",
-                               "description": "optional: search only this document"},
-                },
-                "required": ["value"],
-            },
-        },
-    },
 ]
 
 _PROMPT_HEAD = (
@@ -158,14 +138,12 @@ _PROMPT_TAIL = (
 )
 
 
-def system_prompt(lookup_enabled: bool = True, honesty_enabled: bool = True,
-                  query_enabled: bool = False) -> str:
+def system_prompt(honesty_enabled: bool = True, query_enabled: bool = False) -> str:
     """The instruction, built from the tools this deployment actually offers.
 
-    **The prompt once named `lookup_value` even when the tool was switched off**, so the model could spend its
-    limited steps calling something that was not there, and the tool errors then ate the calls meant for the
-    search. Found on 2026-10-18 after the final configuration measured below the Phase A peak: the prompt and the
-    tool list have to be one fact, which is why both now come from this function.
+    **The prompt and the tool list have to be one fact.** A tool the prompt does not name is used late or
+    not at all, and a tool that is named but not offered eats the loop's limited steps in errors. Found on
+    2026-10-18 when the prompt still named a tool the deployment had switched off.
 
     **`query_rows` is named here for the same reason the other two tools are.** A tool the prompt does not
     name is a tool the model uses late or not at all, and the prompt and the offered list have to be one fact in
@@ -175,9 +153,6 @@ def system_prompt(lookup_enabled: bool = True, honesty_enabled: bool = True,
     if query_enabled:
         tools += ("; query_rows returns the exact table rows that contain the values or labels you give it, "
                   "which is how a figure is confirmed before it is answered")
-    if lookup_enabled:
-        tools += ("; lookup_value finds the exact place a figure appears, for figures that identify a row "
-                  "uniquely")
     rules = _PROMPT_HEAD.format(tools=tools) + _PROMPT_RULES + _TABLE_RULE
     if honesty_enabled:
         rules += _HONESTY_RULE
@@ -213,17 +188,6 @@ QUERY_AMBIGUOUS_DOCS = 3
 # model kept querying a row that was already returned, the namespace stayed full, the calls matched a row and
 # rendered nothing, and the model read that as absence. Eight slots is one call's default worth of rows.
 QUERY_EXTRA_EVIDENCE = 8
-
-
-# How a figure is written, and how it is compared: commas removed, so a comma-separated figure and a plain one
-# are the same figure. Kept at module level so a test can hold the comparison without a database.
-import re as _re
-
-_FIGURES = _re.compile(r"\d[\d,]*(?:\.\d+)?")
-
-
-def _figures_in(value: str) -> list[str]:
-    return [match.replace(",", "") for match in _FIGURES.findall(value or "")]
 
 
 def _normal_for_match(value: str) -> str:
@@ -432,78 +396,11 @@ class ToolBox:
         return (f"Passages from {doc_id} pages {start}-{end}:\n{rendered}") if rendered \
             else json.dumps({"error": "no readable passages at that location"})
 
-    def lookup_value(self, value: str, doc_id: str = "") -> str:
-        """Find chunks stating a figure, comma-insensitive, within the permitted roots.
-
-        **Why this is a tool rather than a better search.** Embeddings are weak on numbers: a question quoting
-        59,473 and a table row stating it are not similar text. The vector arm misses those and the lexical arm
-        tokenises them badly, which is why the value was in the retrieved context only 58 percent of the time. A
-        literal match is exact, cheap and explainable, so it belongs where a model can ask for it.
-        """
-        # **A row described by two figures is an intersection, not one number.** The first version normalised
-        # the whole argument to one digit string, so `228865.1 and 188387.5` became `22886511883875`, which
-        # appears nowhere; the model then reported that no passage stated the figures. Each figure is its own
-        # literal match, and a row described by two must contain both.
-        figures = _figures_in(str(value or ""))
-        if not figures:
-            return json.dumps({"error": "value must contain a figure, for example 59,473"})
-        first = self._lookup_matches(figures[0], doc_id)
-        wanted = {chunk_id for chunk_id, _doc in first}
-        for figure in figures[1:]:
-            wanted &= {chunk_id for chunk_id, _doc in self._lookup_matches(figure, doc_id)}
-        ids = [chunk_id for chunk_id, _doc in first if chunk_id in wanted]
-        if not ids:
-            return json.dumps({"error": f"no passage states {value!r} in the documents this session may read"})
-        # **A figure stated in many documents is not an anchor, and pretending it is produces confident wrong
-        # answers.** Measured in the Phase B run: a model told that 59,473 appears in twenty census tables read
-        # the mean from the wrong one. The tool now says so and names the documents, so the model searches for
-        # the table the question describes instead of anchoring on the first match.
-        documents = {doc for chunk_id, doc in first if chunk_id in ids}
-        if len(documents) > 3:
-            examples = sorted(documents)[:5]
-            return json.dumps({
-                "note": f"{value!r} appears in {len(documents)} documents, so it does not identify one row. "
-                        f"Search for the table the question describes, or call lookup again with doc_id. "
-                        f"Examples: {examples}"})
-        import retriever
-
-        payloads = retriever._fetch_payloads(self.services, ids, self.roots)
-        passages = [retriever.Passage.from_payload(payloads[key], None, 0.0)
-                    for key in ids if key in payloads]
-        rendered = self.render(passages)
-        return ("Passages stating " + json.dumps(str(value)) + ":\n" + rendered) if rendered \
-            else json.dumps({"error": "the figure was indexed but the passages could not be read"})
-
-    def _lookup_matches(self, normalized: str, doc_id: str = "") -> list[tuple[str, str]]:
-        """The literal-match query, as (chunk id, document id). Split out so a test can hold it without a
-        database, and so the ambiguity guard can count documents rather than guessing from an id."""
-        import psycopg2
-
-        dsn = getattr(self.services, "database_url", "")
-        if not dsn:
-            return []
-        sql = ("select chunk_id, doc_id from chunk_index where acl = any(%(roots)s) "
-               "and replace(text, ',', '') like %(needle)s")
-        params = {"roots": sorted(self.roots), "needle": f"%{normalized}%"}
-        if doc_id:
-            sql += " and doc_id = %(doc)s"
-            params["doc"] = doc_id
-        sql += " order by doc_id, page_start, chunk_id limit %(limit)s"
-        params["limit"] = 8
-        try:
-            with psycopg2.connect(dsn) as connection:
-                with connection.cursor() as cursor:
-                    cursor.execute(sql, params)
-                    return [(row[0], row[1]) for row in cursor.fetchall()]
-        except Exception as exc:  # noqa: BLE001
-            print(f"lookup_value unavailable: {type(exc).__name__}: {exc}")
-            return []
-
     # ------------------------------------------------------------------ structured rows
     def query_rows(self, match, doc_id: str = "", limit=None) -> str:
         """Return the exact table rows that contain every string in `match`.
 
-        **Why a row and not a passage.** The Phase B measurement made this gap concrete: `lookup_value` finds
+        **Why a row and not a passage.** The Phase B measurement made this gap concrete: the earlier literal-match tool finds
         the chunk where a figure appears, but the answer row can sit in a forty-row group of near-identical
         lines, and the model read the neighbouring line. Its own words were that none of the passages contained
         a row with the first two values 228865.1 and 188387.5 while the row was in the passage. A tool that
@@ -670,14 +567,12 @@ class ToolBox:
             elif name == "read_passages":
                 out = self.read_passages(str(args.get("doc_id") or ""), args.get("page_start"),
                                          args.get("page_end"), str(args.get("chunk_id") or ""))
-            elif name == "lookup_value":
-                out = self.lookup_value(str(args.get("value") or ""), str(args.get("doc_id") or ""))
             elif name == "query_rows":
                 out = self.query_rows(args.get("match"), str(args.get("doc_id") or ""),
                                       args.get("limit"))
             else:
                 out = json.dumps({"error": f"unknown tool {name!r}; available: search_documents, "
-                                           f"read_passages, query_rows, lookup_value"})
+                                           f"read_passages, query_rows"})
         except Exception as exc:  # noqa: BLE001 - a tool failure must not end the request
             out = json.dumps({"error": f"the tool failed: {type(exc).__name__}"})
         if self.audit is not None:
@@ -710,8 +605,6 @@ def active_tools() -> list:
     offered = list(TOOLS)
     if not _flag("OI_TOOL_QUERY", "off"):
         offered = [schema for schema in offered if schema["function"]["name"] != "query_rows"]
-    if not _flag("OI_TOOL_LOOKUP", "on"):
-        offered = [schema for schema in offered if schema["function"]["name"] != "lookup_value"]
     return offered
 
 
@@ -730,24 +623,22 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
     import answer_contract
 
     offered = active_tools()
-    lookup_offered = any(schema["function"]["name"] == "lookup_value" for schema in offered)
     query_offered = any(schema["function"]["name"] == "query_rows" for schema in offered)
     honesty = os.environ.get("OI_TOOL_HONESTY", "on").strip().lower() not in ("off", "0", "false", "no")
     seeded = toolbox.render(list(seed_passages))
     messages = [
-        {"role": "system", "content": system_prompt(lookup_offered, honesty, query_offered)},
+        {"role": "system", "content": system_prompt(honesty, query_offered)},
         {"role": "user", "content": (
             f"Question: {question}\n\n"
             + (f"Evidence already retrieved, numbered:\n{seeded}\n\n" if seeded else "")
             + "Search if this is not enough, then answer.")},
     ]
-    stats = {"steps": 0, "tool_calls": 0, "corrections": 0, "auto_lookups": 0}
+    stats = {"steps": 0, "tool_calls": 0, "corrections": 0}
     limit_error = ""
     # **What the gateway says answered, per call, so the answer can name the model that ran.** The reply
     # that produces the answer carries it; a failover means this is a different model group from the
     # manifest's primary, and the caller reports both facts.
     attribution: dict = {}
-    lookup_enabled = any(schema["function"]["name"] == "lookup_value" for schema in active_tools())
 
     while stats["steps"] < max_steps:
         if deadline is not None and time.monotonic() >= deadline:
@@ -764,32 +655,6 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
         if not calls:
             content = (reply.get("content") or "").strip()
             failure = answer_contract.violation(content, toolbox.texts())
-            # **A refusal on a question that quotes figures the evidence does not contain is nudged once.**
-            # Measured: the large-table probe returns a refusal even though the quoted pair identifies the row
-            # uniquely. The model does not always take the lookup step the prompt describes, so the loop takes it
-            # deterministically: one automatic lookup for figures from the question, then ask again. Once only,
-            # so a genuinely absent figure still ends in a refusal.
-            if stats["auto_lookups"] == 0 and lookup_enabled and stats["steps"] < max_steps:
-                if failure is not None or (_REFUSAL_PHRASE in content.lower()):
-                    quoted = _figures_in(question)
-                    evidence_digits = "".join(
-                        char for text in toolbox.texts() for char in text if char.isdigit())
-                    missing = [figure for figure in quoted
-                               if "".join(ch for ch in figure if ch.isdigit()) not in evidence_digits]
-                    if missing:
-                        stats["auto_lookups"] = 1
-                        found = toolbox.lookup_value(" and ".join(missing[:2]))
-                        # **Only real evidence justifies a second attempt.** The lookup also answers with a
-                        # note when a figure appears in many documents (it is not an anchor) and with an error
-                        # when nothing states it; nudging on either told the model "here is evidence" when there
-                        # was none, and the Phase B measurement showed exact-number questions getting worse.
-                        if found.startswith("Passages stating"):
-                            messages.append({"role": "assistant", "content": content})
-                            messages.append({"role": "user", "content": (
-                                "An automatic lookup for figures quoted in the question found this evidence:\n"
-                                + found + "\nAnswer the question again using it, or refuse if it does not "
-                                "answer the question.")})
-                            continue
             if failure and stats["steps"] < max_steps:
                 stats["corrections"] += 1
                 messages.append({"role": "assistant", "content": content})

@@ -501,9 +501,6 @@ services:
       OI_TOOL_MAX_STEPS: ${OI_TOOL_MAX_STEPS:-6}
       OI_TOOL_MAX_CALLS: ${OI_TOOL_MAX_CALLS:-10}
       OI_TOOL_SEARCH_LIMIT: ${OI_TOOL_SEARCH_LIMIT:-8}
-      # One tool can be turned off for a measurement without a code change. Lookup is on by default; when a
-      # quoted figure appears in many documents it refuses to act as an anchor, which is what made it safe.
-      OI_TOOL_LOOKUP: ${OI_TOOL_LOOKUP:-off}
       # The structured row query, off until a deployment turns it on. It returns table rows rather than
       # passages, so it changes the answer path the measured configuration was frozen on. The flag is both the
       # opt-in and the rollback; the five-run comparison is docs/reviews/query-tool-2026-10-19.md.

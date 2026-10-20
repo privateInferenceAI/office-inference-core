@@ -162,132 +162,34 @@ def test_progress_events_are_reported_for_steps_and_tools():
     assert events[1]["tool"] == "search_documents"
 
 
-def test_a_refusal_on_quoted_figures_triggers_one_lookup():
-    toolbox = make_toolbox()
-    calls = []
-
-    def fake_lookup(value, doc_id=""):
-        calls.append(value)
-        number = toolbox.add(FakePassage("c1", "228865.1 | 188387.5 | -6.1"))
-        return f"Passages stating {value!r}:\n[{number}] company/coords.txt: 228865.1 | 188387.5 | -6.1"
-
-    toolbox.lookup_value = fake_lookup
-    replies = iter([
-        answer_reply("I could not find that in the available documents."),
-        answer_reply("The third value is -6.1 [1]."),
-    ])
-    result = tool_loop.run_loop(lambda messages, tools: next(replies), toolbox,
-                                "What is the third value for row 228865.1 and 188387.5?")
-    assert calls == ["228865.1 and 188387.5"]
-    assert result["auto_lookups"] == 1
-    assert "-6.1" in result["answer"]
-
-
 def test_a_provider_error_returns_a_reason_not_an_exception():
     toolbox = make_toolbox()
     result = tool_loop.run_loop(lambda messages, tools: {"error": "throttled"}, toolbox, "q")
     assert result["answer"] is None and result["reason"] == "throttled"
 
 
-def test_lookup_refuses_to_anchor_on_a_figure_in_many_documents():
-    toolbox = make_toolbox()
-    matches = [(f"chunk{i}", f"company/doc{i}.csv") for i in range(5)]
-    toolbox._lookup_matches = lambda normalized, doc_id="": matches
-    payload = json.loads(toolbox.lookup_value("59,473"))
-    assert "does not identify one row" in payload["note"]
-
-
-def test_the_lookup_tool_can_be_turned_off_for_a_measurement(monkeypatch):
-    monkeypatch.delenv("OI_TOOL_LOOKUP", raising=False)
-    assert "lookup_value" in [schema["function"]["name"] for schema in tool_loop.active_tools()]
-    monkeypatch.setenv("OI_TOOL_LOOKUP", "off")
-    assert "lookup_value" not in [schema["function"]["name"] for schema in tool_loop.active_tools()]
-
-
 def test_the_tool_schemas_match_the_executor():
     names = [schema["function"]["name"] for schema in tool_loop.TOOLS]
-    assert names == ["search_documents", "read_passages", "query_rows", "lookup_value"]
-
-
-def test_lookup_value_uses_each_figure_it_is_given():
-    toolbox = make_toolbox()
-    seen = []
-
-    def fake_lookup(normalized, doc_id=""):
-        seen.append(normalized)
-        return [("c1", "company/coords.txt")] if normalized in ("228865.1", "188387.5") else []
-
-    toolbox._lookup_matches = fake_lookup
-    import retriever as real_retriever
-    real_fetch = real_retriever._fetch_payloads
-    real_retriever._fetch_payloads = lambda services, ids, roots: {
-        "c1": {"chunk_id": "c1", "doc_id": "company/coords.txt", "acl": "company",
-               "text": "228865.1 | 188387.5 | -6.1", "page_start": 1, "page_end": 1,
-               "kind": "table_row"}}
-    try:
-        out = toolbox.lookup_value("228865.1 and 188387.5")
-    finally:
-        real_retriever._fetch_payloads = real_fetch
-    assert seen == ["228865.1", "188387.5"], "each figure is a literal match"
-    assert "188387.5" in out and "company/coords.txt" in out
-
-
-def test_lookup_value_rejects_an_empty_figure():
-    toolbox = make_toolbox()
-    payload = json.loads(toolbox.lookup_value("not a number"))
-    assert "value must contain a figure" in payload["error"]
-
-
-def test_lookup_value_renders_the_matching_rows():
-    toolbox = make_toolbox()
-    toolbox._lookup_matches = lambda normalized, doc_id="": []
-    payload = json.loads(toolbox.lookup_value("59,473"))
-    assert "no passage states" in payload["error"]
-
-    toolbox._lookup_matches = lambda normalized, doc_id="": [("c1", "company/census.csv")]
-    import retriever as real_retriever
-    imports = real_retriever  # only to satisfy the import inside the method
-    toolbox.add(FakePassage("c1", "median household income 59,473 dollars"))
-    real_fetch = imports._fetch_payloads
-    imports._fetch_payloads = lambda services, ids, roots: {
-        "c1": {"chunk_id": "c1", "doc_id": "company/census.csv", "acl": "company",
-               "text": "median household income 59,473 dollars", "page_start": 1, "page_end": 1,
-               "kind": "table_row"}}
-    try:
-        out = toolbox.lookup_value("59,473")
-    finally:
-        imports._fetch_payloads = real_fetch
-    assert "59,473" in out and "company/census.csv" in out
+    assert names == ["search_documents", "read_passages", "query_rows"]
 
 
 def test_the_prompt_carries_the_honesty_rule_for_absent_events():
     # The 2026-10-18 tool runs on the weaker model answered two unanswerable questions from adjacent facts.
     # The rule that stops a related figure being relabelled as the asked-for one lives in the system prompt.
-    prompt = tool_loop.system_prompt(lookup_enabled=True, honesty_enabled=True)
+    prompt = tool_loop.system_prompt(honesty_enabled=True)
     assert "specific event, period, meeting or document" in prompt
     assert "Do not infer that a related figure" in prompt
-    assert "lookup_value" in prompt
-
-
-def test_the_prompt_only_names_the_tools_that_are_offered():
-    """The prompt once named lookup_value while the tool was switched off, so the model could waste its steps
-    calling a tool that was not there. The prompt and the tool list have to be one fact."""
-    without = tool_loop.system_prompt(lookup_enabled=False, honesty_enabled=True)
-    assert "search_documents" in without and "read_passages" in without
-    assert "lookup_value" not in without
-    with_lookup = tool_loop.system_prompt(lookup_enabled=True, honesty_enabled=True)
-    assert "lookup_value" in with_lookup
 
 
 def test_the_thoroughness_rule_is_in_the_prompt():
     # Dropping this rule in the Phase B rewrite halved the loop's duration and cost the suite seven points.
-    prompt = tool_loop.system_prompt(lookup_enabled=False, honesty_enabled=True)
+    prompt = tool_loop.system_prompt(honesty_enabled=True)
     assert "table row is a valid answer" in prompt
     assert "Check every passage before concluding" in prompt
 
 
 def test_the_honesty_rule_can_be_measured_off():
-    prompt = tool_loop.system_prompt(lookup_enabled=False, honesty_enabled=False)
+    prompt = tool_loop.system_prompt(honesty_enabled=False)
     assert "specific event, period, meeting or document" not in prompt
 
 
@@ -360,9 +262,9 @@ def test_the_row_query_is_off_until_the_flag_turns_it_on(monkeypatch):
 
 
 def test_the_prompt_names_the_row_query_only_when_it_is_offered():
-    without = tool_loop.system_prompt(lookup_enabled=False, honesty_enabled=True)
+    without = tool_loop.system_prompt(honesty_enabled=True)
     assert "query_rows" not in without
-    with_query = tool_loop.system_prompt(lookup_enabled=False, honesty_enabled=True, query_enabled=True)
+    with_query = tool_loop.system_prompt(honesty_enabled=True, query_enabled=True)
     assert "query_rows" in with_query
     assert "exact table rows" in with_query
 

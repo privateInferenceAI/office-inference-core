@@ -954,24 +954,18 @@ items:
       REDACTED all pass.
 
   - id: AGENT-LOOKUP-001
-    title: A literal figure lookup tool, with an ambiguity guard and an automatic retry before a refusal
+    title: 'Retired: a literal figure lookup tool (removed 2026-10-20)'
     tier: [cloud, hosted]
     phase: C6
     verify: >-
-      lookup_value finds chunks stating a figure comma-insensitively inside the session's access roots; a
-      two-figure row is the intersection of two literal matches; a figure that appears in more than three
-      documents is reported as not identifying a row rather than returned as an anchor; and when the model is
-      about to refuse a question quoting figures absent from the evidence, the loop performs one lookup and asks
-      again only when the lookup returned real passages.
-    status: verified
+      Historical. The tool was removed in PR #203 after the structured row query was measured on two corpora
+      and the second corpus met the stated retirement condition. No current configuration offers it.
+    status: retired
     note: >-
-      Built 2026-10-18 (PRs #167, #170, #171, #172, #174). **Measured neutral to negative on this corpus**: with
-      the tool on the suite scored 40 to 41, with it off 37 to 40, and the Phase A search-and-read configuration
-      scored 43 before the tool existed. The cause is measured: this corpus repeats census figures across many
-      documents, so a quoted figure identifies twenty tables and the ambiguity guard correctly refuses to anchor.
-      The pinpoint row inside the 41,000-row table still answers with the wrong line. The tool is kept, tested and
-      switchable with OI_TOOL_LOOKUP, default off; it is the right instrument for unique identifiers and the wrong
-      one for duplicated census data. The real fix for the probe is row-indexed storage or a table-aware read.
+      Built 2026-10-18 (PRs #167, #170, #171, #172, #174) and kept off because it measured neutral to negative
+      on duplicated census figures. The row query superseded it for table rows; the second-corpus measurement
+      (docs/reviews/second-corpus-2026-10-20/README.md) met the retirement condition and the owner approved
+      deletion on 2026-10-20. This entry stays as the record of why the capability existed and why it went.
 
   - id: AGENT-QUERY-001
     title: The answer step can query table rows directly, read-only, bounded and access-filtered

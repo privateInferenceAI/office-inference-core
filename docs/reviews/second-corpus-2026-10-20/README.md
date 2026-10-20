@@ -131,9 +131,9 @@ answering direction, and it holds.
 31.8 of 37 on the second, with the gain on the plain table-number question this time. It stays opt-in in code and
 is enabled after a deployment measures its own corpus.
 
-**lookup_value should be retired.** It was already superseded for table rows by the row query, has never measured
-a gain, and remains off. The second-corpus measurement was the stated condition for deciding; the recommendation
-is removal as dead code, pending the owner's sign-off.
+**lookup_value was retired on 2026-10-20 (PR #203).** It had been superseded for table rows by the row
+query, never measured a gain, and remained off. The second-corpus measurement was the stated condition for
+deciding; the owner approved removal, and the tool, tests, flag and prompt references are gone.
 
 **The next instrument target is long-document needle retrieval.** Two needles failed on the second corpus, and
 the row query cannot help because the failure is retrieval of a fact inside a long document. A secondary target
