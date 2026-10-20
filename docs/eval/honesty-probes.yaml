@@ -1,0 +1,28 @@
+# Policy-absence probes: a known failure class, measured separately from the scored forty.
+#
+# **Why a separate file.** These are policy questions whose answers are not in the corpus. The scored suite's
+# unanswerable questions (U01-U08) have their own absent patterns and belong to the frozen instrument; these exist
+# to check that a prompt change fixes the class rather than one question, without changing the scored run count.
+# Every absent pattern here returned zero matching chunks when checked against the index on 2026-10-19.
+#
+# Run it as a subset on the deployment:
+#   DATA_SUITE_QUESTIONS=/w2/honesty-probes.yaml ... eval /w/tests/fixtures/data_suite_run.py --only H1,H2,H3
+questions:
+  - id: H1
+    category: unanswerable
+    question: "What is the company's remote work policy?"
+    absent_pattern: "remote work"
+    expected:
+      staff: {answered: false, denied: false}
+  - id: H2
+    category: unanswerable
+    question: "What is the company's vacation policy?"
+    absent_pattern: "vacation policy"
+    expected:
+      staff: {answered: false, denied: false}
+  - id: H3
+    category: unanswerable
+    question: "What is the company's dress code?"
+    absent_pattern: "dress code"
+    expected:
+      staff: {answered: false, denied: false}

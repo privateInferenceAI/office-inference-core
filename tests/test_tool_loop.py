@@ -554,3 +554,27 @@ def test_the_loop_carries_the_gateways_attribution_into_the_answer():
     assert result["attribution"]["model_group"] == "analyst-fallback"
     assert result["attribution"]["fallbacks_attempted"] == 1
 
+
+
+def test_the_honesty_rule_names_policy_questions_as_refusals():
+    """U08 is a policy question and the rule did not cover it, so the model answered it from FMLA. The rule has
+    to name the class, or one fixed question is all it can ever pass."""
+    prompt = tool_loop.system_prompt(lookup_enabled=False, honesty_enabled=True)
+    assert "policy, procedure or plan" in prompt
+    assert "refuse rather than answering from general knowledge" in prompt
+
+
+def test_refusal_is_a_terminal_answer_in_the_prompt():
+    """The tail told the model to answer once the evidence was enough; a model that believes its own knowledge
+    is enough reads that as permission. Refusal has to be one of the ways to end the loop."""
+    prompt = tool_loop.system_prompt(lookup_enabled=False, honesty_enabled=True)
+    assert "or when the documents do not contain it" in prompt
+
+
+def test_the_policy_clause_is_behind_the_honesty_flag():
+    """The clause belongs to the honesty rule, which a deployment can switch off; it must not leak into the
+    prompt when the flag is off."""
+    with_flag = tool_loop.system_prompt(lookup_enabled=False, honesty_enabled=True)
+    without_flag = tool_loop.system_prompt(lookup_enabled=False, honesty_enabled=False)
+    assert "policy, procedure or plan" in with_flag
+    assert "policy, procedure or plan" not in without_flag

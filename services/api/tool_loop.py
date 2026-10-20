@@ -148,13 +148,16 @@ _TABLE_RULE = (
 
 _HONESTY_RULE = (
     "7. If the question asks about a specific event, period, meeting or document that the evidence never "
-    "states, refuse even when the evidence contains related facts. Do not infer that a related figure answers "
-    "it, and do not relabel a fact as the one that was asked for.\n"
+    "states, refuse even when the evidence contains related facts. A question that asks for a policy, "
+    "procedure or plan the documents do not state is the same case: refuse rather than answering from general "
+    "knowledge. Do not infer that a related figure answers it, and do not relabel a fact as the one that was "
+    "asked for.\n"
 )
 
 _PROMPT_TAIL = (
     "You have a limited number of tool calls. Answer as soon as the evidence is enough; do not keep searching "
-    "for completeness. When you have the answer, reply with no tool call."
+    "for completeness. When you have the answer, or when the documents do not contain it, reply with no tool "
+    "call."
 )
 
 
