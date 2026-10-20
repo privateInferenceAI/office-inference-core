@@ -60,6 +60,7 @@ sys.path.insert(0, "/app/services")
 import access as access_module  # noqa: E402
 import assertion  # noqa: E402
 import citations  # noqa: E402
+import honesty  # noqa: E402
 import documents as documents_module  # noqa: E402
 import workflow as workflow_module  # noqa: E402
 import approvals as approvals_module  # noqa: E402
@@ -1525,6 +1526,13 @@ async def _tool_frames(session, permit, model: str, question: str, result, reque
     facts = answer_module.model_facts(model, resolved_model(model),
                                       dict(loop.get("attribution") or {}))
     started = time.monotonic()
+    # **The tool stream can still replace the answer, because it emits it as one block after the loop.** The gate
+    # is the same check the JSON path runs in finish, so an answer cannot be honest on one path and not the other.
+    honesty_gate = ""
+    if loop.get("answer") is not None and honesty.gate_enabled() and honesty.unstated_company_attribute(
+            question, [passage.text for passage in (loop.get("evidence") or result.passages)]):
+        loop["answer"] = honesty.REFUSAL
+        honesty_gate = "unstated_company_attribute"
     if loop.get("answer") is None:
         reason = loop.get("reason") or "unclassified"
         audit("model_call", session.subject, session.role, "denied",
@@ -1559,7 +1567,8 @@ async def _tool_frames(session, permit, model: str, question: str, result, reque
         yield frame("delta", {"text": tail})
     report = redactor.report()
     audit("model_call", session.subject, session.role, "ok",
-          {"stage": "ask_stream_tools", "model_role": model, **facts, "deltas": deltas,
+          {"stage": "ask_stream_tools", "model_role": model, **facts,
+           "honesty_gate": honesty_gate or False, "deltas": deltas,
            "passages": len(evidence), "steps": loop.get("steps"),
            "tool_calls": loop.get("tool_calls"), "corrections": loop.get("corrections"),
            "redactions": report["redactions"], "holdback": report["holdback"]},
@@ -1618,6 +1627,23 @@ async def _frames(session, permit, model: str, question: str, result, requested_
                           "citations": [{"index": n + 1, "doc_id": p.doc_id, "acl": p.acl,
                                          "page_start": p.page_start, "page_end": p.page_end}
                                         for n, p in enumerate(result.passages)]})
+
+    # **The single-shot stream cannot take an answer back, so the gate runs before the model is called.** A
+    # question about the company's own attribute that no retrieved passage states is refused here, deterministically,
+    # rather than streaming a fluent answer and discovering the problem afterwards.
+    if honesty.gate_enabled() and honesty.unstated_company_attribute(
+            question, [passage.text for passage in result.passages]):
+        refusal_ms = int((time.monotonic() - started) * 1000)
+        audit("model_call", session.subject, session.role, "denied",
+              {"stage": "ask_stream", "honesty_gate": "unstated_company_attribute", "model_role": model,
+               "reason": "company attribute not stated in the evidence"},
+              model=model, data_class=((STATE.get("manifest") or {}).get("access") or {}).get(
+                  "data_class") or "regulated", egress_allowed=False)
+        yield frame("delta", {"text": honesty.REFUSAL})
+        yield frame("done", {"deltas": 1, "redactions": {}, "honesty_gate": "unstated_company_attribute",
+                             "retrieval_ms": retrieval_ms, "ttft_ms": refusal_ms, "model_first_ms": None,
+                             "total_ms": int((time.monotonic() - requested_at) * 1000)})
+        return
 
     context = "\n\n".join(f"[{n + 1}] {p.text}" for n, p in enumerate(result.passages))
     # Same contract as the JSON path. The stream is not post-checked, because a token already sent cannot be

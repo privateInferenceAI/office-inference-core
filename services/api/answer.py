@@ -30,6 +30,7 @@ from typing import Callable, Optional
 import access as access_module
 import budget as budget_module
 import citations as citations_module
+import honesty
 import redaction
 import retriever
 import routing
@@ -278,6 +279,16 @@ def finish(*, question: str, answer: str, session, permit, model, result, decisi
     original: a comparable value, which is exactly what the manual says it must not be. A hash cannot be
     read back, but it can be compared against a guess. Found by the C3 panel, who hashed both forms.
     """
+    # **The gate replaces the answer before anything reads it.** A question about the company's own attribute is
+    # answerable only when a retrieved passage states it. Prompt wording was measured twice against this failure:
+    # the first iteration did not stop the answer, the second stopped it and broke two numeric questions, so the
+    # check is mechanical and narrow here instead of another instruction the model can weigh against the others.
+    honesty_gate = ""
+    if honesty.gate_enabled() and honesty.unstated_company_attribute(
+            question, [passage.text for passage in result.passages]):
+        answer = honesty.REFUSAL
+        honesty_gate = "unstated_company_attribute"
+
     answer, report = redaction.redact(answer)
     safe_question, question_report = redaction.redact(question)
     report = redaction.Redaction(
@@ -323,7 +334,8 @@ def finish(*, question: str, answer: str, session, permit, model, result, decisi
         payload["request_id"] = request_id
 
     audit("model_call", session.subject, session.role, "ok",
-          {"stage": "ask", "model_role": model, **facts, "passages": len(result.passages),
+          {"stage": "ask", "model_role": model, **facts, "honesty_gate": honesty_gate or False,
+           "passages": len(result.passages),
            "supported": len(payload["supported"]), "unsupported": len(payload["unsupported"]),
            "roots": sorted(permit.roots),
            **routing.audit_facts(decision, data_class)},
