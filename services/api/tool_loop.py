@@ -351,6 +351,7 @@ class ToolBox:
         self.roots = frozenset(getattr(permit, "roots", ()) or ())
         self.evidence: list = []
         self.index: dict[str, int] = {}
+        self.query_rows_called = 0
 
     # ------------------------------------------------------------------ evidence
     def add(self, passage, extra_slots: int = 0) -> int:
@@ -783,6 +784,7 @@ class ToolBox:
                 out = self.read_passages(str(args.get("doc_id") or ""), args.get("page_start"),
                                          args.get("page_end"), str(args.get("chunk_id") or ""))
             elif name == "query_rows":
+                self.query_rows_called += 1
                 out = self.query_rows(args.get("match"), str(args.get("doc_id") or ""),
                                       args.get("limit"))
             else:
@@ -876,6 +878,7 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
             # phrase from the question is searched exactly, its passages are added, and the model answers
             # once more. Once only, so a genuinely absent answer still ends in a refusal.
             if _REFUSAL_PHRASE in content.lower() and stats["auto_exact"] == 0 \
+                    and toolbox.query_rows_called == 0 \
                     and _flag("OI_TOOL_EXACT", "off"):
                 phrase = toolbox.exact_phrase_for_question(question)
                 if phrase:
@@ -916,7 +919,8 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
                              "content": result})
             if isinstance(result, str) and result.startswith('{"error"'):
                 limit_error = "tool_error"
-            if stats["steps"] >= max_steps - 2 and stats["auto_exact"] == 0 and _flag("OI_TOOL_EXACT", "off"):
+            if (stats["steps"] >= max_steps - 2 and stats["auto_exact"] == 0
+                    and toolbox.query_rows_called == 0 and _flag("OI_TOOL_EXACT", "off")):
                 # **The exact fallback also runs before the step limit.** A needle question ends with the
                 # model still searching, not with a refusal, so waiting for a refusal never fired. Two
                 # steps before the limit the loop adds the rarest exact phrase from the question, once.
