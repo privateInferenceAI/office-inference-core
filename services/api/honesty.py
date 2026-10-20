@@ -13,8 +13,11 @@ The check runs before the answer is accepted: the JSON path replaces the model's
 it before emitting, and the single-shot stream never calls the model at all.
 
 **What it deliberately does not do.** It does not guess synonyms, and it does not fire on questions about the
-documents in general. A deployment whose client asks policy questions in different words is not covered, and that
-is the intended boundary: a rule that cannot be checked is what this replaced.
+documents in general. The boundary was measured on 2026-10-19: the first version matched only "the company's",
+and probes written for "our" and "the policy on X" showed those shapes still answered from general knowledge. The
+patterns below cover the three shapes that were measured, and the meta-question exclusion keeps "what do our
+documents say" out of the gate. A question whose attribute is stated in different words than the question asks is
+still not covered, and that is the intended limit: a rule that cannot be checked is what this replaced.
 """
 from __future__ import annotations
 
@@ -26,6 +29,20 @@ REFUSAL = "I could not find that in the available documents."
 # Possessives that mean "the client's own organisation", not a document or a person.
 _POSSESSIVE = re.compile(
     r"\b(?:the\s+)?(?:company|firm|organisation|organization)'s\s+([^?.!,;:]{3,90})", re.IGNORECASE)
+
+# "our <subject>" is the same question in the first person. It is the shape operators actually type.
+_OUR = re.compile(r"\bour\s+([^?.!,;:]{3,90})", re.IGNORECASE)
+
+# "the policy on <subject>" names the attribute after the word rather than before it.
+_POLICY_OF = re.compile(
+    r"\b(?:the\s+)?polic(?:y|ies)\s+(?:on|about|regarding|for)\s+([^?.!,;:]{3,90})", re.IGNORECASE)
+
+# Meta-questions are about the documents, not about the company, and must not be refused by this gate.
+_META = frozenset({
+    "document", "documents", "file", "files", "data", "dataset", "datasets", "system", "tool", "tools",
+    "search", "passage", "passages", "evidence", "corpus", "access", "permission", "permissions",
+    "index", "record", "records",
+})
 
 # Words that carry no distinguishing meaning in the subject; stripped from the ends of the phrase.
 _LEADING = ("the ", "its ", "own ")
@@ -48,11 +65,28 @@ def gate_enabled() -> bool:
 
 
 def subject_phrase(question: str) -> str:
-    """The phrase the question asks the company to state, normalised to lowercase words."""
-    match = _POSSESSIVE.search((question or "").replace("\u2019", "'"))
-    if not match:
+    """The phrase the question asks the company to state, normalised to lowercase words.
+
+    Three measured shapes are read, in this order: the company's possessive, "the policy on <subject>", and
+    "our <subject>". A meta-question ("what do our documents say") is not a company attribute and is not read.
+    """
+    text = (question or "").replace("\u2019", "'")
+    phrase = ""
+    match = _POSSESSIVE.search(text)
+    if match:
+        phrase = " ".join(_words(match.group(1)))
+    else:
+        match = _POLICY_OF.search(text)
+        if match:
+            phrase = " ".join(_words(match.group(1)))
+        else:
+            match = _OUR.search(text)
+            if match:
+                candidate = " ".join(_words(match.group(1)))
+                if candidate.split(" ")[0] not in _META:
+                    phrase = candidate
+    if not phrase:
         return ""
-    phrase = " ".join(_words(match.group(1)))
     for prefix in _LEADING:
         if phrase.startswith(prefix.strip() + " "):
             phrase = phrase[len(prefix):]

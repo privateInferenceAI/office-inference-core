@@ -128,3 +128,28 @@ def test_the_gate_rides_the_honesty_flag(honesty, monkeypatch):
     assert honesty.gate_enabled() is False
     monkeypatch.setenv("OI_TOOL_HONESTY", "on")
     assert honesty.gate_enabled() is True
+
+
+def test_the_our_possessive_is_read(honesty):
+    """The boundary measured on 2026-10-19: 'our' answered from FMLA because the gate only read 'the company's'."""
+    assert honesty.subject_phrase("What is our parental leave policy?") == "parental leave"
+    assert honesty.subject_phrase("What is our dress code?") == "dress code"
+    assert honesty.unstated_company_attribute("What is our parental leave policy?", [FMLA_ONLY]) is True
+
+
+def test_the_policy_on_shape_is_read(honesty):
+    assert honesty.subject_phrase("What is the policy on parental leave?") == "parental leave"
+    assert honesty.subject_phrase("What is the policy regarding jury duty?") == "jury duty"
+    assert honesty.unstated_company_attribute("What is the policy on parental leave?", [FMLA_ONLY]) is True
+
+
+def test_meta_questions_about_the_documents_are_not_gated(honesty):
+    """'What do our documents say' asks about the evidence, not about a company attribute."""
+    assert honesty.subject_phrase("What do our documents say about parental leave?") == ""
+    assert honesty.unstated_company_attribute(
+        "What do our documents say about parental leave?", [FMLA_ONLY]) is False
+
+
+def test_our_possessive_passes_when_the_evidence_states_it(honesty):
+    assert honesty.unstated_company_attribute(
+        "What is our parental leave policy?", [STATED]) is False
