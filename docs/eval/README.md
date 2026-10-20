@@ -74,6 +74,25 @@ the answer, its citations and the audit row are all exercised together.
 Two runs per question for category A, one as `staff` and one as `executive`. The other categories run as `staff`
 by default and a sample as `executive` to prove the company corpus is readable by both.
 
+### Measurement hygiene
+
+**Never run two suites against one deployment.** That is the rule, and the runner enforces it. On 2026-10-20 the
+same configuration scored 53 of 53 on five idle runs and 48 to 51 while a second suite shared the box, with N06 and
+N07 failing in the lower runs. Both windows would have been quotable as this configuration's result.
+
+`scripts/run_answer_suite.sh` takes an flock on `/tmp/oi-suite.lock` for its whole life and exits 3 if another
+suite holds it. The runner also takes a Postgres advisory lock, so a direct `docker run` of
+`tests/fixtures/data_suite_run.py` is refused too. Before the first run the script reads `/proc/loadavg` and
+`MemAvailable` and refuses to start above `OI_SUITE_MAX_LOAD` (default 2.0) or below
+`OI_SUITE_MIN_AVAILABLE_MB` (default 2048).
+
+Every run records where it ran. The script writes `run-context.json` into the output directory before the first
+run, with the commit, the `OI_*` flags the API runs with, the `api` and `eval` image identities, load,
+available memory, hostname and instance id. Each run's JSON carries the same record under `context`.
+`scripts/acceptance_panel.py` warns, and does not fail, when a context is missing or shows a load above the limit
+it was admitted under. A run without that record is a smoke test. The rule is
+[0005](../decisions/0005-measurement-hygiene.md).
+
 ## Adding to the set
 
 A new question needs four things: the question in a user's words, the expected value or the verified absence, the

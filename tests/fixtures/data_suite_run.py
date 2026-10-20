@@ -25,6 +25,13 @@ Run from the repository root on the box, with the eval image, because it carries
       /w/tests/fixtures/data_suite_run.py --json-out /tmp/data-suite.json
 
 `--no-answers` runs retrieval only, which is the fast smoke test when only the retriever is in question.
+
+**The run holds a Postgres advisory lock for its duration.** Two suite runs against one deployment contend for the
+same API, model quota and retrieval stack, and the 2026-10-20 measurement is the case: the same configuration scored
+53 of 53 on five idle runs and 48 to 51 while a second suite ran. The host script takes an flock before it starts
+anything; this lock is the one that also catches a direct `docker run` of this file. A run that cannot take it
+exits with code 4 and a sentence naming the lock, not a traceback. The rule is
+docs/decisions/0005-measurement-hygiene.md.
 """
 from __future__ import annotations
 
@@ -41,6 +48,7 @@ W = Path("/w")
 sys.path.insert(0, str(W / "services" / "retrieval"))
 sys.path.insert(0, str(W / "services" / "session"))
 sys.path.insert(0, str(W / "services" / "ingestion"))
+sys.path.insert(0, str(W / "scripts"))
 
 import yaml  # noqa: E402
 
@@ -48,6 +56,7 @@ import access as access_module  # noqa: E402
 import ingest  # noqa: E402
 import retriever  # noqa: E402
 import session as session_module  # noqa: E402
+import suite_hygiene  # noqa: E402
 
 API = os.environ.get("OI_API_URL", "http://api:8088")
 # Data-owned variable, not the generic QUESTIONS the eval service already sets for the old fixture set.
@@ -134,6 +143,21 @@ def database_url() -> str:
     password = os.environ.get("POSTGRES_PASSWORD", "")
     database = os.environ.get("POSTGRES_DB", "")
     return f"postgresql://{user}:{password}@postgres:5432/{database}" if user else ""
+
+
+def open_suite_connection():
+    """The connection the suite lock is held on, over the database the runner already reads.
+
+    psycopg 3 is imported here rather than at module scope, for the same reason the driver in
+    `absent_pattern_hits` is: the tests import this file's neighbours on machines that have no database driver, and
+    an import error at module scope would be a fixture that cannot be compiled into usefulness. The eval image
+    carries psycopg 3, which is what this needs.
+    """
+    url = database_url()
+    if not url:
+        raise RuntimeError("no DATABASE_URL and no POSTGRES_* variables, so the suite lock cannot be taken")
+    import psycopg
+    return psycopg.connect(url, connect_timeout=10)
 
 
 def mint(subject: str) -> str:
@@ -289,6 +313,20 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=5)
     args = parser.parse_args()
 
+    # **Serial measurement is a condition of the run, not a caveat on the result.** The host script's flock covers
+    # runs started through it; this lock covers the ones that are not, including a direct `docker run` of this file,
+    # which never passes through scripts/run_answer_suite.sh. The lock lives in the Postgres both runs already use,
+    # and it is session-scoped, so it goes away with the connection however the run ends. A refusal is a sentence
+    # with the lock key and the reason, not a traceback: the operator needs to know what to wait for.
+    try:
+        with suite_hygiene.hold_advisory_lock(open_suite_connection):
+            return run_suite(args)
+    except suite_hygiene.SuiteRefused as exc:
+        print(f"refusing to run: {exc}", file=sys.stderr)
+        return suite_hygiene.LOCK_EXIT_CODE
+
+
+def run_suite(args) -> int:
     document = yaml.safe_load(QUESTIONS.read_text(encoding="utf-8"))
     questions = list(document["questions"]) + PROBES
     if args.only:
@@ -381,6 +419,12 @@ def main() -> int:
 
     output = {
         "ran_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        # **The box the run was taken on, carried with the score.** The host script writes run-context.json before
+        # the first run and points this process at it, so every run carries the same commit, answer flags, image
+        # identities, load and memory. A direct docker run has no such file and records what it can see; either way
+        # scripts/acceptance_panel.py can warn when the context is missing or shows contention. A run without this
+        # record is a smoke test, not evidence.
+        "context": suite_hygiene.context_for_runner(root=W, environ=os.environ),
         "latency": latency,
         "duration_seconds": round(time.monotonic() - started, 1),
         "answers": not args.no_answers,

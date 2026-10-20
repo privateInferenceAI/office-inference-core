@@ -18,6 +18,11 @@ The cost figure is **cost per answered question, tool calls included**, because 
 provider calls for one question and a per-call number would flatter the deployment. It is not a per-token
 price; it is what this configuration spent to answer, which is the number a client can compare against an
 alternative.
+
+**The contexts are checked, and the panel warns instead of refusing.** A run file from before 2026-10-20 has no
+context, and a run taken under contention records a load average above the limit it was admitted under. Both are
+printed as warnings and kept in the panel under `warnings`. The numbers are still computed, because the older
+files are the evidence behind the reviews; the warning says how much of it was proven serial.
 """
 from __future__ import annotations
 
@@ -25,8 +30,15 @@ import argparse
 import json
 import os
 import statistics
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+# The load limit is the one the run was admitted under, so it comes from the same module the script and the runner
+# use. Resolving it from this file's directory keeps `python3 scripts/acceptance_panel.py` and a test import on one
+# implementation.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import suite_hygiene  # noqa: E402
 
 
 def database_url() -> str:
@@ -41,6 +53,37 @@ def database_url() -> str:
 
 def load_runs(paths: list[Path]) -> list[dict]:
     return [json.loads(path.read_text(encoding="utf-8")) for path in paths]
+
+
+def context_warnings(runs: list[dict], names: list[str] | None = None,
+                     settings: suite_hygiene.GateSettings | None = None) -> list[str]:
+    """What the runs' contexts say about how much their numbers can be trusted.
+
+    **A warning, never a failure.** Run files written before 2026-10-20 have no `context` key. They are still the
+    evidence behind every number in the reviews, and refusing them would throw away the record instead of
+    annotating it. The warning is the point: a run without a context is a smoke test, and a run that started above
+    the load limit was measured under contention, so whoever quotes the number knows which one they have.
+
+    The limit is the one recorded in the run's context when it is there, because that is what the run was admitted
+    under, and OI_SUITE_MAX_LOAD otherwise.
+    """
+    settings = settings or suite_hygiene.settings_from_env(os.environ)
+    warnings = []
+    for index, run in enumerate(runs):
+        name = names[index] if names and index < len(names) else f"run {index + 1}"
+        context = run.get("context")
+        if not context:
+            warnings.append(f"{name}: no run context (an older run file); serial measurement cannot be verified")
+            continue
+        gates = context.get("gates") or {}
+        max_load = gates.get("max_load") or settings.max_load
+        load = context.get("load_average")
+        if load is None:
+            warnings.append(f"{name}: the run context has no load average; contention cannot be checked")
+        elif isinstance(load, (int, float)) and load > max_load:
+            warnings.append(f"{name}: started at load average {load:.2f}, above the {max_load:.2f} limit; "
+                            "the run may have contended with other work")
+    return warnings
 
 
 def score_totals(runs: list[dict]) -> dict:
@@ -127,12 +170,13 @@ def spend_totals(start: str, end: str) -> dict:
             "failed_calls": int(failed), "by_model": by_model}
 
 
-def build(runs: list[dict]) -> dict:
+def build(runs: list[dict], names: list[str] | None = None) -> dict:
     accuracy = score_totals(runs)
     latency = latency_totals(runs)
     start, end = spend_window(runs)
     spend = spend_totals(start, end)
-    panel = {"accuracy": accuracy, "latency": latency, "spend": spend}
+    panel = {"accuracy": accuracy, "latency": latency, "spend": spend,
+             "warnings": context_warnings(runs, names)}
     if spend.get("available") and accuracy["scored"]:
         panel["cost_per_answer"] = round(spend["spend"] / accuracy["scored"], 5)
         panel["cost_per_pass"] = round(spend["spend"] / accuracy["passed"], 5) if accuracy["passed"] else None
@@ -145,7 +189,12 @@ def main() -> int:
     parser.add_argument("runs", nargs="+", type=Path)
     parser.add_argument("--out", default="")
     args = parser.parse_args()
-    panel = build(load_runs(args.runs))
+    panel = build(load_runs(args.runs), names=[path.name for path in args.runs])
+    for warning in panel["warnings"]:
+        print(f"WARNING: {warning}", file=sys.stderr)
+    if panel["warnings"]:
+        print("WARNING: not every run was proven serial; the panel's numbers carry that caveat.",
+              file=sys.stderr)
     text = json.dumps(panel, indent=2)
     print(text)
     if args.out:
