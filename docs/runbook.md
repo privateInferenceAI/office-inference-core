@@ -5803,6 +5803,12 @@ the check meaningful: refresh it from the provider API first (`docs/model-lifecy
 the new model as unknown. **Restart both processes.** The API reports the model from the manifest it loaded at
 startup, so a gateway-only restart leaves the record disagreeing with the request.
 
+**The honesty gate (C6).** A question phrased as an attribute of the company is refused when no retrieved passage
+contains the subject phrase. It is a deterministic check in the answer paths, not a prompt rule: `finish` replaces
+the JSON answer, the tool stream replaces it before emitting, and the single-shot stream refuses before calling the
+model. It rides `OI_TOOL_HONESTY` and the audit row carries `honesty_gate`; the flag is the rollback.
+`docs/reviews/honesty-gate-2026-10-19.md` holds the two rejected prompt iterations and the measurement.
+
 **What to watch.** About 1.6 times the suite time (178 to 188 seconds against 110 single-shot) and two to three
 times the model calls per answer. The development analyst ceiling is 100 USD for a 30-day period; a day of suite
 runs costs about 0.4 USD per run. The step and call caps bound it; a question that hits the cap returns the single-shot answer rather

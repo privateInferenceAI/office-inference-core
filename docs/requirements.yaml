@@ -1049,6 +1049,28 @@ items:
       the provider's schedule. The tool cannot check provider permissions, so a client installation that adds a
       fallback Region must also allow that Region's inference-profile ARN in its own account; the runbook says so.
 
+  - id: AGENT-REFUSAL-001
+    title: A question about the company's own attribute is refused when no retrieved passage states it
+    tier: [cloud, hosted, office]
+    phase: C6
+    verify: >-
+      a question phrased as an attribute of the company (the company's <subject>, the firm's <subject>) whose
+      subject phrase appears in no retrieved passage is answered with the refusal text rather than with content
+      assembled from related material; the replacement happens before the JSON answer is returned, before the
+      tool-stream answer is emitted, and before the single-shot stream calls the model; the answer payload is
+      unchanged and the audit row carries honesty_gate; the check rides OI_TOOL_HONESTY, so turning that flag off
+      is the rollback; and a question whose evidence states the subject is answered normally.
+    status: verified
+    note: >-
+      Built 2026-10-19 (PR #197). The failure was U08: the corpus contains FMLA law text and a contractor clause
+      but no company leave policy, and the model presented the law as the policy with a real citation attached;
+      the mechanical verifier passed it because its digits appear somewhere in the evidence. Two prompt
+      iterations were measured first and both were rejected: the first did not stop the answer and cost N05 four
+      runs of five, the second stopped it and cost N07 and X07 five runs of five each. Eight unit tests cover the
+      parse, stated and unstated cases, the flag and the finish replacement; seven policy-absence probes all
+      refuse under the gate where six of seven refused before. The boundary is recorded: a question worded in
+      different words is not covered, deliberately, because a gate that guesses cannot be tested.
+
   - id: BUDGET-IDENTITY-001
     title: A gateway identity charges one spend counter and enforces the role ceiling, not the remainder
     tier: [cloud, hosted, office]
