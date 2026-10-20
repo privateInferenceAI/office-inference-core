@@ -53,6 +53,14 @@ written next to it.
    flag set, and the raw JSON kept. A control that moves by more than the five-run spread is a stop signal, not a
    data point. This record adds the serial rule beside them, it does not replace them.
 
+8. **One provider account is one measurement resource.** The host and database locks only see one machine. Both
+   deployments here share the same AWS account and region, so they share the Bedrock per-day token quota. On
+   2026-10-20 the acceptance run for PR #211 started a suite on each box at once; the quota ran out mid-series and
+   the provider began returning 429 "Too many tokens per day", which turned the remaining runs into degraded
+   answers (corpus 1 run 4 scored 24 of 53, corpus 2 runs 2 to 5 scored 15 to 22 of 37). Nothing about the code
+   changed; the runs are invalid and were discarded. Run one suite at a time across every deployment that shares
+   a provider account, and treat a mid-series 429 as a stop signal: the series must be re-run, not averaged.
+
 ## Consequences
 
 - `scripts/run_answer_suite.sh` exits 3 when another suite holds the host lock, and 4 when the gate refuses or
@@ -66,3 +74,6 @@ written next to it.
   either, so these stay operator rules and this record does not pretend otherwise.
 - The first measurement taken under these rules is the corpus-1 live control that the exact-phrase PR left open,
   re-run in a window that the script admits.
+- Provider quota is not enforceable from the box. A suite on another machine sharing the account can exhaust the
+  day's tokens mid-series; the run context records the region and model but not the remaining quota, so the
+  operator keeps this rule by hand and the 429 in the logs is the signal that a series is dead.

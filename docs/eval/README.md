@@ -86,6 +86,12 @@ suite holds it. The runner also takes a Postgres advisory lock, so a direct `doc
 `MemAvailable` and refuses to start above `OI_SUITE_MAX_LOAD` (default 2.0) or below
 `OI_SUITE_MIN_AVAILABLE_MB` (default 2048).
 
+**Never run two suites at once against one provider account either.** The host lock only covers one
+machine. Both deployments share one AWS account and one Bedrock per-day token quota, and on 2026-10-20 a suite on
+each box at the same time exhausted it: the provider returned 429 "Too many tokens per day" mid-series and the
+remaining runs scored 24 of 53 and 15 to 22 of 37. Those runs were discarded. A 429 of that kind is a stop signal
+for the whole series, not a data point to average.
+
 Every run records where it ran. The script writes `run-context.json` into the output directory before the first
 run, with the commit, the `OI_*` flags the API runs with, the `api` and `eval` image identities, load,
 available memory, hostname and instance id. Each run's JSON carries the same record under `context`.
