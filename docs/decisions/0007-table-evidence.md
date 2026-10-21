@@ -40,10 +40,12 @@ Five serial runs per phase, same-day controls on main.
 | Corpus-2 live set (37) | 29, 30, 29, 29, 27 (mean 29.2) | 31, 32, 31, 34, 31 (mean 31.8) |
 | Corpus-1 live suite (53) | 53, 53, 53, 53, 52 (mean 52.8) | 53, 52, 53, 53, 52 (mean 52.6) |
 
-Corpus-2 gains 2.6 role-runs per full pass. PUB_N04 goes from five failures to one in the first combined run and
-the failure disappears in the accepted variant; SYN_A02's executive answer stops reading the 4.9M recommendation
-line once the seed window is left alone. Corpus-1 is flat within the five-run spread: one extra X02 failure in one
-run, no systematic question.
+Corpus-2 gains 2.6 role-runs per full pass, with the best run at 34 of 37. The gain is not owned by one question:
+PUB_N04 fails in all five runs of the accepted variant and passes in the best run; SYN_A02's executive answer, the
+Target net-sales question, the visitor-badge probe and the Caterpillar termination date each move by two or three
+runs between the control and this change. That is the honest shape of a table-evidence change on a question set
+where the model's reading varies run to run. Corpus-1 is flat within the five-run spread: one extra X02 failure in
+one run, no systematic question.
 
 Rejected on the way: seeding the centred snippet into the seed evidence (regressed the three questions above), and
 prepending document title or heading path (the offline ablation showed it cost a question).
