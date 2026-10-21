@@ -479,7 +479,8 @@ def test_the_exact_excerpt_is_centred_on_the_match():
     assert excerpt.startswith("...") and excerpt.endswith("...")
 
 
-def test_a_refusal_gets_one_deterministic_exact_retry(monkeypatch):
+def test_exact_evidence_is_seeded_before_the_model_answers(monkeypatch):
+    """The one exact search that remains: at seed time, not after a refusal."""
     toolbox = make_toolbox()
     toolbox.exact_phrase_for_question = lambda question: "visitor badge"
     calls = []
@@ -501,12 +502,10 @@ def test_a_refusal_gets_one_deterministic_exact_retry(monkeypatch):
     monkeypatch.setenv("OI_TOOL_EXACT", "on")
     result = tool_loop.run_loop(model, toolbox, "How long is a visitor badge valid?")
     assert calls == ["visitor badge"]
-    assert result["auto_exact"] == 1
     assert "24 hours" in result["answer"]
     assert "Exact search for" in seen[0][1]["content"]
 
-
-def test_the_exact_retry_does_not_fire_when_the_flag_is_off(monkeypatch):
+def test_the_exact_seed_does_not_run_when_the_flag_is_off(monkeypatch):
     toolbox = make_toolbox()
     toolbox.exact_phrase_for_question = lambda question: "visitor badge"
     calls = []
