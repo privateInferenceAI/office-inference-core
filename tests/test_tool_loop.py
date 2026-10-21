@@ -376,6 +376,125 @@ def test_the_row_query_reports_no_matching_row(monkeypatch):
     assert "no single row" in out["error"]
 
 
+def test_a_data_row_matches_through_the_section_row_above_it(monkeypatch):
+    """The measured Duke case: the section label is the row above the row that carries the figure.
+
+    Row 4462 is "First Mortgage Bonds"; row 4463 is
+    "Duke Energy Carolinas | December 2026 | 2.950 | % | 600". A query naming both found the chunk and no row,
+    because no single line holds both strings, and the 600 that answers the question was lost.
+    """
+    text = "\n".join([
+        "First Mortgage Bonds",
+        "Duke Energy Carolinas | December 2026 | 2.950 | % | 600",
+        "Duke Energy Carolinas | December 2027 | 3.100 | % | 450",
+    ])
+    toolbox = query_toolbox(monkeypatch, {"c1": payload(text, doc_id="company/duke-10k.pdf", page=118,
+                                                       row_start=4462)})
+    out = toolbox.query_rows(["Duke Energy Carolinas", "First Mortgage Bonds"])
+    # The data row is returned with its own ordinal, and the label is named as context above it.
+    assert "row 4463 of 68" in out
+    assert "Duke Energy Carolinas | December 2026 | 2.950 | % | 600" in out
+    assert 'row 4462 above, which reads "First Mortgage Bonds"' in out
+    assert "not in it" in out and "label" in out
+    # The label row is not returned as a row, and the second Duke row is not returned only because the
+    # header sits two rows above it.
+    assert "row 4462 of" not in out
+    assert "row 4464 of" not in out
+    # The citation is the data row alone, so the answer contract can check the figure against it.
+    assert len(toolbox.evidence) == 1
+    assert toolbox.evidence[0].text == "Duke Energy Carolinas | December 2026 | 2.950 | % | 600"
+    assert toolbox._last_facts["rows_from_context"] == 1
+
+
+def test_a_row_that_states_every_string_is_still_preferred_and_has_no_context_note(monkeypatch):
+    text = "\n".join([
+        "First Mortgage Bonds",
+        "Duke Energy Carolinas | First Mortgage Bonds | 600",
+        "Duke Energy Carolinas | December 2026 | 2.950 | % | 600",
+    ])
+    toolbox = query_toolbox(monkeypatch, {"c1": payload(text, doc_id="company/duke-10k.pdf",
+                                                       row_start=4462)})
+    out = toolbox.query_rows(["Duke Energy Carolinas", "First Mortgage Bonds"])
+    assert "Duke Energy Carolinas | First Mortgage Bonds | 600" in out
+    assert "December 2026" not in out, "the context fallback does not run when a single row matches"
+    assert "context:" not in out
+    assert len(toolbox.evidence) == 1
+    assert toolbox._last_facts["rows_from_context"] == 0
+
+
+def test_two_tables_do_not_complete_each_other(monkeypatch):
+    header = payload("First Mortgage Bonds", chunk_id="c1")
+    header["table_id"] = "table-1"
+    data = payload("Duke Energy Carolinas | December 2026 | 2.950 | % | 600", chunk_id="c2", row_start=1)
+    data["table_id"] = "table-2"
+    toolbox = query_toolbox(monkeypatch, {"c1": header, "c2": data})
+    out = tool_loop.json.loads(toolbox.query_rows(["Duke Energy Carolinas", "First Mortgage Bonds"]))
+    assert "no single row" in out["error"], "a row above in another table is not context"
+
+
+def test_two_documents_do_not_complete_each_other(monkeypatch):
+    header = payload("First Mortgage Bonds", doc_id="company/duke-10k.pdf", chunk_id="c1")
+    data = payload("Duke Energy Carolinas | December 2026 | 2.950 | % | 600",
+                   doc_id="company/duke-10q.pdf", chunk_id="c2", row_start=1)
+    toolbox = query_toolbox(monkeypatch, {"c1": header, "c2": data})
+    out = tool_loop.json.loads(toolbox.query_rows(["Duke Energy Carolinas", "First Mortgage Bonds"]))
+    assert "no single row" in out["error"], "the same table id in another document is not context"
+
+
+def test_a_section_row_more_than_two_rows_above_does_not_complete_a_match(monkeypatch):
+    text = "\n".join([
+        "First Mortgage Bonds",
+        "Unsecured notes | 2025 | 400",
+        "Unsecured notes | 2026 | 350",
+        "Duke Energy Carolinas | December 2026 | 2.950 | % | 600",
+    ])
+    toolbox = query_toolbox(monkeypatch, {"c1": payload(text, doc_id="company/duke-10k.pdf",
+                                                       row_start=4462)})
+    out = tool_loop.json.loads(toolbox.query_rows(["Duke Energy Carolinas", "First Mortgage Bonds"]))
+    assert "no single row" in out["error"], "three rows above is past the bound"
+
+
+def test_the_two_rows_immediately_above_can_supply_the_rest_of_the_match(monkeypatch):
+    text = "\n".join([
+        "First Mortgage Bonds",
+        "December 2026 maturities",
+        "Duke Energy Carolinas | 3.000 | % | 600",
+    ])
+    toolbox = query_toolbox(monkeypatch, {"c1": payload(text, doc_id="company/duke-10k.pdf",
+                                                       row_start=4461)})
+    out = toolbox.query_rows(["Duke Energy Carolinas", "First Mortgage Bonds"])
+    assert "row 4463 of 68" in out
+    assert "Duke Energy Carolinas | 3.000 | % | 600" in out
+    assert "row 4461 above" in out
+
+
+def test_the_context_row_is_read_only_through_the_permitted_roots(monkeypatch):
+    """The rows above come from the same fetch as the row itself, and that fetch filters on the access roots."""
+    import retriever as real_retriever
+
+    table = payload("First Mortgage Bonds\nDuke Energy Carolinas | December 2026 | 2.950 | % | 600",
+                    doc_id="company/duke-10k.pdf", page=118, row_start=4462)
+    seen = []
+
+    def fetch(services, ids, roots):
+        seen.append(roots)
+        return {key: value for key, value in {"c1": table}.items()
+                if key in ids and (value.get("acl") or "") in roots}
+
+    monkeypatch.setattr(real_retriever, "_fetch_payloads", fetch)
+
+    def run(acl):
+        table["acl"] = acl
+        toolbox = tool_loop.ToolBox(services=object(), permit=FakePermit(), role="staff")
+        toolbox._candidate_chunks = lambda values, doc_id="": [("c1", table["doc_id"])]
+        return toolbox.query_rows(["Duke Energy Carolinas", "First Mortgage Bonds"])
+
+    assert "row 4463 of 68" in run("company")
+    blocked = tool_loop.json.loads(run("executive"))
+    assert "no single row" in blocked["error"], "a table outside the roots cannot supply a context row"
+    assert seen == [frozenset({"company"}), frozenset({"company"})]
+
+
 def test_the_row_query_is_audited_with_its_own_counts(monkeypatch):
     events = []
     toolbox = query_toolbox(monkeypatch, {"c1": payload("row | 59,473")},

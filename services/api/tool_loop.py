@@ -197,6 +197,14 @@ QUERY_AMBIGUOUS_DOCS = 3
 # model kept querying a row that was already returned, the namespace stayed full, the calls matched a row and
 # rendered nothing, and the model read that as absence. Eight slots is one call's default worth of rows.
 QUERY_EXTRA_EVIDENCE = 8
+# **A section label can sit on its own row above the figure, and the stored row does not carry it.** Measured on
+# corpus 2: "First Mortgage Bonds" is one row and "Duke Energy Carolinas | December 2026 | 2.950 | % | 600" is the
+# row directly below it. A query naming both found the candidate chunks and no row, because no single line holds
+# both strings, and the 600 that answers the question was lost. So the rows above a data row are a bounded
+# fallback: at most this many, contiguous, in the same table_id and the same document, and only tried when no
+# single row matches every string. The row returned is still the data row, and the rendered line says which
+# string came from above so the label cannot be cited as if it were the row.
+QUERY_CONTEXT_ROWS = 2
 
 
 # --------------------------------------------------------------------------- exact phrase bounds
@@ -512,6 +520,95 @@ def _table_prefix_from_blob(text: str) -> str:
     if header_at + 1 < len(lines) and _looks_like_table_header(lines[header_at + 1]):
         block = block + " / " + lines[header_at + 1]
     return (f"Table: {caption}. Columns: {block}." if caption else f"Columns: {block}.")
+
+
+# --------------------------------------------------------------------------- the section row above a data row
+def _row_has_value(text: str) -> bool:
+    """A figure in the row, as opposed to a bare year in a date label.
+
+    The distinction is the one the header test already makes. It decides between two rows that could both be the
+    data row of a matched window: "December 2026" is a label above the row, and the amount below it is not.
+    """
+    values = _TABLE_VALUE_RE.findall(str(text or ""))
+    return any(not re.fullmatch(r"(?:19|20)\d{2}", value) for value in values)
+
+
+def _context_rows(rows: list[dict], values: list[str], wanted: list[str]) -> list[dict]:
+    """Rows that match only when the rows immediately above them in the same table are included.
+
+    **Conservative by construction.** A window is at most one data row plus QUERY_CONTEXT_ROWS rows above it,
+    the rows must be contiguous, and they are grouped by document and table_id, so a match can never be
+    completed across a table boundary or from another document. The data row must state at least one of the
+    strings itself; the rows above supply the rest. The row returned is the data row, never the label.
+
+    When overlapping windows qualify, the better row wins: the one carrying a figure, then the one stating more
+    of the strings, then the shorter window, then the earlier row. This is what stops a second data row under
+    the same section header from being returned only because the header is two rows above it.
+    """
+    tables: dict[tuple, dict[int, dict]] = {}
+    for row in rows:
+        payload = row.get("payload") or {}
+        index = row.get("row_index")
+        table_id = payload.get("table_id")
+        if not table_id or not isinstance(index, int):
+            continue
+        # A row can be in the store twice, as part of the whole-table chunk and as its own row entry. One line
+        # per position is enough to test a window with.
+        tables.setdefault((payload.get("doc_id") or "", table_id), {}).setdefault(index, row)
+    matches: list[dict] = []
+    for key in sorted(tables):
+        table = tables[key]
+        found: list[tuple[tuple, dict, list[tuple[int, str]], set[int]]] = []
+        for index in sorted(table):
+            anchor = table[index]
+            own = sum(1 for value in wanted if value in anchor["haystack"])
+            if not own:
+                continue
+            for above in range(1, QUERY_CONTEXT_ROWS + 1):
+                window = [table.get(index - offset) for offset in range(above + 1)]
+                if any(item is None for item in window):
+                    continue
+                if not all(any(value in item["haystack"] for item in window) for value in wanted):
+                    continue
+                # **Only the rows above that carry a string the data row does not carry are context.** Quoting
+                # a row that supplies nothing would tell the model to look at a line that has no bearing on
+                # the match, and the note is the only thing that distinguishes the label from the row.
+                context = [(index - offset, table[index - offset]["line"])
+                           for offset in range(above, 0, -1)
+                           if any(value in table[index - offset]["haystack"] and value not in anchor["haystack"]
+                                  for value in wanted)]
+                if not context:
+                    continue
+                rank = (0 if _row_has_value(anchor["line"]) else 1, -own, above, index)
+                found.append((rank, anchor, context, {index - offset for offset in range(above + 1)}))
+                break
+        taken: list[set[int]] = []
+        for _rank, anchor, context, window in sorted(found, key=lambda item: item[0]):
+            if any(window & kept for kept in taken):
+                continue
+            taken.append(window)
+            row = dict(anchor)
+            row["context"] = context
+            row["context_values"] = [value for value, normal in zip(values, wanted)
+                                     if normal not in anchor["haystack"]]
+            matches.append(row)
+    return matches
+
+
+def _context_note(row: dict) -> str:
+    """The rendered note that a matched string came from the row above, not from the returned row."""
+    context = row.get("context") or []
+    if not context:
+        return ""
+    missing = [str(value) for value in (row.get("context_values") or [])]
+    quoted = ", ".join('"' + value + '"' for value in missing)
+    where = "; ".join(f'row {index} above, which reads "{_shorten(line, 120)}"' for index, line in context)
+    if len(missing) == 1:
+        lead = f"{quoted} is above this row, not in it; it comes from {where}"
+    else:
+        lead = f"{quoted} are above this row, not in it; they come from {where}"
+    return (f"  [context: {lead}, in the same table. This is the data row; the text above is its label, not "
+            f"part of the row.]")
 
 
 class ToolBox:
@@ -894,6 +991,13 @@ class ToolBox:
         separator, header names are folded into only some rows, and a cell index would therefore be a contract
         the store cannot keep. A model that knows the label writes the label.
 
+        **The section row above a data row can complete the match, but only as a fallback.** A label such as
+        "First Mortgage Bonds" sits on its own row, and the figure row below it does not repeat it, so a query
+        naming both used to find the passage and no row. When no single row states every string, a data row may
+        be matched with up to two contiguous rows above it in the same table, and the string that came from
+        above is named in the rendered line. The data row is what is cited; the label is not returned as if it
+        were the row, and the bounds are constants, so a model cannot widen the window.
+
         The matching rows are added to the evidence namespace, so a citation to the row resolves and the answer
         contract can check the figure against it. That is the verification step: the figure the answer states
         has to appear in the row the tool returned.
@@ -919,7 +1023,9 @@ class ToolBox:
         rows = self._matching_rows(candidates, values)
         if not rows:
             return json.dumps({"error": "the values matched a chunk but no single row states "
-                                        + " and ".join(repr(value) for value in values)})
+                                        + " and ".join(repr(value) for value in values)
+                                        + ", and adding the rows immediately above a row in the same "
+                                          "table does not supply the rest"})
         documents = {row["payload"].get("doc_id") or "" for row in rows}
         # **A value that identifies rows in many documents is not an anchor, and pretending it is produces the
         # confident wrong answer the Phase B run measured.** The tool says so and names documents instead of
@@ -982,7 +1088,8 @@ class ToolBox:
             total_rows = payload.get("table_rows")
             if total_rows:
                 where += f" of {total_rows}"
-        return number, f"[{number}] {where}: {_shorten(row['line'], QUERY_ROW_CHARS)}"
+        rendered = f"[{number}] {where}: {_shorten(row['line'], QUERY_ROW_CHARS)}"
+        return number, rendered + _context_note(row)
 
     def _candidate_chunks(self, values: list[str], doc_id: str = "") -> list[tuple[str, str]] | None:
         """The chunks whose text could hold a matching row, or None when the store could not be read."""
@@ -1007,27 +1114,42 @@ class ToolBox:
         A row can appear twice in the store: once in the whole-table chunk and once as its own row entry. The
         duplicate is collapsed so the model is not asked to choose between two identical lines, and the entry
         that survives is the one carrying an exact `row_index`, because that is what a citation needs.
+
+        **A row that states every value always wins, and the row above is a fallback that cannot change an
+        answer the tool already gave.** Only when no single row matches is the section row above a data row
+        considered, within the bounds in `_context_rows`. The strings are still matched against the same
+        payloads from the same ACL-filtered fetch, so a context match cannot see a document or a table the
+        row query could not already see.
         """
         import retriever
 
         payloads = retriever._fetch_payloads(self.services, [chunk_id for chunk_id, _ in candidates],
                                              self.roots)
         wanted = [_normal_for_match(value) for value in values]
-        unique: dict[tuple, dict] = {}
+        rows: list[dict] = []
         for chunk_id, _doc in candidates:
             payload = payloads.get(chunk_id)
-            if not payload:
+            if payload:
+                rows.extend(rows_in_chunk(payload))
+        unique: dict[tuple, dict] = {}
+        for row in rows:
+            if not all(value in row["haystack"] for value in wanted):
                 continue
-            for row in rows_in_chunk(payload):
-                if not all(value in row["haystack"] for value in wanted):
-                    continue
-                document = payload.get("doc_id") or ""
-                key = (document, row["row_index"]) if row["row_index"] is not None \
-                    else (document, row["haystack"])
-                existing = unique.get(key)
-                if existing is None or (existing["row_index"] is None and row["row_index"] is not None):
-                    unique[key] = row
-        return sorted(unique.values(), key=lambda row: (
+            document = row["payload"].get("doc_id") or ""
+            key = (document, row["row_index"]) if row["row_index"] is not None \
+                else (document, row["haystack"])
+            existing = unique.get(key)
+            if existing is None or (existing["row_index"] is None and row["row_index"] is not None):
+                unique[key] = row
+        matched = list(unique.values())
+        facts = getattr(self, "_last_facts", None)
+        if isinstance(facts, dict):
+            facts["rows_from_context"] = 0
+        if not matched:
+            matched = _context_rows(rows, values, wanted)
+            if isinstance(facts, dict):
+                facts["rows_from_context"] = len(matched)
+        return sorted(matched, key=lambda row: (
             row["payload"].get("doc_id") or "", int(row["payload"].get("page_start") or 0),
             row["row_index"] if row["row_index"] is not None else 0, row["haystack"]))
 
