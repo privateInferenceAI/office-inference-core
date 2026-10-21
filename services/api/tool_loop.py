@@ -1099,7 +1099,7 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
     offered = active_tools()
     query_offered = any(schema["function"]["name"] == "query_rows" for schema in offered)
     honesty = os.environ.get("OI_TOOL_HONESTY", "on").strip().lower() not in ("off", "0", "false", "no")
-    seeded = toolbox.render(list(seed_passages), focus=question)
+    seeded = toolbox.render(list(seed_passages))
     messages = [
         {"role": "system", "content": system_prompt(honesty, query_offered)},
         {"role": "user", "content": (
