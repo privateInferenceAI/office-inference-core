@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 
 TOOLS = [
@@ -216,6 +217,89 @@ EXACT_AUTO_CANDIDATES = 14
 EXACT_FALLBACK_RESULTS = 10
 
 
+# The words a focus contributes are at least this long. Two-letter words are mostly function words, and a
+# question carries enough longer words that matching them is what centres the snippet on its subject.
+FOCUS_WORD_MIN = 3
+
+
+def _focus_terms(focus) -> tuple[list[str], list[str]]:
+    """The search terms a focus carries, in the two tiers the snippet rule uses.
+
+    A focus is either one string (a tool's query) or a list of them (a question and its key terms). An entry
+    containing whitespace is a multi-word term and is searched literally before any single word is tried, so a
+    phrase the question actually names beats a common word that happens to appear earlier in the passage.
+    Individual words come from every entry, lower-cased, punctuation stripped, and at least three characters
+    long. Duplicates are kept once, so the earliest match is the only thing the order can affect.
+    """
+    if not focus:
+        return [], []
+    if isinstance(focus, str):
+        items = [focus]
+    else:
+        items = [str(item) for item in focus if str(item or "").strip()]
+    phrases: list[str] = []
+    words: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        value = " ".join(str(item or "").split()).lower()
+        if not value:
+            continue
+        if " " in value:
+            phrases.append(value)
+        for word in re.findall(r"[^\W_]+(?:['-][^\W_]+)*", value):
+            if len(word) >= FOCUS_WORD_MIN and word not in seen:
+                seen.add(word)
+                words.append(word)
+    return phrases, words
+
+
+def centred_snippet(text: str, focus="", limit: int = SNIPPET_CHARS) -> str:
+    """A snippet of at most `limit` characters centred on the first focus term in the text.
+
+    **Why the start slice lost an answer.** The facilities manual states the visitor-badge limit twice: a
+    table row that ends "Expires at the end of the visit day, maximum 24 hours", and the prose rule that
+    badges "are valid for 24 hours maximum". A snippet that always starts at character zero kept the weaker
+    "end of visit" line and cut the figure that answers the question. The retrieval was right; the render
+    was the loss. Centring the window on the query's own terms puts the carrying line inside it.
+
+    Whitespace is normalised first, so the match and the cut work on the same string the model will read.
+    A focus with no match, an empty focus, or a text shorter than the window returns today's start slice.
+    The window is the same length as the old snippet; the ellipses mark that text was cut and sit outside
+    that length.
+    """
+    text = " ".join(str(text or "").split())
+    limit = max(0, int(limit))
+    if limit <= 0 or not focus or len(text) <= limit:
+        return text[:limit]
+    phrases, words = _focus_terms(focus)
+    lowered = text.lower()
+    index = -1
+    length = 0
+    # Multi-word terms first: a named phrase is a stronger centre than a single word that happens to appear
+    # earlier in the passage. The earliest multi-word match wins, not the first entry in the list.
+    for term in phrases:
+        found = lowered.find(term)
+        if found >= 0 and (index < 0 or found < index):
+            index, length = found, len(term)
+    if index < 0:
+        for term in words:
+            found = lowered.find(term)
+            if found >= 0 and (index < 0 or found < index):
+                index, length = found, len(term)
+    if index < 0:
+        return text[:limit]
+    start = max(0, index + length // 2 - limit // 2)
+    end = min(len(text), start + limit)
+    if end - start < limit:
+        start = max(0, end - limit)
+    snippet = text[start:end]
+    if start > 0:
+        snippet = "..." + snippet
+    if end < len(text):
+        snippet = snippet + "..."
+    return snippet
+
+
 def _normal_for_match(value: str) -> str:
     """A match string as the row query compares it: lower case, commas gone, whitespace collapsed.
 
@@ -390,7 +474,12 @@ class ToolBox:
     def texts(self) -> list[str]:
         return [getattr(passage, "text", "") or "" for passage in self.evidence]
 
-    def render(self, passages) -> str:
+    def render(self, passages, focus="") -> str:
+        """Number each passage and print its snippet, centred on the caller's focus when there is one.
+
+        The numbering and the line format are unchanged. The focus only decides where the snippet starts:
+        a search passes its query, and a caller with no query keeps the start slice.
+        """
         lines = []
         for passage in passages:
             number = self.add(passage)
@@ -398,7 +487,7 @@ class ToolBox:
                 continue
             text = " ".join((getattr(passage, "text", "") or "").split())
             lines.append(f"[{number}] {passage.doc_id} p{passage.page_start} "
-                         f"kind={passage.kind}: {text[:SNIPPET_CHARS]}")
+                         f"kind={passage.kind}: {centred_snippet(text, focus, SNIPPET_CHARS)}")
         return "\n".join(lines)
 
     # ------------------------------------------------------------------ tools
@@ -407,7 +496,7 @@ class ToolBox:
 
         result = retriever.search(self.services, query, role=self.role, limit=self.search_limit,
                                   permit=self.permit)
-        rendered = self.render(result.passages)
+        rendered = self.render(result.passages, focus=query)
         return ("Search results for " + json.dumps(query) + ":\n" + rendered) if rendered \
             else "No results for " + json.dumps(query) + "."
 
