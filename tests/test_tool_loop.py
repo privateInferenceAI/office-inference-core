@@ -491,16 +491,19 @@ def test_a_refusal_gets_one_deterministic_exact_retry(monkeypatch):
                "visitor badges are valid for 24 hours maximum"
 
     toolbox.search_exact = fake_exact
-    replies = iter([
-        answer_reply("I could not find that in the available documents."),
-        answer_reply("Visitor badges are valid for 24 hours [1]."),
-    ])
+    replies = iter([answer_reply("Visitor badges are valid for 24 hours [1].")])
+    seen = []
+
+    def model(messages, tools):
+        seen.append(messages)
+        return next(replies)
+
     monkeypatch.setenv("OI_TOOL_EXACT", "on")
-    result = tool_loop.run_loop(lambda messages, tools: next(replies), toolbox,
-                                "How long is a visitor badge valid?")
+    result = tool_loop.run_loop(model, toolbox, "How long is a visitor badge valid?")
     assert calls == ["visitor badge"]
     assert result["auto_exact"] == 1
     assert "24 hours" in result["answer"]
+    assert "Exact search for" in seen[0][1]["content"]
 
 
 def test_the_exact_retry_does_not_fire_when_the_flag_is_off(monkeypatch):

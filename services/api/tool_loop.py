@@ -1108,15 +1108,31 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
     offered = active_tools()
     query_offered = any(schema["function"]["name"] == "query_rows" for schema in offered)
     honesty = os.environ.get("OI_TOOL_HONESTY", "on").strip().lower() not in ("off", "0", "false", "no")
+    stats = {"steps": 0, "tool_calls": 0, "corrections": 0, "auto_exact": 0, "synthesis": 0}
+    # **The exact phrase goes in before the model answers, not only after a refusal.** A question
+    # with a cue phrase that matches a small number of chunks has its carrying passages searched
+    # exactly and placed in the seed. Measured on PUB_L01: with twelve seed passages the model
+    # answered a refusal on the first step, and the later refusal-retry never ran because the loop
+    # had already produced an answer. One bounded search at seed time is the difference between a
+    # needle that is reachable and one that is not.
+    exact_preface = ""
+    if _flag("OI_TOOL_EXACT", "off"):
+        phrase = toolbox.exact_phrase_for_question(question)
+        if phrase:
+            found = toolbox.search_exact(phrase, "", EXACT_FALLBACK_RESULTS)
+            if not found.startswith(chr(34) + "error" + chr(34)):
+                stats["auto_exact"] = 1
+                exact_preface = ("Exact search for " + json.dumps(phrase) + ":" + chr(10)
+                                + found + chr(10) + chr(10))
     seeded = toolbox.render(list(seed_passages))
     messages = [
         {"role": "system", "content": system_prompt(honesty, query_offered)},
         {"role": "user", "content": (
             f"Question: {question}\n\n"
+            + exact_preface
             + (f"Evidence already retrieved, numbered:\n{seeded}\n\n" if seeded else "")
             + "Search if this is not enough, then answer.")},
     ]
-    stats = {"steps": 0, "tool_calls": 0, "corrections": 0, "auto_exact": 0, "synthesis": 0}
     limit_error = ""
     # **What the gateway says answered, per call, so the answer can name the model that ran.** The reply
     # that produces the answer carries it; a failover means this is a different model group from the
