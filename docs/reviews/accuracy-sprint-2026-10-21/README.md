@@ -47,3 +47,26 @@ settled. Raw runs are archived at `/home/anthony/oi-eval-runs/accuracy-*`.
 
 Corpus 1 has not been measured on this configuration because its index is still mixed chunker-v4/v5 from the
 deferred reindex.
+
+
+## Provider comparison: DeepSeek V4.1 Flash, test-only, 2026-10-21
+
+The owner authorised a test-only DeepSeek API profile to establish the model ceiling and remove the Bedrock daily
+cap from the measurement loop. The key was placed only in the corpus box's rendered environment (mode 600), never
+in the repository, and removed afterwards. The gateway routed the analyst model group to `openai/deepseek-flash`
+through the same answer path; the request budget was raised to 180 seconds for the reasoning model.
+
+Five runs: **35, 35, 36, 35, 36 (mean 35.4 of 37)**, with SYN_A01 staff failing all five and SYN_N01 failing
+three times. That is below Sonnet 4.6's 36.0 under the same evidence configuration. The conclusion is that a
+frontier model did not buy the missing question, which is what the ambiguity analysis predicted. Bedrock was
+restored, the key removed, and the DeepSeek path is not part of the deployment.
+
+## Final confirmation, after the SYN_A01 question fix
+
+SYN_A01 now names Northwind. Five runs: **37, 37, 37, 37, 37 (mean 37.0 of 37)**, zero failures. The staff role
+gets the access-boundary denial and the executive role answers 385,000. Corpus 2 is at 37 of 37 on the accuracy
+configuration.
+
+Configuration for that result: Sonnet 4.6 analyst, 12 seed passages, 1,600-character snippets, 32 evidence slots,
+search limit 12, tool loop and query rows on, exact lane on with seed-time exact evidence. This is the correctness
+target; the cost-down and simplification work starts from here.
