@@ -151,7 +151,74 @@ DEFAULT_DOCUMENTS_ROOT = Path(os.environ.get("INGEST_DOCUMENTS_ROOT", "/document
 # did not bump this, so the cycle skipped all four documents, the new write path never ran, and the acceptance
 # probe found an empty chunk_index with no error anywhere. Nothing was wrong with the code: the corpus had
 # simply been ingested under rules that did not include the new store. v3 is that bump.
-PAYLOAD_VERSION = "payload-v5"
+#
+# **v6 because a table row's TEXT changed.** A row entry now begins with its column labels and caption
+# (chunker-v5), so every stored payload holds a row without them. The chunker version in the manifest is
+# the durable fix and would catch this on its own; this bump is the mechanism that does not depend on the
+# new column having been added first, and the two agreeing is what makes the re-derivation unavoidable
+# rather than a matter of remembering.
+PAYLOAD_VERSION = "payload-v6"
+
+
+# ---------------------------------------------------------------- the lexical schema the worker needs
+#
+# **The lexical arm could not say which table a row came from.** `chunk_index` stored ten columns and
+# dropped the rest of the payload, so `table_id`, `row_index`, `row_start`, `row_end`, `table_rows` and
+# `headings` existed only in Qdrant. A row query over `chunk_index` matched the bare line of figures, and
+# the period labels above it were reachable only by a second lookup at read time.
+#
+# These are `add column if not exists` and they exist twice on purpose: here, because the worker writes
+# the columns and a worker started against a database that predates the migration would fail every
+# document's lexical write and dead-letter the corpus; and in `db/migrations/024`, because that is the
+# ordered, checksummed path a fresh database takes and the one an operator runs. Whichever runs first,
+# the other is a no-op. `tests/test_table_context_columns.py` compares the two so they cannot drift.
+TABLE_CONTEXT_COLUMNS = (
+    ("table_id", "text"),
+    ("row_index", "integer"),
+    ("row_start", "integer"),
+    ("row_end", "integer"),
+    ("table_rows", "integer"),
+    ("headings", "jsonb"),
+)
+# The manifest records which chunker version a document was derived under. The skip decision is made on
+# the file's bytes, and a chunker change does not touch them, so without this column a corpus chunked
+# under old rules is skipped forever after a bump.
+MANIFEST_CHUNKER_COLUMN = ("chunker_version", "text")
+
+
+def table_context_column_sql() -> list[str]:
+    """The idempotent statements that bring an older database up to the columns this worker writes.
+
+    Returned rather than executed so the migration tool, the worker and a test can all read the same
+    list. Nothing here drops or rewrites anything: each statement adds a nullable column that did not
+    exist, and running the list on a migrated database does nothing.
+    """
+    return ([f"alter table chunk_index add column if not exists {name} {kind}"
+             for name, kind in TABLE_CONTEXT_COLUMNS]
+            + [f"alter table ingest_manifest add column if not exists {name} {kind}"
+               for name, kind in (MANIFEST_CHUNKER_COLUMN,)])
+
+
+def ensure_table_context_columns(manifest: "Manifest") -> bool:
+    """Add the columns when the database predates them. True when the statements ran, False otherwise.
+
+    **A warning rather than a refusal**, because the one thing this must not do is fall back to the
+    in-memory manifest: that would re-ingest the whole corpus over a permissions problem. A database that
+    refuses the DDL is a database whose owner has to run the migration, and the message says so.
+    """
+    connection = getattr(manifest, "connection", None)
+    if connection is None:
+        return False
+    try:
+        with connection.cursor() as cur:
+            for statement in table_context_column_sql():
+                cur.execute(statement)
+    except Exception as exc:  # noqa: BLE001 - a missing grant is the operator's problem, not a crash
+        print(f"could not add the table-context columns ({type(exc).__name__}: {exc}). Run "
+              f"`oi run --rm audit migrate` before this worker writes, or every lexical row will fail.")
+        return False
+    return True
+
 
 # **What the worker will look at, and it is loaded rather than written here.**
 #
@@ -828,6 +895,15 @@ def index_for_lexical(manifest: "Manifest", points: list[dict]) -> None:
             "chunker_version": point["payload"].get("chunker_version"),
             "source_sha256": point["payload"].get("source_sha256"),
             "identifiers": identify(point["payload"].get("text") or ""),
+            # The six columns that say which table this chunk belongs to and, for a row, which row.
+            # Read from the payload rather than re-derived, so the lexical row and the vector point
+            # cannot disagree about the table they describe.
+            "table_id": point["payload"].get("table_id"),
+            "row_index": point["payload"].get("row_index"),
+            "row_start": point["payload"].get("row_start"),
+            "row_end": point["payload"].get("row_end"),
+            "table_rows": point["payload"].get("table_rows"),
+            "headings": point["payload"].get("headings") or [],
         }
         for point in points
     ])
@@ -1055,6 +1131,50 @@ def ingest_document(services: Services, document: Document, content_sha256: str,
 
 # --------------------------------------------------------------------------- the manifest
 
+# The lexical row, column by column, in one place. The insert's column list and the tuple it is given
+# have to agree or `execute_values` fails with a message that names neither, and the six table-context
+# columns are exactly the kind of late addition that gets made to one side only. Both are built from
+# this tuple, and `lexical_row` is the only place a row becomes a tuple.
+CHUNK_INDEX_COLUMNS = (
+    "chunk_id", "doc_id", "acl", "text", "page_start", "page_end", "kind", "chunker_version",
+    "source_sha256", "identifiers",
+    "table_id", "row_index", "row_start", "row_end", "table_rows", "headings",
+)
+
+
+def lexical_row(row: dict) -> tuple:
+    """One lexical row as the tuple the insert expects, in `CHUNK_INDEX_COLUMNS` order.
+
+    The table fields are optional because a prose chunk has none of them and a caller that predates
+    them (a probe, a test) need not know they exist. `headings` is a jsonb column, so the list is sent
+    as JSON text rather than as a Postgres array, which is what psycopg2 would make of a Python list.
+    """
+    headings = row.get("headings")
+    return (
+        row["chunk_id"], row["doc_id"], row["acl"], row["text"], row["page_start"],
+        row["page_end"], row["kind"], row["chunker_version"], row["source_sha256"],
+        row["identifiers"],
+        row.get("table_id"), row.get("row_index"), row.get("row_start"), row.get("row_end"),
+        row.get("table_rows"),
+        json.dumps(headings) if headings else None,
+    )
+
+
+def chunk_index_upsert_sql() -> str:
+    """The lexical upsert, with both sides built from `CHUNK_INDEX_COLUMNS`.
+
+    Built rather than written out because the failure it prevents is silent until it is not: a column added
+    to the insert list and not to the tuple fails inside `execute_values` with a count mismatch that names
+    neither side, and a column left out of the update list keeps a stale value that no test looks at. Both
+    lists are derived, so neither can be forgotten, and the text is testable without a database.
+    """
+    columns = ", ".join(CHUNK_INDEX_COLUMNS)
+    assignments = ", ".join(f"{name} = excluded.{name}"
+                            for name in CHUNK_INDEX_COLUMNS if name != "chunk_id")
+    return (f"insert into chunk_index ({columns}) values %s"
+            f" on conflict (chunk_id) do update set {assignments}")
+
+
 class Manifest:
     """What has been ingested, behind a small interface so the policy is testable without Postgres.
 
@@ -1218,23 +1338,26 @@ class PostgresManifest(Manifest):
         with self.connection.cursor() as cur:
             cur.execute(
                 "select relpath, root, content_sha256, bytes, page_count, chunk_count, "
-                "failure_count, failure_kind, last_error, ingested_at, payload_version "
+                "failure_count, failure_kind, last_error, ingested_at, payload_version, "
+                "chunker_version "
                 "from ingest_manifest where relpath = %s",
                 (relpath,))
             row = cur.fetchone()
         if not row:
             return None
         keys = ("relpath", "root", "content_sha256", "bytes", "page_count", "chunk_count",
-                "failure_count", "failure_kind", "last_error", "ingested_at", "payload_version")
+                "failure_count", "failure_kind", "last_error", "ingested_at", "payload_version",
+                "chunker_version")
         return dict(zip(keys, row))
 
     def all(self) -> dict[str, dict]:
         with self.connection.cursor() as cur:
             cur.execute("select relpath, root, content_sha256, chunk_count, failure_count, "
-                        "failure_kind, last_error, payload_version from ingest_manifest")
+                        "failure_kind, last_error, payload_version, chunker_version "
+                        "from ingest_manifest")
             rows = cur.fetchall()
         keys = ("relpath", "root", "content_sha256", "chunk_count", "failure_count", "failure_kind",
-                "last_error", "payload_version")
+                "last_error", "payload_version", "chunker_version")
         return {row[0]: dict(zip(keys, row)) for row in rows}
 
     def put(self, relpath: str, record: dict) -> None:
@@ -1242,8 +1365,9 @@ class PostgresManifest(Manifest):
             cur.execute(
                 """insert into ingest_manifest
                      (relpath, root, content_sha256, bytes, page_count, chunk_count,
-                      failure_count, failure_kind, last_error, payload_version, ingested_at, updated_at)
-                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now(), now())
+                      failure_count, failure_kind, last_error, payload_version, chunker_version,
+                      ingested_at, updated_at)
+                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now(), now())
                    on conflict (relpath) do update set
                      root = excluded.root,
                      content_sha256 = excluded.content_sha256,
@@ -1254,12 +1378,14 @@ class PostgresManifest(Manifest):
                      failure_kind = excluded.failure_kind,
                      last_error = excluded.last_error,
                      payload_version = excluded.payload_version,
+                     chunker_version = excluded.chunker_version,
                      ingested_at = excluded.ingested_at,
                      updated_at = now()""",
                 (relpath, record.get("root"), record.get("content_sha256"), record.get("bytes"),
                  record.get("page_count"), record.get("chunk_count", 0),
                  record.get("failure_count", 0), record.get("failure_kind"),
-                 record.get("last_error"), record.get("payload_version")))
+                 record.get("last_error"), record.get("payload_version"),
+                 record.get("chunker_version")))
 
     def remove(self, relpath: str) -> None:
         with self.connection.cursor() as cur:
@@ -1284,24 +1410,7 @@ class PostgresManifest(Manifest):
             return
         from psycopg2.extras import execute_values
         with self.connection.cursor() as cur:
-            execute_values(cur, """
-                insert into chunk_index
-                  (chunk_id, doc_id, acl, text, page_start, page_end, kind, chunker_version,
-                   source_sha256, identifiers)
-                values %s
-                on conflict (chunk_id) do update set
-                  doc_id = excluded.doc_id,
-                  acl = excluded.acl,
-                  text = excluded.text,
-                  page_start = excluded.page_start,
-                  page_end = excluded.page_end,
-                  kind = excluded.kind,
-                  chunker_version = excluded.chunker_version,
-                  source_sha256 = excluded.source_sha256,
-                  identifiers = excluded.identifiers
-            """, [(row["chunk_id"], row["doc_id"], row["acl"], row["text"], row["page_start"],
-                   row["page_end"], row["kind"], row["chunker_version"], row["source_sha256"],
-                   row["identifiers"]) for row in rows])
+            execute_values(cur, chunk_index_upsert_sql(), [lexical_row(row) for row in rows])
 
     def remove_chunks(self, doc_id: str) -> None:
         with self.connection.cursor() as cur:
@@ -1559,6 +1668,17 @@ def ingest_cycle(services: Services, documents_root: Path, manifest: Manifest,
                   f"worker writes {PAYLOAD_VERSION}; re-deriving it")
             same_bytes = False
 
+        # Same bytes, older chunker rules. **The skip decision is on the bytes, and a chunker change does
+        # not touch them.** Until the manifest carried this, a document chunked under rules that have
+        # since changed was skipped forever: the new chunking never reached it, and the only way to make
+        # it reach was to bump PAYLOAD_VERSION and hope the next person remembered. A document derived
+        # under any other version is now stale whatever else changed, and it says so before it re-derives.
+        if same_bytes and (record.get("chunker_version") or "") != chunker.CHUNKER_VERSION:
+            print(f"  {document.relpath} was chunked under "
+                  f"{record.get('chunker_version') or 'a chunker version not recorded'} and this "
+                  f"worker writes {chunker.CHUNKER_VERSION}; re-deriving it")
+            same_bytes = False
+
         # A record claiming success with no chunks is not a document that has been ingested, it is a bug's
         # residue. The first real corpus run wrote two contract exhibits as zero chunks before the worker
         # learned to refuse them, and those rows say "ingested, unchanged, 0 chunks" ever since, so the
@@ -1705,7 +1825,7 @@ def write_document(result: CycleResult, manifest: Manifest, services: Services, 
         "relpath": document.relpath, "root": document.root,
         "content_sha256": content_sha256, "bytes": size, "page_count": pages,
         "chunk_count": len(points), "failure_count": 0, "failure_kind": None, "last_error": None,
-        "payload_version": PAYLOAD_VERSION,
+        "payload_version": PAYLOAD_VERSION, "chunker_version": chunker.CHUNKER_VERSION,
     })
 
 
@@ -1731,7 +1851,14 @@ def record_failure(result: CycleResult, manifest: Manifest, document: Document, 
         "failure_count": failures if transient else failures + 1,
         "failure_kind": "transient" if transient else "permanent",
         "last_error": f"{type(exc).__name__}: {exc}"[:500],
+        # **Preserved for the payload and current for the chunker, and the difference is not an
+        # oversight.** The payload rule is about how stored labels are computed, so a failed re-derivation
+        # keeps the old claim and is retried. The chunker version is about this attempt: writing the old
+        # one back would make the mismatch fire on every cycle and defeat the dead-letter limit, because
+        # the mismatch is checked before it. Writing what just failed means one retry per chunker change
+        # and then the ordinary failure path.
         "payload_version": (record or {}).get("payload_version") or PAYLOAD_VERSION,
+        "chunker_version": chunker.CHUNKER_VERSION,
     })
 
 
@@ -1751,11 +1878,21 @@ def build_manifest(dsn: str | None) -> Manifest:
               "look new and be re-ingested")
         return MemoryManifest()
     try:
-        return PostgresManifest(dsn)
+        manifest: Manifest = PostgresManifest(dsn)
     except Exception as exc:  # noqa: BLE001
         print(f"could not reach the database for the manifest ({exc}); carrying on with an in-memory "
               f"manifest, which means documents will be re-ingested rather than skipped")
         return MemoryManifest()
+    # **Before the first read, because the first read needs the column.** The manifest query selects the
+    # chunker version and the lexical write sets the table columns, so a database that predates the
+    # migration would fail on both. `audit migrate` remains the ordered path; this makes the worker
+    # correct when it is started first, which is an ordering an operator can produce by accident.
+    #
+    # It runs for every command that opens the database, including the read-only ones, rather than only
+    # for the cycle. The alternative is a list of write paths, and a list is what the next write path
+    # forgets; six catalog checks on an already-migrated database are the cheaper mistake.
+    ensure_table_context_columns(manifest)
+    return manifest
 
 
 def dataset_files(documents_root: Path) -> list[dict]:

@@ -2188,21 +2188,25 @@ recorded as ingested with no chunks behind them, and 29 chunks of HTML left labe
 code that labelled them was corrected.
 
 `PAYLOAD_VERSION` in `services/ingestion/ingest.py` names the rules a stored payload was derived under. It is
-`payload-v5` today. The manifest records it per document, and a record whose value differs from the running
+`payload-v6` today. The manifest records it per document, and a record whose value differs from the running
 worker's is re-derived even though its bytes have not changed. Bump it when the meaning of a stored field
 changes, and the next cycle re-derives the whole corpus once. **Measured on the reference instance: 10,026
 documents in 1h36m at four documents in flight.** For a client's corpus it is the price of not serving content
 the code no longer produces.
 
-It is deliberately separate from the chunker's version, which is `chunker-v3` (it was `chunker-v2` until the
+It is deliberately separate from the chunker's version, which is `chunker-v5` (it was `chunker-v2` until the
 measured post-condition described in 13a landed). **The separation is real and it
 is not absolute**, and the change that raised both is the case that shows why. A labelling fix changes what a
 stored field means and leaves the chunk's text and its id alone, so only the payload version moves: forcing a
 re-parse for it would hide the difference between the two. But when the *chunking rules themselves* change --
 what text belongs to a chunk, and therefore what a chunk is -- then the chunk text changes, the chunk id
-changes with it, and both versions move together. Step 3.5b is that case: a chunk now carries the heading path
+changes with it, and the chunker version moves. Step 3.5b is that case: a chunk now carries the heading path
 it opened under, so every chunk's text and id are new, and a payload bump alone would have reached nothing
 because the manifest would have seen identical bytes and skipped every file.
+
+**Since migration 024 the manifest records the chunker version too**, so that trap is closed: a document
+derived under any other version is re-derived on the next cycle, and a chunker bump no longer depends on
+somebody remembering to raise the payload version as well.
 
 **If you are about to ingest a corpus for the first time, check both constants first.** Getting the rules right
 before the first ingest costs nothing; getting them right afterwards costs a full re-embed, and the larger the

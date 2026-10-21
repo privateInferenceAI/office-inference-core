@@ -782,3 +782,33 @@ def test_a_table_row_uses_its_sibling_rows_for_the_column_header():
                           table_id="t1", row_index=12)
     rendered = toolbox.render([passage])
     assert "Columns: Three Months Ended June 30" in rendered
+
+
+def test_a_row_that_already_carries_its_context_is_not_prefixed_twice():
+    """A row re-ingested under chunker-v5 begins with its own columns and caption. The renderer still
+    supports the lookup because rows indexed before v5 have no prefix, and adding a second one to a
+    prefixed row would read "Columns: Columns: ..." -- and the prefixed row can itself pass the header
+    test, so the duplicate would be built rather than merely repeated."""
+    toolbox = make_toolbox()
+    toolbox._table_sibling_rows = lambda table_id, row_index: [
+        (10, "Three Months Ended June 30, | Six Months Ended June 30,"),
+        (11, "2026 | 2025 | 2026 | 2025"),
+    ]
+    text = ("Columns: Three Months Ended June 30, | Six Months Ended June 30, / "
+            "2026 | 2025 | 2026 | 2025. Total revenues | 4,934,098 | 4,136,543")
+    passage = FakePassage("c1", text, kind="table_row", table_id="t1", row_index=12)
+    rendered = toolbox.render([passage])
+    assert rendered.count("Columns:") == 1, rendered
+    assert "4,934,098" in rendered
+
+
+def test_a_whole_table_blob_that_already_carries_its_context_is_not_prefixed_twice():
+    """Same guard on the blob path. The whole-table text is unchanged by v5, so a blob never gains the
+    prefix in the index; the guard is here because the two paths share the method and a future change
+    that put the caption into the blob would otherwise double it."""
+    toolbox = make_toolbox()
+    blob = ("Table: CONDENSED CONSOLIDATED STATEMENTS OF OPERATIONS. Columns: Three Months Ended June 30,"
+            " | Six Months Ended June 30, / 2026 | 2025 | 2026 | 2025. Total revenues | 4,934,098")
+    passage = FakePassage("c1", blob, kind="table", table_id="t1")
+    rendered = toolbox.render([passage])
+    assert rendered.count("Columns:") == 1, rendered
