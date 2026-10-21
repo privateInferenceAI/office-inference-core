@@ -975,7 +975,13 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
         except Exception:
             reply = {"error": "synthesis_failed"}
         content = (reply.get("content") or "").strip() if not reply.get("error") else ""
-        if content and answer_contract.violation(content, toolbox.texts()) is None:
+        # **A synthesized refusal is a failed synthesis.** The old path's single-shot fallback can still
+        # answer from the retrieval passages, and measured on A04 executive it did: the loop's gathered
+        # evidence held only part of the compensation table, the synthesis correctly refused, and the
+        # question regressed from 5 of 5 to 0 of 5. Refusals fall through to the old behaviour; only a
+        # synthesis that actually answers is accepted.
+        if (content and _REFUSAL_PHRASE not in content.lower()
+                and answer_contract.violation(content, toolbox.texts()) is None):
             return {"answer": content, "reason": None, "evidence": toolbox.evidence,
                     "attribution": attribution, **stats}
     return {"answer": None, "reason": limit_error or "tool_step_limit",

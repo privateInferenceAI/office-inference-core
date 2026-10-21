@@ -617,3 +617,22 @@ def test_a_failed_synthesis_keeps_the_old_none_result():
     assert result["answer"] is None
     assert result["synthesis"] == 1
     assert result["reason"] in ("tool_step_limit", "tool_budget", "tool_error")
+
+
+def test_a_synthesized_refusal_falls_back_to_the_old_result():
+    toolbox = make_toolbox()
+
+    def fake_search(query):
+        number = toolbox.add(FakePassage("c1", "the answer row"))
+        return "[" + str(number) + "] company/doc.md: the answer row"
+
+    toolbox.search_documents = fake_search
+
+    def model(messages, tools):
+        if tools:
+            return tool_reply("search_documents", json.dumps({"query": "again"}))
+        return answer_reply("I could not find that in the available documents.")
+
+    result = tool_loop.run_loop(model, toolbox, "q", max_steps=2)
+    assert result["answer"] is None
+    assert result["synthesis"] == 1
