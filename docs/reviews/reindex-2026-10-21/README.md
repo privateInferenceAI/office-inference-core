@@ -35,3 +35,12 @@ reindex is needed before any corpus-1 comparison.
 
 **Evidence.** Raw runs at `/home/anthony/oi-eval-runs/reindex-corpus2` on the laptop, and the reindex log in that
 archive. Snapshots and dumps in `/home/anthony/oi-eval-runs/backups`.
+
+
+## Related experiment: query_rows section-row matching (PR #219)
+
+A separate change let `query_rows` complete a match using the section row immediately above a data row, aimed at
+the Duke bond question. Measured on the reindexed corpus-2 index, five serial runs: 29, 32, 32, 33, 33 (mean 31.8)
+against a 32.0 baseline on the same code and index. PUB_L02 passes 4 of 5 in the experiment, but it already passes
+5 of 5 on the reindexed baseline, so the rule bought nothing. Closed without merge and recorded here as a
+measured negative.
