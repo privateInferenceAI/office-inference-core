@@ -159,6 +159,14 @@ def system_prompt(honesty_enabled: bool = True, query_enabled: bool = False) -> 
     return rules + _PROMPT_TAIL
 
 
+# The one message a capped loop is allowed to act on: answer from the evidence already gathered, with no
+# tools. It is deliberately a user message, not a new system prompt, so the measured prompt stays unchanged.
+SYNTHESIS_INSTRUCTION = (
+    "You cannot call any more tools. Answer the question now using only the evidence above. Cite the "
+    "evidence number that carries the answer as [n]. If the evidence does not contain the answer, reply "
+    "exactly: I could not find that in the available documents."
+)
+
 CORRECTIVE = (
     "Your previous reply was rejected: {reason}. Answer again using the evidence already gathered, or search "
     "once more if a needed value is missing. {instruction}"
@@ -485,33 +493,50 @@ class ToolBox:
 
     def exact_phrase_for_question(self, question: str) -> str:
         # The rarest literal phrase from the question, used only when the loop is about to refuse.
-        # Capitalised runs catch a heading or a defined term ("Current Termination Date"); content
-        # n-grams catch a rule name ("visitor badge", "full-time equivalent"). A phrase that matches
-        # too much (or nothing) is rejected, so the fallback cannot pull half the corpus.
-        tokens = [token for token in question.replace("?", " ").replace(",", " ").split()]
-        from_words = []
+        # **Only run when the question contains an exact-phrase cue.** Measured: firing this on
+        # numeric-anchor table questions (N03, N06, N07) cost 1.4 points on the live suite because the
+        # injected evidence displaced the row-query path. Cues are a capitalised multiword term, a
+        # hyphenated term, or a quoted phrase; all three measured needle questions carry one and the
+        # numeric-anchor questions carry none.
+        import re
+        stripper = chr(46) + chr(95) + chr(40) + chr(41) + chr(91) + chr(93) + chr(59) + chr(58) + chr(39) + chr(34)
+        tokens = [token.strip(stripper) for token in question.replace("?", " ").replace(",", " ").split()]
+        tokens = [token for token in tokens if token]
         stop = {"the", "a", "an", "of", "for", "and", "or", "to", "in", "on", "at", "by", "with",
                 "what", "which", "who", "how", "many", "much", "is", "are", "was", "were", "did",
-                "does", "do", "its", "their", "our", "your", "this", "that", "these", "those"}
+                "does", "do", "its", "their", "our", "your", "this", "that", "these", "those", "under"}
+        has_hyphen = any("-" in token and len(token) > 4 for token in tokens)
+        has_quote = chr(34) in question or chr(8220) in question or chr(8221) in question
+        capitalised = []
+        has_caps_run = False
+        for token in tokens:
+            clean = token.lower().strip(".")
+            if token[0].isupper() and clean not in stop:
+                capitalised.append(token)
+            elif capitalised:
+                if len(capitalised) >= 2:
+                    has_caps_run = True
+                capitalised = []
+        if len(capitalised) >= 2:
+            has_caps_run = True
+        if not (has_hyphen or has_quote or has_caps_run):
+            return ""
+        from_words = []
         capitalised = []
         for token in tokens:
-            stripper = chr(46) + chr(95) + chr(40) + chr(41) + chr(91) + chr(93) + chr(59) + chr(58) + chr(39) + chr(34)
-            clean = token.strip(stripper)
-            if len(clean) < 2:
-                continue
-            if clean[0].isupper() and clean.lower().strip(".") not in stop:
-                capitalised.append(clean)
+            clean = token.lower().strip(".")
+            if token[0].isupper() and clean not in stop:
+                capitalised.append(token)
             elif capitalised:
                 if len(capitalised) >= 2:
                     from_words.append(" ".join(capitalised))
                 capitalised = []
         if len(capitalised) >= 2:
             from_words.append(" ".join(capitalised))
-        words = [token.strip(stripper).lower() for token in tokens]
-        words = [word for word in words if len(word) >= 3 and word not in stop]
+        words = [token.lower() for token in tokens if len(token) >= 3 and token.lower() not in stop]
         for size in (3, 2):
-            for start in range(0, max(1, len(words) - size + 1)):
-                phrase = " ".join(words[start:start + size])
+            for offset in range(0, max(1, len(words) - size + 1)):
+                phrase = " ".join(words[offset:offset + size])
                 if len(phrase) >= 6:
                     from_words.append(phrase)
         seen = set()
@@ -850,7 +875,7 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
             + (f"Evidence already retrieved, numbered:\n{seeded}\n\n" if seeded else "")
             + "Search if this is not enough, then answer.")},
     ]
-    stats = {"steps": 0, "tool_calls": 0, "corrections": 0, "auto_exact": 0}
+    stats = {"steps": 0, "tool_calls": 0, "corrections": 0, "auto_exact": 0, "synthesis": 0}
     limit_error = ""
     # **What the gateway says answered, per call, so the answer can name the model that ran.** The reply
     # that produces the answer carries it; a failover means this is a different model group from the
@@ -907,9 +932,12 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
                             "function": {"name": call["name"], "arguments": call["arguments"]}}
                            for call in calls],
         })
+        exhausted = False
         for call in calls:
             if stats["tool_calls"] >= max_tool_calls:
-                return {"answer": None, "reason": "tool_budget", "evidence": toolbox.evidence, **stats}
+                limit_error = "tool_budget"
+                exhausted = True
+                break
             stats["tool_calls"] += 1
             result = toolbox.execute(call.get("name") or "", call.get("arguments") or "{}")
             if on_event is not None:
@@ -932,7 +960,32 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
                         messages.append({"role": "user", "content": (
                             "An exact search for " + json.dumps(phrase) + " found this evidence:" + chr(10)
                             + found + chr(10) + "Use it if it answers the question, then answer or refuse.")})
-    return {"answer": None, "reason": limit_error or "tool_step_limit", "evidence": toolbox.evidence, **stats}
+
+        if exhausted:
+            break
+    # **A capped loop keeps its evidence.** The old path returned no answer, and the caller fell back to the
+    # single-shot request whose six passages had already failed, discarding everything the loop had gathered.
+    # Measured: N06/N07 are flaky exactly this way under load, and the same failure appears in the committed
+    # raw runs. One no-tools synthesis turn lets the model answer from evidence it has already seen, verified
+    # by the same answer contract; if it fails, behaviour is exactly as before.
+    if toolbox.evidence:
+        stats["synthesis"] = 1
+        try:
+            reply = call_model(messages + [{"role": "user", "content": SYNTHESIS_INSTRUCTION}], [])
+        except Exception:
+            reply = {"error": "synthesis_failed"}
+        content = (reply.get("content") or "").strip() if not reply.get("error") else ""
+        # **A synthesized refusal is a failed synthesis.** The old path's single-shot fallback can still
+        # answer from the retrieval passages, and measured on A04 executive it did: the loop's gathered
+        # evidence held only part of the compensation table, the synthesis correctly refused, and the
+        # question regressed from 5 of 5 to 0 of 5. Refusals fall through to the old behaviour; only a
+        # synthesis that actually answers is accepted.
+        if (content and _REFUSAL_PHRASE not in content.lower()
+                and answer_contract.violation(content, toolbox.texts()) is None):
+            return {"answer": content, "reason": None, "evidence": toolbox.evidence,
+                    "attribution": attribution, **stats}
+    return {"answer": None, "reason": limit_error or "tool_step_limit",
+            "evidence": toolbox.evidence, **stats}
 
 
 def enabled() -> bool:
