@@ -92,6 +92,16 @@ each box at the same time exhausted it: the provider returned 429 "Too many toke
 remaining runs scored 24 of 53 and 15 to 22 of 37. Those runs were discarded. A 429 of that kind is a stop signal
 for the whole series, not a data point to average.
 
+The answer half also stops at a daily provider-token budget. Before the phase and before every run,
+`scripts/run_answer_suite.sh` reads today's `total_tokens` from `LiteLLM_SpendLogs` through the deployment's
+postgres container, and exits 5 when the next run would cross `OI_SUITE_DAILY_TOKEN_LIMIT` (default 30,000,000,
+with `OI_SUITE_TOKEN_RESERVE` held back on top). The projection is the average of the completed runs in the
+output directory, or 2,000,000 tokens while there are none.
+
+`token-budget.json` beside the runs records the start and every run. The account quota is 150,000,000 tokens a
+day and is not adjustable today, so the working budget sits well under it. If the spend table cannot be read the
+phase refuses to start unless `OI_SUITE_TOKEN_GUARD=warn`, and that warning is recorded in the same file.
+
 Every run records where it ran. The script writes `run-context.json` into the output directory before the first
 run, with the commit, the `OI_*` flags the API runs with, the `api` and `eval` image identities, load,
 available memory, hostname and instance id. Each run's JSON carries the same record under `context`.

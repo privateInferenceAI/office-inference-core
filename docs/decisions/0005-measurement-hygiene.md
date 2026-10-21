@@ -1,6 +1,6 @@
 # 0005. Measurement hygiene: one suite at a time, and every run records its context
 
-Date: 2026-10-20
+Date: 2026-10-20, updated 2026-10-21 for the daily provider-token budget
 Status: accepted
 
 ## Context
@@ -61,11 +61,27 @@ written next to it.
    changed; the runs are invalid and were discarded. Run one suite at a time across every deployment that shares
    a provider account, and treat a mid-series 429 as a stop signal: the series must be re-run, not averaged.
 
+9. **Provider tokens are account-wide, and a phase stops at a daily budget.** The Bedrock quota is a
+   Cross-Model Max Tokens Per Day of 150,000,000 on the account. It is not adjustable today and there is no
+   premium support plan to raise it. The suite's working budget is 30,000,000 tokens per UTC day
+   (`OI_SUITE_DAILY_TOKEN_LIMIT`), well under the account cap so the gateway's other traffic and the second
+   deployment can share it. `OI_SUITE_TOKEN_RESERVE` holds tokens back on top of that. Before the phase and
+   before every run, `scripts/run_answer_suite.sh` reads today's `total_tokens` from `LiteLLM_SpendLogs`
+   through the deployment's own postgres container and stops with exit 5 when the next run would cross the
+   budget. The next run is projected at the average of the completed runs in the same output directory, or at
+   2,000,000 tokens while there are none. The start and every run are recorded in `token-budget.json` beside
+   the runs, including the observation that stopped the phase. If the spend table cannot be read, the phase
+   refuses to start. `OI_SUITE_TOKEN_GUARD=warn` is the explicit way to measure without that proof, and the
+   warning is recorded. The working budget can move; the provider quota above it cannot.
+
 ## Consequences
 
-- `scripts/run_answer_suite.sh` exits 3 when another suite holds the host lock, and 4 when the gate refuses or
-  the context cannot be written. `tests/fixtures/data_suite_run.py` exits 4 when the advisory lock is busy or
-  Postgres cannot be reached.
+- `scripts/run_answer_suite.sh` exits 3 when another suite holds the host lock, 4 when the gate refuses or
+  the context cannot be written, and 5 when the provider-token budget would be crossed or today's usage cannot
+  be read. `tests/fixtures/data_suite_run.py` exits 4 when the advisory lock is busy or Postgres cannot be
+  reached.
+- A budget stop leaves `run-context.json` and `token-budget.json` in the output directory, so a refused phase
+  is a record with the observation that stopped it, not an empty directory.
 - A direct runner gets a thinner context. The eval image has no git, so the commit is null, and image identities
   are absent. Run through the script for a complete record; the panel still warns about what is missing.
 - The load gate covers runs started through the script. A direct runner is serialized by the database lock but not
@@ -74,6 +90,7 @@ written next to it.
   either, so these stay operator rules and this record does not pretend otherwise.
 - The first measurement taken under these rules is the corpus-1 live control that the exact-phrase PR left open,
   re-run in a window that the script admits.
-- Provider quota is not enforceable from the box. A suite on another machine sharing the account can exhaust the
-  day's tokens mid-series; the run context records the region and model but not the remaining quota, so the
-  operator keeps this rule by hand and the 429 in the logs is the signal that a series is dead.
+- Provider quota is account-wide and only partly visible from one box. The budget reads this deployment's spend
+  logs, not the other deployment's, so a suite running elsewhere on the same account can still take the day's
+  remaining tokens. The budget is a floor on what this box has spent and a stop before the quota, not a proof
+  of the account's remaining balance. A mid-series 429 is still the signal that a series is dead.

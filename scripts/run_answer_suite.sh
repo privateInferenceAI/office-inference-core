@@ -18,7 +18,8 @@
 #   scripts/run_answer_suite.sh [runs] [output-directory]
 #
 # Defaults: five runs (the minimum for a configuration claim), output under /tmp. Environment: OI_ROOT,
-# OI_SUITE_LOCK, OI_SUITE_MAX_LOAD and OI_SUITE_MIN_AVAILABLE_MB (see scripts/suite_hygiene.py).
+# OI_SUITE_LOCK, OI_SUITE_MAX_LOAD, OI_SUITE_MIN_AVAILABLE_MB, OI_SUITE_DAILY_TOKEN_LIMIT,
+# OI_SUITE_TOKEN_RESERVE and OI_SUITE_TOKEN_GUARD (see scripts/suite_hygiene.py).
 set -euo pipefail
 
 ROOT="${OI_ROOT:-/opt/oi-core}"
@@ -58,9 +59,25 @@ python3 "$ROOT/scripts/suite_hygiene.py" preflight \
   --compose-file deploy/office/compose/docker-compose.yml \
   --env-file rendered/env
 
+# **The day's provider tokens are an admission condition too.** Bedrock's 150M-token daily quota is account-wide
+# and not adjustable, so a phase that starts near it cannot finish a series. This check reads today's total from
+# LiteLLM_SpendLogs through the deployment's own postgres container, and stops the phase with exit 5 when the next
+# run is projected to cross the budget. The start and every run are written to token-budget.json beside the runs,
+# so the panel can read what the phase cost. The projection and the refusal live in scripts/suite_hygiene.py,
+# where the tests exercise them without a database.
+BUDGET="$OUT/token-budget.json"
+token_budget() {
+  python3 "$ROOT/scripts/suite_hygiene.py" budget \
+    --out "$BUDGET" \
+    --compose-file deploy/office/compose/docker-compose.yml \
+    --env-file rendered/env "$@"
+}
+token_budget --stage start
+
 echo "running $RUNS suite run(s) against $(git -C "$ROOT" log --oneline -1 2>/dev/null || echo 'unknown commit')"
 echo "output: $OUT"
 echo "context: $OUT/run-context.json"
+echo "token budget: $BUDGET"
 
 # **The output directory has to be writable by the container's user, and the image's user is not root.**
 # The eval image runs as uid 10003; a directory this script creates belongs to the operator, so the runner's
@@ -71,6 +88,9 @@ echo "context: $OUT/run-context.json"
 # OI_RUN_CONTEXT points the runner at the record written above, so the run's JSON carries the same commit, flags,
 # images, load and memory rather than guessing at them from inside the container.
 for n in $(seq 1 "$RUNS"); do
+  # **Checked again before every run.** The average of the runs already recorded here is the projection, so a
+  # series stops before the run that would cross the budget instead of after it.
+  token_budget --stage before --run "$n"
   docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env run -T --rm --no-deps \
     --user "$(id -u):$(id -g)" \
     --entrypoint python \
@@ -79,5 +99,9 @@ for n in $(seq 1 "$RUNS"); do
     -e OI_RUN_CONTEXT=/out/run-context.json \
     eval /w/tests/fixtures/data_suite_run.py --json-out "/out/run-$n.json" < /dev/null >/dev/null
   echo "run $n complete: $OUT/run-$n.json"
+  # The run has finished, so this records its cost and never refuses: a refusal here would discard a run that
+  # already happened. The next loop's check is what stops the phase.
+  token_budget --stage after --run "$n"
 done
+echo "token usage for this phase: $BUDGET"
 echo "five runs are the minimum before a configuration claim; read the range, not one number."
