@@ -636,3 +636,103 @@ def test_a_synthesized_refusal_falls_back_to_the_old_result():
     result = tool_loop.run_loop(model, toolbox, "q", max_steps=2)
     assert result["answer"] is None
     assert result["synthesis"] == 1
+
+
+# --------------------------------------------------------------------------- centred evidence snippets
+#
+# The visitor-badge measurement: the manual states the badge limit in a table row whose figure sat past the
+# seven-hundred-character slice, so the model answered from the weaker "end of visit" line. These tests hold
+# the deterministic fix: the window follows the query's terms, and nothing else about the render changes.
+
+BADGE_ROW = ("Visitor | White | Guests, interviewees, customer reps | "
+             "Expires at the end of the visit day, maximum 24 hours | Escort required")
+BADGE_FILLER = "The manual covers facilities and access procedures. "
+
+
+def badge_text():
+    return (BADGE_FILLER * 45) + BADGE_ROW
+
+
+def snippet_body(snippet):
+    body = snippet[3:] if snippet.startswith("...") else snippet
+    return body[:-3] if body.endswith("...") else body
+
+
+def test_a_figure_at_the_end_of_a_long_passage_is_visible_when_the_query_hits_it():
+    snippet = tool_loop.centred_snippet(badge_text(), "How long is a visitor badge valid?",
+                                        tool_loop.SNIPPET_CHARS)
+    assert "maximum 24 hours" in snippet
+    assert snippet.startswith("..."), "the window starts after the beginning of the passage"
+    assert len(snippet_body(snippet)) == tool_loop.SNIPPET_CHARS
+
+
+def test_a_multiword_focus_term_wins_over_an_earlier_single_word():
+    text = "badge " + (BADGE_FILLER * 30) + "visitor badge is valid for 24 hours maximum"
+    snippet = tool_loop.centred_snippet(text, ["visitor badge", "badge"], tool_loop.SNIPPET_CHARS)
+    assert "24 hours maximum" in snippet
+
+
+def test_without_a_focus_the_snippet_is_the_start_slice():
+    text = "alpha " * 300
+    start = text[:tool_loop.SNIPPET_CHARS]
+    assert tool_loop.centred_snippet(text, "", tool_loop.SNIPPET_CHARS) == start
+    assert tool_loop.centred_snippet(text, "visitor badge", tool_loop.SNIPPET_CHARS) == start
+    assert not start.startswith("...")
+
+
+def test_render_without_a_focus_keeps_the_exact_old_line():
+    toolbox = make_toolbox()
+    text = "alpha " * 300
+    rendered = toolbox.render([FakePassage("c1", text)])
+    assert rendered == ("[1] company/policy.doc p1 kind=prose: "
+                        + " ".join(text.split())[:tool_loop.SNIPPET_CHARS])
+
+
+def test_a_short_text_is_unchanged_even_with_a_focus():
+    snippet = tool_loop.centred_snippet("Visitor   badges\nare valid for 24 hours maximum.", "visitor badge",
+                                        tool_loop.SNIPPET_CHARS)
+    assert snippet == "Visitor badges are valid for 24 hours maximum."
+    assert "..." not in snippet
+
+
+def test_the_snippet_normalises_whitespace_before_matching_and_cutting():
+    text = ("filler\n\n\t" * 200) + "Visitor   badges\tare valid for\n24 hours maximum"
+    snippet = tool_loop.centred_snippet(text, "24 hours", tool_loop.SNIPPET_CHARS)
+    assert "24 hours maximum" in snippet
+    assert "\n" not in snippet and "\t" not in snippet and "  " not in snippet
+    assert snippet.startswith("...") and not snippet.endswith("...")
+
+
+def test_a_focus_does_not_change_evidence_numbering_or_line_format():
+    toolbox = make_toolbox()
+    long_text = (BADGE_FILLER * 45) + BADGE_ROW
+    rendered = toolbox.render([FakePassage("c1", long_text), FakePassage("c2", "second passage")],
+                              focus="visitor badge hours")
+    assert rendered.startswith("[1] company/policy.doc p1 kind=prose: ")
+    assert "[2] company/policy.doc p1 kind=prose: second passage" in rendered
+    assert "maximum 24 hours" in rendered
+    again = toolbox.render([FakePassage("c1", long_text)], focus="24 hours")
+    assert again.startswith("[1] "), "a repeated passage keeps its number"
+    assert len(toolbox.evidence) == 2
+
+
+def test_search_documents_centres_the_snippet_on_its_query(monkeypatch):
+    toolbox = make_toolbox()
+    passage = FakePassage("c1", badge_text(), doc_id="company/facilities.md", page=7)
+    seen = []
+
+    class Result:
+        passages = [passage]
+
+    import retriever as real_retriever
+
+    def fake_search(services, query, **kwargs):
+        seen.append(query)
+        return Result()
+
+    monkeypatch.setattr(real_retriever, "search", fake_search)
+    out = toolbox.search_documents("visitor badge hours")
+    assert seen == ["visitor badge hours"]
+    assert "maximum 24 hours" in out
+    assert out.startswith('Search results for "visitor badge hours":')
+
