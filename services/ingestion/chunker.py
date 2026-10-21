@@ -86,7 +86,14 @@ DATASET_TEXT_MIN_BYTES = 3 * 1024 * 1024
 # Bumped when any rule above changes, because it is part of every chunk id: a chunker change makes new
 # ids for the same document, which is what forces a deliberate re-embed rather than a silent mix of
 # two chunkings in one collection.
-CHUNKER_VERSION = "chunker-v4"
+#
+# **v5 changes the text of every table row.** A row entry now begins with the column labels and the
+# caption above it (Table: ... Columns: ...), so the same document under v5 produces different text and
+# different ids from v4. The worker also records this version in `ingest_manifest`, because the skip
+# decision is made on the file's bytes and a chunker change does not touch them: without that column a
+# corpus chunked under v4 would be skipped forever after this bump, and the new text would never reach a
+# single document.
+CHUNKER_VERSION = "chunker-v5"
 
 _WORD = re.compile(r"\S+")
 
@@ -132,6 +139,10 @@ class Chunk:
     row_start: int | None = None
     row_end: int | None = None
     table_rows: int | None = None
+    # The one-line context a table_row's text now begins with ("Table: ... Columns: ..."), kept on the
+    # chunk so the derivation is inspectable rather than only visible inside the text. Empty for prose,
+    # whole-table and marker chunks, which is what makes "this row had no header above it" sayable.
+    table_context: str = ""
     # The measured token count under the served embedding model, set by the post-condition. None when the
     # caller did not supply a tokenizer, which the worker refuses to do.
     token_count: int | None = None
@@ -365,16 +376,23 @@ def _extent(fragment: TableFragment) -> tuple[float, float]:
 
 
 def serialise_table(group: list[TableFragment], headings: list[str], caption: str = "") \
-        -> tuple[str, list[str], list[tuple[int, str, dict]]]:
+        -> tuple[str, list[str], list[tuple[int, str, dict]], str]:
     """A logical table as text: a deterministic prefix, then one line per row.
 
     The prefix carries the heading path and the caption because the research measured a deterministic
     prefix plus table caption beating generated keywords and summaries on page accuracy, 67.38 against
     46.10 and 62.41. It costs nothing and it is embedded with the chunk.
 
-    Returns the whole-table text, the column names it folded into the rows, and the rows with their own
-    pages. The column names come back because the caller needs them to tell the header row apart from a
-    data row when it decides which rows become retrievable entries.
+    Returns the whole-table text, the column names it folded into the rows, the rows with their own
+    pages, and the top row of the fragment that carried the header. The column names come back because
+    the caller needs them to tell the header row apart from a data row when it decides which rows become
+    retrievable entries.
+
+    **The dropped top row comes back too, and it is not a leftover.** The header rule removes it from the
+    emitted rows, and it is still the row above the first emitted row: it is where a table's caption sits
+    when the caption is the table's own first row, and it is one half of a two-row period header when the
+    period labels happen to be the top row. A row entry derives its context from the rows in this list,
+    so a row that is not in it cannot be context and the caption would be invisible.
     """
     headers, carriers = find_headers(group)
     lines: list[str] = []
@@ -383,11 +401,127 @@ def serialise_table(group: list[TableFragment], headings: list[str], caption: st
     if caption:
         lines.append(caption)
     rows: list[tuple[int, str, dict]] = []
+    top_row = ""
     for fragment_index, fragment in enumerate(group):
         body = fragment.row_texts(headers, skip_first=(fragment_index in carriers))
+        if fragment_index in carriers and not top_row:
+            # The row the header rule dropped, as plain cells rather than with the column names folded
+            # into it. It is a row of labels, so the folded form would read
+            # "Three Months Ended June 30,: Three Months Ended June 30," and put its own noise in
+            # front of every row below it.
+            top_index = fragment.top_row_index()
+            if top_index is not None:
+                top_row = " | ".join(value for value in fragment.row_values(top_index) if value)
         rows.extend((fragment.page_no, text, bbox) for _, text, bbox in body)
     lines.extend(text for _, text, _ in rows)
-    return "\n".join(lines), headers, rows
+    return "\n".join(lines), headers, rows, top_row
+
+
+# --------------------------------------------------------------------------- a row's own context
+#
+# **A row of figures cannot say which period each figure belongs to, and the index did not carry the row
+# that could.** Corpus 2's row is `Total revenues | 4,934,098 | 4,136,543 | 8,947,032 | 8,183,283`: four
+# numbers, and the labels that tell them apart sit in the header rows above it. The renderer already
+# prepends those labels at read time (`services/api/tool_loop.py`), which fixed the answer and left the
+# lexical arm blind, because `chunk_index` held the bare row. The derivation happens here instead, once,
+# so the text that is embedded, the text that is indexed and the text a row query matches all carry it,
+# and nothing has to look a table up while answering.
+#
+# The rules are the renderer's on purpose: the same header test, the same caption test and the same
+# " / " join, so a row reads the same whichever path reaches it. What is deliberately NOT added is the
+# document title or the heading path. Measured on corpus 2, those made retrieval worse; the column
+# labels are what a row needs.
+
+# A header row is short and mostly labels. Longer than this is a sentence that happens to name a month.
+_TABLE_CONTEXT_ROW_CHARS = 220
+# How far above a row to look for its header, in rows. A table's header is at its top, and forty rows is
+# wider than the tallest block of period labels a filing uses.
+_TABLE_CONTEXT_LOOKBACK = 40
+# How far above the header block to look for the caption. A caption is adjacent in practice; the bound is
+# there so a table with no caption does not walk to the top of the document looking for one.
+_TABLE_CONTEXT_CAPTION_LOOKBACK = 6
+
+_TABLE_HEADER_RE = re.compile(
+    r"(three|six|nine|twelve)\s+months?|months?\s+ended|quarter|years?\s+ended|"
+    r"fiscal|as\s+of|(?:19|20)\d{2}|"
+    r"(?:january|february|march|april|may|june|july|august|september|october|november|december)|"
+    r"in\s+(?:thousands|millions|billions)")
+_TABLE_VALUE_RE = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?")
+
+
+def _one_line(text: str) -> str:
+    """A row as one line, because the prefix is one line and a cell can carry a newline."""
+    return " ".join(str(text or "").split())
+
+
+def looks_like_table_header(text: str) -> bool:
+    """A row of period labels, not a row of figures.
+
+    Two tests, and both are needed. The words say the row is about a period; the number count says the row
+    is labels rather than values. A single value-like number is allowed because a header frequently ends
+    with one ("in thousands, except per share amounts" carries no figure, but "as of December 31, 2025"
+    carries a date), and a year is not a value.
+    """
+    text = _one_line(text)
+    if not text or len(text) > _TABLE_CONTEXT_ROW_CHARS:
+        return False
+    if not _TABLE_HEADER_RE.search(text.lower()):
+        return False
+    values = _TABLE_VALUE_RE.findall(text)
+    value_like = [value for value in values
+                  if not re.fullmatch(r"(?:19|20)\d{2}", value)
+                  and ("." in value or len(value.replace(",", "")) >= 3)]
+    return len(value_like) <= 1
+
+
+def table_caption(text: str) -> str:
+    """A section title above the header, such as "Profit (Loss) by Segment", or "" for anything else.
+
+    The test is negative on purpose: no pipe and no digit means it is not a data row and not a labelled
+    period row, so it is a title. Two to nine words bounds it at both ends, because one word is usually
+    the document's name and ten is a sentence.
+    """
+    text = _one_line(text)
+    if " | " in text or any(ch.isdigit() for ch in text):
+        return ""
+    words = text.split()
+    return text if 2 <= len(words) <= 9 else ""
+
+
+def table_row_context(row_texts: list[str], position: int) -> str:
+    """The one-line context for the row at `position`, or "" when nothing above it says what it is.
+
+    `row_texts` is the table's rows in reading order, so the row at `position` is the row being emitted
+    and every row before it is context. Nothing outside the table is read: the context is a function of
+    the table alone, which is what makes it deterministic and keeps two runs over one document agreeing
+    on the text and therefore on the chunk ids.
+
+    The block is the nearest header row above the row, plus one contiguous header row above that when it
+    also looks like a header. Two rows is what a period header needs: the first names the periods
+    ("Three Months Ended June 30, / Six Months Ended June 30,") and the second names the years
+    ("2026 | 2025 | 2026 | 2025").
+    """
+    if position <= 0 or position > len(row_texts):
+        return ""
+    rows = [_one_line(text) for text in row_texts]
+    header_at = None
+    for offset in range(position - 1, max(-1, position - 1 - _TABLE_CONTEXT_LOOKBACK), -1):
+        if looks_like_table_header(rows[offset]):
+            header_at = offset
+            break
+    if header_at is None:
+        return ""
+    start = header_at
+    if header_at - 1 >= 0 and looks_like_table_header(rows[header_at - 1]):
+        start = header_at - 1
+    caption = ""
+    for offset in range(start - 1, max(-1, start - 1 - _TABLE_CONTEXT_CAPTION_LOOKBACK), -1):
+        if looks_like_table_header(rows[offset]):
+            continue
+        caption = table_caption(rows[offset])
+        break
+    block = " / ".join(rows[index] for index in range(start, header_at + 1))
+    return f"Table: {caption}. Columns: {block}." if caption else f"Columns: {block}."
 
 
 # --------------------------------------------------------------------------- prose
@@ -546,7 +680,7 @@ def chunk_document(document: dict, doc_id: str, source_sha256: str,
         first_page = group[0].page_no
         last_page = group[-1].page_no
         headings = headings_by_page.get(first_page, [])
-        whole_text, column_names, rows = serialise_table(group, headings)
+        whole_text, column_names, rows, table_top_row = serialise_table(group, headings)
         table_id = f"{doc_id}:table:{group[0].self_ref.split('/')[-1]}"
         span = {p for p in range(min(first_page, last_page), max(first_page, last_page) + 1)}
         chunks.extend(_table_chunks(
@@ -561,6 +695,13 @@ def chunk_document(document: dict, doc_id: str, source_sha256: str,
         # bounded row groups and the omission marker carry what retrieval needs instead.
         if include_row_entries and len(rows) <= MAX_ROW_ENTRIES:
             header_text = " | ".join(column_names).strip()
+            # The rows are in memory, so the context is derived from them and from nothing else. Two
+            # rows are not emitted but still sit above the first row entry: the header row, which is
+            # the context rather than a retrievable row, and the table's dropped top row, which is
+            # where a caption sits when the caption is the table's own first row. Both are put back in
+            # front of the sequence so a position in it is still the row's position in the table.
+            context_rows = ([table_top_row] if table_top_row else []) + [text for _, text, _ in rows]
+            offset = 1 if table_top_row else 0
             for ordinal, (page_no, text, bbox) in enumerate(rows):
                 if not text.strip():
                     continue
@@ -569,11 +710,16 @@ def chunk_document(document: dict, doc_id: str, source_sha256: str,
                     # carries no value to check. It stays inside the whole-table entry, which is where
                     # the column names belong and where a citation to the schedule's shape points.
                     continue
+                context = table_row_context(context_rows, ordinal + offset)
                 chunks.append(Chunk(
-                    text=text, page_start=page_no, page_end=page_no, kind="table_row",
+                    text=f"{context} {text}" if context else text,
+                    page_start=page_no, page_end=page_no, kind="table_row",
                     doc_id=doc_id, source_sha256=source_sha256, table_id=table_id,
-                    row_index=ordinal, bbox_start=bbox, bbox_end=bbox,
+                    row_index=ordinal, row_start=ordinal, row_end=ordinal,
+                    table_rows=len(rows) or None,
+                    bbox_start=bbox, bbox_end=bbox,
                     coord_origin=bbox.get("coord_origin"), headings=headings,
+                    table_context=context,
                 ))
 
     nominal = has_no_pages(document)

@@ -131,6 +131,54 @@ def test_an_unchanged_file_costs_one_read_and_no_parse(tmp_path, wired):
     assert services.parsed_names == parsed_before, "an unchanged file was parsed again"
 
 
+def test_a_document_chunked_under_an_older_chunker_version_is_re_derived(tmp_path, wired):
+    """**The hole a chunker bump falls through.** The skip decision is made on the file's bytes, and a
+    chunker change alters every chunk's text and id without touching a single byte of any document. So
+    without a recorded version the corpus keeps its old chunking forever, and the new rules reach nothing.
+
+    The record now names the chunker that derived it, and a record that names any other is stale.
+    """
+    services = wired()
+    make_corpus(tmp_path)
+    manifest = ingest.MemoryManifest()
+    ingest.ingest_cycle(services, tmp_path, manifest)
+    assert manifest.get("company/policy.pdf")["chunker_version"] == chunker.CHUNKER_VERSION
+
+    # The bytes are unchanged; only the rules that derived the text moved on.
+    manifest.get("company/policy.pdf")["chunker_version"] = "chunker-v4"
+    parsed_before = list(services.parsed_names)
+
+    result = ingest.ingest_cycle(services, tmp_path, manifest)
+
+    assert result.changed == 1 and result.skipped == 0, "a stale chunker version was skipped"
+    assert services.parsed_names == parsed_before + ["company/policy.pdf"]
+    assert manifest.get("company/policy.pdf")["chunker_version"] == chunker.CHUNKER_VERSION
+
+
+def test_a_stale_chunker_version_does_not_defeat_dead_lettering(tmp_path, wired):
+    """A stale version is checked before the dead-letter limit, so the version a FAILURE records has to be
+    the one that just failed rather than the one before it. Recording the old version would make the
+    mismatch fire on every cycle, and a permanently unreadable file would be re-parsed forever -- which
+    is exactly what dead-lettering exists to stop."""
+    services = wired(fail_for={"company/policy.pdf"})
+    path = make_corpus(tmp_path)
+    sha, size = ingest.sha256_of(path)
+    manifest = ingest.MemoryManifest()
+    manifest.put("company/policy.pdf", {
+        "relpath": "company/policy.pdf", "root": "company", "content_sha256": sha, "bytes": size,
+        "chunk_count": 0, "failure_count": 1, "failure_kind": "permanent",
+        "last_error": "RuntimeError: an earlier failure", "payload_version": ingest.PAYLOAD_VERSION,
+        "chunker_version": "chunker-v4",
+    })
+
+    first = ingest.ingest_cycle(services, tmp_path, manifest)
+    assert first.failed == 1, "a document under older rules should be tried once more"
+    assert manifest.get("company/policy.pdf")["chunker_version"] == chunker.CHUNKER_VERSION
+
+    second = ingest.ingest_cycle(services, tmp_path, manifest)
+    assert second.skipped == 1 and second.failed == 0, "the dead-letter limit stopped applying"
+
+
 def test_a_changed_file_has_its_old_chunks_removed_not_joined(tmp_path, wired):
     """Delete then write, in that order. Without the delete, a document that shrank leaves its old
     chunks behind and the index holds two versions of the same policy, both citable."""

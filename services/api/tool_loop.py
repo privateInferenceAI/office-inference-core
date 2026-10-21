@@ -615,6 +615,14 @@ class ToolBox:
         """Column labels and caption for a table passage, cached per row."""
         kind = getattr(passage, "kind", "") or ""
         text = getattr(passage, "text", "") or ""
+        # **A row indexed under chunker-v5 already carries its own context, and adding it again is not
+        # harmless.** The stored text begins "Columns: ...", and a prefixed row can itself pass the
+        # header test, so a second prefix would be built from a row that already is one and the model
+        # would read "Columns: Columns: ...". The stored context comes from the same derivation, so
+        # there is nothing to add. A row indexed before v5 has no prefix and still needs this lookup,
+        # which is why the path is kept rather than deleted.
+        if text.startswith("Columns: ") or text.startswith("Table: "):
+            return ""
         if kind == "table":
             key = ("blob", getattr(passage, "table_id", "") or "", 0)
             if key not in self.table_prefix_cache:
