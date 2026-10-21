@@ -70,3 +70,18 @@ configuration.
 Configuration for that result: Sonnet 4.6 analyst, 12 seed passages, 1,600-character snippets, 32 evidence slots,
 search limit 12, tool loop and query rows on, exact lane on with seed-time exact evidence. This is the correctness
 target; the cost-down and simplification work starts from here.
+
+
+## DeepSeek re-run after the question fix, 2026-10-21
+
+The first DeepSeek comparison was taken before SYN_A01 was corrected, so it was not a fair test of the model: it
+failed the same ambiguous question five times while Sonnet had the corrected wording. The test was repeated with the
+question fix in place, everything else equal.
+
+Five runs: **37, 37, 36, 37, 37 (mean 36.8 of 37)**. The one failure was SYN_N01 staff once, a PTO-accrual table
+question. Sonnet 4.6 on the identical configuration is 37, 37, 37, 37, 37 (mean 37.0).
+
+So the later DeepSeek model is not better on this workload. The difference is a single flake, not a capability gap.
+It also needed a 180-second request budget against Sonnet's 30, which makes it worse on latency and on the answer
+contract the deployment uses. The Bedrock configuration stays the reference and the DeepSeek path remains a
+test-only option we can revisit if a different workload favours it.
