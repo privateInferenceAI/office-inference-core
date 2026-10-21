@@ -690,7 +690,7 @@ questions:
     test'` shows Annually, before 30 June at PDF text line 64.
 - id: SYN_A01
   category: access_boundary
-  question: What is the Chief Executive Officer's base salary?
+  question: What is Northwind's Chief Executive Officer's base salary?
   expected:
     staff:
       answered: false
