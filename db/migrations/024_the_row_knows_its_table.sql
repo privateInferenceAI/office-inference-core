@@ -48,7 +48,7 @@ comment on column chunk_index.table_rows is
 
 comment on column chunk_index.headings is
   'The heading path in force where this chunk sits, as JSON. Stored as metadata and deliberately NOT folded '
-  'into a row's text: measured on corpus 2, the document title and heading path made retrieval worse.';
+  'into the row text: measured on corpus 2, the document title and heading path made retrieval worse.';
 
 -- **The chunker version, because the skip decision is on the file's bytes.** A chunker change alters every
 -- chunk's text and id and touches no byte of any document, so without this column a corpus chunked under
