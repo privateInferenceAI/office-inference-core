@@ -1,6 +1,6 @@
 # 0006. A capped tool loop answers from the evidence it gathered
 
-**Date:** 2026-10-20. **Status:** implemented, measurement pending. **Owner context:** reliability work continues.
+**Date:** 2026-10-20, accepted 2026-10-21. **Status:** accepted and enabled by default (no flag).
 
 ## Why
 
@@ -28,6 +28,27 @@ synthesis turn is invisible to the measured system prompt: it is a user message 
 - Unit tests cover success, no-tools, and failed-synthesis paths.
 - Five-run acceptance is pending. The new measurement-hygiene rules (0005) require a serial run; the exact-lane
   comparison was re-run under contention and could not be certified, which is exactly why the rescue exists.
+
+## Acceptance, 2026-10-21
+
+Five serial runs per phase under the measurement rules in 0005, with the run context recorded by the suite script.
+
+| Comparison | Control (main) | Rescue |
+|---|---|---|
+| Corpus-1 live suite (53) | 53, 53, 53, 53, 53 | 53, 53, 53, 53, 52 |
+| Corpus-2 live set (37) | 29, 30, 29, 29, 27 (mean 29.4) | 29, 30, 28, 31, 28 (mean 29.2) |
+
+The corpus-1 difference is one verification of A04 executive (the CEO long-term incentive question). A04 is
+demonstrably unstable in isolation on both builds: five standalone runs of it failed 5 of 5 on main as well as on
+the rescue build, because the model sometimes refuses to read the incentive figure out of the compensation table.
+The rescue's first shape also regressed A04 by accepting a synthesized refusal as an answer; the shipped shape
+rejects a synthesized refusal and falls through to the old single-shot path, which restored 4 of the 5 runs. No
+other corpus-1 question changed, and corpus-2 is flat within the five-run spread.
+
+The first acceptance attempt was invalidated by provider quota: running a suite on each deployment at once
+exhausted the shared Bedrock daily token quota, and the 429s degraded the later runs. That produced rule 8 in
+decision 0005 (one suite at a time across every deployment on one provider account). The accepted runs above were
+taken serially afterwards.
 
 ## Consequences
 

@@ -79,3 +79,12 @@ Two follow-ups are in flight as their own units:
 
 The exact fallback stays default off. The cue-restricted version measured 50, 53, 53 on three live-on runs before
 the run was stopped for time; that is not a certification, and no deployment enables the flag.
+
+
+## Acceptance of the loop-cap rescue, 2026-10-21
+
+The rescue in decision 0006 was accepted after five serial runs per phase: corpus-1 control 53, 53, 53, 53, 53 and
+rescue 53, 53, 53, 53, 52, with the single difference an A04 executive question that fails 5 of 5 when run alone on
+both builds; corpus-2 control 29.4 and rescue 29.2, flat within the five-run spread. The first attempt was
+invalidated by the shared Bedrock daily token quota when a suite ran on each deployment at once, which is now rule
+8 in decision 0005. The exact-phrase flag stays default off; the rescue is the answer-path improvement that landed.
