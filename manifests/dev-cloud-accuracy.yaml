@@ -1,0 +1,217 @@
+# The development deployment's accuracy manifest: Claude Sonnet 4.5 as the analyst, with Haiku 4.5 as the
+# fallback. This box exists for answer-quality work. It is deliberately more expensive per token than the
+# default dev manifest and is not a client default; the cost-down phase comes after correctness.
+#
+# This is the manifest the dev box renders from. It exists because the deployment's model choice used to
+# live only in the untracked rendered/ files: a re-render silently reverted the analyst and dropped the
+# fallback. A deployment whose model is not in a tracked manifest is a deployment nobody can reproduce.
+#
+# The chain is deliberate, in this order:
+#   1. Claude Haiku 4.5 through the us. inference profile: the primary, and the model the measurements name
+#   2. the same Haiku 4.5 through the us. profile from us-east-2, so Bedrock's own regional routing is the
+#      first recovery step: same model, same answer quality, a different regional endpoint
+#   3. Nova Pro, a different model, for a failure that takes Haiku out in both Regions
+#
+# Both Claude entries are inference-profile only, so the instance role must be allowed the profile ARNs in
+# both Regions. This account's policy does that as of 2026-10-19; a client installation has to do the same,
+# and the runbook's installation checklist spells it out.
+#
+# The other roles stay on the cheap tier on purpose. This box exists for answer-quality work, not for a
+# representative client load.
+manifest_version: 1
+client:
+  name: Office Inference Dev
+  deployment_id: oi-core-dev-cloud
+profile: cloud
+packs: [core]
+models:
+  front_desk:
+    local: ""
+    frontier: bedrock/amazon.nova-micro-v1:0
+  analyst:
+    local: ""
+    # Claude Sonnet 4.5 through the US geographic inference profile. The stronger reader; the accuracy
+    # phase uses it, and the default dev manifest keeps Haiku for cost comparison.
+    frontier: bedrock/us.anthropic.claude-sonnet-4-6
+    # **The chain, in order.** A geographic inference profile is resolved from the Region the call is made
+    # in, so the first entry keeps the same model and price and only changes the regional endpoint. The
+    # second entry is a different model, for the case where Haiku is unavailable in both Regions: Nova Pro
+    # is ON_DEMAND, tracked, and does not need an inference profile at all.
+    fallback:
+      - bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0
+      - bedrock/amazon.nova-pro-v1:0
+  reader:
+    local: ""
+    frontier: bedrock/amazon.nova-pro-v1:0
+  coder:
+    local: ""
+    frontier: bedrock/deepseek.v3.2
+lanes:
+  frontier:
+    enabled: true
+    provider: bedrock
+    # Our own account rather than a client's, because this is our development box and the same
+    # shape the hosted tier uses. The validator refuses this with a compliance profile attached,
+    # since the hosted tier is standard-only.
+    account_owner: office_inference
+    # Deliberately the two lowest classes. Nothing confidential belongs on a development box.
+    data_classes_allowed: [public, internal]
+    requires_approval: false
+    redaction: true
+content:
+  # What the record keeps, per data class: hash only, redacted, or full. The prompt and completion
+  # hashes are recorded whatever this says, so the record can prove what was said without keeping it.
+  #
+  # A development box, so the two lowest classes are generous and the higher ones are not.
+  default: hash
+  classes:
+    public: full
+    internal: redacted
+access:
+  # What a request on this deployment IS, which decides whether a remote lane may see it. The
+  # egress block below says which classes may leave; this says which class a request carries.
+  # **Absent means the most restrictive class**, so a deployment that forgets this does not send
+  # content off the box by omission.
+  data_class: internal
+  # The declared permission model, SEC-ACL-002. A development deployment, so it declares the model the
+  # probe needs rather than one belonging to a client.
+  #
+  # **The roots are the two the corpus actually has.** An earlier draft invented a third called `finance`,
+  # and the probe that asks across the boundary reported zero passages withheld: no document carried the
+  # label, so the crossing question was not crossing anything and the right passed for no reason. The label
+  # set here is the one `ls documents/` prints.
+  roots: [company, executive]
+  groups:
+    staff:   {roots: [company]}
+    exec:    {roots: [company, executive]}
+  users:
+    # No subject here is a real person. The names say what each one is for, because a fixture whose purpose
+    # is not in its name becomes a mystery the first time it fails.
+    - subject: probe-staff@officeinference.com
+      name: Staff probe
+      groups: [staff]
+    - subject: probe-exec@officeinference.com
+      name: Executive probe
+      groups: [exec]
+
+  # What a user is told when their role excludes content that would answer the
+  # question. silent tells them nothing; denied says documents exist that they
+  # cannot see; counted also says how many passages were withheld. The trade is
+  # the client's: disclosing reveals that restricted content EXISTS, and staying
+  # silent makes a partial answer look complete.
+  denial: counted
+
+  # What may leave for a frontier model. The gate refuses rather than defaulting, so a deployment that
+  # declares nothing sends nothing off-box. This one declares the two classes a small business can send to a
+  # provider: public material and ordinary internal work. confidential and regulated are absent rather than
+  # listed as false, so the permission set is what it says it is and the reason a refusal gives names what IS
+  # permitted.
+  egress:
+    frontier_classes: [public, internal]
+    # On, and the default. Turning it off is a client's decision and one they should have to make explicitly:
+    # the cost of redacting something harmless is a question the model cannot answer, and the cost of not
+    # redacting a card number is a payment incident in a provider's logs.
+    redaction: "on"
+budgets:
+  # Per-role ceilings in USD, enforced by the gateway, which refuses a request once recorded spend is over
+  # the ceiling. Internal cost control, not client billing.
+  #
+  # **Not a hard cap, and the wording is deliberate.** LiteLLM checks admission against RECORDED spend, so
+  # concurrent requests can all pass before any of them is counted (open issues #34732 and #35567 as of
+  # 2026-10-14). This stops a runaway. It does not make the number unexceedable, and no client should be
+  # told otherwise. The ceilings that hold are the egress gate, which decides what may leave at all, and a
+  # per-request max_tokens.
+  period_days: 30
+  # **The analyst ceiling is a development number.** Measuring the answer path costs model calls, and the tool
+  # loop multiplies them: 2026-10-18 spent 9.6 USD of a 10 USD analyst ceiling in one day of suite runs, which
+  # exhausted the budget and turned every answer into a degraded one. It was raised from 100 to 200 on
+  # 2026-10-19 because the honesty measurement cycle needs several five-run comparisons and cutting corners to
+  # save a few dollars would be the wrong trade; production manifests set the ceiling per client contract.
+  roles:
+    front_desk: 2
+    analyst: 200
+    reader: 10
+    coder: 5
+compliance:
+  profile: none
+  audit_retention_days: 90
+# Where audit artifacts go off this box. The bucket is in our account because there is no client yet;
+# a client deployment gets one in theirs, created by Terraform at C7, and the manifest records its
+# name so nothing is typed on a server.
+#
+# Anchors hourly and exports daily. No document or prompt can ever be named here: the validator
+# accepts anchors, exports, and backups, and refuses the rest.
+offsite:
+  provider: s3
+  account_owner: office_inference
+  bucket: oi-core-audit-dev
+  region: us-east-1
+  ship: [anchors, exports]
+support:
+  response_window: business hours, 4 hours
+# The tasks this deployment can be asked to do, which is what the client app's Do screen is built from.
+#
+# **These names used to live in the API's source**, in a frozenset called AGENTIC_TASKS, and the manifest
+# knew nothing about them. That made the app impossible to build correctly: it could not discover which
+# tasks existed, could not label them in a client's words, and could not say what they touch. So the list
+# is here, where the deployment is defined, and the API reads it from the same place the app does.
+#
+# **Every task below is honest about what it does today.** Each one retrieves from the client's documents
+# and asks the model named by `tier` to answer, in one step. None of them loops, calls a tool, or changes
+# anything, because the agentic pack is C6 and this deployment does not carry it.
+#
+# The first draft of this block declared nothing, on the reasoning that a task which cannot do the work
+# teaches a client the feature is broken. That was wrong for a reason worth recording: it made the job path
+# untestable on the only deployment that exists, and a path nothing exercises is a path nobody knows works.
+# The labels say what happens rather than what will happen, and when C6 gives the same ids a real loop the
+# interface does not change.
+#
+#   id                  matched exactly by a request's `task` field, and read by the routing trigger
+#   label               shown as-is. A person reads this, so it says what the thing does
+#   tier                which model role answers. This is what lets one task go to the cheap model and
+#                       another to the frontier one WITHOUT the interface choosing a model: the app sends
+#                       a task, and the manifest decides the tier
+#   touches             shown before somebody starts it
+#   needs_approval      whether a human approves first. Nothing here writes yet, so nothing needs one
+agentic:
+  tasks:
+    - id: draft
+      label: Draft a reply
+      description: Write a reply to a message, using your own documents as the source.
+      tier: front_desk
+      touches: [documents]
+      needs_approval: false
+    - id: compare
+      label: Compare two documents
+      description: Look for disagreements between documents and list them with their sources.
+      tier: analyst
+      touches: [documents]
+      needs_approval: false
+    - id: summarise_across_documents
+      label: Summarise across documents
+      description: Read several documents and write one summary that cites each source it used.
+      tier: reader
+      touches: [documents]
+      needs_approval: false
+    - id: extract_table
+      label: Pull the figures out
+      description: Find the numbers in a document and list them, with the page each came from.
+      tier: analyst
+      touches: [documents]
+      needs_approval: false
+    # **The first task this deployment can run that is not one step.** The four above are answered by the C4
+    # executor inside the request that started them. This one is a six-step plan with a gate, so it is the
+    # only route over HTTP to the workflow engine, and until it existed the engine was wired and unreachable:
+    # `plan_for` knew `invoice_intake` while the manifest declared four other ids, so `POST /jobs` refused it
+    # with `no_such_task` and nothing could reach a gate at all.
+    #
+    # `needs_approval: true` is not a preference. It is what tells the Do screen that starting this stops for
+    # a person, and the engine's gate refuses to be skipped either way.
+    - id: invoice_intake
+      label: Prepare a supplier invoice
+      description: >-
+        Read an invoice, pull out the vendor and the amount, draft the entry it would post, and stop for you
+        to approve before anything is written.
+      tier: analyst
+      touches: [documents]
+      needs_approval: true

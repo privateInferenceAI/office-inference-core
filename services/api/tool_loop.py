@@ -177,7 +177,7 @@ MAX_EVIDENCE_CHARS = 9000
 
 # The exact words the contract asks for when an answer is not in the evidence.
 _REFUSAL_PHRASE = "could not find that in the available documents"
-SNIPPET_CHARS = 700
+SNIPPET_CHARS = int(os.environ.get("OI_SNIPPET_CHARS", "700"))
 
 # --------------------------------------------------------------------------- structured row query bounds
 #
@@ -522,14 +522,15 @@ class ToolBox:
     """
 
     def __init__(self, services, permit, role: str, audit=None, search_limit: int = 8,
-                 read_limit: int = 12, max_evidence: int = 24):
+                 read_limit: int = 12, max_evidence: int | None = None):
         self.services = services
         self.permit = permit
         self.role = role
         self.audit = audit
         self.search_limit = search_limit
         self.read_limit = read_limit
-        self.max_evidence = max_evidence
+        self.max_evidence = (int(os.environ.get("OI_MAX_EVIDENCE", "24"))
+                              if max_evidence is None else max_evidence)
         self.roots = frozenset(getattr(permit, "roots", ()) or ())
         self.evidence: list = []
         self.index: dict[str, int] = {}

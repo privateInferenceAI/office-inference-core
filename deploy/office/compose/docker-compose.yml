@@ -501,6 +501,9 @@ services:
       OI_TOOL_MAX_STEPS: ${OI_TOOL_MAX_STEPS:-6}
       OI_TOOL_MAX_CALLS: ${OI_TOOL_MAX_CALLS:-10}
       OI_TOOL_SEARCH_LIMIT: ${OI_TOOL_SEARCH_LIMIT:-8}
+      OI_PASSAGES: ${OI_PASSAGES:-6}
+      OI_SNIPPET_CHARS: ${OI_SNIPPET_CHARS:-700}
+      OI_MAX_EVIDENCE: ${OI_MAX_EVIDENCE:-24}
       # The structured row query, off until a deployment turns it on. It returns table rows rather than
       # passages, so it changes the answer path the measured configuration was frozen on. The flag is both the
       # opt-in and the rollback; the five-run comparison is docs/reviews/query-tool-2026-10-19.md.

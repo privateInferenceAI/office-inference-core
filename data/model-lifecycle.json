@@ -63,6 +63,20 @@
       "eol_date": null,
       "replacement": "anthropic.claude-sonnet-5",
       "note": "Inference-profile only. Used by the hybrid example as the analyst's frontier tier."
+    },
+    "anthropic.claude-sonnet-4-6": {
+      "provider": "Anthropic",
+      "status": "ACTIVE",
+      "eol_date": null,
+      "replacement": "anthropic.claude-sonnet-5",
+      "note": "Added 2026-10-21 for the accuracy phase. bedrock:GetFoundationModel reported ACTIVE and a signed us. inference-profile Converse request answered for this account. Not part of the 2026-10-11 table refresh."
+    },
+    "anthropic.claude-opus-4-6-v1": {
+      "provider": "Anthropic",
+      "status": "ACTIVE",
+      "eol_date": null,
+      "replacement": "anthropic.claude-opus-5",
+      "note": "Added 2026-10-21 as the escalation tier above Sonnet 4.6. bedrock:GetFoundationModel reported ACTIVE and a signed us. inference-profile Converse request answered for this account. Not part of the 2026-10-11 table refresh."
     }
   }
 }
