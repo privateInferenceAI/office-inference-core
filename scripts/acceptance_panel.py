@@ -4,7 +4,9 @@
 **The panel is what a client's decision rests on: answers, wait and cost, measured together.** The suite
 answers measure correctness; this script reads their records for the accuracy figures, pools the per-answer
 latency the runner captured, and joins the same window against the gateway's spend records for the cost of the
-answers the client actually asked for. One run is not a panel: point it at the five runs of a configuration.
+answers the client actually asked for. It also reports the phase's token-budget sidecar when the suite script
+left one beside the runs, so the provider tokens the phase spent and any budget stop are read with the scores.
+One run is not a panel: point it at the five runs of a configuration.
 
 Usage, on the box, from the deployment root, inside a Python that can reach Postgres (the eval image does):
 
@@ -170,12 +172,30 @@ def spend_totals(start: str, end: str) -> dict:
             "failed_calls": int(failed), "by_model": by_model}
 
 
-def build(runs: list[dict], names: list[str] | None = None) -> dict:
+def token_budget_record(runs: list[Path]) -> dict:
+    """The phase's token-budget sidecar, when the script wrote one beside the runs.
+
+    The suite writes token-budget.json into the output directory before the first run and updates it after every
+    run. The panel reports it as it stands, including a stop, so the accuracy numbers and the token cost of the
+    phase are read from the same directory. Older run directories have no sidecar and the panel says so.
+    """
+    for run in runs:
+        candidate = Path(run).parent / suite_hygiene.TOKEN_BUDGET_FILE
+        if candidate.is_file():
+            document = suite_hygiene.load_token_budget(candidate)
+            if document:
+                return {"available": True, "path": str(candidate), **document}
+    return {"available": False, "reason": f"no {suite_hygiene.TOKEN_BUDGET_FILE} beside the runs"}
+
+
+def build(runs: list[dict], names: list[str] | None = None, token_budget: dict | None = None) -> dict:
     accuracy = score_totals(runs)
     latency = latency_totals(runs)
     start, end = spend_window(runs)
     spend = spend_totals(start, end)
     panel = {"accuracy": accuracy, "latency": latency, "spend": spend,
+             "token_budget": token_budget or {"available": False,
+                                              "reason": f"no {suite_hygiene.TOKEN_BUDGET_FILE} beside the runs"},
              "warnings": context_warnings(runs, names)}
     if spend.get("available") and accuracy["scored"]:
         panel["cost_per_answer"] = round(spend["spend"] / accuracy["scored"], 5)
@@ -189,7 +209,8 @@ def main() -> int:
     parser.add_argument("runs", nargs="+", type=Path)
     parser.add_argument("--out", default="")
     args = parser.parse_args()
-    panel = build(load_runs(args.runs), names=[path.name for path in args.runs])
+    panel = build(load_runs(args.runs), names=[path.name for path in args.runs],
+                  token_budget=token_budget_record(args.runs))
     for warning in panel["warnings"]:
         print(f"WARNING: {warning}", file=sys.stderr)
     if panel["warnings"]:

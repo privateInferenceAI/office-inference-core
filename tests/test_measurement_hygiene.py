@@ -19,6 +19,7 @@ import os
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -108,6 +109,207 @@ def test_a_mistyped_limit_is_refused_rather_than_ignored(variable: str, value: s
     """Falling back to the default would widen the gate the operator believed they had set."""
     with pytest.raises(ValueError, match=variable):
         suite_hygiene.settings_from_env({variable: value})
+
+
+# --------------------------------------------------------------------------- the daily provider-token budget
+
+def test_a_day_under_the_budget_is_allowed() -> None:
+    decision = suite_hygiene.check_token_budget(10_000_000, suite_hygiene.TokenBudgetSettings(),
+                                                projected_run=2_000_000)
+    assert decision["allowed"] is True
+    assert decision["available_tokens"] == 20_000_000
+    assert decision["headroom_after_run"] == 18_000_000
+
+
+def test_the_last_run_that_fits_exactly_is_allowed() -> None:
+    """A projection equal to what is left fits; the refusal is for a run that would cross the line."""
+    decision = suite_hygiene.check_token_budget(28_000_000, suite_hygiene.TokenBudgetSettings(),
+                                                projected_run=2_000_000)
+    assert decision["allowed"] is True
+    assert decision["headroom_after_run"] == 0
+
+
+def test_a_day_already_over_the_budget_is_refused_and_names_both_numbers() -> None:
+    with pytest.raises(suite_hygiene.TokenBudgetRefused) as caught:
+        suite_hygiene.check_token_budget(31_000_000, suite_hygiene.TokenBudgetSettings())
+    message = str(caught.value)
+    assert "31,000,000" in message, "the refusal has to say what was observed"
+    assert "30,000,000" in message, "and the limit it was measured against"
+    assert "passed by 1,000,000" in message
+    assert "not adjustable today" in message
+
+
+def test_a_projection_that_crosses_the_budget_is_refused_before_the_run() -> None:
+    with pytest.raises(suite_hygiene.TokenBudgetRefused) as caught:
+        suite_hygiene.check_token_budget(
+            29_000_000, suite_hygiene.TokenBudgetSettings(), projected_run=2_000_000,
+            projection_source="the average of 5 completed runs in this output directory")
+    message = str(caught.value)
+    assert "29,000,000" in message
+    assert "30,000,000" in message
+    assert "2,000,000" in message
+    assert "average of 5 completed runs" in message
+    assert "cross the budget" in message
+    assert "mid-series" in message
+
+
+def test_the_projection_is_the_documented_default_until_a_run_is_measured() -> None:
+    projection, source = suite_hygiene.run_cost_projection([])
+    assert projection == suite_hygiene.DEFAULT_RUN_TOKENS == 2_000_000
+    assert "conservative default" in source
+
+
+def test_the_projection_is_the_average_of_the_measured_runs() -> None:
+    projection, source = suite_hygiene.run_cost_projection([
+        {"run": 1, "tokens_consumed": 1_000_000},
+        {"run": 2, "tokens_consumed": 3_000_000},
+        {"run": 3, "tokens_consumed": None},
+    ])
+    assert projection == 2_000_000
+    assert "average of 2" in source
+
+
+def test_a_missing_reading_is_a_refusal_not_a_pass() -> None:
+    """The provider quota is the one limit a missing signal cannot be guessed around."""
+    with pytest.raises(suite_hygiene.TokenBudgetRefused) as caught:
+        suite_hygiene.check_token_budget(None, suite_hygiene.TokenBudgetSettings())
+    message = str(caught.value)
+    assert "cannot prove it is inside the 30,000,000-token daily limit" in message
+    assert "OI_SUITE_TOKEN_GUARD=warn" in message
+
+
+def test_a_missing_reading_warns_when_the_operator_accepts_it() -> None:
+    """The warn mode is an explicit decision to measure without a budget proof, and it is recorded."""
+    decision = suite_hygiene.check_token_budget(
+        None, suite_hygiene.TokenBudgetSettings(guard=suite_hygiene.TOKEN_GUARD_WARN))
+    assert decision["allowed"] is True
+    assert decision["observed_tokens"] is None
+    assert decision["warnings"]
+    assert "no budget proof" in decision["warnings"][0]
+
+
+def test_the_budget_and_reserve_are_read_from_the_environment() -> None:
+    settings = suite_hygiene.token_settings_from_env({
+        "OI_SUITE_DAILY_TOKEN_LIMIT": "45000000",
+        "OI_SUITE_TOKEN_RESERVE": "5000000",
+    })
+    assert settings == suite_hygiene.TokenBudgetSettings(daily_limit=45_000_000, reserve=5_000_000)
+    decision = suite_hygiene.check_token_budget(30_000_000, settings, projected_run=2_000_000)
+    assert decision["allowed"] is True
+    assert decision["available_tokens"] == 10_000_000
+
+
+def test_the_token_defaults_are_the_budget_the_decision_records() -> None:
+    assert suite_hygiene.token_settings_from_env({}) == suite_hygiene.TokenBudgetSettings(
+        daily_limit=30_000_000, reserve=0, guard="refuse")
+
+
+@pytest.mark.parametrize("variable,value", [
+    ("OI_SUITE_DAILY_TOKEN_LIMIT", "30M"),
+    ("OI_SUITE_DAILY_TOKEN_LIMIT", "0"),
+    ("OI_SUITE_DAILY_TOKEN_LIMIT", "-1"),
+    ("OI_SUITE_TOKEN_RESERVE", "abc"),
+    ("OI_SUITE_TOKEN_RESERVE", "-5"),
+    ("OI_SUITE_TOKEN_GUARD", "ignore"),
+])
+def test_a_mistyped_token_setting_is_refused_rather_than_ignored(variable: str, value: str) -> None:
+    """Falling back would widen the budget the operator believed they had set."""
+    with pytest.raises(ValueError, match=variable):
+        suite_hygiene.token_settings_from_env({variable: value})
+
+
+def test_a_reserve_at_or_above_the_budget_is_refused() -> None:
+    with pytest.raises(ValueError, match="must be below"):
+        suite_hygiene.token_settings_from_env({
+            "OI_SUITE_DAILY_TOKEN_LIMIT": "1000",
+            "OI_SUITE_TOKEN_RESERVE": "1000",
+        })
+
+
+def test_the_parser_reads_the_number_psql_prints() -> None:
+    assert suite_hygiene.parse_token_count("1234567\n") == 1_234_567
+    assert suite_hygiene.parse_token_count("  0  \n") == 0
+
+
+@pytest.mark.parametrize("output", [
+    "",
+    "\n",
+    "psql: error: connection to server failed\n",
+    "-5\n",
+])
+def test_the_parser_refuses_an_answer_it_cannot_read(output: str) -> None:
+    with pytest.raises(ValueError):
+        suite_hygiene.parse_token_count(output)
+
+
+def test_the_token_day_is_utc_not_local() -> None:
+    moment = datetime(2026, 10, 20, 21, 30, tzinfo=timezone(timedelta(hours=-4)))
+    assert suite_hygiene.utc_day(moment) == "2026-10-21"
+
+
+def test_the_sidecar_records_the_start_and_each_run(tmp_path: Path) -> None:
+    """The bytes the panel reads: start, per-run before and after, the first run's cost, and the stop."""
+    path = tmp_path / "token-budget.json"
+    settings = suite_hygiene.TokenBudgetSettings(daily_limit=15_000_000)
+    readings = iter([10_000_000, 10_000_000, 11_900_000, 13_800_000])
+
+    def query(compose_args, day):
+        return next(readings)
+
+    moment = datetime(2026, 10, 21, 12, tzinfo=timezone.utc)
+    suite_hygiene.token_budget_step(path, stage="start", settings=settings, query=query, now=moment)
+    suite_hygiene.token_budget_step(path, stage="before", run_number=1, settings=settings,
+                                    query=query, now=moment)
+    suite_hygiene.token_budget_step(path, stage="after", run_number=1, settings=settings,
+                                    query=query, now=moment)
+    document = json.loads(path.read_text(encoding="utf-8"))
+    assert document["start_tokens"] == 10_000_000
+    assert document["observed_tokens"] == 11_900_000
+    assert document["runs"][0]["tokens_before"] == 10_000_000
+    assert document["runs"][0]["tokens_after"] == 11_900_000
+    assert document["runs"][0]["tokens_consumed"] == 1_900_000
+
+    # 1,200,000 left, the first run cost 1,900,000, so the second run would cross the budget.
+    with pytest.raises(suite_hygiene.TokenBudgetRefused) as caught:
+        suite_hygiene.token_budget_step(path, stage="before", run_number=2, settings=settings,
+                                        query=query, now=moment)
+    document = json.loads(path.read_text(encoding="utf-8"))
+    assert document["stopped"]["stage"] == "before"
+    assert document["stopped"]["run"] == 2
+    assert "13,800,000" in str(caught.value)
+    assert "15,000,000" in str(caught.value)
+    assert document["observed_tokens"] == 13_800_000
+    assert document["runs"][0]["tokens_consumed"] == 1_900_000
+
+
+def test_a_new_utc_day_starts_a_new_record_and_keeps_the_measured_runs(tmp_path: Path) -> None:
+    path = tmp_path / "token-budget.json"
+    settings = suite_hygiene.TokenBudgetSettings()
+    day_one = datetime(2026, 10, 20, 23, 0, tzinfo=timezone.utc)
+    day_two = datetime(2026, 10, 21, 0, 30, tzinfo=timezone.utc)
+    suite_hygiene.token_budget_step(path, stage="start", settings=settings,
+                                    query=lambda args, day: 5_000_000, now=day_one)
+    suite_hygiene.token_budget_step(path, stage="before", run_number=1, settings=settings,
+                                    query=lambda args, day: 5_000_000, now=day_one)
+    suite_hygiene.token_budget_step(path, stage="after", run_number=1, settings=settings,
+                                    query=lambda args, day: 6_000_000, now=day_one)
+    document = suite_hygiene.token_budget_step(path, stage="start", settings=settings,
+                                               query=lambda args, day: 500_000, now=day_two)
+    assert document["day"] == "2026-10-21"
+    assert document["start_tokens"] == 500_000
+    assert document["previous_days"][0]["day"] == "2026-10-20"
+    assert document["runs"][0]["tokens_consumed"] == 1_000_000
+
+
+def test_the_suite_script_checks_the_budget_before_each_run() -> None:
+    """A wiring guard: the helpers are useless if the script never calls them around the docker run."""
+    source = (ROOT / "scripts" / "run_answer_suite.sh").read_text(encoding="utf-8")
+    start = source.index("token_budget --stage start")
+    before = source.index("token_budget --stage before")
+    run = source.index("docker compose -f deploy/office/compose/docker-compose.yml")
+    after = source.index("token_budget --stage after")
+    assert start < before < run < after
+    assert source.count('--run "$n"') == 2
 
 
 # --------------------------------------------------------------------------- the Postgres advisory lock
@@ -370,6 +572,22 @@ def test_a_run_taken_above_the_load_limit_names_both_numbers() -> None:
 def test_a_run_within_the_limit_does_not_warn() -> None:
     run = {"context": {"load_average": 0.4, "gates": {"max_load": 2.0}}}
     assert acceptance_panel.context_warnings([run]) == []
+
+
+def test_the_panel_reports_the_token_budget_sidecar(tmp_path: Path) -> None:
+    sidecar = tmp_path / "token-budget.json"
+    sidecar.write_text(json.dumps({"day": "2026-10-21", "limit": 30_000_000,
+                                   "observed_tokens": 12_000_000, "runs": [{"run": 1}]}), encoding="utf-8")
+    record = acceptance_panel.token_budget_record([tmp_path / "run-1.json"])
+    assert record["available"] is True
+    assert record["path"] == str(sidecar)
+    assert record["observed_tokens"] == 12_000_000
+
+
+def test_the_panel_says_so_when_there_is_no_token_budget_sidecar(tmp_path: Path) -> None:
+    record = acceptance_panel.token_budget_record([tmp_path / "run-1.json"])
+    assert record["available"] is False
+    assert "token-budget.json" in record["reason"]
 
 
 def test_the_panel_includes_the_warnings_without_failing_old_runs(monkeypatch) -> None:
