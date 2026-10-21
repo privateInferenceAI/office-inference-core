@@ -534,7 +534,6 @@ class ToolBox:
         self.roots = frozenset(getattr(permit, "roots", ()) or ())
         self.evidence: list = []
         self.index: dict[str, int] = {}
-        self.query_rows_called = 0
         self.table_prefix_cache: dict = {}
 
     # ------------------------------------------------------------------ evidence
@@ -1050,7 +1049,6 @@ class ToolBox:
                 out = self.read_passages(str(args.get("doc_id") or ""), args.get("page_start"),
                                          args.get("page_end"), str(args.get("chunk_id") or ""))
             elif name == "query_rows":
-                self.query_rows_called += 1
                 out = self.query_rows(args.get("match"), str(args.get("doc_id") or ""),
                                       args.get("limit"))
             else:
@@ -1108,7 +1106,7 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
     offered = active_tools()
     query_offered = any(schema["function"]["name"] == "query_rows" for schema in offered)
     honesty = os.environ.get("OI_TOOL_HONESTY", "on").strip().lower() not in ("off", "0", "false", "no")
-    stats = {"steps": 0, "tool_calls": 0, "corrections": 0, "auto_exact": 0, "synthesis": 0}
+    stats = {"steps": 0, "tool_calls": 0, "corrections": 0, "synthesis": 0}
     # **The exact phrase goes in before the model answers, not only after a refusal.** A question
     # with a cue phrase that matches a small number of chunks has its carrying passages searched
     # exactly and placed in the seed. Measured on PUB_L01: with twelve seed passages the model
@@ -1121,7 +1119,6 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
         if phrase:
             found = toolbox.search_exact(phrase, "", EXACT_FALLBACK_RESULTS)
             if not found.startswith(chr(34) + "error" + chr(34)):
-                stats["auto_exact"] = 1
                 exact_preface = ("Exact search for " + json.dumps(phrase) + ":" + chr(10)
                                 + found + chr(10) + chr(10))
     seeded = toolbox.render(list(seed_passages))
@@ -1154,26 +1151,6 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
         if not calls:
             content = (reply.get("content") or "").strip()
             failure = answer_contract.violation(content, toolbox.texts())
-            # **A refusal gets one deterministic exact-phrase retry.** Two measured needles failed
-            # because the carrying chunk ranked below the retrieval cut, and a model-facing tool proved
-            # too variable in tool choice to fix it. The loop takes the step itself: the rarest literal
-            # phrase from the question is searched exactly, its passages are added, and the model answers
-            # once more. Once only, so a genuinely absent answer still ends in a refusal.
-            if _REFUSAL_PHRASE in content.lower() and stats["auto_exact"] == 0 \
-                    and toolbox.query_rows_called == 0 \
-                    and _flag("OI_TOOL_EXACT", "off"):
-                phrase = toolbox.exact_phrase_for_question(question)
-                if phrase:
-                    stats["auto_exact"] = 1
-                    found = toolbox.search_exact(phrase, "", EXACT_FALLBACK_RESULTS)
-                    if not found.startswith('"error"'):
-                        messages.append({"role": "assistant", "content": content})
-                        messages.append({"role": "user", "content": (
-                            "An exact search for " + json.dumps(phrase) + " found this evidence:" + chr(10)
-                            + found + chr(10) + "Answer the question again using it, or refuse if it "
-                            "does not answer the question.")})
-                        continue
-
             if failure and stats["steps"] < max_steps:
                 stats["corrections"] += 1
                 messages.append({"role": "assistant", "content": content})
@@ -1204,20 +1181,6 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
                              "content": result})
             if isinstance(result, str) and result.startswith('{"error"'):
                 limit_error = "tool_error"
-            if (stats["steps"] >= max_steps - 2 and stats["auto_exact"] == 0
-                    and toolbox.query_rows_called == 0 and _flag("OI_TOOL_EXACT", "off")):
-                # **The exact fallback also runs before the step limit.** A needle question ends with the
-                # model still searching, not with a refusal, so waiting for a refusal never fired. Two
-                # steps before the limit the loop adds the rarest exact phrase from the question, once.
-                phrase = toolbox.exact_phrase_for_question(question)
-                if phrase:
-                    stats["auto_exact"] = 1
-                    found = toolbox.search_exact(phrase, "", EXACT_FALLBACK_RESULTS)
-                    if not found.startswith('"error"'):
-                        messages.append({"role": "user", "content": (
-                            "An exact search for " + json.dumps(phrase) + " found this evidence:" + chr(10)
-                            + found + chr(10) + "Use it if it answers the question, then answer or refuse.")})
-
         if exhausted:
             break
     # **A capped loop keeps its evidence.** The old path returned no answer, and the caller fell back to the
