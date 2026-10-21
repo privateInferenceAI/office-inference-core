@@ -21,12 +21,15 @@ import tool_loop  # noqa: E402
 
 
 class FakePassage:
-    def __init__(self, chunk_id, text, doc_id="company/policy.doc", page=1, kind="prose"):
+    def __init__(self, chunk_id, text, doc_id="company/policy.doc", page=1, kind="prose",
+                 table_id=None, row_index=None):
         self.chunk_id = chunk_id
         self.text = text
         self.doc_id = doc_id
         self.page_start = page
         self.kind = kind
+        self.table_id = table_id
+        self.row_index = row_index
 
 
 class FakePermit:
@@ -736,3 +739,46 @@ def test_search_documents_centres_the_snippet_on_its_query(monkeypatch):
     assert "maximum 24 hours" in out
     assert out.startswith('Search results for "visitor badge hours":')
 
+
+
+def test_a_period_row_is_a_table_header_and_a_data_row_is_not():
+    assert tool_loop._looks_like_table_header("Three Months Ended June 30, | 2026 | 2025")
+    assert tool_loop._looks_like_table_header("2026 | 2025 | 2026 | 2025")
+    assert not tool_loop._looks_like_table_header("Total revenues | $ | 4,934,098 | $ | 4,136,543")
+
+
+def test_table_prefix_pairs_a_caption_with_its_columns():
+    rows = [
+        (10, "CONDENSED CONSOLIDATED STATEMENTS OF OPERATIONS"),
+        (11, "Three Months Ended June 30, | Six Months Ended June 30,"),
+        (12, "2026 | 2025 | 2026 | 2025"),
+        (13, "Total revenues | 4,934,098 | 4,136,543 | 8,947,032 | 8,183,283"),
+    ]
+    prefix = tool_loop._table_prefix_from_rows(rows, 13)
+    assert prefix.startswith("Table: CONDENSED CONSOLIDATED STATEMENTS OF OPERATIONS.")
+    assert "Three Months Ended June 30" in prefix and "2026 | 2025" in prefix
+
+
+def test_a_whole_table_blob_carries_its_columns_into_the_rendered_evidence():
+    toolbox = make_toolbox()
+    blob = ("CONDENSED CONSOLIDATED STATEMENTS OF OPERATIONS\n"
+            "Three Months Ended June 30, | Six Months Ended June 30,\n"
+            "2026 | 2025 | 2026 | 2025\n"
+            "Total revenues | 4,934,098 | 4,136,543 | 8,947,032 | 8,183,283")
+    passage = FakePassage("c1", blob, kind="table", table_id="t1")
+    rendered = toolbox.render([passage])
+    assert "Columns: Three Months Ended June 30" in rendered
+    assert "4,934,098" in rendered
+    assert "Table: CONDENSED CONSOLIDATED STATEMENTS OF OPERATIONS." in rendered
+
+
+def test_a_table_row_uses_its_sibling_rows_for_the_column_header():
+    toolbox = make_toolbox()
+    toolbox._table_sibling_rows = lambda table_id, row_index: [
+        (10, "Three Months Ended June 30, | Six Months Ended June 30,"),
+        (11, "2026 | 2025 | 2026 | 2025"),
+    ]
+    passage = FakePassage("c1", "Total revenues | 4,934,098 | 4,136,543", kind="table_row",
+                          table_id="t1", row_index=12)
+    rendered = toolbox.render([passage])
+    assert "Columns: Three Months Ended June 30" in rendered

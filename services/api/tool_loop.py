@@ -424,6 +424,96 @@ def exact_excerpt(text: str, phrase: str, window: int = EXACT_WINDOW) -> str:
     return excerpt
 
 
+# --------------------------------------------------------------------------- table context
+# **A table row's meaning lives in its table's header and caption, and the indexed row does not carry them.**
+# Measured on corpus 2: "Total revenues | 4,934,098 | 4,136,543 | 8,947,032 | 8,183,283" cannot say which of
+# its four numbers is the three-month 2026 figure. The model answered 896,604, which is the Global Forwarding
+# column of a concatenated table blob. The renderer therefore prepends the nearest preceding header block and
+# section caption. Rows come from the Qdrant payloads (table_id and row_index are there even though the lexical
+# chunk_index does not store them); a whole-table blob is read from its own lines. Neither path needs a reindex.
+_TABLE_HEADER_RE = re.compile(
+    r"(three|six|nine|twelve)\s+months?|months?\s+ended|quarter|years?\s+ended|"
+    r"fiscal|as\s+of|(?:19|20)\d{2}|"
+    r"(?:january|february|march|april|may|june|july|august|september|october|november|december)|"
+    r"in\s+(?:thousands|millions|billions)")
+_TABLE_VALUE_RE = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?")
+
+
+def _looks_like_table_header(text: str) -> bool:
+    """A row of period labels, not a row of figures."""
+    text = " ".join(str(text or "").split())
+    if not text or len(text) > 220:
+        return False
+    if not _TABLE_HEADER_RE.search(text.lower()):
+        return False
+    values = _TABLE_VALUE_RE.findall(text)
+    value_like = [value for value in values
+                  if not re.fullmatch(r"(?:19|20)\d{2}", value)
+                  and ("." in value or len(value.replace(",", "")) >= 3)]
+    return len(value_like) <= 1
+
+
+def _table_caption(text: str) -> str:
+    """A section title above the header, such as "Profit (Loss) by Segment"."""
+    text = " ".join(str(text or "").split())
+    if " | " in text or any(ch.isdigit() for ch in text):
+        return ""
+    words = text.split()
+    return text if 2 <= len(words) <= 9 else ""
+
+
+def _table_prefix_from_rows(rows, row_index: int) -> str:
+    ordered = sorted((index, " ".join(str(text or "").split())) for index, text in rows if text)
+    position = next((offset for offset, (index, _) in enumerate(ordered) if index == row_index), None)
+    if position is None:
+        position = sum(1 for index, _ in ordered if index < row_index)
+    if position <= 0:
+        return ""
+    if position is None:
+        return ""
+    header_at = None
+    for offset in range(position - 1, max(-1, position - 40), -1):
+        if _looks_like_table_header(ordered[offset][1]):
+            header_at = offset
+            break
+    if header_at is None:
+        return ""
+    caption = ""
+    for offset in range(header_at - 1, max(-1, header_at - 6), -1):
+        caption = _table_caption(ordered[offset][1])
+        if caption:
+            break
+    start = header_at
+    while start - 1 >= 0 and header_at - start < 2:
+        previous, current = ordered[start - 1], ordered[start]
+        if current[0] - previous[0] > 2 or not _looks_like_table_header(previous[1]):
+            break
+        start -= 1
+    block = " / ".join(ordered[offset][1] for offset in range(start, header_at + 1))
+    return (f"Table: {caption}. Columns: {block}." if caption else f"Columns: {block}.")
+
+
+def _table_prefix_from_blob(text: str) -> str:
+    lines = [" ".join(line.split()) for line in str(text or "").splitlines()]
+    lines = [line for line in lines if line]
+    header_at = None
+    for offset, line in enumerate(lines):
+        if " | " in line and _looks_like_table_header(line):
+            header_at = offset
+            break
+    if header_at is None:
+        return ""
+    caption = ""
+    for offset in range(header_at - 1, -1, -1):
+        caption = _table_caption(lines[offset])
+        if caption:
+            break
+    block = lines[header_at]
+    if header_at + 1 < len(lines) and _looks_like_table_header(lines[header_at + 1]):
+        block = block + " / " + lines[header_at + 1]
+    return (f"Table: {caption}. Columns: {block}." if caption else f"Columns: {block}.")
+
+
 class ToolBox:
     """The tools, the evidence they produce, and the access rules they apply.
 
@@ -444,6 +534,7 @@ class ToolBox:
         self.evidence: list = []
         self.index: dict[str, int] = {}
         self.query_rows_called = 0
+        self.table_prefix_cache: dict = {}
 
     # ------------------------------------------------------------------ evidence
     def add(self, passage, extra_slots: int = 0) -> int:
@@ -486,9 +577,61 @@ class ToolBox:
             if not number:
                 continue
             text = " ".join((getattr(passage, "text", "") or "").split())
+            prefix = self._table_prefix(passage)
             lines.append(f"[{number}] {passage.doc_id} p{passage.page_start} "
-                         f"kind={passage.kind}: {centred_snippet(text, focus, SNIPPET_CHARS)}")
+                         f"kind={passage.kind}: "
+                         + ((prefix + " ") if prefix else "")
+                         + centred_snippet(text, focus, SNIPPET_CHARS))
         return "\n".join(lines)
+
+    def _table_sibling_rows(self, table_id: str, row_index: int):
+        """Rows above this one in the same parser table block, from the Qdrant payloads."""
+        try:
+            import urllib.request
+
+            body = {"filter": {"must": [
+                {"key": "table_id", "match": {"value": table_id}},
+                {"key": "row_index", "range": {"gte": max(0, row_index - 40), "lt": row_index}},
+                {"key": "acl", "match": {"any": sorted(self.roots)}},
+            ]}, "limit": 40, "with_payload": True, "with_vector": False}
+            url = (f"{self.services.vector_url}/collections/{self.services.collection}"
+                   "/points/scroll")
+            request = urllib.request.Request(
+                url, data=json.dumps(body).encode(), method="POST",
+                headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(request, timeout=2) as response:
+                points = (json.loads(response.read()).get("result") or {}).get("points") or []
+        except Exception:
+            return []
+        rows = []
+        for point in points:
+            payload = point.get("payload") or {}
+            index = payload.get("row_index")
+            if isinstance(index, int):
+                rows.append((index, payload.get("text") or ""))
+        return rows
+
+    def _table_prefix(self, passage) -> str:
+        """Column labels and caption for a table passage, cached per row."""
+        kind = getattr(passage, "kind", "") or ""
+        text = getattr(passage, "text", "") or ""
+        if kind == "table":
+            key = ("blob", getattr(passage, "table_id", "") or "", 0)
+            if key not in self.table_prefix_cache:
+                self.table_prefix_cache[key] = _table_prefix_from_blob(text)
+            return self.table_prefix_cache[key]
+        if kind != "table_row":
+            return ""
+        table_id = getattr(passage, "table_id", None)
+        row_index = getattr(passage, "row_index", None)
+        if not table_id or not isinstance(row_index, int):
+            return ""
+        key = (table_id, row_index)
+        if key not in self.table_prefix_cache:
+            self.table_prefix_cache[key] = _table_prefix_from_rows(
+                self._table_sibling_rows(table_id, row_index), row_index)
+        return self.table_prefix_cache[key]
+
 
     # ------------------------------------------------------------------ tools
     def search_documents(self, query: str) -> str:
