@@ -177,7 +177,7 @@ MAX_EVIDENCE_CHARS = 9000
 
 # The exact words the contract asks for when an answer is not in the evidence.
 _REFUSAL_PHRASE = "could not find that in the available documents"
-SNIPPET_CHARS = 700
+SNIPPET_CHARS = int(os.environ.get("OI_SNIPPET_CHARS", "700"))
 
 # --------------------------------------------------------------------------- structured row query bounds
 #
@@ -522,14 +522,15 @@ class ToolBox:
     """
 
     def __init__(self, services, permit, role: str, audit=None, search_limit: int = 8,
-                 read_limit: int = 12, max_evidence: int = 24):
+                 read_limit: int = 12, max_evidence: int | None = None):
         self.services = services
         self.permit = permit
         self.role = role
         self.audit = audit
         self.search_limit = search_limit
         self.read_limit = read_limit
-        self.max_evidence = max_evidence
+        self.max_evidence = (int(os.environ.get("OI_MAX_EVIDENCE", "24"))
+                              if max_evidence is None else max_evidence)
         self.roots = frozenset(getattr(permit, "roots", ()) or ())
         self.evidence: list = []
         self.index: dict[str, int] = {}
@@ -1107,15 +1108,31 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
     offered = active_tools()
     query_offered = any(schema["function"]["name"] == "query_rows" for schema in offered)
     honesty = os.environ.get("OI_TOOL_HONESTY", "on").strip().lower() not in ("off", "0", "false", "no")
+    stats = {"steps": 0, "tool_calls": 0, "corrections": 0, "auto_exact": 0, "synthesis": 0}
+    # **The exact phrase goes in before the model answers, not only after a refusal.** A question
+    # with a cue phrase that matches a small number of chunks has its carrying passages searched
+    # exactly and placed in the seed. Measured on PUB_L01: with twelve seed passages the model
+    # answered a refusal on the first step, and the later refusal-retry never ran because the loop
+    # had already produced an answer. One bounded search at seed time is the difference between a
+    # needle that is reachable and one that is not.
+    exact_preface = ""
+    if _flag("OI_TOOL_EXACT", "off"):
+        phrase = toolbox.exact_phrase_for_question(question)
+        if phrase:
+            found = toolbox.search_exact(phrase, "", EXACT_FALLBACK_RESULTS)
+            if not found.startswith(chr(34) + "error" + chr(34)):
+                stats["auto_exact"] = 1
+                exact_preface = ("Exact search for " + json.dumps(phrase) + ":" + chr(10)
+                                + found + chr(10) + chr(10))
     seeded = toolbox.render(list(seed_passages))
     messages = [
         {"role": "system", "content": system_prompt(honesty, query_offered)},
         {"role": "user", "content": (
             f"Question: {question}\n\n"
+            + exact_preface
             + (f"Evidence already retrieved, numbered:\n{seeded}\n\n" if seeded else "")
             + "Search if this is not enough, then answer.")},
     ]
-    stats = {"steps": 0, "tool_calls": 0, "corrections": 0, "auto_exact": 0, "synthesis": 0}
     limit_error = ""
     # **What the gateway says answered, per call, so the answer can name the model that ran.** The reply
     # that produces the answer carries it; a failover means this is a different model group from the
