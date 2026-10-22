@@ -5623,17 +5623,17 @@ The denial appeal agent end to end.
 
 ### 6.7 The answer step searches: enabling, measuring and rolling back the tool loop
 
-The answer step can run as a bounded tool loop (C6). Retrieval, access, citation verification and the audit chain
-are unchanged; the model may search again and read around a hit before it answers.
+The answer step is one path: retrieval seeds it, the model may search again and read around a hit, and the
+answer is verified against the evidence it gathered. It is not enabled by a flag; the deployment chooses an
+answer profile, which sets the evidence budget.
 
-**Enable it on a deployment.**
+**Set the profile on a deployment.**
 
     cd /opt/oi-core
-    grep -q '^OI_TOOL_LOOP=' rendered/env && sed -i 's/^OI_TOOL_LOOP=.*/OI_TOOL_LOOP=on/' rendered/env \
-      || echo 'OI_TOOL_LOOP=on' >> rendered/env
+    grep -q '^OI_ANSWER_PROFILE=' rendered/env && sed -i 's/^OI_ANSWER_PROFILE=.*/OI_ANSWER_PROFILE=accuracy/' rendered/env || echo 'OI_ANSWER_PROFILE=accuracy' >> rendered/env
     docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env up -d --force-recreate api
-    docker exec api printenv OI_TOOL_LOOP        # expect: on
-    docker logs api 2>&1 | grep 'tool-loop'      # one line per answer after the next question
+    docker exec api printenv OI_ANSWER_PROFILE        # expect: accuracy
+    docker logs api 2>&1 | grep 'tool-loop'           # one line per answer after the next question
 
 **Choose the model.** The loop is provider-agnostic, but tool calling quality is not. The measured best is Claude
 Haiku 4.5 through Bedrock:
@@ -5664,13 +5664,7 @@ recorded five-run experiment is in `docs/reviews/experiment-answers-2026-10-19/`
 
 **The row query (the answer step's third tool).** `query_rows` returns the exact table rows a question
 quotes instead of the passage around them, because the measured failure on exact-number questions was reading the
-neighbouring line of a forty-row group. It is off until a deployment asks for it, and the flag is the rollback:
-
-    cd /opt/oi-core
-    grep -q '^OI_TOOL_QUERY=' rendered/env && sed -i 's/^OI_TOOL_QUERY=.*/OI_TOOL_QUERY=on/' rendered/env \
-      || echo 'OI_TOOL_QUERY=on' >> rendered/env
-    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env up -d --force-recreate api
-    docker exec api printenv OI_TOOL_QUERY        # expect: on
+neighbouring line of a forty-row group. It is always offered; there is no flag to set.
 
 Ask a question whose answer is a row and confirm the call reached the audit chain. Every tool call is a
 `tool_call` row; the row query carries its own counts, so a refusal or a wrong row can be checked later:
@@ -5686,7 +5680,7 @@ The bounds are constants in `services/api/tool_loop.py`: 400 chunks scanned, 8 r
 characters a row, 6,000 characters a response. The query is one parameterised SELECT with the session's access
 roots in its where clause, and an unscoped match that spans more than three documents is refused with examples
 rather than anchored on the first. Nothing in the corpus, the vector store or the audit chain changes when the
-flag is turned off again. The five-run comparison of on against off is
+profile changes. The five-run comparison of on against off is
 `docs/reviews/query-tool-2026-10-19.md`.
 
 **Test the streaming opt-in.** The old frames are unchanged unless the client asks for tools:
@@ -5806,7 +5800,7 @@ startup, so a gateway-only restart leaves the record disagreeing with the reques
 **The honesty gate (C6).** A question phrased as an attribute of the company is refused when no retrieved passage
 contains the subject phrase. It is a deterministic check in the answer paths, not a prompt rule: `finish` replaces
 the JSON answer, the tool stream replaces it before emitting, and the single-shot stream refuses before calling the
-model. It rides `OI_TOOL_HONESTY` and the audit row carries `honesty_gate`; the flag is the rollback.
+model. It is part of the answer path, not a switch; the audit row carries `honesty_gate`.
 `docs/reviews/honesty-gate-2026-10-19.md` holds the two rejected prompt iterations and the measurement.
 
 **What to watch.** About 1.6 times the suite time (178 to 188 seconds against 110 single-shot) and two to three

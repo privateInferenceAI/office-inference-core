@@ -137,8 +137,8 @@ python3 scripts/render_manifest.py --manifest manifests/lab-1.yaml --out rendere
 Do not install the S3 evidence-ship timers on the lab. The audit chain lives in the lab database; that keeps the
 lab's record separate from the reference's bucket, and the lab is not a deployment that ships evidence anywhere.
 
-Point the answer path at the same measured configuration as the reference: Claude Haiku through the `us.` inference
-profile, tool loop on, row query on, lookup off, honesty on, six steps, ten calls.
+Point the answer path at the same measured configuration as the reference: Claude through the `us.` inference
+profile and the accuracy answer profile.
 
 ```bash
 python3 - <<'PY'
@@ -152,11 +152,8 @@ t = t.replace("bedrock/amazon.nova-lite-v1:0",
 l.write_text(t)
 PY
 
-for pair in OI_TOOL_LOOP=on OI_TOOL_QUERY=on OI_TOOL_HONESTY=on \
-            OI_TOOL_MAX_STEPS=6 OI_TOOL_MAX_CALLS=10; do
-  k=${pair%%=*}; v=${pair#*=}
-  grep -q "^$k=" rendered/env && sed -i "s/^$k=.*/$k=$v/" rendered/env || echo "$k=$v" >> rendered/env
-done
+sed -i 's/^OI_ANSWER_PROFILE=.*/OI_ANSWER_PROFILE=accuracy/' rendered/env
+grep -q '^OI_ANSWER_PROFILE=' rendered/env || echo 'OI_ANSWER_PROFILE=accuracy' >> rendered/env
 ```
 
 ## Step 5 — build, start, provision teams
