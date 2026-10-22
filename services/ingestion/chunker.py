@@ -125,13 +125,8 @@ class Chunk:
     ordinal: int = 0
     table_id: str | None = None
     row_index: int | None = None
-    bbox_start: dict | None = None
-    bbox_end: dict | None = None
-    coord_origin: str | None = None
     is_ocr: bool = True
     headings: list[str] = field(default_factory=list)
-    prev_chunk_id: str | None = None
-    next_chunk_id: str | None = None
     page_is_nominal: bool = False
     # A table too large to embed as one chunk becomes row groups that all carry the same table_id and
     # their own row range, so a citation can name the schedule and the rows while the retrieval unit
@@ -139,10 +134,6 @@ class Chunk:
     row_start: int | None = None
     row_end: int | None = None
     table_rows: int | None = None
-    # The one-line context a table_row's text now begins with ("Table: ... Columns: ..."), kept on the
-    # chunk so the derivation is inspectable rather than only visible inside the text. Empty for prose,
-    # whole-table and marker chunks, which is what makes "this row had no header above it" sayable.
-    table_context: str = ""
     # The measured token count under the served embedding model, set by the post-condition. None when the
     # caller did not supply a tokenizer, which the worker refuses to do.
     token_count: int | None = None
@@ -179,15 +170,8 @@ class Chunk:
             "row_start": self.row_start,
             "row_end": self.row_end,
             "table_rows": self.table_rows,
-            "bbox_start": self.bbox_start,
-            "bbox_end": self.bbox_end,
-            "coord_origin": self.coord_origin,
             "is_ocr": self.is_ocr,
             "headings": self.headings,
-            "ordinal": self.ordinal,
-            "prev_chunk_id": self.prev_chunk_id,
-            "next_chunk_id": self.next_chunk_id,
-            "token_estimate": estimate_tokens(self.text),
             "token_count": self.token_count,
         }
 
@@ -687,8 +671,6 @@ def chunk_document(document: dict, doc_id: str, source_sha256: str,
             whole_text=whole_text, rows=rows, headings=headings, table_id=table_id,
             doc_id=doc_id, source_sha256=source_sha256,
             page_start=min(span), page_end=max(span),
-            bbox_start=group[0].bbox, bbox_end=group[-1].bbox,
-            coord_origin=group[0].bbox.get("coord_origin"),
             count_tokens=count_tokens, limit=limit))
         # Row entries are the precise retrieval unit for an ordinary table. Above the cap the table is a data
         # dump, and tens of thousands of near-identical row vectors are noise that displaces real documents; the
@@ -716,18 +698,14 @@ def chunk_document(document: dict, doc_id: str, source_sha256: str,
                     page_start=page_no, page_end=page_no, kind="table_row",
                     doc_id=doc_id, source_sha256=source_sha256, table_id=table_id,
                     row_index=ordinal, row_start=ordinal, row_end=ordinal,
-                    table_rows=len(rows) or None,
-                    bbox_start=bbox, bbox_end=bbox,
-                    coord_origin=bbox.get("coord_origin"), headings=headings,
-                    table_context=context,
+                    table_rows=len(rows) or None, headings=headings,
                 ))
 
     nominal = has_no_pages(document)
-    for page_no, text, bbox, headings in _group_prose(page_texts(document)):
+    for page_no, text, _bbox, headings in _group_prose(page_texts(document)):
         chunks.append(Chunk(
             text=text, page_start=page_no, page_end=page_no, kind="prose",
             doc_id=doc_id, source_sha256=source_sha256,
-            bbox_start=bbox, bbox_end=bbox, coord_origin=bbox.get("coord_origin"),
             headings=headings, page_is_nominal=nominal,
         ))
 
@@ -743,9 +721,6 @@ def chunk_document(document: dict, doc_id: str, source_sha256: str,
     for ordinal, chunk in enumerate(chunks):
         chunk.ordinal = ordinal
         chunk.sealed()
-    for index, chunk in enumerate(chunks):
-        chunk.prev_chunk_id = chunks[index - 1].chunk_id if index else None
-        chunk.next_chunk_id = chunks[index + 1].chunk_id if index + 1 < len(chunks) else None
     return chunks
 
 
@@ -841,7 +816,6 @@ def _enforce_measured_limit(chunks: list[Chunk], count_tokens: TokenCounter, lim
 
 def _table_chunks(*, whole_text: str, rows: list[tuple[int, str, dict]], headings: list[str],
                   table_id: str, doc_id: str, source_sha256: str, page_start: int, page_end: int,
-                  bbox_start: dict, bbox_end: dict, coord_origin: str | None,
                   count_tokens: TokenCounter | None, limit: int) -> list[Chunk]:
     """The table as bounded, citable chunks: one when it fits, row groups carrying a row range when it does not.
 
@@ -856,8 +830,7 @@ def _table_chunks(*, whole_text: str, rows: list[tuple[int, str, dict]], heading
         return Chunk(
             text=text, page_start=page_start, page_end=page_end, kind="table",
             doc_id=doc_id, source_sha256=source_sha256, table_id=table_id,
-            row_start=row_start, row_end=row_end, table_rows=len(rows) or None,
-            bbox_start=bbox_start, bbox_end=bbox_end, coord_origin=coord_origin, headings=headings)
+            row_start=row_start, row_end=row_end, table_rows=len(rows) or None, headings=headings)
 
     def with_prefix(group_rows: list[tuple[int, str, dict]]) -> str:
         body = "\n".join(text for _, text, _ in group_rows)
@@ -903,7 +876,7 @@ def _table_chunks(*, whole_text: str, rows: list[tuple[int, str, dict]], heading
             text=marker, page_start=page_start, page_end=page_end, kind=TABLE_OMISSION_KIND,
             doc_id=doc_id, source_sha256=source_sha256, table_id=table_id,
             row_start=last_indexed + 1, row_end=len(rows) - 1, table_rows=len(rows),
-            bbox_start=bbox_start, bbox_end=bbox_end, coord_origin=coord_origin, headings=headings))
+            headings=headings))
     return out
 
 

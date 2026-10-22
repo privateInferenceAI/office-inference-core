@@ -66,7 +66,7 @@ def report_ours(document: dict) -> None:
     print("=== ours (services/ingestion/chunker.py) ===")
     print(f"chunks: {len(chunks)}")
     for c in chunks:
-        tokens = c.as_payload()["token_estimate"]
+        tokens = c.token_count
         print(f"  {c.kind:<10} p{c.page_start}-{c.page_end} tokens~{tokens:<5} {c.text[:60]!r}")
     tables = [c for c in chunks if c.kind == "table"]
     rows = [c for c in chunks if c.kind == "table_row"]

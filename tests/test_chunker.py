@@ -179,16 +179,6 @@ def test_prose_never_crosses_a_page():
         assert chunk.page_start == chunk.page_end, chunk.text
 
 
-def test_neighbours_are_linked_both_ways():
-    """The escape hatch the architecture chose over a parent pointer, because it needs no re-embed."""
-    chunks = chunker.chunk_document(split_schedule_document(), "doc", "sha")
-    assert chunks[0].prev_chunk_id is None
-    assert chunks[-1].next_chunk_id is None
-    for index in range(len(chunks) - 1):
-        assert chunks[index].next_chunk_id == chunks[index + 1].chunk_id
-        assert chunks[index + 1].prev_chunk_id == chunks[index].chunk_id
-
-
 def test_the_token_estimate_is_documented_as_an_estimate():
     """It bounds a chunk size and must never be used to assert one, because it is words times a
     constant rather than the embedding model's tokenizer."""
