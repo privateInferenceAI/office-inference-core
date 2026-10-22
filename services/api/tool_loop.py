@@ -23,7 +23,8 @@ missing filter hides.
 from __future__ import annotations
 
 import json
-import os
+
+import answer_profile
 import re
 import time
 
@@ -139,25 +140,16 @@ _PROMPT_TAIL = (
 )
 
 
-def system_prompt(honesty_enabled: bool = True, query_enabled: bool = False) -> str:
-    """The instruction, built from the tools this deployment actually offers.
+def system_prompt() -> str:
+    """The instruction for the one answer path.
 
-    **The prompt and the tool list have to be one fact.** A tool the prompt does not name is used late or
-    not at all, and a tool that is named but not offered eats the loop's limited steps in errors. Found on
-    2026-10-18 when the prompt still named a tool the deployment had switched off.
-
-    **`query_rows` is named here for the same reason the other two tools are.** A tool the prompt does not
-    name is a tool the model uses late or not at all, and the prompt and the offered list have to be one fact in
-    both directions: name what is offered, and offer what is named.
+    The prompt and the tool list are one fact: every offered tool is named here, and every tool named here is
+    offered. When they drifted apart the model spent its limited steps calling a tool that did not exist.
     """
-    tools = ""
-    if query_enabled:
-        tools += ("; query_rows returns the exact table rows that contain the values or labels you give it, "
-                  "which is how a figure is confirmed before it is answered")
-    rules = _PROMPT_HEAD.format(tools=tools) + _PROMPT_RULES + _TABLE_RULE
-    if honesty_enabled:
-        rules += _HONESTY_RULE
-    return rules + _PROMPT_TAIL
+    tools = ("; query_rows returns the exact table rows that contain the values or labels you give it, "
+             "which is how a figure is confirmed before it is answered")
+    return (_PROMPT_HEAD.format(tools=tools) + _PROMPT_RULES + _TABLE_RULE + _HONESTY_RULE
+            + _PROMPT_TAIL)
 
 
 # The one message a capped loop is allowed to act on: answer from the evidence already gathered, with no
@@ -173,11 +165,10 @@ CORRECTIVE = (
     "once more if a needed value is missing. {instruction}"
 )
 
-MAX_EVIDENCE_CHARS = 9000
-
 # The exact words the contract asks for when an answer is not in the evidence.
 _REFUSAL_PHRASE = "could not find that in the available documents"
-SNIPPET_CHARS = int(os.environ.get("OI_SNIPPET_CHARS", "700"))
+_PROFILE = answer_profile.current()
+SNIPPET_CHARS = _PROFILE.snippet_chars
 
 # --------------------------------------------------------------------------- structured row query bounds
 #
@@ -469,8 +460,6 @@ def _table_prefix_from_rows(rows, row_index: int) -> str:
         position = sum(1 for index, _ in ordered if index < row_index)
     if position <= 0:
         return ""
-    if position is None:
-        return ""
     header_at = None
     for offset in range(position - 1, max(-1, position - 40), -1):
         if _looks_like_table_header(ordered[offset][1]):
@@ -529,8 +518,7 @@ class ToolBox:
         self.audit = audit
         self.search_limit = search_limit
         self.read_limit = read_limit
-        self.max_evidence = (int(os.environ.get("OI_MAX_EVIDENCE", "24"))
-                              if max_evidence is None else max_evidence)
+        self.max_evidence = _PROFILE.max_evidence if max_evidence is None else max_evidence
         self.roots = frozenset(getattr(permit, "roots", ()) or ())
         self.evidence: list = []
         self.index: dict[str, int] = {}
@@ -650,50 +638,6 @@ class ToolBox:
         rendered = self.render(result.passages, focus=query)
         return ("Search results for " + json.dumps(query) + ":\n" + rendered) if rendered \
             else "No results for " + json.dumps(query) + "."
-
-    def read_passages(self, doc_id: str, page_start: int | None = None, page_end: int | None = None,
-                      chunk_id: str = "") -> str:
-        if not doc_id:
-            return json.dumps({"error": "doc_id is required"})
-        import psycopg2
-
-        dsn = getattr(self.services, "database_url", "")
-        if not dsn:
-            return json.dumps({"error": "the document store is unavailable"})
-        start = int(page_start or 1)
-        end = int(page_end or start)
-        try:
-            with psycopg2.connect(dsn) as connection:
-                with connection.cursor() as cursor:
-                    if chunk_id:
-                        cursor.execute(
-                            "select page_start, page_end from chunk_index "
-                            "where chunk_id = %s and doc_id = %s and acl = any(%s)",
-                            (chunk_id, doc_id, sorted(self.roots)))
-                        found = cursor.fetchone()
-                        if not found:
-                            return json.dumps({"error": "no such chunk in the documents this session may read"})
-                        start, end = int(found[0]), int(found[1])
-                    cursor.execute(
-                        "select chunk_id from chunk_index "
-                        "where doc_id = %s and acl = any(%s) "
-                        "and page_end >= %s and page_start <= %s "
-                        "order by page_start, chunk_id limit %s",
-                        (doc_id, sorted(self.roots), start, end, self.read_limit))
-                    ids = [row[0] for row in cursor.fetchall()]
-        except Exception as exc:  # noqa: BLE001
-            return json.dumps({"error": f"the document store could not be read: {type(exc).__name__}"})
-        if not ids:
-            return json.dumps({"error": "no passages found at that location for this document, or it is a "
-                                        "data set rather than a readable document"})
-        import retriever
-
-        payloads = retriever._fetch_payloads(self.services, ids, self.roots)
-        passages = [retriever.Passage.from_payload(payloads[key], None, 0.0)
-                    for key in ids if key in payloads]
-        rendered = self.render(passages)
-        return (f"Passages from {doc_id} pages {start}-{end}:\n{rendered}") if rendered \
-            else json.dumps({"error": "no readable passages at that location"})
 
     def search_exact(self, phrase: str, doc_id: str = "", limit: int = EXACT_RESULT_CAP) -> str:
         # Find chunks stating a phrase, literally and comma-insensitively, with a centred excerpt.
@@ -1072,21 +1016,9 @@ class ToolBox:
         return out
 
 
-def _flag(name: str, default: str) -> bool:
-    return os.environ.get(name, default).strip().lower() not in ("off", "0", "false", "no")
-
-
 def active_tools() -> list:
-    """The tools this deployment offers, so a measurement can turn one off without a code change.
-
-    **`query_rows` is off until a deployment asks for it.** The tool changes the answer path the measured
-    configuration was frozen on, so merging it must not silently change what the deployment offers: the flag is
-    how the five-run comparison turns it on, and how a rollback turns it off again without a revert.
-    """
-    offered = list(TOOLS)
-    if not _flag("OI_TOOL_QUERY", "off"):
-        offered = [schema for schema in offered if schema["function"]["name"] != "query_rows"]
-    return offered
+    """The tools the answer path offers. One path, so one list."""
+    return list(TOOLS)
 
 
 def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
@@ -1103,9 +1035,6 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
     """
     import answer_contract
 
-    offered = active_tools()
-    query_offered = any(schema["function"]["name"] == "query_rows" for schema in offered)
-    honesty = os.environ.get("OI_TOOL_HONESTY", "on").strip().lower() not in ("off", "0", "false", "no")
     stats = {"steps": 0, "tool_calls": 0, "corrections": 0, "synthesis": 0}
     # **The exact phrase goes in before the model answers, not only after a refusal.** A question
     # with a cue phrase that matches a small number of chunks has its carrying passages searched
@@ -1114,16 +1043,15 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
     # had already produced an answer. One bounded search at seed time is the difference between a
     # needle that is reachable and one that is not.
     exact_preface = ""
-    if _flag("OI_TOOL_EXACT", "off"):
-        phrase = toolbox.exact_phrase_for_question(question)
-        if phrase:
-            found = toolbox.search_exact(phrase, "", EXACT_FALLBACK_RESULTS)
-            if not found.startswith(chr(34) + "error" + chr(34)):
-                exact_preface = ("Exact search for " + json.dumps(phrase) + ":" + chr(10)
-                                + found + chr(10) + chr(10))
+    phrase = toolbox.exact_phrase_for_question(question)
+    if phrase:
+        found = toolbox.search_exact(phrase, "", EXACT_FALLBACK_RESULTS)
+        if not found.startswith('"error"'):
+            exact_preface = ("Exact search for " + json.dumps(phrase) + ":" + chr(10)
+                            + found + chr(10) + chr(10))
     seeded = toolbox.render(list(seed_passages))
     messages = [
-        {"role": "system", "content": system_prompt(honesty, query_offered)},
+        {"role": "system", "content": system_prompt()},
         {"role": "user", "content": (
             f"Question: {question}\n\n"
             + exact_preface
@@ -1208,25 +1136,6 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
             "evidence": toolbox.evidence, **stats}
 
 
-def enabled() -> bool:
-    return os.environ.get("OI_TOOL_LOOP", "off").strip().lower() in ("on", "1", "true", "yes")
-
-
 def limits() -> tuple[int, int]:
-    """Steps and tool calls. Six and ten are the measured best, and the clock share is what keeps the fallback
-    alive rather than the caps.
-
-    **Measured on 2026-10-18.** Four steps scored 37.3 and six scored 43.3 on the same suite: the model needed the
-    extra turns to recover exact-number questions. The budget starvation that first looked like a caps problem was
-    the gateway refusing calls against an exhausted team ceiling; the loop now reserves the fallback's share of the
-    clock in the caller and the caps stay where the measurement put them.
-    """
-    try:
-        steps = int(os.environ.get("OI_TOOL_MAX_STEPS", "6"))
-    except ValueError:
-        steps = 6
-    try:
-        calls = int(os.environ.get("OI_TOOL_MAX_CALLS", "10"))
-    except ValueError:
-        calls = 10
-    return max(1, min(steps, 12)), max(1, min(calls, 24))
+    """Steps and tool calls per answer. Measured, not tuned per deployment."""
+    return 6, 10

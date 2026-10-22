@@ -60,8 +60,9 @@ def _words(text: str) -> list[str]:
 
 
 def gate_enabled() -> bool:
-    """The gate rides the prompt-honesty flag, so turning that off is the rollback for both."""
-    return os.environ.get("OI_TOOL_HONESTY", "on").strip().lower() not in ("off", "0", "false", "no")
+    """The gate is part of the answer path, not a switch. A deployment that must disable it is a code change
+    with a measurement, which is what the switch was being used for anyway."""
+    return True
 
 
 def subject_phrase(question: str) -> str:

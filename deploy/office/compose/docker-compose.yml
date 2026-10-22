@@ -494,24 +494,9 @@ services:
       COLLECTION: ${COLLECTION:-documents}
       OI_DEFAULT_MODEL_ROLE: ${OI_DEFAULT_MODEL_ROLE:-analyst}
       OI_DEFAULT_API_ROLE: ${OI_DEFAULT_API_ROLE:-viewer}
-      # **The tool-using answer path, off unless a deployment turns it on.** The loop is an experiment until it
-      # has been measured; the single-shot path stays as the fallback, so enabling this cannot be worse than not
-      # enabling it. Bounds are steps, tool calls, and how many results a search may add to the evidence.
-      OI_TOOL_LOOP: ${OI_TOOL_LOOP:-off}
-      OI_TOOL_MAX_STEPS: ${OI_TOOL_MAX_STEPS:-6}
-      OI_TOOL_MAX_CALLS: ${OI_TOOL_MAX_CALLS:-10}
-      OI_TOOL_SEARCH_LIMIT: ${OI_TOOL_SEARCH_LIMIT:-8}
-      OI_PASSAGES: ${OI_PASSAGES:-6}
-      OI_SNIPPET_CHARS: ${OI_SNIPPET_CHARS:-700}
-      OI_MAX_EVIDENCE: ${OI_MAX_EVIDENCE:-24}
-      # The structured row query, off until a deployment turns it on. It returns table rows rather than
-      # passages, so it changes the answer path the measured configuration was frozen on. The flag is both the
-      # opt-in and the rollback; the five-run comparison is docs/reviews/query-tool-2026-10-19.md.
-      OI_TOOL_QUERY: ${OI_TOOL_QUERY:-off}
-      OI_TOOL_EXACT: ${OI_TOOL_EXACT:-off}
-      # The honesty rule for questions that name an event the evidence never states. On by default; switchable so
-      # its effect can be measured rather than assumed.
-      OI_TOOL_HONESTY: ${OI_TOOL_HONESTY:-on}
+
+      # One profile for the answer path: accuracy or economy.
+      OI_ANSWER_PROFILE: ${OI_ANSWER_PROFILE:-accuracy}
       # The audit tool's content mode, passed because the tool refuses to run without it. A model-call row
       # names a model and counts rather than text, so the policy has nothing to govern here.
       CONTENT_DEFAULT: ${CONTENT_DEFAULT:-hash}

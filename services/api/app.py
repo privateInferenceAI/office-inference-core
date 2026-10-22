@@ -59,7 +59,6 @@ sys.path.insert(0, "/app/services")
 
 import access as access_module  # noqa: E402
 import assertion  # noqa: E402
-import citations  # noqa: E402
 import honesty  # noqa: E402
 import documents as documents_module  # noqa: E402
 import workflow as workflow_module  # noqa: E402
@@ -73,6 +72,7 @@ import answer_contract  # noqa: E402
 import routing  # noqa: E402
 import streaming  # noqa: E402
 import tool_loop  # noqa: E402
+import answer_profile  # noqa: E402
 
 # **What a client is promised, declared rather than described.** These are attached with
 # `responses={...}` so they reach `/openapi.json`, which is the artifact the client app is built from.
@@ -132,7 +132,7 @@ def question_too_long(question: str):
 DEFAULT_MODEL_ROLE = os.environ.get("OI_DEFAULT_MODEL_ROLE", "analyst")
 
 # How many passages the answer is built from.
-PASSAGES = int(os.environ.get("OI_PASSAGES", "6"))
+PASSAGES = answer_profile.current().seed_passages
 
 STATE: dict = {}
 
@@ -427,24 +427,19 @@ async def ask(request: Request):
     # every successful call (`attribution_from`), so a failover names itself in the answer and in the audit
     # row instead of being credited to the primary. Empty until a call succeeds.
     attribution: dict = {}
-    if tool_loop.enabled():
-        try:
-            loop = _generate_with_tools(session, permit, model, question_text, result, request_budget)
-        except Exception as exc:  # noqa: BLE001 - the single-shot path is the fallback, not a failure response
-            print(f"tool-loop unavailable, using the single-shot path: {type(exc).__name__}", flush=True)
-            loop = {"answer": None, "reason": "tool_loop_error", "evidence": []}
-        if loop.get("answer") is not None:
-            generated, generation = loop["answer"], None
-            attribution = dict(loop.get("attribution") or {})
-            if loop.get("evidence"):
-                # **The citations are verified against what the model actually read.** Without this the
-                # verifier would check tool-derived citations against the original five passages and refuse
-                # correct answers.
-                import dataclasses
-                result = dataclasses.replace(result, passages=loop["evidence"])
-        else:
-            generated, generation, attribution = _generate(
-                session, permit, model, question_text, result.passages, request_budget)
+    try:
+        loop = _generate_with_tools(session, permit, model, question_text, result, request_budget)
+    except Exception as exc:  # noqa: BLE001 - the single-shot path is the fallback, not a failure response
+        print(f"tool-loop unavailable, using the single-shot path: {type(exc).__name__}", flush=True)
+        loop = {"answer": None, "reason": "tool_loop_error", "evidence": []}
+    if loop.get("answer") is not None:
+        generated, generation = loop["answer"], None
+        attribution = dict(loop.get("attribution") or {})
+        if loop.get("evidence"):
+            # **The citations are verified against what the model actually read.** Without this the verifier
+            # would check tool-derived citations against the original seed passages and refuse correct answers.
+            import dataclasses
+            result = dataclasses.replace(result, passages=loop["evidence"])
     else:
         generated, generation, attribution = _generate(
             session, permit, model, question_text, result.passages, request_budget)
@@ -1209,7 +1204,7 @@ def _generate_with_tools(session, permit, model: str, question: str, result, req
     may extend it rather than starting blank. Every extra search and read is bounded by `tool_loop.limits()`.
     """
     max_steps, max_calls = tool_loop.limits()
-    search_limit = int(os.environ.get("OI_TOOL_SEARCH_LIMIT", "8"))
+    search_limit = answer_profile.current().search_limit
     def tool_audit(event, actor, actor_role, outcome, payload, **extra):
         audit(event, session.subject, session.role, outcome, payload, **extra)
 
@@ -1501,7 +1496,7 @@ async def _tool_frames(session, permit, model: str, question: str, result, reque
                 audit(event, session.subject, session.role, outcome, payload, **extra)
 
             toolbox = tool_loop.ToolBox(STATE["services"], permit, session.role, audit=tool_audit,
-                                        search_limit=int(os.environ.get("OI_TOOL_SEARCH_LIMIT", "8")))
+                                        search_limit=answer_profile.current().search_limit)
             holder["loop"] = tool_loop.run_loop(
                 lambda messages, tools: _tool_chat(session, model, messages, tools, request_budget),
                 toolbox, question, seed_passages=result.passages, max_steps=max_steps,
@@ -1599,7 +1594,7 @@ async def _frames(session, permit, model: str, question: str, result, requested_
     progress events while the model searches and reads, then the answer. Existing clients are untouched, which is
     why this is opt-in rather than a change to the event order.
     """
-    if use_tools and tool_loop.enabled():
+    if use_tools:
         async for event in _tool_frames(session, permit, model, question, result, requested_at, lane):
             yield event
         return
