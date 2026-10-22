@@ -96,3 +96,41 @@ Concrete decisions:
 - Whether a Service Quotas increase for Sonnet 4.6 TPM and the cross-model daily quota would be granted to this
   account, and how long it would take.
 - Provisioned Throughput availability and cost for the model and Region a client would use.
+
+
+## Refinement from a third research pass, 2026-10-22
+
+Three findings change the practical plan.
+
+**Provisioned Throughput does not cover Claude 4.x.** The supported-model table lists only Claude 3 Haiku and
+Claude 3 Sonnet, and only in ap-south-1. Provisioned Throughput cannot solve Sonnet 4.6 or Haiku 4.5 throttling.
+The 2026 route to dedicated capacity for these models is the Reserved service tier: dedicated capacity separate
+from the on-demand pool, minimum 100,000 input TPM and 10,000 output TPM, one- or three-month terms, account-team
+only, with automatic overflow to Standard. Priority and Flex remain on the shared on-demand quota; only Reserved is
+separate. Do not recommend Provisioned Throughput to a client for Claude 4.x.
+
+**The quota stack is more precise than one daily number.** The cross-model daily pool is one aggregate per account
+per Region. Cross-region TPM and RPM are adjustable in Service Quotas; the daily quota is not a console slider, but
+AWS's documented path is to request an increase on the cross-region TPM quota for the model, and support bundles the
+daily increase with it. Legacy per-model daily quotas still exist for older models. Requests can be denied, and
+priority goes to accounts already consuming their allocation. A bare request without evidence is likely to be
+denied; include request IDs, CloudWatch token counts, InvocationThrottles and spend evidence.
+
+**Quota units and max_tokens matter more than they look.** Quota units per request are input plus five times
+output. Admission reserves input plus max_tokens, so the 64K default reserves 64K and crushes concurrency; the
+recommended cap is 4K for chat and 8K to 16K for code. Prompt-cache reads are excluded from the quota while cache
+writes count. Batch inference runs at roughly half price with separate quotas and suits nightly jobs. Flex is
+cheaper and slower but still draws on the same on-demand pool.
+
+**Why our account ran out after about 24 calls.** At documented accounting, 25 calls could not exhaust a
+150,000,000 daily pool unless each call is large. Two explanations fit: the applied quota is lower than the
+displayed default, or a "call" in the observation is a user turn containing 20 to 30 agent requests. Our audit
+counts model calls, so the first explanation is more likely for this account. The next step is to compare the
+applied quota with the default, count API requests rather than prompts, and file the cross-region TPM increase
+with the evidence.
+
+**Adjusted recommendations.** Per-client AWS accounts remain right. Quote the Reserved tier or Priority for
+service-level work; never promise on-demand throughput. Cap max_tokens per task, cache stable prompts, move
+non-interactive work to batch, use a cross-region profile, and build the fallback chain with bounded retries and a
+queue. File quota increases early and budget days. Do not start new work on Legacy models; Sonnet 4.5 is Legacy
+and Haiku 4.5 is near its end-of-life window.
