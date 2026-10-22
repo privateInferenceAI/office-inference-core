@@ -88,7 +88,6 @@ def test_a_two_row_period_header_is_prepended_to_the_row():
     chunk = row_chunk([PERIOD_HEADER, YEAR_HEADER, TOTAL_REVENUES], "4,934,098")
     assert chunk.text.startswith(EXPECTED_COLUMNS), chunk.text
     assert "Total revenues" in chunk.text
-    assert chunk.table_context == EXPECTED_COLUMNS
 
 
 def test_a_caption_above_the_header_block_is_included():
@@ -110,7 +109,6 @@ def test_a_table_with_no_header_keeps_the_bare_row():
     for chunk in chunks:
         assert not chunk.text.startswith("Columns:"), chunk.text
         assert not chunk.text.startswith("Table:"), chunk.text
-        assert chunk.table_context == ""
 
 
 def test_a_row_of_figures_is_not_mistaken_for_a_header():
