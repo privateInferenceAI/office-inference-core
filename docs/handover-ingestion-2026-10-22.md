@@ -13,6 +13,9 @@ it before touching ingest, chunking, retrieval or the evaluation harness.
   is FastAPI.
 - Corpus 2 is the active test corpus: 80 documents, 24,296 chunks, ingested with chunker-v5 and payload-v6. Its
   answer benchmark is 37 of 37 with Claude Sonnet 4.6 and the accuracy answer profile, five consecutive runs.
+  A fresh install from a pinned archive on 2026-10-22 reproduced the same 80/24,296 counts, passed the four
+  acceptance probes and a 5 of 5 corpus-2 check with no model fallback. The procedure is
+  docs/runbooks/fresh-install-agent.md; the evidence is docs/reviews/fresh-install-2026-10-22/.
 - Corpus 1 is the older, larger corpus: 539 indexed documents, 100,478 chunks at chunker-v4. Its index is
   **mixed v4/v5** after a reindex was stopped at 18 of 539 documents. Do not measure corpus 1 until a complete
   reindex is run.
@@ -39,7 +42,11 @@ sg-09d9bfffbd28014c9, instance profile oi-core-dev-instance.
 **Corpus assets:** S3 bucket officeinference-corpus-878451098165. The corpus-2 archive used for the fresh install is
 second-corpus/second-corpus-2026-10-22.tar.gz, sha256
 0b154bcb452af0789cdc34a6453b3806924fb22cdbf15a217eb73175072a88a1. It contains documents/ for the 80 corpus-2
-documents. The older lab corpus is at lab-baseline/lab-corpus-2026-10-19.tar.gz.
+documents. The code archive for the accepted install is fresh-install/oi-core-795b9a6.tar.gz, sha256
+28c24862da6abdec3061f2f5dd3412dc8dee4f4866635822f230dd9f1684b70c. The UI builds from a second repository,
+oic-ui; its archive for the accepted install is fresh-install/oic-ui-6d28c3c.tar.gz, sha256
+4609bdb30bbd6438ac1a77f8fd8e0cb5795e977b211a0c7f6f5725450df72a2b. The older lab corpus is at
+lab-baseline/lab-corpus-2026-10-19.tar.gz.
 
 **Question sets:** docs/eval/corpora/second-corpus/questions.yaml for corpus 2 (35 questions, 37 role-runs because
 two run as both staff and executive), and docs/eval/data-questions.yaml for the older 40-question set plus probes.

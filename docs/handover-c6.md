@@ -84,9 +84,11 @@ office build uses local models; the cloud build uses Bedrock.
   profile, five consecutive runs. The earlier clean Bedrock run had 185 Sonnet calls and zero fallbacks.
 - The answer path was simplified in the last two days: one answer profile setting replaces ten environment
   switches, the tool loop and three tools are constants, and dead payload fields and dead branches were removed.
-- A clean end-to-end install is being executed on a brand-new instance at the time of writing. Its runbook will
-  land at docs/runbooks/fresh-install-agent.md and its evidence under docs/reviews/fresh-install-2026-10-22/.
-  That runbook is the fastest way to bring up a box you can test C6 on.
+- A clean end-to-end install was executed and accepted on 2026-10-22. It started from a bare Ubuntu instance and a
+  pinned archive, ingested corpus 2 to 80 documents and 24,296 chunks, passed the four acceptance probes and a
+  5 of 5 corpus-2 answer check, and made 42 Sonnet calls with no fallback. Instance i-02aba2feef08f8e7b is
+  stopped. The runbook is docs/runbooks/fresh-install-agent.md; the evidence report is
+  docs/reviews/fresh-install-2026-10-22/. That runbook is the fastest way to bring up a box you can test C6 on.
 - Bedrock capacity is the current external constraint. The account has a 150,000,000 cross-model daily token pool
   while the published default is 700,000,000, Sonnet 4.6 has no separate daily allowance, and a day of heavy
   measurement can exhaust the usable allowance after roughly two dozen Sonnet calls. The gateway silently falls
@@ -105,8 +107,10 @@ work. Do not use the default account for this product.
   Stopped between tasks. Its volumes survive a stop; /tmp may not.
 - Corpus-2 box: instance i-05fa6edd5284b7881, m7i.4xlarge, deployment root /opt/oi-core2, no Elastic IP, so the
   public IP changes on every start. Stopped at handover.
-- Fresh-install box: created by the install agent on 2026-10-22; its instance id is in the fresh-install evidence
-  document.
+- Fresh-install box: instance i-02aba2feef08f8e7b, m7i.4xlarge, us-east-1b, 200 GB gp3, deployment root
+  /opt/oi-core, instance profile oi-core-dev-instance, no Elastic IP. Stopped, not terminated. Its root volume
+  holds /opt/oi-core/evidence/fresh-install/. The accepted install is documented in the runbook and evidence
+  report named above.
 - Security group sg-09d9bfffbd28014c9 allows SSH from 47.164.45.109/32. Instance profile oi-core-dev-instance
   carries the Bedrock permissions and SSM.
 
@@ -222,6 +226,12 @@ access enforcement.
 ---
 
 ## 8. The traps, in the order they will bite you
+
+**A fresh host fails in three specific places, and the runbook has all three.** The external ai-net network has
+to be created by hand. LiteLLM's Prisma refuses a database the API has already migrated, so the gateway starts
+before the API on a new volume. Ingestion loses two startup races, against the API migrations and against the
+embeddings model load, and needs one restart. Read the failure table in the fresh-install runbook before you
+blame a service.
 
 **The deployment runs code nobody can point at.** The box can be five commits behind while git status is clean
 because origin/main is stale. Fetch, count, pull, rebuild, verify. The previous handover has six examples.
