@@ -33,7 +33,7 @@ All times UTC, from `acceptance-start.txt`, the progress monitor, and the launch
 | Launch | 09:13:21 | |
 | SSH answers | 09:13:40 | 19 s |
 | Host packages and Docker | 09:14:15 | 35 s |
-| Archives verified, manifest rendered, validation clean | 09:14:55 | 1 s |
+| Archives verified, manifest rendered, validation clean | 09:14:55 | under a minute |
 | Image build (10 images) | 09:15:47 to 09:18:54 | 3 min 07 s |
 | First `up` fails on missing `ai-net` | 09:19:01 | |
 | `ai-net` created, stack starts | 09:19:37 to 09:19:57 | |
@@ -63,7 +63,7 @@ Counts through the deployment's Postgres:
 
 | Query | Result | Baseline |
 |---|---|---|
-| `select count(distinct doc_id), count(*) from chunk_index` | `80 | 24296` | 80 | 24296, matches |
+| `select count(distinct doc_id), count(*) from chunk_index` | `80 \| 24296` | 80 \| 24296, matches |
 | `select count(*) from ingest_manifest where failure_count >= 2` | `0` | none dead-lettered |
 | `select count(*) from chunk_index where kind = 'dataset'` | `0` | no file classified as a dataset |
 | `select count(*) from ingest_manifest` | `80` | one manifest row per document |
@@ -121,7 +121,7 @@ role:
   SYN_A01 executive PASS docs=['executive/second-synthetic/executive-compensation-2025.md', ...]
 ```
 
-Summary: 5 runs, 5 passed, 1.0 on every category. Duration 33.5 s. Full JSON in `corpus2-check.json`. The staff
+Summary: 5 runs, 5 passed, every category with runs equal to passed. Duration 33.5 s. Full JSON in `corpus2-check.json`. The staff
 run refused the CEO salary and the executive run found 385,000, which is the access boundary the question exists
 to test.
 
@@ -149,9 +149,10 @@ Six failures, all recorded here because the runbook now carries them.
 5. **The forced degradation did not take the first time.** `OI_MAX_TOKENS=100000` on the compose command line did
    not reach the container, because the api service does not list that variable in its `environment:` block, so
    the recreate succeeded and changed nothing. Fix: stop the gateway (`docker stop litellm`), ask one question,
-   start it again. The API recorded `stage=degraded` with 12 passages, reason `unclassified`. An earlier
-   cold-start attempt had already left a `timeout` degradation row, so `interface_probe` passed DEGRADED on the
-   rerun.
+   start it again. The API recorded `stage=degraded` with 12 passages and reason `unclassified`, and
+   `interface_probe` passed DEGRADED on the rerun. The audit table holds two degraded rows by the end, one
+   `timeout` and one `unclassified`; the review keeps the fact rather than a story about which attempt wrote
+   which.
 6. **The suite printed 5 of 5 and then exited 1.** The eval image runs as an unprivileged user and could not
    write `--json-out` into the operator-owned evidence directory. Fix: mount a directory it can write
    (`chmod 777 /tmp/oi-evidence`), write there, copy out. The scoring was never affected.
