@@ -4,13 +4,26 @@
 document before you touch anything. It is long on purpose. Anthony asked the previous handover to be long because
 a handover that leaves you guessing costs the first hour of the engagement.
 
+**Target update, 2026-10-22. The cloud build is the Cloud Workspace.** A company does not pay a build fee and a
+retainer for document chat. The cloud product is a workspace agent: it researches, writes files, runs code, uses
+approved web access and client systems, produces artifacts, and stops for approval before anything irreversible.
+The design is `docs/design/cloud-workspace.md`; the phase is `WS` in `docs/requirements.yaml`; the runtime
+shape is `docs/decisions/0009-agent-runtime-shape.md`. C6 is the execution core of that product, not the whole
+product. The office build remains a separate product, and its rule that nothing leaves the building is not a rule
+for this build.
+
+**State update, 2026-10-22.** C6 Section 1, the eight C5 approval rows, is built and in PR #239. It makes the
+decision and its chain row one transaction, records refused attempts, covers the approval column by chain version
+3, and adds the re-attestation command. Merge it before building Section 2; the runtime gate depends on it. Section
+2, the runtime, is the next piece and its design record is 0009.
+
 ---
 
 ## 0. Read this first
 
 You are picking up a real product with a client promise. The stack installs, ingests a corpus, answers with
-citations, enforces access boundaries, and records an audit chain. C5, workflows and approvals, is built. C6, the
-agent runtime and MCP gateway, is the next phase and it is not built.
+citations, enforces access boundaries, and records an audit chain. C5, workflows and approvals, is built. C6 is in
+progress: Section 1, the approval rows, is built in PR #239, and Section 2, the agent runtime, is next.
 
 **Three things before anything technical.**
 
@@ -183,13 +196,16 @@ or a tool call.
 
 ## 6. C6 scope, in practical terms
 
-C6 is two things that ship together: an agent runtime and an MCP gateway. Read the C6 requirements in
-docs/requirements.yaml and FINISH-SCOPE sections 2 and 3 before designing anything.
+C6 is the execution core: an agent runtime and an MCP gateway. Read the C6 requirements in
+docs/requirements.yaml and FINISH-SCOPE sections 2 and 3 before designing anything. The workspace layer is the
+separate `WS` phase described in `docs/design/cloud-workspace.md`; it is not part of C6, but the runtime's tool
+interface must be able to host it.
 
 **Agent runtime.** The acceptance line is an agent task with a sub-agent and a checkpoint. The runtime is one per
 deployment. It needs a task loop with checkpoints, two modes, a queue, context control, verification, sub-agents
 with child rules, the approval gate, and definitions loaded from packs. The C5 workflow engine stays: C6 replaces
-the plan, not the engine. The loop is a step whose function calls a model several times; the transaction, approval
+the plan, not the engine. Decision 0009 makes the loop a dynamic plan whose iterations are engine steps; the
+shorter "the loop is one step" reading does not satisfy AG-LOOP-001 or AG-CHECKPOINT-001. The transaction, approval
 gate, event log and job states already exist.
 
 **MCP gateway.** One per deployment. It needs a tool registry, per-connector credentials, gateway policy, estate
@@ -211,8 +227,9 @@ access enforcement.
 
 ## 7. How to start
 
-1. Read docs/requirements.yaml C6 rows and docs/lab/FINISH-SCOPE.md sections 2, 3 and 4. Write your own section
-   plan and bring it to Anthony before building.
+1. Read docs/requirements.yaml C6 rows, docs/lab/FINISH-SCOPE.md sections 2, 3 and 4, docs/decisions/0009,
+   and docs/design/cloud-workspace.md. The cloud workspace is the target; the office build is a different product.
+   Write your own section plan and bring it to Anthony before building.
 2. Bring up a working box with docs/runbooks/fresh-install-agent.md once it lands. Do not build on the old corpus
    box; its state is evidence, not a clean starting line.
 3. Run the acceptance probes and one corpus-2 smoke run before changing anything, so you know the baseline.

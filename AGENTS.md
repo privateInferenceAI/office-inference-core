@@ -6,6 +6,12 @@ The single core system for Office Inference, deployed two ways: into a client's 
 or onto hardware in a client's building. Read `docs/architecture.md` before changing anything,
 then `docs/service-inventory.md` for the service list and its location tags.
 
+**Target update, 2026-10-22.** The cloud build's product is the **Cloud Workspace**: a workspace agent with a
+task-scoped sandbox, approved web egress, artifacts and connectors. The design is `docs/design/cloud-workspace.md`;
+the phase is `WS` in `docs/requirements.yaml`. The office build remains a separate restricted product, and its
+"nothing leaves the building" rule does not apply to the cloud build. C6 is the execution core of the workspace,
+not the whole product.
+
 ### A step is not done until every requirement it names is verified
 
 The register is the authority, not the step list. A step plan is written from the architecture's
@@ -42,8 +48,10 @@ progress against the phase.
    first question a security review asks.
 5. **Capabilities are sold as packs, not toggles.** Add capability by adding a pack to
    `packs/catalog.yaml`, not by inventing a new setting.
-6. **The frontier lane is off by default and every outbound call is logged.** Any change that
-   could send client content off the box needs an explicit gate and an audit record.
+6. **Egress is explicit and audited, per build.** In the cloud build, Bedrock is the inference lane and
+   approved web and connector traffic goes through the egress proxy; every outbound call is logged. In the
+   office build the frontier lane is off by default and the box has no internet. Any change that could send
+   client content out of the deployment needs an explicit gate and an audit record.
 
 ## What "finished" means
 

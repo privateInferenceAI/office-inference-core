@@ -2400,6 +2400,144 @@ items:
       call does not always pass through the API. Two places making one claim is a cost, and the alternative
       is a second door with a different lock.
 
+# ---------------------------------------------------------------- the cloud workspace (WS)
+  #
+  # The cloud build's product is a workspace agent: it does the work in a task-scoped sandbox, reaches approved
+  # web and client systems, produces artifacts, and stops for approval before anything irreversible. The office
+  # build is a different product and does not carry this phase. Design: docs/design/cloud-workspace.md.
+
+  - id: WS-SANDBOX-001
+    title: A task runs in an isolated workspace with files, shell and code, and the sandbox is destroyed after it
+    tier: [cloud, hosted]
+    phase: WS
+    verify: >-
+      a workspace task writes a file and runs a script, and the artifact is readable after the task. The task
+      cannot read /opt/oi-core, the rendered environment, the assertion key or another task's files. The sandbox
+      is gone when the task ends, and a task that exceeds its CPU, memory, disk or wall-clock quota fails with a
+      typed cause.
+    status: open
+    note: >-
+      The sandbox is the difference between an agent that reads documents and one that does the work. It is
+      not a developer environment and not the host. Isolation is a claim to run, not to write down.
+
+  - id: WS-WEB-001
+    title: Web access is off by default, goes through the client's egress policy, and every request is recorded
+    tier: [cloud, hosted]
+    phase: WS
+    verify: >-
+      with the web tool off, a task that tries to fetch a URL is refused and the proxy sees no request. With the
+      tool on and the domain allowed, the fetch returns a page and the chain records the destination, the data
+      class and the redaction summary. With the domain not on the allowlist, the fetch is refused and the proxy
+      sees no request.
+    status: open
+    note: >-
+      This is the cloud rule, not the office rule. The client's allowlist and data classes decide what leaves the
+      VPC; the proxy records it. The office build has no internet at all.
+
+  - id: WS-ARTIFACT-001
+    title: Artifacts are stored in the client's account, content-addressed, retained by policy and downloadable
+    tier: [cloud, hosted]
+    phase: WS
+    verify: >-
+      a task writes two files with the same bytes and one with different bytes; the bucket holds two distinct
+      objects, the task's result names them, and the client app can download both. A retention policy deletes an
+      artifact after its window and records the deletion. An artifact written before a cancellation survives and
+      is listed.
+    status: open
+    note: >-
+      The output belongs in the client's estate. The sandbox is disposable; the artifact is not.
+
+  - id: WS-UI-001
+    title: The client app shows the run, its steps, its artifacts, its approvals and its record
+    tier: [cloud, hosted]
+    phase: WS
+    verify: >-
+      a person starts a workspace task in the app, watches steps appear, opens an artifact, approves a pending
+      send, and reads the resulting activity row. A task with no artifact shows that it produced none rather
+      than an empty panel that looks broken.
+    status: open
+    note: >-
+      The existing Ask, Do, Review, Activity and Settings screens are the base. The workspace adds the run view,
+      the artifact viewer and the live detail a person needs to trust the work.
+
+  - id: WS-CONNECTOR-001
+    title: A real business connector works end to end, with its own credential and an approval before a send
+    tier: [cloud, hosted]
+    phase: WS
+    verify: >-
+      a task drafts an email and stops at the gate; nothing is sent. Approve quoting the digest and the connector
+      sends exactly once; the chain records the tool call, the approval and the result. Rotate the connector
+      credential and the next send uses the new value without a redeploy; the old value fails. A send the client's
+      policy forbids is refused before the connector is reached.
+    status: open
+    note: >-
+      The first connector is a product decision: client SMTP or Microsoft 365 Graph Mail.Send. Graph reuses the
+      intake app registration but needs a consent and a licensed mailbox. SMTP is simpler and client-owned.
+
+  - id: WS-CRED-001
+    title: The sandbox holds no standing credentials; a tool that needs one calls the gateway from the runtime
+    tier: [cloud, hosted]
+    phase: WS
+    verify: >-
+      inspect the sandbox environment and filesystem for connector, model and cloud credentials; none are
+      present. A tool that needs a credential is called by the runtime through the MCP gateway, and the sandbox
+      cannot reach the gateway directly.
+    status: open
+    note: >-
+      A credential in a sandbox is a credential in a shell the model can run. The gateway is the only place a
+      credential is used, and the client owns it.
+
+  - id: WS-LIMITS-001
+    title: CPU, memory, disk, wall-clock and token budgets bound a workspace task, and a runaway task is stopped
+    tier: [cloud, hosted]
+    phase: WS
+    verify: >-
+      a task that allocates past its memory limit is killed with a typed cause; a task that sleeps past its
+      wall-clock limit is stopped; a task that loops past its token budget is stopped; each is recorded. The
+      deployment stays healthy and another task can start.
+    status: open
+    note: >-
+      A workspace that can run code can run a fork bomb or fill a disk. The quotas are the product's protection
+      against one task taking the deployment down.
+
+  - id: WS-AUDIT-001
+    title: Every sandbox command, web fetch, connector call and artifact write is in the chain, traceable to its task and step
+    tier: [cloud, hosted]
+    phase: WS
+    verify: >-
+      run a workspace task that writes a file, runs a command, fetches an allowed URL and calls one connector.
+      The chain holds one row for each, each carries the task id and the step, and verify_chain passes. A call
+      with no row, and a row with no call, both fail.
+    status: open
+    note: >-
+      The sandbox is a second place work happens, and the chain is the only reason it is auditable. The rows use
+      the same writer and the same table as the model and tool rows; no second sink.
+
+  - id: WS-ACCEPT-001
+    title: The cloud workspace acceptance task passes on a fresh deployment
+    tier: [cloud, hosted]
+    phase: WS
+    verify: >-
+      on a fresh client-account-shaped deployment, a research task reads a file from the workspace, fetches an
+      allowed web source, runs a calculation in code, spawns one read-only child, checkpoints, stops for approval
+      on a test send, resumes after a process restart without repeating a step, produces an artifact, and leaves a
+      chain that verifies.
+    status: open
+    note: >-
+      This is the WS exit line. It is the C6 acceptance plus the workspace layer, not a replacement for either.
+
+  - id: WS-PROFILE-001
+    title: The workspace is a cloud and hosted product; the office profile refuses the workspace pack
+    tier: [cloud, hosted]
+    phase: WS
+    verify: >-
+      a manifest with profile office and the workspace pack is refused by validation with a message naming the
+      profile. A cloud manifest with the pack validates. The rendered environment contains the workspace service
+      only for the cloud and hosted profiles.
+    status: open
+    note: >-
+      The office build is a different product. A profile check is how that stays true when a manifest is copied.
+
   - id: NEVER-KB-001
     title: No managed knowledge base
     tier: [cloud, hosted]

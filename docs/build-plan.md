@@ -8,6 +8,13 @@ decision is made here and the argument is given.
 cheap hardware produces the cloud demo and the cloud product. The office build reuses every component
 and swaps the substrate.
 
+**Target update, 2026-10-22. The cloud build's flagship is the Cloud Workspace.** A company does not pay a build
+fee and a retainer for a search box. The cloud product is a workspace agent: it researches, writes files, runs code,
+uses approved web access and client systems, produces artifacts, and stops for approval before anything
+irreversible. The design is in `docs/design/cloud-workspace.md`; the phase is `WS`. The office build remains a
+separate product with its own boundary, and the office rule that nothing leaves the building is not a rule for
+this build.
+
 ---
 
 ## 1. The product, in one page
@@ -34,6 +41,10 @@ number that does not matter.
 
 Market anchors, for the first negotiation: a scoped AI pilot runs 5,000 to 15,000, a multi-workflow
 build 20,000 to 80,000, agency retainers 2,000 to 15,000 a month, AI consulting 150 to 350 an hour.
+
+**The prices above predate the Cloud Workspace and must be revised before the first cloud sale.** The workspace
+adds a sandbox, an egress proxy, an artifacts bucket, a first connector and a UI surface. That is more build and
+more support than the document-chat package the table was priced for.
 
 **The retainer is priced below market on purpose.** 750 sits under the 2,000 floor. Keep it as an
 introductory rate, write into the first contract that it moves to 1,250 after the third client, and
@@ -69,6 +80,8 @@ say so out loud rather than surprising anyone.
                    tei-rerank        bge-reranker-v2-m3
                    docs              ingestion and retrieval tools
                    agents            agent runtime
+                   workspace         per-task sandbox: files, shell, code
+                   egress-proxy      allowlisted web and API egress
                    mcp               MCP gateway, vetted connectors
                    n8n or replacement workflows
                    audit             audit sink, the CLI
@@ -85,9 +98,12 @@ say so out loud rather than surprising anyone.
 | Vector store | Qdrant | Access labels live in the payload, so the permission filter runs inside the search |
 | Embeddings and reranking | Text Embeddings Inference | bge-m3 and bge-reranker-v2-m3. On the office build the same images run with a CUDA tag |
 | Ingestion | Docling plus our pipeline | OCR, tables, and layout. See section 4 |
-| Agent runtime | OpenAI Agents SDK | MIT, MCP, sessions, human-in-the-loop, and a LiteLLM provider so it drives either lane |
-| Workflows | n8n, or a replacement | See the licence blocker in section 10 |
-| MCP gateway | ContextForge | Central tool registry, per-connector credentials, tool-level policy |
+| Agent runtime | our dynamic plan on the C5 engine | Decision 0009: one audit path, per-iteration step rows, the existing gate and chain. The SDK was considered and rejected for the runtime |
+| Workflows | our workflow engine (C5) | The state change and the chain row are one transaction. n8n was rejected on the licence and the transaction |
+| Workspace sandbox | per-task container or microVM | Files, shell and code for the task, isolated from the host, destroyed after |
+| Egress proxy | allowlisted HTTP(S) proxy | The client's policy decides what leaves the VPC; every request is recorded |
+| Artifacts | S3 in the client account | Outputs belong in the client's estate; content-addressed and retained by policy |
+| MCP gateway | ContextForge, decision under research | Central tool registry, per-connector credentials, tool-level policy |
 | Audit | our sink | The differentiator. Section 5 |
 | Identity | Cognito, roles from the validated token | Today the role is a command-line flag. That ends here |
 
@@ -115,8 +131,15 @@ customer-managed KMS keys, VPC endpoints so no data path crosses the internet, O
 audit and document buckets, and the retention and eligibility rules of section 3 enforced by the
 validator.
 
+**The workspace layer is part of the cloud build.** The agent gets an ephemeral sandbox with a file
+workspace, shell and code execution; approved web and API egress through a proxy; artifacts in the client's S3;
+and connectors through the MCP gateway. The sandbox is not the host and holds no standing credentials. The C6
+runtime is the execution core, not the whole product. The office build does not get this layer; its manifest
+refuses the workspace pack.
+
 **Infrastructure as code.** Terraform owns the account: VPC, subnets, endpoints, security groups,
-ALB, ACM, Cognito, RDS, S3, KMS, IAM, CloudWatch, budgets. The installer owns the instance: pull the
+ALB, ACM, Cognito, RDS, S3, KMS, IAM, CloudWatch, budgets. The workspace adds an artifacts bucket and the
+egress proxy's egress rules. The installer owns the instance: pull the
 images by digest, render config from the manifest, start compose, run health checks, register with
 SSM. A client deployment is created, updated, and destroyed by those two things and nothing typed by
 hand.
@@ -365,11 +388,13 @@ change did not make their answers worse.
 | **C4** | Client app: Ask, Do, Review, Activity | Someone who has never seen it can ask and approve |
 | **C5** | Workflows and the first connectors | Invoice intake with an approval gate |
 | **C6** | Agent runtime and MCP gateway | An agent task with a sub-agent and a checkpoint |
+| **WS** | Cloud Workspace: sandbox, approved egress, artifacts, first connector, workspace UI | A research task uses a file, a web source and code, spawns one child, checkpoints, gates a send, produces an artifact, resumes after a restart, and verifies the chain |
 | **C7** | Ingress, TLS, Cognito, Terraform into a client account | A deployment created from code in a client account |
 | **C8** | Ops: alarms, backups, restore drill, golden questions, CI | The acceptance test passes on a fresh deployment |
 | **C9** | Demo rehearsal, twelve minutes, eight scenes | The demo |
 
-C0 to C4 produce the cloud demo. Everything after makes it sellable and supportable.
+C0 to C4 produce the cloud demo. C6 and WS produce the product a company pays for. C7 and C8 make it
+sellable and supportable.
 
 ---
 
@@ -414,6 +439,9 @@ The 5,000 USD of Activate credits covers the demo box for years. Do not optimise
 - **A managed knowledge base.** It would fork the retrieval path and leave the audit sink.
 - **Multi-tenancy.** One deployment per client is what makes compliance and "you can fire us" simple.
 - **Agent swarms.** One runtime, sub-agents at depth one.
+- **A general coding harness.** The workspace sandbox is task-scoped. It is not a developer environment, and it is
+  destroyed when the task ends.
+- **Unrestricted internet.** Every web or API call goes through the client's egress policy and is recorded.
 - **Our own model, or our own chat engine.**
 - **A usage-based price component.** It is theatre at these volumes and invites the client to audit the
   one number that does not matter.
@@ -556,6 +584,24 @@ which reuses this plan), **not needed** (deliberate), or **gap** (nothing yet, n
 | 12.8 | Third-party breach duties in writing | **C8** with incident response | gap, assigned |
 | 12.9 | Error budget reporting, monthly availability per client | **C8** | gap, assigned |
 | 12.10 | A named security contact at the client and at ours | **Onboarding checklist** | gap, assigned |
+
+### Cloud workspace (added 2026-10-22)
+
+The cloud build's product target. The design is `docs/design/cloud-workspace.md`; the register rows are phase
+`WS`.
+
+| # | Item | Where it lands | Status |
+|---|---|---|---|
+| WS.1 | Per-task sandbox with files, shell, code, quotas and teardown | WS, `WS-SANDBOX-001` | open |
+| WS.2 | Approved web access through an egress proxy, off by default, audited | WS, `WS-WEB-001` | open |
+| WS.3 | Artifacts in the client's S3, content-addressed, retained, downloadable | WS, `WS-ARTIFACT-001` | open |
+| WS.4 | Workspace UI: run view, artifacts, approvals, activity | WS, `WS-UI-001` | open |
+| WS.5 | First real connector with its own credential and an approval before a send | WS, `WS-CONNECTOR-001` | open |
+| WS.6 | No standing credentials in the sandbox; the gateway holds them | WS, `WS-CRED-001` | open |
+| WS.7 | CPU, memory, disk, wall-clock and token limits; runaway task stopped | WS, `WS-LIMITS-001` | open |
+| WS.8 | Every sandbox command, web fetch, connector call and artifact write in the chain | WS, `WS-AUDIT-001` | open |
+| WS.9 | The cloud acceptance task | WS, `WS-ACCEPT-001` | open |
+| WS.10 | Workspace is cloud and hosted only; office refuses the pack | WS, `WS-PROFILE-001` | open |
 
 ### What this audit found
 

@@ -1,7 +1,7 @@
 # 0009. The agent runtime is a dynamic plan on the C5 engine
 
-- Status: proposed, awaiting owner acceptance
-- Section: C6 Section 2
+- Status: the Cloud Workspace target is accepted by the owner, 2026-10-22. The runtime shape is proposed.
+- Section: C6 Section 2 / WS
 - Date: 2026-10-22
 - Supersedes: the `agent-runtime` row of `0001-service-implementations.md`, and only that row
 
@@ -9,6 +9,13 @@
 
 Section 2 builds the 14 open `AG-*` rows: a loop, checkpoints, two modes, one runtime, a queue, context
 control, verification, four sub-agent rules, the approval gate, the C5 seam and definitions from packs.
+
+**The product target is the Cloud Workspace.** The cloud build is a workspace agent: it researches, writes files,
+runs code, uses approved web access and client systems, produces artifacts and stops for approval before anything
+irreversible. The design is `docs/design/cloud-workspace.md`; the phase is `WS`. The office build is a separate
+product with its own boundary, and the office rule that nothing leaves the building is not a rule for this build.
+The runtime described here is the execution core of the workspace, not the whole product. Its tool interface must
+be able to host the sandbox, web and connector tools; the workspace phase supplies them.
 
 C5 built the durable thing. A job has a store, a state machine, an event log, step rows, an approval gate, an
 effects ledger and a hash-chained audit row written in the transaction that changes the state. The engine is
@@ -195,6 +202,10 @@ Each is one logical change and one PR.
    act-once effect.
 5. **The live acceptance.** The research-brief task with a child, a checkpoint, a kill and restart, a gate on
    an irreversible test send, and `verify_chain`.
+
+The cloud workspace phase `WS` follows this core. It adds the sandbox, the approved egress proxy, the artifact
+store, the first real connector and the workspace UI, and it uses the tool interface this record defines. The
+office build does not carry it.
 
 ## Open decisions for the owner
 

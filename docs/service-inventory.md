@@ -36,17 +36,20 @@ These are on in every build. The *Core* pack is implicit and not sold separately
 | Service | Location | Purpose | Pack |
 |---|---|---|---|
 | `inference-local` | office | vLLM or llama.cpp serving open weights | Core on office builds |
-| `inference-frontier` | cloud | Bedrock or a frontier API | Frontier Lane |
+| `inference-frontier` | cloud | Bedrock or a frontier API | Core on cloud builds |
 | `model-router` | either | Lane selection by data class, with the gate and the audit hook | Frontier Lane |
 
 ## Capability services
 
 | Service | Location | Purpose | Pack |
 |---|---|---|---|
-| `workflow` | either | Multi-step execution, scheduling, approval gates. n8n today | Workflow Automation |
-| `agent-runtime` | either | The agent loop: planning, tools, sessions, human-in-the-loop | Agentic Desk |
+| `workflow` | either | Multi-step execution, approval gates. Our engine; the state change and chain row are one transaction | Workflow Automation |
+| `agent-runtime` | either | The agent loop: dynamic plan, tools, sessions, checkpoints, human-in-the-loop | Agentic Desk |
 | `mcp-gateway` | either | Central tool registry, per-client credential injection, tool-level policy | Agentic Desk |
 | `connectors` | either | One adapter per integration, MCP servers where they exist | per integration |
+| `workspace-sandbox` | cloud | Per-task sandbox: files, shell, code, quotas, teardown | Cloud Workspace (WS) |
+| `egress-proxy` | cloud | Allowlisted web and API egress, with audit | Cloud Workspace (WS) |
+| `artifact-store` | cloud | S3 artifacts in the client's account | Cloud Workspace (WS) |
 | `voice` | office | LiveKit cascade: ASR, then model, then TTS | Voice |
 | `redaction` | either | Strips identifiers on the way out when the frontier lane is used | Compliance Pack |
 
