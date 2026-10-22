@@ -134,3 +134,36 @@ service-level work; never promise on-demand throughput. Cap max_tokens per task,
 non-interactive work to batch, use a cross-region profile, and build the fallback chain with bounded retries and a
 queue. File quota increases early and budget days. Do not start new work on Legacy models; Sonnet 4.5 is Legacy
 and Haiku 4.5 is near its end-of-life window.
+
+
+## Daily token counts, and the billing-table question (2026-10-22)
+
+The billing export shows total Bedrock cost on 10/20 higher than 10/21, which looks like the daily allowance was
+lowered. CloudWatch token counts do not support that reading. Buckets are UTC days, sums from AWS/Bedrock
+InputTokenCount and OutputTokenCount:
+
+| Model | 10/19 | 10/20 | 10/21 |
+|---|---|---|---|
+| Claude Haiku 4.5 input / output | 37.1M / 0.92M | 22.3M / 0.54M | 25.6M / 0.40M |
+| Claude Sonnet 4.5 input / output | 3.48M / 0.08M | none | 9 / 4 tokens |
+| Claude Sonnet 4.6 input / output | none | none | 14.2M / 0.15M |
+
+Total recorded Bedrock tokens were about 41.5M on 10/19, 22.8M on 10/20 and 40.3M on 10/21. So 10/21 was not a
+lighter day; it was comparable to 10/19 and almost twice 10/20. The cost table is lower because Claude Sonnet 4.6
+has no column in that export and appears only partly under the generic Bedrock line, and because the Haiku mix was
+different. The billing table is not evidence that AWS lowered the quota.
+
+What did change on 10/21 is the model: Sonnet 4.5 has a published per-model daily allowance of 27M tokens, while
+Sonnet 4.6 has no published per-model daily allowance and draws from the shared cross-model pool, which AWS
+describes as estimated from on-demand pricing. A price-weighted estimate makes Sonnet tokens count more than
+Haiku tokens. The applied quota for Sonnet 4.6 in this account, and the exact weighting, remain unconfirmed.
+
+The owner decided not to open a support ticket: the measurement campaign is finite, DeepSeek is available through
+Bedrock as a test model, and the three accounts can be sharded once the credits are shared in November.
+
+## Test-only verification without the Sona quota
+
+Amazon Bedrock in us-east-1 lists `deepseek.v3.2` (DeepSeek V3.2, ACTIVE) and a Converse call with that model id
+answers in this account, with the existing instance-role policy already allowing it. That gives a test-only answer
+model inside AWS and inside the same gateway, with no external API key and a separate capacity pool. It is a
+verification and fallback-testing model, not a replacement for the production Claude configuration.
