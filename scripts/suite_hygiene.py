@@ -267,6 +267,42 @@ def token_usage_query(day: str) -> str:
             f"where \"startTime\" >= timestamp '{day} 00:00:00'")
 
 
+# A fallback call is a model call the gateway made against the recovery model after the primary failed. A run
+# containing one is not a measurement of the primary model, however good the score looks. The check is a separate
+# admission condition from the token budget because the failure is silent: the answer comes back, and only the
+# audit row says it came from a different model.
+UTC_SECOND = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
+
+
+def fallback_usage_query(since: str) -> str:
+    """The SQL that counts fallback model calls at or after a UTC timestamp.
+
+    The timestamp is validated against a fixed shape and then embedded as a plain timestamp with the session in
+    UTC, so a caller cannot smuggle SQL through it and the comparison means one thing everywhere.
+    """
+    if not UTC_SECOND.fullmatch(since or ""):
+        raise ValueError(f"a UTC timestamp must look like 2026-10-21T20:00:00Z, got {since!r}")
+    return ("select count(*) from audit_events where event_type = 'model_call' "
+            "and payload->>'fallback_used' = 'true' "
+            f"and occurred_at >= timestamp '{since}'")
+
+
+def compose_postgres_fallbacks(compose_args: list[str] | tuple[str, ...], since: str,
+                               run: Callable[..., str | None] | None = None) -> int | None:
+    """Fallback calls at or after a timestamp, read through the deployment's own postgres container.
+
+    None means the count could not be read, which the caller must treat as a refusal: a run whose model mix is
+    unknown is not a valid measurement. A malformed answer raises ValueError.
+    """
+    sql = fallback_usage_query(since)
+    command = ["docker", "compose", *compose_args, "exec", "-T", "postgres", "sh", "-c",
+               'PGTZ=UTC psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -A -t -c ' + shlex.quote(sql)]
+    output = (run or run_command)(command, 30.0)
+    if output is None:
+        return None
+    return parse_token_count(output)
+
+
 def parse_token_count(output: str) -> int:
     """The single integer psql prints for an aggregate in its -A -t mode, or an error naming what came back.
 
@@ -838,6 +874,12 @@ def main(argv: list[str] | None = None) -> int:
     preflight_parser.add_argument("--meminfo", default=str(PROC_MEMINFO))
     preflight_parser.add_argument("--instance-id-file", default="")
 
+    fallback_parser = commands.add_parser(
+        "fallback", help="refuse a run whose model calls fell back to the recovery model")
+    fallback_parser.add_argument("--since", required=True, help="UTC run start, 2026-10-21T20:00:00Z")
+    fallback_parser.add_argument("--compose-file", default="")
+    fallback_parser.add_argument("--env-file", default="")
+
     budget_parser = commands.add_parser(
         "budget", help="check and record the day's provider-token budget")
     budget_parser.add_argument("--out", required=True, help="token-budget.json beside the runs")
@@ -853,6 +895,23 @@ def main(argv: list[str] | None = None) -> int:
             observed = check_gate(read_load_average(args.loadavg),
                                   read_mem_available_mb(args.meminfo), settings)
             print(json.dumps(observed, indent=2))
+            return 0
+        if args.command == "fallback":
+            compose_args = []
+            if args.compose_file:
+                compose_args += ["-f", args.compose_file]
+            if args.env_file:
+                compose_args += ["--env-file", args.env_file]
+            count = compose_postgres_fallbacks(compose_args, args.since)
+            if count is None:
+                print("refusing to accept the run: could not read fallback calls from the deployment's Postgres",
+                      file=sys.stderr)
+                return 2
+            if count:
+                print(f"refusing to accept the run: {count} model call(s) fell back to another model since "
+                      f"{args.since}; this measures the recovery model, not the configured one", file=sys.stderr)
+                return 6
+            print(f"no fallback model calls since {args.since}")
             return 0
         if args.command == "budget":
             compose_args: list[str] = []

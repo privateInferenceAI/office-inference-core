@@ -598,3 +598,41 @@ def test_the_panel_includes_the_warnings_without_failing_old_runs(monkeypatch) -
     assert panel["accuracy"]["scored"] == 1
     assert panel["accuracy"]["passed"] == 1
     assert panel["warnings"] and "run-1.json" in panel["warnings"][0]
+
+
+def test_the_fallback_query_counts_fallback_calls_for_a_utc_window() -> None:
+    sql = suite_hygiene.fallback_usage_query("2026-10-21T20:00:00Z")
+    assert "audit_events" in sql
+    assert "fallback_used" in sql
+    assert "timestamp '2026-10-21T20:00:00Z'" in sql
+
+
+@pytest.mark.parametrize("since", [
+    "",
+    "2026-10-21",
+    "2026-10-21T20:00:00",
+    "2026-10-21T20:00:00Z' or 1=1 --",
+])
+def test_the_fallback_query_refuses_a_malformed_timestamp(since: str) -> None:
+    with pytest.raises(ValueError):
+        suite_hygiene.fallback_usage_query(since)
+
+
+def test_the_fallback_check_reads_the_count_through_the_deployment_postgres() -> None:
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str], timeout: float = 20.0) -> str:
+        commands.append(command)
+        return "3\n"
+
+    assert suite_hygiene.compose_postgres_fallbacks(
+        ["-f", "compose.yml"], "2026-10-21T20:00:00Z", run=fake_run) == 3
+    joined = " ".join(commands[0])
+    assert "audit_events" in joined
+    assert "postgres" in joined
+
+
+def test_the_fallback_check_refuses_when_the_database_cannot_be_read() -> None:
+    assert suite_hygiene.compose_postgres_fallbacks(
+        ["-f", "compose.yml"], "2026-10-21T20:00:00Z",
+        run=lambda command, timeout=20.0: None) is None
