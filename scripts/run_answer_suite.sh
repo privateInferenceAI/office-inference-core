@@ -91,6 +91,10 @@ for n in $(seq 1 "$RUNS"); do
   # **Checked again before every run.** The average of the runs already recorded here is the projection, so a
   # series stops before the run that would cross the budget instead of after it.
   token_budget --stage before --run "$n"
+  # The fallback check is per run, not per phase, because one fallback call makes that run a measurement of a
+  # different model even when the score looks right. The runner returns before this line, so the run is already
+  # written; a failure marks the output directory rather than deleting evidence.
+  RUN_START="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env run -T --rm --no-deps \
     --user "$(id -u):$(id -g)" \
     --entrypoint python \
@@ -99,6 +103,12 @@ for n in $(seq 1 "$RUNS"); do
     -e OI_RUN_CONTEXT=/out/run-context.json \
     eval /w/tests/fixtures/data_suite_run.py --json-out "/out/run-$n.json" < /dev/null >/dev/null
   echo "run $n complete: $OUT/run-$n.json"
+  if ! python3 "$ROOT/scripts/suite_hygiene.py" fallback --since "$RUN_START" \
+      --compose-file deploy/office/compose/docker-compose.yml --env-file rendered/env; then
+    printf '%s\n' "run $n CONTAMINATED: fallback model calls present; not a valid measurement" \
+      | tee "$OUT/CONTAMINATED"
+    exit 6
+  fi
   # The run has finished, so this records its cost and never refuses: a refusal here would discard a run that
   # already happened. The next loop's check is what stops the phase.
   token_budget --stage after --run "$n"
