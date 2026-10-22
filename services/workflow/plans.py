@@ -132,6 +132,25 @@ class Plan:
     def names(self) -> list:
         return [step.name for step in self.steps]
 
+    def next_spec(self, job):
+        """The next step, from the job's succeeded rows, or None when the plan is done.
+
+        **This is the seam a dynamic plan uses.** The static implementation below is the C5 behaviour: the
+        first entry with no succeeded row. A dynamic plan overrides this and returns a `StepSpec` it builds
+        from the definition and the job's history, which is how one loop iteration becomes one engine step.
+        The engine never assumes the plan is a fixed tuple again.
+        """
+        done = {step.name for step in job.steps if step.state == "succeeded"}
+        for spec in self.steps:
+            if spec.name not in done:
+                return spec
+        return None
+
+    def is_final(self, job, spec) -> bool:
+        """Whether this step ends the plan. The static answer is the last tuple entry; a dynamic plan may
+        decide from the definition and the history instead."""
+        return spec is self.steps[-1]
+
     @property
     def step_count(self) -> int:
         return len(self.steps)

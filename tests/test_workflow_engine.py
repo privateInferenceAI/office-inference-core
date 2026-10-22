@@ -513,3 +513,92 @@ def test_a_committed_unit_leaves_all_three_writes_in_place():
     assert len(units.journal) == 1
     assert units.journal[0]["chain"] == "memory-double", (
         "a memory chain row says it is a double, so no test can mistake it for the real chain")
+
+# --------------------------------------------------------------------------- a dynamic plan
+
+class CountedLoop:
+    """A plan whose steps are generated from the job's succeeded rows, not from a tuple.
+
+    This is the shape the agent runtime uses: each iteration is a plan step, so the engine's step row,
+    transaction, budget and resume all apply without a second engine. The class is deliberately not a
+    `Plan` dataclass; the engine needs `next_spec`, `is_final`, `name` and the two budgets, and a plan
+    that is not a fixed tuple should not have to pretend to be one.
+    """
+
+    name = "counted-loop"
+    steps = ()
+
+    def __init__(self, limit: int = 3):
+        self.limit = limit
+        self.calls: list[int] = []
+
+    def next_spec(self, job):
+        done = [step.name for step in job.steps if step.state == jobs.SUCCEEDED]
+        if "finish" in done:
+            return None
+        ran = sum(1 for name in done if name.startswith("iteration-"))
+        if ran < self.limit:
+            def iteration(run, number=ran + 1):
+                self.calls.append(number)
+                return workflow.StepResult(output={"iteration": number})
+            return workflow.StepSpec(name=f"iteration-{ran + 1}", run=iteration, timeout_s=5)
+        def finish(run):
+            return workflow.StepResult(output={"finished": True})
+        return workflow.StepSpec(name="finish", run=finish, timeout_s=5)
+
+    def is_final(self, job, spec) -> bool:
+        return spec.name == "finish"
+
+    @property
+    def attempt_budget(self) -> int:
+        return 20
+
+    @property
+    def time_budget_s(self) -> int:
+        return 120
+
+
+def counted_job():
+    job = jobs.new_job(deployment_id="oi-test", subject="dana", actor_role="staff", roots={"company"},
+                       credential_sha256="a" * 64, task="counted_loop", input="x",
+                       attempt_budget=20, time_budget_s=120)
+    store = jobs.MemoryStore()
+    store.put(job)
+    return job, store
+
+
+def test_a_dynamic_plan_turns_each_iteration_into_a_step():
+    """AG-LOOP-001's shape: one job, one step row per iteration, and a final step, without a second engine."""
+    job, store = counted_job()
+    plan = CountedLoop(3)
+    job = workflow.runner_for(store, plan).start(job)
+    assert job.state == jobs.SUCCEEDED
+    assert [step.name for step in job.steps] == [
+        "iteration-1", "iteration-2", "iteration-3", "finish"]
+    assert all(step.state == jobs.SUCCEEDED for step in job.steps)
+    assert plan.calls == [1, 2, 3]
+
+
+def test_a_dynamic_plan_resumes_at_the_first_iteration_with_no_succeeded_row():
+    """AG-CHECKPOINT-001's shape: a kill after iteration 2 resumes at 3, and 1 and 2 do not run again."""
+    job, store = counted_job()
+    for name in ("iteration-1", "iteration-2"):
+        job.steps.append(jobs.Step(step_id=name + "-id", job_id=job.job_id, attempt=1,
+                                   name=name, state=jobs.SUCCEEDED))
+    store.put(job)
+    plan = CountedLoop(3)
+    job = workflow.runner_for(store, plan).start(job)
+    assert job.state == jobs.SUCCEEDED
+    names = [step.name for step in job.steps]
+    assert names.count("iteration-1") == 1 and names.count("iteration-2") == 1
+    assert names.count("iteration-3") == 1 and names.count("finish") == 1
+    assert plan.calls == [3], "a resumed dynamic plan must not repeat a succeeded iteration"
+
+
+def test_a_dynamic_plan_is_bounded_by_the_jobs_attempt_budget_not_by_the_plan():
+    job, store = counted_job()
+    job.attempt_budget = 2
+    store.put(job)
+    job = workflow.runner_for(store, CountedLoop(10)).start(job)
+    assert job.state == jobs.FAILED
+    assert job.outcome_reason == workflow.FAIL_ATTEMPTS
