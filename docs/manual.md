@@ -5573,7 +5573,7 @@ wins.
 | `OI_DELIVERY_RESERVE_SECONDS` | `1.2` | Held back so a degraded answer still fits inside the deadline | the API's budget |
 | `OI_MAX_ATTEMPTS` | `3` | Attempts before giving up, all inside the one deadline | the API's budget |
 | `OI_MAX_TOKENS` | `700` | The output ceiling sent to the model | the API |
-| `OI_PASSAGES` | `6` | How many passages retrieval asks for | the API |
+| `OI_ANSWER_PROFILE` | `accuracy` | The answer path's one setting. `accuracy` seeds 12 passages, uses 1,600-character snippets, 32 evidence slots and 12 search results; `economy` uses 6, 700, 24 and 8. Everything else is fixed | the API |
 | `OI_STREAM_PING_SECONDS` | `15` | The SSE heartbeat interval | the API's streaming path |
 | `RERANK_ENABLED` | `true` | Whether the reranker runs at all. Only the exact string `false` disables it | retrieval, so `eval` and the probes |
 | `RERANK_DEPTH` | `50` | The **ceiling** on how many fused candidates the reranker scores. The real number is whatever the arms returned, up to this | retrieval |
@@ -5694,20 +5694,22 @@ above is built**, and each phase's page says what it could not prove when it was
 application is 13i, the approval gate and its record are 13j and 13k, the email intake connector is 13l, and
 the workflow engine is 13m.
 
-## 13n. The answer step: single-shot, tools, and how to roll back
+## 13n. The answer step
 
-The step that turns retrieved passages into an answer has two modes, and the deployment chooses.
+There is one answer path. Retrieval seeds it with passages, the model may call tools in a bounded loop, and the
+answer is verified against the evidence it gathered. The single-shot request remains only as the fallback when
+the loop returns nothing, because a cap, provider error or exception must still produce an answer from the
+passages retrieval already chose. It is not a deployment mode.
 
-**Single-shot (the older mode, `OI_TOOL_LOOP=off`).** Retrieval returns passages, they go into one prompt, the
-model answers once. It is the cheapest and it is what every deployment gets by default.
+The model gets three tools. `search_documents` runs the same hybrid retrieval under the session's
+access roots. `read_passages` opens a document around a hit, the rest of a table, or the next
+page. `query_rows` returns the exact table rows that contain a figure or a row label the
+question quotes, which is how a figure is confirmed before it is answered; it scans at most 400 chunks,
+returns at most 8 rows, and refuses a match that spans more than three documents unless the query names
+the document.
 
-**Tools (`OI_TOOL_LOOP=on`).** The model gets two, three or four tools and a bounded loop. `search_documents`
-runs the same hybrid retrieval under the session's access roots. `read_passages` opens a document around a hit,
-the rest of a table, or the next page. `query_rows` returns the exact table rows that contain a figure or a row
-label the question quotes, which is how a figure is confirmed before it is answered; it scans at most 400
-chunks, returns at most 8 rows, and refuses a match that spans more than three documents unless the query names
-Every chunk or row a tool returns is numbered, and the final answer is checked against that evidence by
-the same citation verifier as before, so a citation cannot point at a passage the model never saw.
+Every chunk or row a tool returns is numbered, and the final answer is checked against that evidence by the
+same citation verifier as before, so a citation cannot point at a passage the model never saw.
 
 **The fallback chain.** A role can name a second remote model in the manifest
 (`models.analyst.fallback`), and the gateway fails over to it when the primary deployment fails. The field also
@@ -5724,26 +5726,27 @@ installation section.
 **The honesty gate.** A question phrased as an attribute of the company (`the company's leave policy`, `the
 firm's dress code`) is refused when no retrieved passage contains the subject phrase: the answer becomes
 `I could not find that in the available documents.` and the audit row carries `honesty_gate`. It is mechanical, not a
-model instruction, and it runs on the JSON answer, a job, and both stream paths. It rides `OI_TOOL_HONESTY`,
-which is also the rollback. The boundary is deliberate: a question worded differently is not gated.
+model instruction, and it runs on the JSON answer, a job, and both stream paths. It is part of the answer path, not a switch; changing it is a code change with a measurement. The boundary is deliberate: a question worded differently is not gated.
 
-**The bounds, all set in the environment and visible to an operator.**
+**The bounds.** The answer path has one setting, `OI_ANSWER_PROFILE`, and two profiles.
+Everything else is a constant in `services/api/answer_profile.py` and
+`services/api/tool_loop.py`.
 
-| Variable | Default | Meaning |
-|---|---|---|
-| `OI_TOOL_LOOP` | off | on enables the tool path |
-| `OI_TOOL_MAX_STEPS` | 6 | model turns per answer, capped at 12 |
-| `OI_TOOL_MAX_CALLS` | 10 | tool calls per answer, capped at 24 |
-| `OI_TOOL_SEARCH_LIMIT` | 8 | results a search may add |
-| `OI_TOOL_QUERY` | off | enables the structured row query; every call is audited as a `tool_call` with its candidate and returned-row counts |
-| `OI_TOOL_EXACT` | off | enables the deterministic exact-phrase fallback: when a refusal is imminent, the loop searches the rarest literal phrase from the question, adds centred excerpts, and retries once; off until measured |
+| Profile | Seed passages | Snippet characters | Evidence slots | Search results |
+|---|---|---|---|---|
+| `accuracy` | 12 | 1,600 | 32 | 12 |
+| `economy` | 6 | 700 | 24 | 8 |
+
+Six model steps and ten tool calls per answer, all three tools offered, the exact-phrase search on, and the
+honesty gate on, in both profiles. The accuracy profile is the measured configuration: 37 of 37 on the
+second corpus in five consecutive runs.
 
 The wall clock is the same request budget the single-shot path uses. Any loop failure, cap, provider error or
 exception falls back to the single-shot answer with the passages retrieval already chose, so enabling the loop
 cannot answer worse than turning it off.
 
 **Streaming.** `/ask/stream` keeps its existing frames unless the client opts in with `"tools": true`. With the
-opt-in and the loop enabled, the stream carries a `progress` frame for each step and tool call, a `sources` frame
+opt-in, the stream carries a `progress` frame for each step and tool call, a `sources` frame
 with the evidence the tools returned, then the redacted answer as one or two deltas, then `done`. Token streaming
 is traded for progress streaming on this path: the loop needs complete messages to parse tool calls from. Clients
 that send nothing new see no change.
@@ -5755,13 +5758,13 @@ three things an operator must check: the Anthropic use-case form accepted in the
 the inference profile and the foundation-model ARNs in every region the profile routes to, and the manifest naming
 the `us.` inference profile rather than the raw model id.
 
-**Rolling back.** Either the flag or the model, not a redeploy from scratch.
+**Rolling back.** Change the profile, or change the model. Both are settings, not code.
 
-    # back to single-shot, same model
-    sed -i 's/^OI_TOOL_LOOP=.*/OI_TOOL_LOOP=off/' rendered/env
+    # smaller evidence, same answer path
+    sed -i 's/^OI_ANSWER_PROFILE=.*/OI_ANSWER_PROFILE=economy/' rendered/env
     docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env up -d --force-recreate api
 
-    # back to the cheaper model (then re-render, and recreate litellm and api)
+    # back to the cheaper model, then re-render and recreate litellm and api
     # analyst.frontier: bedrock/amazon.nova-lite-v1:0 in manifests/dev-cloud.yaml
 
 **How it is measured.** The same forty questions and four probes, scored by `tests/fixtures/data_suite_run.py`,
