@@ -1,7 +1,7 @@
 # 0001. Service implementations
 
 Date: 2026-10-09
-Status: accepted, with named open risks
+Status: accepted, with named open risks. The `agent-runtime` row is superseded by 0009, which keeps the C5 engine and writes the loop as a dynamic plan.
 
 ## Context
 
