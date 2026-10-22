@@ -21,7 +21,11 @@ except ImportError:
 CLOUD_PHASES = {f"C{n}" for n in range(10)}
 OTHER_PHASES = {"OFFICE", "DEPLOY", "BIZ", "NEVER"}
 PHASES = CLOUD_PHASES | OTHER_PHASES
-STATUSES = {"open", "verified", "waived"}
+# **The register uses two statuses the checker did not know.** C6 added `retired` for a capability that was
+# removed and is kept as history, and `experimental` for one that is built but not admitted to a deployment.
+# A checker that refuses the statuses its own register uses is a check that fails on a correct file; both are
+# named here so the register can describe the states the product actually has.
+STATUSES = {"open", "verified", "waived", "retired", "experimental"}
 TIERS = {"cloud", "office", "hybrid", "hosted"}
 
 

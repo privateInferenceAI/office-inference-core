@@ -13,7 +13,9 @@ from pathlib import Path
 import pytest
 
 # The service imports psycopg at module level, the same stub the verifier tests use.
-if "psycopg" not in sys.modules:
+try:
+    import psycopg  # noqa: F401 - the real driver when it is installed
+except ImportError:
     psycopg = types.ModuleType("psycopg")
     psycopg.connect = lambda *a, **k: None
     psycopg.types = types.ModuleType("psycopg.types")
@@ -143,7 +145,10 @@ def field(insert_params, name: str):
 
 
 def stored_payload(insert_params):
-    return field(insert_params, "payload")
+    value = field(insert_params, "payload")
+    # psycopg's Jsonb wrapper is what the writer passes the driver; the stub used on a machine without the
+    # driver is the identity function. Unwrap it so the test reads the value either way.
+    return getattr(value, "obj", value)
 
 
 def prompt_hash(insert_params):

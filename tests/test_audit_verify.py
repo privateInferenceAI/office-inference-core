@@ -20,7 +20,9 @@ from pathlib import Path
 
 # The service imports psycopg at module level. Stub it before importing, so the file-level checks
 # can be exercised anywhere, including CI, without a database.
-if "psycopg" not in sys.modules:
+try:
+    import psycopg  # noqa: F401 - the real driver when it is installed
+except ImportError:
     psycopg = types.ModuleType("psycopg")
     psycopg.connect = lambda *a, **k: None
     psycopg.types = types.ModuleType("psycopg.types")

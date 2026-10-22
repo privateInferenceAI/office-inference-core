@@ -1753,7 +1753,8 @@ items:
       run a job to its gate and leave it; it is still awaiting_approval after a wait longer than any step
       timeout, it has not proceeded and it has not failed. A gate that quietly expires into a failure is worse
       than one that waits, because the work is lost and nobody was asked.
-    status: open
+    status: verified
+    evidence: docs/reviews/c6-section-1-approvals/README.md
 
   - id: APR-DECIDE-001
     title: Approve, deny and request-changes are each recorded, and a denial carries a reason
@@ -1762,7 +1763,8 @@ items:
     verify: >-
       three jobs, one per decision; each record names the decision and the session that made it; the denied one
       carries a reason, and a denial submitted without one is refused rather than stored blank.
-    status: open
+    status: verified
+    evidence: docs/reviews/c6-section-1-approvals/README.md
 
   - id: APR-RESUME-001
     title: An approval resumes the job where it stopped, and a denial stops it without running the rest
@@ -1771,7 +1773,8 @@ items:
     verify: >-
       approve a paused job and assert the steps after the gate run exactly once while the steps before it do
       not run again; deny a second job and assert no step after the gate runs at all.
-    status: open
+    status: verified
+    evidence: docs/reviews/c6-section-1-approvals/README.md
 
   - id: APR-HONEST-001
     title: An approval record does not claim a verified identity the system cannot verify
@@ -1781,7 +1784,8 @@ items:
       every approval row carries an identity basis, and no row records a verified identity while that basis is
       a session token. The test fails if the field is absent, and it fails on any sentence in the API, the UI
       or the activity feed that names a person or asserts that a person acted.
-    status: open
+    status: verified
+    evidence: docs/reviews/c6-section-1-approvals/README.md
     note: >-
       21 CFR 11.100(b) makes identity verification a precondition to an electronic signature existing, and the
       FDA's 2003 enforcement discretion kept the signature rules when it relaxed everything else, so this is
@@ -1800,7 +1804,8 @@ items:
       a workflow whose final step sends an email stops at the gate; assert nothing was sent, then approve and
       assert it was sent exactly once. The test asserts the absence before approval, because a test that only
       checks the send afterwards passes on a system that sends twice.
-    status: open
+    status: verified
+    evidence: docs/reviews/c6-section-1-approvals/README.md
 
   - id: APR-UPGRADE-001
     title: Approval records can be re-attested when real identity arrives, without rewriting the chain
@@ -1811,7 +1816,8 @@ items:
       the session, and assert the original row is byte-identical, the new row links to both its id and its
       row_hash, and verify_chain still passes. Migration 013 is the template: version the formula, never
       recompute old rows.
-    status: open
+    status: verified
+    evidence: docs/reviews/c6-section-1-approvals/README.md
     note: >-
       The limit is worth stating rather than discovering. Assurance cannot be upgraded retroactively: the C5
       token is a bearer credential and the workstation is often shared, so a later statement by a named person
@@ -1960,7 +1966,8 @@ items:
       canonical string or hashed into payload_sha256. audit_events.approval fails this today: it is a jsonb
       column with an approval event type and it is not among the eighteen fields the canonical function takes,
       so a value written there can be edited by hand while every chain check passes.
-    status: open
+    status: verified
+    evidence: docs/reviews/c6-section-1-approvals/README.md
     note: >-
       This is the identical defect migration 013 was written to close for the four redaction columns, and its
       comment states the consequence better than a new sentence could: a field the chain does not cover is a
@@ -2005,7 +2012,8 @@ items:
       submit an approval carrying an executive role in the body with no valid session; the request is refused
       and the attempt is recorded. This is the guard C3 paid for and it applies to the approval route exactly
       as it applies to a question.
-    status: open
+    status: verified
+    evidence: docs/reviews/c6-section-1-approvals/README.md
 
   - id: SEC-CON-001
     title: The intake credential is not readable from the application container or the repository
