@@ -90,6 +90,45 @@ def pack_services(pack_ids: list[str]) -> list[str]:
     return services
 
 
+def pack_definitions(pack_ids: list[str]) -> list[dict]:
+    """The agent definitions the chosen packs carry, following `requires`.
+
+    **A definition is pack content, not manifest content.** The client buys Agentic Desk; the pack names the
+    jobs the runtime can run, the role that answers and the tools and budgets each one has. Resolving them here
+    means the runtime reads one file instead of a pack catalog, and a deployment with no agentic pack gets an
+    empty list rather than a hidden default.
+
+    A duplicate id across two packs is a catalogue error, not a merge: two definitions with one name would make
+    the runtime depend on pack order.
+    """
+    catalog = yaml.safe_load((ROOT / "packs" / "catalog.yaml").read_text())
+    by_id = {p["id"]: p for p in catalog.get("packs", [])}
+    resolved: list[str] = []
+
+    def add(pack_id: str) -> None:
+        if pack_id in resolved:
+            return
+        resolved.append(pack_id)
+        for required in (by_id.get(pack_id, {}) or {}).get("requires") or []:
+            add(str(required))
+
+    for pack_id in pack_ids:
+        add(str(pack_id))
+
+    definitions: list[dict] = []
+    seen: set[str] = set()
+    for pack_id in resolved:
+        for definition in (by_id.get(pack_id, {}) or {}).get("definitions") or []:
+            identifier = str((definition or {}).get("id") or "")
+            if not identifier:
+                raise ValueError(f"pack {pack_id!r} carries a definition with no id")
+            if identifier in seen:
+                raise ValueError(f"definition {identifier!r} appears in more than one pack")
+            seen.add(identifier)
+            definitions.append(dict(definition))
+    return definitions
+
+
 def build_litellm_config(manifest: dict, env: dict[str, str]) -> dict:
     """One gateway entry per role per available lane.
 
@@ -351,6 +390,10 @@ def main() -> int:
     # Read the catalog before writing anything, so a broken catalog fails loudly instead of
     # leaving half a deployment on disk.
     services = pack_services(manifest["packs"])
+    definitions = pack_definitions(manifest["packs"])
+    agentic = manifest.setdefault("agentic", {})
+    agentic["definitions"] = definitions
+    agentic["runtime_count"] = int(agentic.get("runtime_count") or 1)
 
     out_dir = Path(args.out) if args.out else Path(args.root) / "rendered"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -468,6 +511,10 @@ def main() -> int:
     env["OI_DEFAULT_API_ROLE"] = api_roles[0]
     env["DEPLOYMENT_ID"] = manifest["client"]["deployment_id"]
     env["PROFILE"] = manifest["profile"]
+    # Where the API and the runtime read the resolved definitions, and how many runtimes this deployment
+    # declares. The path is the container's view of the rendered directory; the file is written below.
+    env["OI_AGENT_DEFINITIONS"] = "/app/rendered/agent_definitions.json"
+    env["OI_AGENT_RUNTIME_COUNT"] = str(manifest["agentic"]["runtime_count"])
     # One compose file serves both builds. The local lane's containers sit behind the "office"
     # profile, so a cloud deployment starts the gateway and the database without them. Set
     # explicitly rather than defaulted, so rendering a cloud manifest over an office env file
@@ -497,6 +544,10 @@ def main() -> int:
         + "".join(f"{s}\n" for s in services)
     )
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    (out_dir / "agent_definitions.json").write_text(json.dumps({
+        "runtime_count": manifest["agentic"]["runtime_count"],
+        "definitions": definitions,
+    }, indent=2, sort_keys=True) + "\n")
 
     # The signing key as a file, mode 600, because the gateway hook reads a file rather than an environment
     # variable: an environment variable is visible to `docker inspect` and to any process that can read /proc.

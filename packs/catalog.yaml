@@ -61,6 +61,28 @@ packs:
       - mcp-gateway
       - connectors
     requires: [core, document-chat]
+    # **Definitions are the pack's content, not the manifest's.** A client buys the pack; the pack names the
+    # jobs the runtime can run, the role that answers, the tools each may use and the budgets it runs under.
+    # The renderer resolves these into rendered/agent_definitions.json so a deployment with no agentic pack has
+    # no definitions and refuses the task by name. A definition is not a prompt in code; it is configuration.
+    definitions:
+      - id: research_brief
+        label: Research and brief
+        description: >-
+          Research a question across the client's documents, use one read-only helper for a narrow lookup,
+          and produce a brief with citations. Stops for approval before any irreversible action.
+        mode: task
+        role: analyst
+        tools: [search_documents, read_passages, query_rows]
+        child_tools: [search_documents, read_passages]
+        irreversible_tools: [send_email]
+        max_steps: 12
+        max_seconds: 600
+        max_tokens: 60000
+        child_max_seconds: 120
+        child_max_tokens: 12000
+        verify: citations_present
+        needs_approval: true
 
   - id: voice
     name: Voice

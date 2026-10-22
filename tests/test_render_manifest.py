@@ -9,6 +9,7 @@ Run: python3 -m pytest tests/
 """
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -24,6 +25,7 @@ OFFICE = ROOT / "manifests" / "dev-office.yaml"
 # The manifest this deployment actually renders, and the only one that declares an offsite
 # destination. The example manifests stay illustrative.
 DEV_CLOUD = ROOT / "manifests" / "dev-cloud.yaml"
+WORKSPACE = ROOT / "manifests" / "dev-cloud-workspace.yaml"
 
 
 def render(manifest: Path, out: Path) -> subprocess.CompletedProcess:
@@ -229,7 +231,7 @@ def test_a_sellable_pack_pulls_in_core(tmp_path):
 
 
 def test_the_render_names_the_files_it_writes(tmp_path):
-    """Six of them, and the manual says so.
+    """Seven of them, and the manual says so.
 
     `access.json` is the permission model the session tool and the retriever both read (SEC-ACL-002), and
     `assertion.key` is the signing key the API mints model-call assertions with and the gateway verifies them
@@ -239,8 +241,37 @@ def test_the_render_names_the_files_it_writes(tmp_path):
     out = tmp_path / "rendered"
     assert render(DEV_CLOUD, out).returncode == 0
     written = sorted(p.name for p in out.iterdir())
-    assert written == ["access.json", "assertion.key", "env", "litellm.yaml", "manifest.json",
-                       "services.txt"], written
+    assert written == ["access.json", "agent_definitions.json", "assertion.key", "env",
+                       "litellm.yaml", "manifest.json", "services.txt"], written
+
+
+def test_a_deployment_without_the_agentic_pack_has_no_definitions(tmp_path):
+    """The refusal is data, not a hidden default: no pack means an empty list and the API has nothing to run."""
+    assert render(DEV_CLOUD, tmp_path).returncode == 0
+    rendered = json.loads((tmp_path / "agent_definitions.json").read_text())
+    assert rendered["definitions"] == []
+    assert rendered["runtime_count"] == 1
+    assert env_values(tmp_path)["OI_AGENT_DEFINITIONS"] == "/app/rendered/agent_definitions.json"
+
+
+def test_the_agentic_pack_renders_its_definitions_and_their_budgets(tmp_path):
+    """AG-DEFS-001: the definition carries the role, the tools and the budgets the runtime will enforce."""
+    assert render(WORKSPACE, tmp_path).returncode == 0
+    rendered = json.loads((tmp_path / "agent_definitions.json").read_text())
+    definitions = {entry["id"]: entry for entry in rendered["definitions"]}
+    assert set(definitions) == {"research_brief"}
+    brief = definitions["research_brief"]
+    assert brief["role"] == "analyst"
+    assert brief["tools"] == ["search_documents", "read_passages", "query_rows"]
+    assert brief["child_tools"] == ["search_documents", "read_passages"]
+    assert brief["max_steps"] == 12 and brief["max_seconds"] == 600
+    assert "send_email" in brief["irreversible_tools"]
+
+    normalized = json.loads((tmp_path / "manifest.json").read_text())
+    assert normalized["agentic"]["definitions"][0]["id"] == "research_brief"
+    assert normalized["agentic"]["runtime_count"] == 1
+    assert env_values(tmp_path)["OI_AGENT_RUNTIME_COUNT"] == "1"
+
 
 
 def test_the_denial_policy_reaches_the_env_file(tmp_path):
