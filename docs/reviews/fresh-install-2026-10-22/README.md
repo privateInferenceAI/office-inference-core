@@ -174,7 +174,7 @@ passing one; the earlier miss is recorded here rather than discarded.
 
 ## Evidence
 
-Copied to `/home/anthony/oi-eval-runs/fresh-install-2026-10-22/` (44 files, 212 KB) before the instance was
+Copied to `/home/anthony/oi-eval-runs/fresh-install-2026-10-22/` (45 files, 212 KB) before the instance was
 stopped. The same files are under `/opt/oi-core/evidence/fresh-install/` on the instance's root volume.
 
 | File | What it holds |
