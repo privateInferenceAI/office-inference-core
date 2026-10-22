@@ -297,6 +297,33 @@ class MemoryStore:
         return sorted((j for j in self.jobs.values() if j.state == AWAITING_APPROVAL),
                       key=lambda j: j.created_at)
 
+    def claim_queued(self, limit: int, task_ids: set[str] | None = None) -> list[Job]:
+        """Move up to `limit` queued jobs to running, oldest first, and return them.
+
+        **The claim is the queue.** A worker that read a queued row and then wrote it could claim the same job
+        twice; the durable store does this in one `for update skip locked` statement. The memory path does the
+        same transition under the same state machine, so the dispatcher is testable without a database.
+        """
+        if limit < 1:
+            return []
+        wanted = sorted(
+            (j for j in self.jobs.values()
+             if j.state == QUEUED and (task_ids is None or j.task in task_ids)),
+            key=lambda j: j.created_at,
+        )[:limit]
+        for job in wanted:
+            transition(job, RUNNING)
+        return wanted
+
+    def queue_position(self, job_id: str) -> Optional[int]:
+        """This queued job's place in line, 1-based, or None when it is not queued."""
+        job = self.get(job_id)
+        if job is None or job.state != QUEUED:
+            return None
+        ahead = sum(1 for other in self.jobs.values()
+                    if other.state == QUEUED and other.created_at < job.created_at)
+        return ahead + 1
+
     def append(self, job_id: str, event: str, data: dict) -> int:
         seq = len(self.events.get(job_id, [])) + 1
         self.events.setdefault(job_id, []).append(
@@ -320,6 +347,9 @@ class PostgresStore:
 
         self.conn = psycopg.connect(database_url)
         self.conn.autocommit = True
+        # Held for the dispatcher's advisory lock. The store's own connection is shared with request paths,
+        # and a session-level lock on it would be released by a reconnect for reasons unrelated to the worker.
+        self.database_url = database_url
 
     def migrate(self, migrations_dir: str | Path) -> list[str]:
         """Apply migrations, reusing the same bookkeeping table as every other component."""
@@ -460,6 +490,48 @@ class PostgresStore:
                 "select job_id from jobs where state = %s order by created_at", (AWAITING_APPROVAL,))
             ids = [r[0] for r in cur.fetchall()]
         return [j for j in (self.get(i) for i in ids) if j is not None]
+
+    def claim_queued(self, limit: int, task_ids: set[str] | None = None) -> list[Job]:
+        """Move up to `limit` queued jobs to running in one statement, oldest first.
+
+        **`for update skip locked` is the whole concurrency story.** Two workers, or two processes, ask for
+        work at the same time; the first locks the rows it takes, the second skips them and gets different
+        rows. A read followed by an update would let both claim the same job, which is the duplicate this
+        product's record exists to prevent. The claim is also the transition, so a claimed job cannot be
+        claimed again.
+        """
+        if limit < 1:
+            return []
+        wanted = sorted(task_ids) if task_ids is not None else None
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                with picked as (
+                    select job_id from jobs
+                     where state = %s
+                       and (%s::text[] is null or task = any(%s::text[]))
+                     order by created_at
+                     for update skip locked
+                     limit %s
+                )
+                update jobs set state = %s, started_at = now()
+                  from picked
+                 where jobs.job_id = picked.job_id
+                 returning jobs.job_id
+                """, (QUEUED, wanted, wanted, limit, RUNNING))
+            ids = [row[0] for row in cur.fetchall()]
+        return [j for j in (self.get(i) for i in ids) if j is not None]
+
+    def queue_position(self, job_id: str) -> Optional[int]:
+        """This queued job's place in line, 1-based, or None when it is not queued."""
+        with self.conn.cursor() as cur:
+            cur.execute("select state, created_at from jobs where job_id = %s", (job_id,))
+            row = cur.fetchone()
+            if row is None or row[0] != QUEUED:
+                return None
+            cur.execute("select count(*) from jobs where state = %s and created_at < %s",
+                        (QUEUED, row[1]))
+            return int(cur.fetchone()[0]) + 1
 
     def append(self, job_id: str, event: str, data: dict) -> int:
         """Write one event and assign its number in the same statement that inserts it.
