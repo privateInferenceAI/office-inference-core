@@ -179,36 +179,17 @@ def test_the_tool_schemas_match_the_executor():
 def test_the_prompt_carries_the_honesty_rule_for_absent_events():
     # The 2026-10-18 tool runs on the weaker model answered two unanswerable questions from adjacent facts.
     # The rule that stops a related figure being relabelled as the asked-for one lives in the system prompt.
-    prompt = tool_loop.system_prompt(honesty_enabled=True)
+    prompt = tool_loop.system_prompt()
     assert "specific event, period, meeting or document" in prompt
     assert "Do not infer that a related figure" in prompt
 
 
 def test_the_thoroughness_rule_is_in_the_prompt():
     # Dropping this rule in the Phase B rewrite halved the loop's duration and cost the suite seven points.
-    prompt = tool_loop.system_prompt(honesty_enabled=True)
+    prompt = tool_loop.system_prompt()
     assert "table row is a valid answer" in prompt
     assert "Check every passage before concluding" in prompt
 
-
-def test_the_honesty_rule_can_be_measured_off():
-    prompt = tool_loop.system_prompt(honesty_enabled=False)
-    assert "specific event, period, meeting or document" not in prompt
-
-
-def test_the_flag_defaults_off(monkeypatch):
-    monkeypatch.delenv("OI_TOOL_LOOP", raising=False)
-    assert tool_loop.enabled() is False
-    monkeypatch.setenv("OI_TOOL_LOOP", "on")
-    assert tool_loop.enabled() is True
-
-
-# --------------------------------------------------------------------------- the structured row query
-#
-# The row query is the one tool that returns a row instead of a passage, so the tests hold the three things that
-# make it trustworthy: the query it builds is read-only and parameterised, access is a clause in that query, and
-# the row it returns carries the ordinal a citation needs. The row-extraction tests use chunk payloads with the
-# same shape the ingestion worker writes; none of them needs a database or the network.
 
 def payload(text, doc_id="company/census.csv", kind="table", page=1, row_start=None, row_index=None,
             table_rows=68, headings=None, chunk_id="c1"):
@@ -257,21 +238,16 @@ def test_the_row_query_matches_without_wildcard_semantics():
     assert params["v0"] == "100%"
 
 
-def test_the_row_query_is_off_until_the_flag_turns_it_on(monkeypatch):
-    monkeypatch.delenv("OI_TOOL_QUERY", raising=False)
-    assert "query_rows" not in [schema["function"]["name"] for schema in tool_loop.active_tools()]
-    monkeypatch.setenv("OI_TOOL_QUERY", "on")
-    assert "query_rows" in [schema["function"]["name"] for schema in tool_loop.active_tools()]
+def test_the_row_query_is_always_offered():
+    names = [schema["function"]["name"] for schema in tool_loop.active_tools()]
+    assert "query_rows" in names
 
 
-def test_the_prompt_names_the_row_query_only_when_it_is_offered():
-    without = tool_loop.system_prompt(honesty_enabled=True)
-    assert "query_rows" not in without
-    with_query = tool_loop.system_prompt(honesty_enabled=True, query_enabled=True)
-    assert "query_rows" in with_query
-    assert "exact table rows" in with_query
-
-
+def test_the_prompt_always_names_the_tools_it_offers():
+    prompt = tool_loop.system_prompt()
+    for name in ("search_documents", "read_passages", "query_rows"):
+        assert name in prompt
+    assert "exact table rows" in prompt
 def test_the_row_query_returns_the_exact_row_and_its_ordinal(monkeypatch):
     text = "\n".join([
         "231629.5 | 188623.1 | 0",
@@ -499,26 +475,10 @@ def test_exact_evidence_is_seeded_before_the_model_answers(monkeypatch):
         seen.append(messages)
         return next(replies)
 
-    monkeypatch.setenv("OI_TOOL_EXACT", "on")
     result = tool_loop.run_loop(model, toolbox, "How long is a visitor badge valid?")
     assert calls == ["visitor badge"]
     assert "24 hours" in result["answer"]
     assert "Exact search for" in seen[0][1]["content"]
-
-def test_the_exact_seed_does_not_run_when_the_flag_is_off(monkeypatch):
-    toolbox = make_toolbox()
-    toolbox.exact_phrase_for_question = lambda question: "visitor badge"
-    calls = []
-    toolbox.search_exact = lambda phrase, doc_id="", limit=6: calls.append(phrase) or "Passages containing nothing"
-    replies = iter([
-        answer_reply("I could not find that in the available documents."),
-        answer_reply("I could not find that in the available documents."),
-    ])
-    monkeypatch.delenv("OI_TOOL_EXACT", raising=False)
-    tool_loop.run_loop(lambda messages, tools: next(replies), toolbox,
-                       "How long is a visitor badge valid?")
-    assert calls == []
-
 
 def test_the_phrase_picker_prefers_the_rarest_plausible_phrase():
     toolbox = make_toolbox()
@@ -702,7 +662,7 @@ def test_a_short_text_is_unchanged_even_with_a_focus():
 
 def test_the_snippet_normalises_whitespace_before_matching_and_cutting():
     text = ("filler\n\n\t" * 200) + "Visitor   badges\tare valid for\n24 hours maximum"
-    snippet = tool_loop.centred_snippet(text, "24 hours", tool_loop.SNIPPET_CHARS)
+    snippet = tool_loop.centred_snippet(text, "24 hours", 160)
     assert "24 hours maximum" in snippet
     assert "\n" not in snippet and "\t" not in snippet and "  " not in snippet
     assert snippet.startswith("...") and not snippet.endswith("...")

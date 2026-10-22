@@ -123,13 +123,8 @@ def test_finish_keeps_an_answer_when_the_evidence_states_the_attribute(honesty):
     assert decided.payload["answer"].startswith("The company's parental leave policy")
 
 
-def test_the_gate_rides_the_honesty_flag(honesty, monkeypatch):
-    monkeypatch.setenv("OI_TOOL_HONESTY", "off")
-    assert honesty.gate_enabled() is False
-    monkeypatch.setenv("OI_TOOL_HONESTY", "on")
+def test_the_gate_is_part_of_the_answer_path(honesty):
     assert honesty.gate_enabled() is True
-
-
 def test_the_our_possessive_is_read(honesty):
     """The boundary measured on 2026-10-19: 'our' answered from FMLA because the gate only read 'the company's'."""
     assert honesty.subject_phrase("What is our parental leave policy?") == "parental leave"
