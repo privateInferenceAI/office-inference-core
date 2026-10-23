@@ -1,44 +1,47 @@
 # Client-tenant DNS and Elastic IP cutover
 
-**Date:** 2026-10-23. **Status:** completed on mcp.officeinference.com.
+**Date:** 2026-10-23. **Status:** completed. The public API name is mcp.badj.ai.
 
-## Allocated and associated address
+## Address
 
 - Allocation: eipalloc-0da2730bda34519ff
 - Public IP: 34.225.62.245
 - Association: eipassoc-06186707a373a4e5b
 - Tenant instance: i-0b6aa00095ae40e54
 - Account: badj.ai, 426063972668
+- Previous address 3.85.130.96 was released.
 
-The Elastic IP is associated. The previous address 3.85.130.96 was released.
+## Names and certificates
 
-## Name
+Primary API name:
 
-The public name is mcp.officeinference.com, added at Namecheap as an A record to 34.225.62.245. Caddy obtained a
-Let's Encrypt certificate for it, HTTP redirects to HTTPS, and the API uses OI_MCP_URL=https://mcp.officeinference.com.
+- mcp.badj.ai, A record at Porkbun to 34.225.62.245
+- Caddy certificate obtained from Let's Encrypt
+- OI_MCP_URL=https://mcp.badj.ai
+- scripts/check_client_endpoint.py reports client-owned
+- HTTP returns 308 to HTTPS
+- Gateway SES send returned message id 010001a168e1b255-02048d9b-ae8a-4ee6-a767-e3d752175a35-000000
 
-mcp.badj.ai was the original proposal but its public DNS at Porkbun did not resolve to the Elastic IP. It is not
-used.
+Compatibility alias:
 
-## Ownership tradeoff
+- mcp.officeinference.com still resolves to the Elastic IP and is still served by Caddy.
+- It is on Office Inference's domain, so check_client_endpoint refuses it as a vendor domain.
+- It is not the API URL and must not be used as ownership evidence.
 
-The hostname is on Office Inference's domain, not the client's. The MCP-OWNED evidence in
-docs/reviews/mcp-owned/ was gathered when the endpoint was the client-domain sslip name. The current name is an
-Office Inference alias, and scripts/check_client_endpoint.py refuses it for that reason. The tenant account is
-still badj.ai, but the domain check does not pass.
+## Cutover evidence
 
-For a true client-owned endpoint, add a client-domain A record to 34.225.62.245 and change the Caddyfile and
-OI_MCP_URL. For this development deployment, the Office alias is accepted.
+- Both names return health ok.
+- Both certificates were obtained.
+- The API was recreated with OI_MCP_URL=https://mcp.badj.ai.
+- Gateway send through mcp.badj.ai returned sent true and transport ses.
+
+## Ownership
+
+badj.ai is not one of the vendor suffixes in scripts/check_client_endpoint.py, and the check reports the endpoint as
+client-owned. The tenant account is badj.ai account 426. The officeinference.com alias remains vendor-owned.
 
 ## Rollback
 
-Disassociate the Elastic IP, restore the previous Caddyfile and OI_MCP_URL, restart Caddy and API. The tenant has
-no old address to return to once the EIP is associated, so rollback must use another address or the EIP again.
-
-## Evidence
-
-- HTTPS health: ok
-- HTTP: 308 to HTTPS
-- Let's Encrypt certificate obtained for mcp.officeinference.com
-- Gateway SES send after cutover: message id 010001a168d26007-bb5a825f-ca4d-4db6-a715-e71d9ec82e74-000000,
-  sent true, transport ses
+Disassociate the Elastic IP, restore the previous Caddyfile and OI_MCP_URL, restart Caddy and the API. The previous
+3.85.130.96 address is released. The officeinference.com alias remains available as a fallback name while the
+tenant is in this account.

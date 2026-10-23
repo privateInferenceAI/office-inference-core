@@ -27,7 +27,7 @@ incident tabletop. The rest of C8 and the business rows are open.
 The authoritative current snapshot is docs/current-deployment.md. Section Phase C6 to C8 below has the commands.
 
 The build box is in Office Inference account 878. The client tenant is badj.ai account 426, instance
-i-0b6aa00095ae40e54, public name https://mcp.officeinference.com. The tenant runs the MCP gateway, the email
+i-0b6aa00095ae40e54, public name https://mcp.badj.ai. The tenant runs the MCP gateway, the email
 connector, Caddy and Mailpit. The connector sends through SES as awstest@officeinference.com to that verified
 address. Mailpit remains a capture fallback.
 
@@ -42,7 +42,7 @@ address. Mailpit remains a capture fallback.
 | SSH allowed from | 47.164.45.109 only (security group `sg-09d9bfffbd28014c9`) |
 | Instance role | `oi-core-dev-instance`: `AmazonSSMManagedInstanceCore` for keyless access, plus `oi-core-dev-bedrock-invoke`, which allows exactly the four models the dev manifest names |
 | Inference | Bedrock, us-east-1. No model runs on this box |
-| Client tenant | badj.ai account 426063972668, instance i-0b6aa00095ae40e54, public name https://mcp.officeinference.com |
+| Client tenant | badj.ai account 426063972668, instance i-0b6aa00095ae40e54, public name https://mcp.badj.ai |
 | Tenant services | MCP gateway loopback 8080, connector systemd port 8094, Caddy 80 and 443, Mailpit 1025 fallback, SES identity awstest@officeinference.com |
 | Region | us-east-1 |
 | State | Build box: stopped when not in use. Client tenant: running while it serves the gateway |
@@ -5682,7 +5682,7 @@ listens on loopback 8080, the connector is the systemd unit client-connector on 
 capture fallback.
 
     # tenant health
-    curl -s https://mcp.officeinference.com/health
+    curl -s https://mcp.badj.ai/health
 
     # restart-safe checks
     ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@34.225.62.245 'systemctl is-active client-connector; docker ps --format "{{.Names}} {{.Status}}"'
@@ -5742,13 +5742,13 @@ The gateway reads the new file on the next call. The connector restarts through 
 
 ### C7.4 TLS
 
-Caddy terminates TLS for https://mcp.officeinference.com. The gateway listens on loopback only. Security group
+Caddy terminates TLS for https://mcp.badj.ai. The gateway listens on loopback only. Security group
 ingress is 22, 80 and 443; port 8080 is closed externally. HTTP returns 308 to HTTPS. Job
 57309daac87244d9acea35f4f65dbffb went through the HTTPS gateway; its final state was failed verification, but
 act row 1242 records sent true.
 
-    curl -sS https://mcp.officeinference.com/health
-    curl -sS -I http://mcp.officeinference.com/health
+    curl -sS https://mcp.badj.ai/health
+    curl -sS -I http://mcp.badj.ai/health
 
 ### C7.5 Object Lock and the contract
 
