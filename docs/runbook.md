@@ -3213,6 +3213,13 @@ resolution, the retriever call, and the refusal path with its audit event.
 assert its own role — an ALB that rejects a bad token never sees the body, and the API is what sees a valid
 session asking for something it does not hold. That path is what this phase is for, and it stays.
 
+**A legitimate denial is recorded too, and the difference is one column.** A forged-role refusal has
+`actor_role` set to a role the session never held. A retrieval boundary denial writes `actor_role` as the
+role the session did hold, `stage=retrieval`, `reason=boundary`, the permitted roots, the count of restricted
+passages that matched (`restricted_matched`), their best score, and the policy's disclosure text. The answer
+is still given from what the role may read. That row is what turns "the system says no" into something an
+auditor can find: `audit list --type access` shows both kinds, and the payload says which is which.
+
 **Run it.**
 
     cd /opt/oi-core
