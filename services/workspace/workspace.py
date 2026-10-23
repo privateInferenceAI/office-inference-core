@@ -51,6 +51,7 @@ class Limits:
     memory_mb: int = 512
     pids: int = 128
     seconds: int = 120
+    cpu_seconds: float = 60.0
     disk_mb: int = 256
     tmp_mb: int = 64
     nofile: int = 1024
@@ -126,11 +127,18 @@ class DockerSandbox:
         if before > self.limits.disk_mb * 1024 * 1024:
             raise SandboxQuota(f"the task already uses {before} bytes")
         budget = min(int(timeout or self.limits.seconds), self.limits.seconds)
+        # The CPU budget is measured by the command, not inferred from wall time. /usr/bin/time writes the
+        # user and system seconds beside the task and the manager removes the file before the artifact pass.
+        wrapped = ["/usr/bin/time", "-f", "%U %S", "-o", ".oi-cpu", "--", *argv]
         try:
-            result = self._runner(self.command(task_id, argv), budget)
+            result = self._runner(self.command(task_id, wrapped), budget)
         except subprocess.TimeoutExpired as exc:
             self._kill(task_id)
             raise SandboxTimeout(f"the command exceeded {budget} seconds") from exc
+        cpu_seconds = self._take_cpu_seconds(task_id)
+        if cpu_seconds is not None and cpu_seconds > self.limits.cpu_seconds:
+            raise SandboxResource(
+                f"the task used {cpu_seconds:.2f} CPU seconds, over its {self.limits.cpu_seconds:.2f} allowance")
         after = self.size_bytes(task_id)
         if after > self.limits.disk_mb * 1024 * 1024:
             raise SandboxQuota(f"the task wrote {after} bytes, over its {self.limits.disk_mb} MB allowance")
@@ -140,6 +148,22 @@ class DockerSandbox:
         if result.returncode == 137:
             raise SandboxResource("the task was killed by a resource limit, likely its memory ceiling")
         return result
+
+    def _take_cpu_seconds(self, task_id: str) -> Optional[float]:
+        """Read and remove the CPU report the wrapper wrote, if the command finished far enough to write one."""
+        path = self.task_dir(task_id) / ".oi-cpu"
+        if not path.exists():
+            return None
+        try:
+            values = [float(part) for part in path.read_text().split()]
+            return sum(values)
+        except (OSError, ValueError):
+            return None
+        finally:
+            try:
+                path.unlink()
+            except OSError:
+                pass
 
     def run_shell(self, task_id: str, script: str, *, timeout: Optional[int] = None) -> subprocess.CompletedProcess:
         if not script or "\x00" in script:

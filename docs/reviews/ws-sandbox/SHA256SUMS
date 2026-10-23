@@ -1,5 +1,5 @@
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/reviews/ws-sandbox/c6-ws-containers.txt
 8915a725864ce236616a653a8b9b286cde226d62fd8af3aec6e9381c0b9d05c7  docs/reviews/ws-sandbox/c6-ws-image.txt
 ddf7776e7db0cfa6cd47e98e1f7736ed0b6df5bac55f70106dea573159239903  docs/reviews/ws-sandbox/c6-ws-live-result.json
-ef241eccec916ecb982e9174c959e4a4fc9375a77a92e3475add9ffbbe85ef62  docs/reviews/ws-sandbox/README.md
-d06dca179b2535f03699d515057a3cf59b33ef4d07c90260e021e84dd7d52763  docs/reviews/ws-sandbox/SHA256SUMS
+c1be75cf51a0d658cf370925ad42b2ac5d71103bfb1077fe77d3f176d63ec6ad  docs/reviews/ws-sandbox/isolation-cpu.json
+c05a1776a1acfb360e44e1a34dcd3595cec7ce64f4111d13f7ea7d3d6e912113  docs/reviews/ws-sandbox/README.md

@@ -92,6 +92,14 @@ def test_run_passes_the_wall_clock_budget_and_the_command_result_through(tmp_pat
     assert argv[-3:] == ["python3", "script.py"] or argv[-2:] == ["python3", "script.py"]
 
 
+def test_cpu_time_over_the_budget_is_a_typed_resource_kill(tmp_path):
+    runner = FakeRunner()
+    sandbox = make_sandbox(tmp_path, runner=runner, limits=workspace.Limits(cpu_seconds=0.2))
+    sandbox._take_cpu_seconds = lambda task_id: 0.9
+    with pytest.raises(workspace.SandboxResource):
+        sandbox.run("task-1", ["python3", "-c", "spin"])
+
+
 def test_exit_137_is_a_typed_resource_kill(tmp_path):
     runner = FakeRunner(returncode=137)
     sandbox = make_sandbox(tmp_path, runner=runner)
