@@ -2562,7 +2562,8 @@ items:
       a manifest with profile office and the workspace pack is refused by validation with a message naming the
       profile. A cloud manifest with the pack validates. The rendered environment contains the workspace service
       only for the cloud and hosted profiles.
-    status: open
+    status: verified
+    evidence: docs/reviews/ws-profile/README.md
     note: >-
       The office build is a different product. A profile check is how that stays true when a manifest is copied.
 

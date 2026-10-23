@@ -47,6 +47,14 @@ def test_every_shipped_manifest_validates(packs):
         assert problems(load(path), packs) == [], f"{path.name} should validate cleanly"
 
 
+def test_the_workspace_pack_is_refused_on_an_office_profile(packs):
+    """WS-PROFILE-001: the cloud workspace has services an office deployment does not run."""
+    manifest = load(ROOT / "manifests" / "dev-office.yaml")
+    manifest["packs"] = list(manifest["packs"]) + ["workspace"]
+    found = problems(manifest, packs)
+    assert mentions(found, "workspace pack is cloud and hosted only"), found
+
+
 def test_a_global_inference_profile_under_a_regulated_profile_is_refused(packs):
     manifest = load(COMPLIANT)
     manifest["models"]["analyst"]["frontier"] = "bedrock/global.anthropic.claude-sonnet-5"

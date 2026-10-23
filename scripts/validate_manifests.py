@@ -293,6 +293,12 @@ def check(manifest: dict, packs: set[str], path: Path) -> list[str]:
     if not used:
         problems.append("packs must list at least one sellable pack")
 
+    # **The workspace is a cloud product.** Its sandbox, egress service and artifact store are the parts an
+    # office build does not have, and shipping the definition there would offer a task the deployment cannot
+    # run. The refusal is at the pack, so a copied office manifest cannot smuggle it in one definition later.
+    if "workspace" in used and profile != "cloud":
+        problems.append(f"the workspace pack is cloud and hosted only, not {profile!r}")
+
     # **One runtime, and the manifest can say so only by declaring one.** A second runtime means a second
     # policy, a second audit path and two places for a bug to hide; the field is here so a copied manifest
     # that adds one is refused rather than deployed.
