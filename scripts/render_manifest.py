@@ -156,6 +156,22 @@ def build_litellm_config(manifest: dict, env: dict[str, str]) -> dict:
         entry = entry or {}
         local = entry.get("local") or ""
         frontier = entry.get("frontier") or ""
+        provider = entry.get("provider") or {}
+
+        if provider:
+            key_env = str(provider["api_key_env"])
+            if key_env not in env:
+                raise SystemExit(f"models.{role}.provider names {key_env}, but the rendered env does not hold it")
+            models.append({
+                "model_name": role,
+                "litellm_params": {
+                    "model": f"openai/{provider['model']}",
+                    "api_base": str(provider["base_url"]),
+                    "api_key": f"os.environ/{key_env}",
+                },
+                "model_info": {"lane": "provider", "provider": "openai-compatible"},
+            })
+            continue
 
         if local and profile != "cloud":
             models.append({

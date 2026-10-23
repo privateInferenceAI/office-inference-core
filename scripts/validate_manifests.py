@@ -286,6 +286,12 @@ def check(manifest: dict, packs: set[str], path: Path) -> list[str]:
 
     problems.extend(check_access(manifest))
 
+    for role, entry in (manifest.get("models") or {}).items():
+        provider = (entry or {}).get("provider")
+        if provider and profile != "cloud":
+            problems.append(f"models.{role}.provider is remote and the profile is {profile!r}; "
+                            "an office or hybrid build must not send generations off the box")
+
     used = manifest.get("packs", [])
     unknown = sorted(set(used) - packs)
     if unknown:

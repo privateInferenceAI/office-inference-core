@@ -1112,7 +1112,8 @@ items:
       at validation because the data would leave the building. The key appears nowhere in the rendered gateway
       configuration, only in the rendered environment. A suite run and a comparison run against the same
       questions succeed with the alternate provider.
-    status: open
+    status: verified
+    evidence: docs/reviews/inf-provider/README.md
     note: >-
       Direction approved by the owner 2026-10-18: provider choice is a client-facing option rather than a Bedrock
       lock-in, because what is permitted can change. Deliberately parked behind the answer-quality work; noted as

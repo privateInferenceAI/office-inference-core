@@ -589,6 +589,17 @@
           "type": "string",
           "description": "Model id used when the frontier lane is on."
         },
+        "provider": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "An OpenAI-compatible provider for this role. When present the role is served remotely and the office profile refuses it. The key is named here, never written here: the renderer emits an os.environ reference and the value stays in the rendered env file.",
+          "required": ["base_url", "model", "api_key_env"],
+          "properties": {
+            "base_url": {"type": "string", "format": "uri"},
+            "model": {"type": "string", "minLength": 1},
+            "api_key_env": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*$"}
+          }
+        },
         "fallback": {
           "oneOf": [
             {
