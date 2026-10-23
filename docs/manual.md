@@ -5910,6 +5910,7 @@ digest only, so their prompt and completion columns were never in their hash.
     ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@3.85.130.96 'cd /home/ubuntu/client && sudo AWS_DEFAULT_REGION=us-east-1 python3 rotate_connector_secret.py       --secret-id oi-core/connector-token       --token-file /home/ubuntu/client/connector.token       --env-file /home/ubuntu/client/connector.env --service client-connector'
 
     # deployment state and drift
+    cd /opt/oi-core
     python3 scripts/deployment_state.py --compose /opt/oi-core/deploy/office/compose/docker-compose.yml       --manifest /opt/oi-core/rendered/manifest.json --compare deploy/office/expected-state.json
 
     # image scan
@@ -5930,6 +5931,19 @@ comparison and should be rotated. The image scan has current critical findings i
 they are recorded, not waived. The tenant gateway does not write refusals to the Office chain, as section 26.2
 says. An unrelated Midnight indexer, step0-hello-indexer, also runs on the tenant on port 8088.
 
+### 26.6 Running an agent job
+
+The API has no host port. Get a shell inside the API container and use the Stage 13j job commands against
+127.0.0.1:8088:
+
+    ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@52.204.204.133
+    docker exec -it api sh
+    curl -s http://127.0.0.1:8088/health
+
+Then follow Stage 13j. The job needs a live session token, a declared task and an input. It stops at the
+approval gate, the approval carries the action digest, and the act step calls `send_email` through the tenant
+gateway. A fresh job and approval is the operator check that the whole C6 path still works.
+
 ### 26.7 Workspace host services
 
 The WS workspace, egress proxy and old host gateway are on-demand host processes, not part of the current
@@ -5937,7 +5951,7 @@ running deployment. They are stopped. If a workspace test needs them, start them
 service's own `--host 127.0.0.1 --port` arguments; do not expose 8090 to 8093 publicly. The production tool path
 is the tenant gateway, not the 8093 host process.
 
-### 26.6 What is still open
+### 26.8 What is still open
 
 The open C8 rows are alarms, backup and restore, RTO, rollback, SSM-only support, cost reporting, golden
 questions, fresh-deployment acceptance and load testing. The BIZ rows need counsel, insurance, contracts,

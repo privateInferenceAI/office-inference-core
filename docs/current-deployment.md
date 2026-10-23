@@ -100,6 +100,11 @@ the client tenant.
    waived.
 5. **No alarm, backup, restore drill, rollback, SSM-only support, cost report, golden question set,
    fresh-deployment acceptance or load test exists yet.** Those are the open C8 rows.
+6. **The tenant gateway does not write refusals to the Office chain.** It has no audit database route. Build-box
+   refusals are recorded; tenant-gateway refusals return to the API only. This is a recorded gap, not a claim
+   to paper over.
+7. **An unrelated Midnight indexer, step0-hello-indexer, runs on the tenant on 8088.** It is not part of this
+   deployment.
 
 ## Open rows, with what blocks them
 

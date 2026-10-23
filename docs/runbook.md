@@ -5662,7 +5662,8 @@ reads the connector credential from a mode-600 file on every call. Refusals on t
 The registry is rendered from the manifest's mcp.tools block into rendered/mcp_tools.json. An undeclared tool is
 refused by name. The credential is never in the API environment, the gateway image or the repository.
 
-    # the gateway tests, from a full checkout with the dev dependencies (the deployed checkout has no pytest)
+    # the gateway tests, from a full repository checkout with the dev dependencies
+    # (the deployed /opt/oi-core tree omits tests and has no pytest)
     python3 -m venv ~/venv
     ~/venv/bin/pip install -r requirements-dev.txt
     ~/venv/bin/python -m pytest tests/test_mcp_gateway.py -q
@@ -5740,8 +5741,9 @@ The gateway reads the new file on the next call. The connector restarts through 
 ### C7.4 TLS
 
 Caddy terminates TLS for https://3-85-130-96.sslip.io. The gateway listens on loopback only. Security group
-ingress is 22, 80 and 443; port 8080 is closed externally. HTTP returns 308 to HTTPS. A job sent through the
-HTTPS gateway; audit row 1242.
+ingress is 22, 80 and 443; port 8080 is closed externally. HTTP returns 308 to HTTPS. Job
+57309daac87244d9acea35f4f65dbffb went through the HTTPS gateway; its final state was failed verification, but
+act row 1242 records sent true.
 
     curl -sS https://3-85-130-96.sslip.io/health
     curl -sS -I http://3-85-130-96.sslip.io/health
@@ -5768,8 +5770,9 @@ prompt_sha256 and completion_sha256.
     docker exec api python /app/audit.py export --out /tmp/chain
     docker exec api python /app/audit.py verify /tmp/chain/audit-events.jsonl
 
-    # editing approval_sha256, prompt_sha256 or completion_sha256 in a copy
-    # makes the verifier fail with "row_hash does not match the row contents"
+    # For a version 4 row, editing approval_sha256, prompt_sha256 or completion_sha256
+    # makes the verifier fail with "row_hash does not match the row contents".
+    # Version 3 rows cover only the approval digest.
 
 ### C8.2 Image scanning
 
@@ -5778,6 +5781,7 @@ summary. A systemd timer, oi-image-scan.timer, runs it weekly. LiteLLM 1.104.2 i
 and confirmed in the running container. The current report includes critical findings in litellm, parser and
 postgres; they are recorded, not waived.
 
+    cd /opt/oi-core
     sudo bash scripts/scan_images.sh /var/log/oi-image-scan
     systemctl list-timers oi-image-scan.timer --no-pager
 
@@ -5786,6 +5790,7 @@ postgres; they are recorded, not waived.
 scripts/deployment_state.py reports the manifest hash and every compose image pin. Keep the expected state with
 the release and compare:
 
+    cd /opt/oi-core
     python3 scripts/deployment_state.py --compose deploy/office/compose/docker-compose.yml       --manifest rendered/manifest.json --compare deploy/office/expected-state.json
 
 Changing a pin on the box makes the compare exit 1 with the differing service. The manual's section 26 has the

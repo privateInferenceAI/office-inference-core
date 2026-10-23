@@ -20,7 +20,7 @@ The client tenant has no route back to our sessions database. The API mints a sh
 
 Job aa1b739255744e6f98c1cb1a38bed610 reached turn-1, approval-1, act-1, turn-2 and finish successfully. Audit row 1190 records sent true to anthony@badj.ai, with egress_allowed true.
 
-Then officeinference.com, api.officeinference.com and mcp.officeinference.com were pointed at 127.0.0.1 on the Office box. Job 43dfdbbd5d5b465489b165013a442d0a ran the same path and audit row 1204 again records sent true. The hosts file was restored.
+Then officeinference.com, api.officeinference.com and mcp.officeinference.com were pointed at 127.0.0.1 on the Office box. Job 43dfdbbd5d5b465489b165013a442d0a went through the same act path; its final job state was failed verification, but the act row 1204 records sent true. The hosts file was restored.
 
 The Mailpit inbox on the tenant held the captured messages, so the connector really received the call.
 
