@@ -13,7 +13,7 @@ describe how to build and operate the system; where they disagree with this page
 | C8 | Partly built. Audit hashes, image scanning, drift reporting and the incident tabletop are verified. Alarming, backup and restore, rollback, SSM-only support, cost reporting, golden questions, acceptance on a fresh deployment, load test and the business rows are open |
 | C9 | Not started |
 
-The full suite is **1353 passed, 1 skipped** as of the last run on 2026-10-23.
+The full suite is **1355 passed, 1 skipped** as of the last run on 2026-10-23.
 
 ## Where the pieces run
 
