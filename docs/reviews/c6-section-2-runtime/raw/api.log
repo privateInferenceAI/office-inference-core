@@ -1,0 +1,9 @@
+INFO:     Started server process [1]
+INFO:     Waiting for application startup.
+api ready: registry=/app/rendered/access.json model_role_default=analyst answers_with=analyst jobs=durable
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8088 (Press CTRL+C to quit)
+INFO:     127.0.0.1:47290 - "POST /jobs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47718 - "GET /jobs/e7d41c0e3a0847de9533ff4019dd44fd HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41186 - "GET /jobs/2426a6306cd3408995a809f73cd0735f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41198 - "GET /jobs/e7d41c0e3a0847de9533ff4019dd44fd HTTP/1.1" 200 OK
