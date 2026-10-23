@@ -709,6 +709,12 @@ def _run_agent_job(job):
                      "attribution": reply.get("attribution") or {}}
         audit("model_call", session.subject, session.role, "ok", addressed, model=model)
 
+    def context_audit(trimmed):
+        # **What the model did not see is part of the record.** The row names the step and the count, so a
+        # later reader can tell an answer made without a document from one made before the document existed.
+        addressed = dict(trimmed or {}, job_id=job.job_id, task=job.task, step=step_name())
+        audit("context_trim", session.subject, session.role, "ok", addressed)
+
     toolbox = tool_loop.ToolBox(STATE["services"], session.permit(), session.role,
                                 audit=tool_audit, strict_audit=True)
     budget = budget_module.Budget(total=max(60.0, float(job.time_budget_s)), reserve=0.0)
@@ -719,6 +725,7 @@ def _run_agent_job(job):
         tools=tool_loop.agent_tools(definition),
         verify=_agent_verify(definition),
         on_model_call=model_audit,
+        on_context_trim=context_audit,
         run_child=run_child if child_specs else None,
         max_steps=int(definition.get("max_steps") or 12),
         max_messages=int(definition.get("max_messages") or 24),

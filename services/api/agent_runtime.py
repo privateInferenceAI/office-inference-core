@@ -41,6 +41,9 @@ class RuntimeContext:
     tools: list
     verify: Optional[Callable[[str, dict], Optional[str]]] = None
     on_model_call: Optional[Callable[[dict], None]] = None
+    # What left the live prompt and why, for the chain row. The record has to be able to answer what the
+    # model did not see, not only what it did.
+    on_context_trim: Optional[Callable[[dict], None]] = None
     # A child brief goes in, a structured JSON result comes out. The controller does not know how the child
     # runs; the deployment supplies a read-only child loop with its own budget.
     run_child: Optional[Callable[[str], str]] = None
@@ -183,6 +186,18 @@ class AgentPlan:
         context = self.context
         context.turns += 1
         messages = self._messages(run.prior, run.input)
+        messages, trimmed = self._trim(messages)
+        if trimmed:
+            if context.on_context_trim is None:
+                return workflow.StepResult(
+                    ok=False, failure_kind="context_audit",
+                    failure_detail="older context was dropped and there is no trim callback", retryable=False)
+            try:
+                context.on_context_trim(trimmed)
+            except Exception as exc:  # noqa: BLE001
+                return workflow.StepResult(
+                    ok=False, failure_kind="context_audit",
+                    failure_detail=f"the context trim audit failed: {type(exc).__name__}", retryable=False)
         reply = context.call_model(messages, context.tools)
         if reply.get("error"):
             return workflow.StepResult(
@@ -305,6 +320,37 @@ class AgentPlan:
             for message in output.get("delta") or []:
                 messages.append(message)
         return messages
+
+    def _trim(self, messages: list) -> tuple[list, dict]:
+        """Keep the live prompt under the ceiling and say what left.
+
+        **The record is the reason this is not silent.** A model that answered without a document because the
+        document had been dropped looks identical to one that never found it. The trim report names the count,
+        the ceiling and the step, and the deployment writes it to the chain.
+        """
+        if not messages:
+            return messages, {}
+        limit = max(2, int(self.context.max_messages))
+        if len(messages) <= limit:
+            return messages, {}
+        head = []
+        if messages[0].get("role") == "system":
+            head.append(messages[0])
+        for message in messages[len(head):]:
+            if message.get("role") == "user":
+                head.append(message)
+                break
+        keep = max(0, limit - len(head))
+        tail = messages[-keep:] if keep else []
+        drop_count = max(0, len(messages) - len(head) - len(tail))
+        dropped = messages[len(head):len(head) + drop_count]
+        return head + tail, {
+            "reason": "message_cap",
+            "dropped": len(dropped),
+            "kept": len(head) + len(tail),
+            "max_messages": limit,
+            "dropped_roles": sorted({str(message.get("role")) for message in dropped}),
+        }
 
     def _cap(self, delta: list) -> list:
         """Keep the new turn's messages under the context ceiling.
