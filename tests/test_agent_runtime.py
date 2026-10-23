@@ -10,11 +10,13 @@ for extra in (ROOT / "services", ROOT / "services" / "api"):
         sys.path.insert(0, str(extra))
 
 import agent_runtime  # noqa: E402
+import approvals  # noqa: E402
 import jobs  # noqa: E402
 
 
 DEFINITION = {"id": "research_brief", "description": "Research the question and answer it with cites.",
-              "role": "analyst", "max_steps": 12, "max_seconds": 600}
+              "role": "analyst", "max_steps": 12, "max_seconds": 600,
+              "irreversible_tools": ["send_email"]}
 
 
 class FakeModel:
@@ -128,6 +130,50 @@ def test_a_resumed_plan_reads_the_last_turn_outcome_from_the_record():
     plan = agent_runtime.AgentPlan(ctx, store=store)
     spec = plan.next_spec(job)
     assert spec.name == "finish"
+
+
+def test_an_irreversible_tool_call_stops_at_the_gate_and_runs_only_after_approval():
+    """AG-GATE-001 and AG-IRREVERSIBLE-001: the call is held, the digest covers it, and the act is once."""
+    model = FakeModel([
+        {"content": "", "tool_calls": [{"id": "call-send", "name": "send_email",
+                                         "arguments": '{"to": "dana@example.com", "body": "hello"}'}],
+         "error": None},
+        {"content": "The message was sent [1].", "tool_calls": [], "error": None},
+    ])
+    toolbox = FakeToolbox(result='{"sent": true}')
+    ctx = context(model, toolbox, verify=lambda answer, evidence: None)
+    job, store = make_job(ctx)
+
+    first = agent_runtime.run(store, job, ctx)
+    assert first.job.state == jobs.AWAITING_APPROVAL
+    assert [step.name for step in first.job.steps] == ["turn-1", "approval-1"]
+    assert first.job.pending_action["target"] == "send_email"
+    assert "dana@example.com" in first.job.pending_action["body"]
+    assert toolbox.calls == [], "the tool must not run before the decision"
+
+    approved = jobs.decide(first.job, store, approvals.DECISION_APPROVE,
+                           first.job.pending_action_digest)
+    second = agent_runtime.run(store, approved, ctx)
+
+    assert second.job.state == jobs.SUCCEEDED
+    assert toolbox.calls == [("send_email", '{"to": "dana@example.com", "body": "hello"}')]
+    assert "act-1" in [step.name for step in second.job.steps]
+    assert "turn-2" in [step.name for step in second.job.steps]
+    assert second.job.result["answer"] == "The message was sent [1]."
+
+
+def test_a_denied_irreversible_call_never_runs_and_the_job_fails():
+    model = FakeModel([
+        {"content": "", "tool_calls": [{"id": "call-send", "name": "send_email",
+                                         "arguments": '{"to": "dana@example.com"}'}], "error": None},
+    ])
+    toolbox = FakeToolbox()
+    ctx = context(model, toolbox)
+    job, store = make_job(ctx)
+    first = agent_runtime.run(store, job, ctx)
+    denied = jobs.decide(first.job, store, approvals.DECISION_DENY, first.job.pending_action_digest)
+    assert denied.state == jobs.FAILED
+    assert toolbox.calls == []
 
 
 def test_each_model_call_is_reported_to_the_audit_hook():

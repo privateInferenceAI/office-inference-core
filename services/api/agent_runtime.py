@@ -59,9 +59,9 @@ class AgentPlan:
 
     @property
     def attempt_budget(self) -> int:
-        # Every turn can fail once, plus the finish step. A loop that is merely long is bounded by max_steps,
-        # not by this budget.
-        return max(2, self.context.max_steps + 2)
+        # A turn can fail once, and every irreversible action adds a gate step and an act step. A loop that is
+        # merely long is still bounded by max_steps, not by this budget.
+        return max(4, self.context.max_steps * 2 + 4)
 
     @property
     def time_budget_s(self) -> int:
@@ -75,11 +75,25 @@ class AgentPlan:
         if not turns:
             return workflow.StepSpec(name="turn-1", run=self._turn, timeout_s=120)
         latest = max(int(name.split("-", 1)[1]) for name in turns)
+        last_output = self._recorded_output(job, f"turn-{latest}")
+        pending = last_output.get("pending_tool") if isinstance(last_output, dict) else None
+        if pending:
+            # **A tool that must not happen without a decision is materialised as a gate step, not run inside
+            # the turn.** The C5 route approves or refuses it. The gate is named after the turn so a second
+            # irreversible call later in the run gets its own gate.
+            gate_name = f"approval-{latest}"
+            if gate_name not in done:
+                return workflow.StepSpec(
+                    name=gate_name, gate=True,
+                    approval_of=lambda run: self._approval_action(pending), timeout_s=30)
+            act_name = f"act-{latest}"
+            if act_name not in done:
+                return workflow.StepSpec(name=act_name, run=self._act, timeout_s=120)
         # **A resumed process learns the last turn's outcome from the record, not from memory.** The plan is
         # rebuilt after a restart, so `context.done` is false; without this read the run would ask the model
         # for another turn after one that already produced the final answer.
         if not self.context.done:
-            self.context.done = self._recorded_done(job, latest)
+            self.context.done = bool(last_output.get("done")) if isinstance(last_output, dict) else False
         if self.context.done:
             return workflow.StepSpec(name="finish", run=self._finish, timeout_s=30)
         if latest >= self.context.max_steps:
@@ -91,17 +105,74 @@ class AgentPlan:
     def is_final(self, job, spec) -> bool:
         return spec.name == "finish"
 
-    def _recorded_done(self, job, latest: int) -> bool:
+    def _recorded_output(self, job, step_name: str) -> dict:
+        """The output the record holds for a succeeded step, or an empty dict.
+
+        Read from the event log because step outputs are not on the job row. The plan is rebuilt after a
+        restart, so the gate, the act and the resume all have to be derivable from the record alone.
+        """
         if self.store is None:
-            return False
+            return {}
         for event in reversed(self.store.events_since(job.job_id, 0)):
             if event.get("event") != "step":
                 continue
             data = event.get("data") or {}
-            if data.get("step") == f"turn-{latest}":
-                output = data.get("output") or {}
-                return bool(output.get("done"))
-        return False
+            if data.get("step") == step_name and data.get("step_state") == jobs.SUCCEEDED:
+                return dict(data.get("output") or {})
+        return {}
+
+    def _approval_action(self, pending: dict):
+        """What the person is approving, and the content the digest covers.
+
+        The action carries the exact tool name and its arguments. The C5 route compares the decision to this
+        digest, so a call whose arguments changed between the screen and the decision fails as drift.
+        """
+        name = str(pending.get("name") or "")
+        arguments = str(pending.get("arguments") or "{}")
+        return workflow.Action(
+            kind="tool.call",
+            summary=f"Run the irreversible tool {name}",
+            reason="the agent requested a tool that cannot be undone",
+            target=name,
+            subject=arguments,
+            body=arguments,
+            consequence=("The tool runs once after approval. If its arguments change before the decision, the "
+                         "approval is refused as drifted."),
+        )
+
+    def _act(self, run):
+        """Run the approved tool exactly as it was recorded when the gate was raised."""
+        context = self.context
+        turns = [name for name in run.prior if name.startswith("turn-")]
+        if not turns:
+            return workflow.StepResult(ok=False, failure_kind="no_pending_tool",
+                                       failure_detail="the gate was reached with no turn to act on",
+                                       retryable=False)
+        latest = max(int(name.split("-", 1)[1]) for name in turns)
+        pending = (run.prior.get(f"turn-{latest}") or {}).get("pending_tool") or {}
+        name = str(pending.get("name") or "")
+        arguments = str(pending.get("arguments") or "{}")
+        if not name:
+            return workflow.StepResult(ok=False, failure_kind="no_pending_tool",
+                                       failure_detail="the approved turn holds no tool call", retryable=False)
+        try:
+            result = context.toolbox.execute(name, arguments)
+        except tool_loop.ToolAuditError as exc:
+            return workflow.StepResult(ok=False, failure_kind="tool_audit",
+                                       failure_detail=str(exc), retryable=False)
+        except Exception as exc:  # noqa: BLE001
+            return workflow.StepResult(ok=False, failure_kind="tool_error",
+                                       failure_detail=f"the approved tool failed: {type(exc).__name__}",
+                                       retryable=False)
+        return workflow.StepResult(
+            output={"delta": [{"role": "tool", "tool_call_id": pending.get("id") or "",
+                               "content": str(result)}],
+                    "pending_tool": None, "act": name},
+            # The engine records the effect with the act step and skips a replayed act. A real connector must
+            # use the same key on its side; the runtime passes no credential to the tool itself.
+            effects=[workflow.Effect(key="irreversible", mode="external", state="applied",
+                                     detail={"tool": name})],
+        )
 
     # ---- the steps
 
@@ -132,6 +203,24 @@ class AgentPlan:
                                           "function": {"name": c.get("name") or "",
                                                        "arguments": c.get("arguments") or "{}"}}
                                          for c in calls]})
+        irreversible = {str(name) for name in (context.definition.get("irreversible_tools") or [])}
+        pending_call = next((call for call in calls if str(call.get("name") or "") in irreversible), None)
+        if pending_call is not None:
+            # **Nothing in this turn runs before the decision.** The call that needs approval is held as a gate
+            # step; the model's other calls, if any, wait for the next turn so no side effect can happen while
+            # the person is deciding.
+            delta = self._cap(delta)
+            context.done = False
+            return workflow.StepResult(output={
+                "delta": delta,
+                "done": False,
+                "content": content,
+                "tool_results": [],
+                "pending_tool": {"id": pending_call.get("id") or "",
+                                 "name": str(pending_call.get("name") or ""),
+                                 "arguments": str(pending_call.get("arguments") or "{}")},
+                "turns": context.turns,
+            })
         tool_results = []
         for call in calls:
             name = call.get("name") or ""
@@ -194,7 +283,9 @@ class AgentPlan:
              + (f"\n\nTask:\n{task_input}" if task_input else "")},
         ]
         for name, output in prior.items():
-            if not name.startswith("turn-") or not isinstance(output, dict):
+            # **The act step's tool result belongs in the conversation.** Without it the model would see its
+            # own tool call, the approval gate, and then no result, and would ask again.
+            if not (name.startswith("turn-") or name.startswith("act-")) or not isinstance(output, dict):
                 continue
             for message in output.get("delta") or []:
                 messages.append(message)
