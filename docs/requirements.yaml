@@ -2442,7 +2442,8 @@ items:
       cannot read /opt/oi-core, the rendered environment, the assertion key or another task's files. The sandbox
       is gone when the task ends, and a task that exceeds its CPU, memory, disk or wall-clock quota fails with a
       typed cause.
-    status: open
+    status: verified
+    evidence: docs/reviews/ws-sandbox/README.md
     note: >-
       The sandbox is the difference between an agent that reads documents and one that does the work. It is
       not a developer environment and not the host. Isolation is a claim to run, not to write down.

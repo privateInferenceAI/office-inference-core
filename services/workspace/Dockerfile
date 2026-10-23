@@ -6,7 +6,7 @@
 FROM python:3.12-slim
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends bash coreutils jq ca-certificates \
+ && apt-get install -y --no-install-recommends bash coreutils jq ca-certificates time \
  && rm -rf /var/lib/apt/lists/*
 
 # The task directory is mounted here by the sandbox manager. The root filesystem is read-only at run time, so

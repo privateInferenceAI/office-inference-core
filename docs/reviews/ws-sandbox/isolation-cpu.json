@@ -1,0 +1,11 @@
+{
+  "cpu": {
+    "typed": true,
+    "detail": "the task used 3.21 CPU seconds, over its 0.20 allowance"
+  },
+  "isolation": {
+    "returncode": 0,
+    "output": "OWN:\n.oi-cpu\na.txt\nHOST:\nHIDDEN\nOTHER:\nHIDDEN"
+  },
+  "leftover": []
+}
