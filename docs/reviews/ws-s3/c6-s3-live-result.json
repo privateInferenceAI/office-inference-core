@@ -1,0 +1,15 @@
+{
+  "job_id": "220b4329143f4db2a9f5ae89b8278355",
+  "state": "succeeded",
+  "artifacts": [
+    {
+      "key": "artifacts/220b4329143f4db2a9f5ae89b8278355/b64506b8623199b40c8b5281e14d4f22059a8b30991cdb9c5a1da93cfa8fd3b4",
+      "path": "report.txt",
+      "bytes": 932,
+      "store": "s3",
+      "sha256": "b64506b8623199b40c8b5281e14d4f22059a8b30991cdb9c5a1da93cfa8fd3b4"
+    }
+  ],
+  "download_bytes": 932,
+  "download_head": "TRAVEL APPROVAL THRESHOLDS\n==========================\nSource: Travel and Expense"
+}

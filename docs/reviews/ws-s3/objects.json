@@ -1,0 +1,12 @@
+{
+  "prefix": "artifacts/220b4329143f4db2a9f5ae89b8278355/",
+  "objects": [
+    {
+      "key": "artifacts/220b4329143f4db2a9f5ae89b8278355/b64506b8623199b40c8b5281e14d4f22059a8b30991cdb9c5a1da93cfa8fd3b4",
+      "bytes": 932,
+      "etag": "\"d8f4d8a04be4863446299b06a28f4468\"",
+      "version": null,
+      "encryption": "AES256"
+    }
+  ]
+}
