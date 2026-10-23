@@ -120,7 +120,7 @@ the client tenant.
 
 | Row | What it needs |
 |---|---|
-| OPS-SUPPORT-001 | Owner decision: keep SSH for now. The SSM-only cutover is not being made. |
+| OPS-SUPPORT-001 | SSH retained by owner decision. Build box: key ai-stack-key exists, SG22 is restricted to 47.164.45.109/32, SSM agent is online, no CloudTrail trail. Tenant: stopped, key exists, SG22 is open to 0.0.0.0/0, no SSM role or SSM registration, no CloudTrail. |
 | BIZ-* | Counsel, insurance, contracts, on-call staff, subprocessors and pricing decisions |
 
 ## Evidence
