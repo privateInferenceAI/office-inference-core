@@ -803,3 +803,8 @@ def test_the_delegate_tool_is_offered_only_to_a_definition_with_child_tools():
     with_child = {tool["function"]["name"]
                   for tool in tool_loop.agent_tools({"child_tools": ["search_documents"]})}
     assert "delegate_research" in with_child
+    without_workspace = {tool["function"]["name"] for tool in tool_loop.agent_tools({})}
+    assert "workspace_run" not in without_workspace
+    with_workspace = {tool["function"]["name"]
+                      for tool in tool_loop.agent_tools({"workspace": True})}
+    assert {"workspace_write", "workspace_read", "workspace_list", "workspace_run"} <= with_workspace

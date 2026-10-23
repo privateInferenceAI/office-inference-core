@@ -118,6 +118,26 @@ def test_the_loop_stops_at_its_step_cap_and_fails_with_no_answer():
     assert [step.name for step in result.job.steps] == ["turn-1", "finish"]
 
 
+def test_the_runtime_routes_workspace_tools_to_the_workspace_callback():
+    model = FakeModel([
+        {"content": "", "tool_calls": [{"id": "w1", "name": "workspace_write",
+                                         "arguments": '{"path": "note.txt", "content": "hello"}'}],
+         "error": None},
+        {"content": "Wrote the note [1].", "tool_calls": [], "error": None},
+    ])
+    ctx = context(model, FakeToolbox(), verify=lambda answer, evidence: None)
+    calls = []
+    ctx.workspace_tool = lambda name, arguments: (calls.append((name, arguments)) or
+                                                  '{"path": "note.txt", "bytes": 5}')
+    job, store = make_job(ctx)
+
+    result = agent_runtime.run(store, job, ctx)
+
+    assert result.job.state == jobs.SUCCEEDED
+    assert calls == [("workspace_write", '{"path": "note.txt", "content": "hello"}')]
+    assert [step.name for step in result.job.steps] == ["turn-1", "turn-2", "finish"]
+
+
 def test_a_resumed_plan_reads_the_last_turn_outcome_from_the_record():
     """A new process has no `context.done`; the recorded turn output must still send it to finish."""
     ctx = context(FakeModel([]), FakeToolbox())

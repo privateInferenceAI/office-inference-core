@@ -67,6 +67,7 @@ import approvals as approvals_module  # noqa: E402
 import definitions as definitions_module  # noqa: E402
 import agent_worker as agent_worker_module  # noqa: E402
 import agent_runtime as agent_runtime_module  # noqa: E402
+import workspace_client as workspace_client_module  # noqa: E402
 import redaction  # noqa: E402
 import ingest  # noqa: E402
 import retriever  # noqa: E402
@@ -674,6 +675,16 @@ def _run_agent_job_locked(job):
 
     model = model_for(definition.get("role") or session.role)
 
+    workspace = None
+    if definition.get("workspace"):
+        workspace_url = (os.environ.get("OI_WORKSPACE_URL") or "").strip()
+        workspace_token = (os.environ.get("OI_WORKSPACE_TOKEN") or "").strip()
+        if not workspace_url or not workspace_token:
+            _fail_agent_job(job, "workspace_not_configured",
+                            "the definition needs a workspace but OI_WORKSPACE_URL or OI_WORKSPACE_TOKEN is unset")
+            return
+        workspace = workspace_client_module.WorkspaceClient(workspace_url, workspace_token)
+
     # **The child's tools are a subset of the parent's.** A definition that lets a helper read something the
     # parent cannot is a permission hole, so the declaration is checked before any work starts.
     parent_tools = {str(name) for name in (definition.get("tools") or [])}
@@ -776,6 +787,38 @@ def _run_agent_job_locked(job):
         addressed = dict(trimmed or {}, job_id=job.job_id, task=job.task, step=step_name())
         audit("context_trim", session.subject, session.role, "ok", addressed)
 
+    def workspace_tool(name: str, arguments: str) -> str:
+        try:
+            parsed = json.loads(arguments or "{}")
+        except (ValueError, TypeError):
+            return json.dumps({"error": "workspace arguments must be a JSON object"})
+        if not isinstance(parsed, dict):
+            return json.dumps({"error": "workspace arguments must be a JSON object"})
+        try:
+            if name == "workspace_write":
+                result = workspace.write(job.job_id, str(parsed.get("path") or ""),
+                                         str(parsed.get("content") or ""))
+            elif name == "workspace_read":
+                result = workspace.read(job.job_id, str(parsed.get("path") or ""))
+            elif name == "workspace_list":
+                result = workspace.list(job.job_id)
+            elif name == "workspace_run":
+                result = workspace.run(job.job_id, str(parsed.get("command") or ""),
+                                       timeout=int(parsed.get("timeout") or 60))
+            else:
+                return json.dumps({"error": f"unknown workspace tool {name!r}"})
+        except workspace_client_module.WorkspaceClientError as exc:
+            result = {"error": str(exc)}
+        # **The sandbox is a second place work happens, and the chain has to say so.** The row names the job,
+        # the step and the tool; a failed audit fails the step rather than letting the work happen unrecorded.
+        try:
+            audit("tool_call", session.subject, session.role, "ok",
+                  {"job_id": job.job_id, "task": job.task, "step": step_name(), "tool": name,
+                   "arguments_chars": len(arguments or "")}, tool=name)
+        except Exception as exc:  # noqa: BLE001
+            raise tool_loop.ToolAuditError(f"the workspace audit failed: {type(exc).__name__}") from exc
+        return json.dumps(result, sort_keys=True)
+
     toolbox = tool_loop.ToolBox(STATE["services"], session.permit(), session.role,
                                 audit=tool_audit, strict_audit=True)
     budget = budget_module.Budget(total=max(60.0, float(job.time_budget_s)), reserve=0.0)
@@ -788,13 +831,25 @@ def _run_agent_job_locked(job):
         on_model_call=model_audit,
         on_context_trim=context_audit,
         run_child=run_child if child_specs else None,
+        workspace_tool=workspace_tool if workspace is not None else None,
         max_steps=int(definition.get("max_steps") or 12),
         max_messages=int(definition.get("max_messages") or 24),
     )
     mint = lambda actor, role: assertion.mint_audit(STATE["key"], actor, role,
                                                     deployment_id=DEPLOYMENT_ID)
-    agent_runtime_module.run(STATE["jobs"], job, context, mint=mint,
-                             deployment_id=DEPLOYMENT_ID, key_path=KEY_PATH)
+    try:
+        agent_runtime_module.run(STATE["jobs"], job, context, mint=mint,
+                                 deployment_id=DEPLOYMENT_ID, key_path=KEY_PATH)
+    finally:
+        # **A terminal task takes its sandbox with it.** A gate or a pause keeps the task directory because the
+        # job will resume; a finished, failed or cancelled job does not get to leave a container or files behind.
+        if workspace is not None:
+            final = STATE["jobs"].get(job.job_id)
+            if final is not None and final.state in jobs_module.TERMINAL:
+                try:
+                    workspace.cleanup(job.job_id)
+                except Exception:  # noqa: BLE001 - the record already says the job ended
+                    pass
 
 
 def _step_once(job, attempt):
