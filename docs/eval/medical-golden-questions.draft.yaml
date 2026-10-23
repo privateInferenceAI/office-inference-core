@@ -1,0 +1,680 @@
+vertical: medical_clinic
+status: draft
+source_docs:
+- fixtures/corpus/medical/clinic-policy.md
+note: Synthetic draft. Clinical and compliance review required before use as a client
+  acceptance set.
+questions:
+- id: MED-001
+  vertical: medical_clinic
+  category: operations
+  role: staff
+  question: What are the clinic's weekday hours?
+  expected_answer: Monday through Friday, 8:00 a.m. to 6:00 p.m.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 1. Clinic hours and access
+    page: 1
+  hard_fail: fabricated_number
+- id: MED-002
+  vertical: medical_clinic
+  category: operations
+  role: staff
+  question: What are the Saturday hours?
+  expected_answer: Saturday, 9:00 a.m. to 1:00 p.m.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 1. Clinic hours and access
+    page: 1
+  hard_fail: wrong_document
+- id: MED-003
+  vertical: medical_clinic
+  category: operations
+  role: staff
+  question: What number does a patient call after hours?
+  expected_answer: The after-hours line at 555-0100.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 1. Clinic hours and access
+    page: 1
+  hard_fail: cross_role_leak
+- id: MED-004
+  vertical: medical_clinic
+  category: operations
+  role: staff
+  question: When is the clinic closed?
+  expected_answer: Sundays and the six observed holidays listed in the policy.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 1. Clinic hours and access
+    page: 1
+  hard_fail: unanswerable
+- id: MED-005
+  vertical: medical_clinic
+  category: operations
+  role: staff
+  question: What is the walk-in policy for urgent problems?
+  expected_answer: Walk-ins are triaged between 8:00 a.m. and 4:00 p.m. on weekdays.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 1. Clinic hours and access
+    page: 1
+  hard_fail: fabricated_number
+- id: MED-006
+  vertical: medical_clinic
+  category: operations
+  role: staff
+  question: How early should a new patient arrive?
+  expected_answer: Fifteen minutes before the appointment.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 1. Clinic hours and access
+    page: 1
+  hard_fail: wrong_document
+- id: MED-007
+  vertical: medical_clinic
+  category: operations
+  role: staff
+  question: How long is a new-patient visit?
+  expected_answer: Sixty minutes.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 2. Appointments and cancellations
+    page: 1
+  hard_fail: cross_role_leak
+- id: MED-008
+  vertical: medical_clinic
+  category: operations
+  role: staff
+  question: How long is a follow-up visit?
+  expected_answer: Twenty minutes.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 2. Appointments and cancellations
+    page: 1
+  hard_fail: unanswerable
+- id: MED-009
+  vertical: medical_clinic
+  category: operations
+  role: staff
+  question: How much notice is needed to cancel without a fee?
+  expected_answer: Twenty-four hours.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 2. Appointments and cancellations
+    page: 1
+  hard_fail: fabricated_number
+- id: MED-010
+  vertical: medical_clinic
+  category: operations
+  role: staff
+  question: What is the no-show fee?
+  expected_answer: Fifty USD.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 2. Appointments and cancellations
+    page: 1
+  hard_fail: wrong_document
+- id: MED-011
+  vertical: medical_clinic
+  category: operations
+  role: staff
+  question: How does a patient request an interpreter?
+  expected_answer: Ask scheduling at least two business days before the visit.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 2. Appointments and cancellations
+    page: 1
+  hard_fail: cross_role_leak
+- id: MED-012
+  vertical: medical_clinic
+  category: operations
+  role: staff
+  question: Can a patient request a same-day visit?
+  expected_answer: Yes, through the triage line; same-day slots are released at 7:30
+    a.m.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 2. Appointments and cancellations
+    page: 1
+  hard_fail: unanswerable
+- id: MED-013
+  vertical: medical_clinic
+  category: billing
+  role: billing
+  question: Which insurance plans are accepted?
+  expected_answer: The plans listed in the accepted-plan table, including the two
+    Medicaid managed-care plans.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 3. Insurance and authorization
+    page: 1
+  hard_fail: fabricated_number
+- id: MED-014
+  vertical: medical_clinic
+  category: billing
+  role: billing
+  question: When is eligibility checked?
+  expected_answer: Two business days before the visit and again at check-in.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 3. Insurance and authorization
+    page: 1
+  hard_fail: wrong_document
+- id: MED-015
+  vertical: medical_clinic
+  category: billing
+  role: billing
+  question: How long does a prior authorization take?
+  expected_answer: Five business days after the clinical information is complete.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 3. Insurance and authorization
+    page: 1
+  hard_fail: cross_role_leak
+- id: MED-016
+  vertical: medical_clinic
+  category: billing
+  role: billing
+  question: Does the clinic accept self-pay patients?
+  expected_answer: Yes, with a 20 percent prompt-pay discount.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 3. Insurance and authorization
+    page: 1
+  hard_fail: unanswerable
+- id: MED-017
+  vertical: medical_clinic
+  category: billing
+  role: billing
+  question: How is secondary insurance handled?
+  expected_answer: The secondary plan is billed after the primary remittance posts.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 3. Insurance and authorization
+    page: 1
+  hard_fail: fabricated_number
+- id: MED-018
+  vertical: medical_clinic
+  category: billing
+  role: billing
+  question: What happens when a referral is required but missing?
+  expected_answer: The visit is scheduled but the referral must arrive before the
+    encounter.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 3. Insurance and authorization
+    page: 1
+  hard_fail: wrong_document
+- id: MED-019
+  vertical: medical_clinic
+  category: billing
+  role: billing
+  question: When is payment due?
+  expected_answer: At the time of service, after insurance is verified.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 4. Billing and payments
+    page: 1
+  hard_fail: cross_role_leak
+- id: MED-020
+  vertical: medical_clinic
+  category: billing
+  role: billing
+  question: When is the first statement sent?
+  expected_answer: Thirty days after the date of service.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 4. Billing and payments
+    page: 1
+  hard_fail: unanswerable
+- id: MED-021
+  vertical: medical_clinic
+  category: billing
+  role: billing
+  question: What is the payment-plan threshold?
+  expected_answer: Balances over five hundred USD can use a six-month plan.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 4. Billing and payments
+    page: 1
+  hard_fail: fabricated_number
+- id: MED-022
+  vertical: medical_clinic
+  category: billing
+  role: billing
+  question: What is the fee for CPT 99213?
+  expected_answer: One hundred twenty USD.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 4. Billing and payments
+    page: 1
+  hard_fail: wrong_document
+- id: MED-023
+  vertical: medical_clinic
+  category: billing
+  role: billing
+  question: What is the fee for CPT 99214?
+  expected_answer: One hundred eighty USD.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 4. Billing and payments
+    page: 1
+  hard_fail: cross_role_leak
+- id: MED-024
+  vertical: medical_clinic
+  category: billing
+  role: billing
+  question: How long does a refund take?
+  expected_answer: Ten business days after approval.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 4. Billing and payments
+    page: 1
+  hard_fail: unanswerable
+- id: MED-025
+  vertical: medical_clinic
+  category: records
+  role: staff
+  question: How long are adult records kept?
+  expected_answer: Seven years after the last visit.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 5. Medical records
+    page: 1
+  hard_fail: fabricated_number
+- id: MED-026
+  vertical: medical_clinic
+  category: records
+  role: staff
+  question: How long are minor records kept?
+  expected_answer: Until the patient turns twenty-one, or seven years, whichever is
+    longer.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 5. Medical records
+    page: 1
+  hard_fail: wrong_document
+- id: MED-027
+  vertical: medical_clinic
+  category: records
+  role: staff
+  question: How long does a records release take?
+  expected_answer: Five business days after a valid authorization.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 5. Medical records
+    page: 1
+  hard_fail: cross_role_leak
+- id: MED-028
+  vertical: medical_clinic
+  category: records
+  role: staff
+  question: How does a patient request an amendment?
+  expected_answer: In writing; the clinic responds within thirty days.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 5. Medical records
+    page: 1
+  hard_fail: unanswerable
+- id: MED-029
+  vertical: medical_clinic
+  category: records
+  role: staff
+  question: Can a patient see portal results immediately?
+  expected_answer: Yes, except results the ordering clinician has flagged for a discussion.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 5. Medical records
+    page: 1
+  hard_fail: fabricated_number
+- id: MED-030
+  vertical: medical_clinic
+  category: records
+  role: staff
+  question: What is the record-copy fee?
+  expected_answer: The fee stated in the state schedule, with the first twenty pages
+    free.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 5. Medical records
+    page: 1
+  hard_fail: wrong_document
+- id: MED-031
+  vertical: medical_clinic
+  category: privacy
+  role: staff
+  question: What is the minimum-necessary rule?
+  expected_answer: Use or disclose only the information needed for the purpose.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 6. Privacy and disclosures
+    page: 1
+  hard_fail: cross_role_leak
+- id: MED-032
+  vertical: medical_clinic
+  category: privacy
+  role: staff
+  question: When is a separate authorization required?
+  expected_answer: For psychotherapy notes and marketing uses.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 6. Privacy and disclosures
+    page: 1
+  hard_fail: unanswerable
+- id: MED-033
+  vertical: medical_clinic
+  category: privacy
+  role: staff
+  question: Within what period is a breach notified?
+  expected_answer: Within sixty days of discovery.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 6. Privacy and disclosures
+    page: 1
+  hard_fail: fabricated_number
+- id: MED-034
+  vertical: medical_clinic
+  category: privacy
+  role: staff
+  question: Can a family member receive information?
+  expected_answer: Only with the patient's authorization or when the patient is present
+    and does not object.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 6. Privacy and disclosures
+    page: 1
+  hard_fail: wrong_document
+- id: MED-035
+  vertical: medical_clinic
+  category: privacy
+  role: staff
+  question: Are faxes allowed?
+  expected_answer: Only to a verified number with a cover sheet.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 6. Privacy and disclosures
+    page: 1
+  hard_fail: cross_role_leak
+- id: MED-036
+  vertical: medical_clinic
+  category: privacy
+  role: staff
+  question: Who is the privacy officer?
+  expected_answer: The compliance manager listed in the privacy policy.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 6. Privacy and disclosures
+    page: 1
+  hard_fail: unanswerable
+- id: MED-037
+  vertical: medical_clinic
+  category: clinical
+  role: clinical
+  question: How long does a routine refill take?
+  expected_answer: Two business days.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 7. Prescriptions and refills
+    page: 1
+  hard_fail: fabricated_number
+- id: MED-038
+  vertical: medical_clinic
+  category: clinical
+  role: clinical
+  question: How often are controlled prescriptions reviewed?
+  expected_answer: Every thirty days; early fills require a clinician review.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 7. Prescriptions and refills
+    page: 1
+  hard_fail: wrong_document
+- id: MED-039
+  vertical: medical_clinic
+  category: clinical
+  role: clinical
+  question: Can a prescription be sent to any pharmacy?
+  expected_answer: Yes, to a pharmacy the patient names and the e-prescribing system
+    supports.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 7. Prescriptions and refills
+    page: 1
+  hard_fail: cross_role_leak
+- id: MED-040
+  vertical: medical_clinic
+  category: clinical
+  role: clinical
+  question: What happens when a medication is lost?
+  expected_answer: The clinician decides whether a replacement is clinically appropriate;
+    a police report is not required.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 7. Prescriptions and refills
+    page: 1
+  hard_fail: unanswerable
+- id: MED-041
+  vertical: medical_clinic
+  category: clinical
+  role: clinical
+  question: Is an antibiotic given for a viral cold?
+  expected_answer: No; antibiotics are not prescribed for viral upper respiratory
+    infections.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 7. Prescriptions and refills
+    page: 1
+  hard_fail: fabricated_number
+- id: MED-042
+  vertical: medical_clinic
+  category: clinical
+  role: clinical
+  question: How are prescription errors reported?
+  expected_answer: To the clinical lead and through the incident system within one
+    business day.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 7. Prescriptions and refills
+    page: 1
+  hard_fail: wrong_document
+- id: MED-043
+  vertical: medical_clinic
+  category: clinical
+  role: clinical
+  question: How fast is a routine referral sent?
+  expected_answer: Within three business days.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 8. Referrals and care coordination
+    page: 1
+  hard_fail: cross_role_leak
+- id: MED-044
+  vertical: medical_clinic
+  category: clinical
+  role: clinical
+  question: Who tracks an urgent referral?
+  expected_answer: The referral coordinator, the same day.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 8. Referrals and care coordination
+    page: 1
+  hard_fail: unanswerable
+- id: MED-045
+  vertical: medical_clinic
+  category: clinical
+  role: clinical
+  question: Does a patient need a referral for a specialist?
+  expected_answer: Only when the plan requires one; the policy lists the exceptions.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 8. Referrals and care coordination
+    page: 1
+  hard_fail: fabricated_number
+- id: MED-046
+  vertical: medical_clinic
+  category: clinical
+  role: clinical
+  question: How is an external specialist report filed?
+  expected_answer: Into the patient's chart within two business days of receipt.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 8. Referrals and care coordination
+    page: 1
+  hard_fail: wrong_document
+- id: MED-047
+  vertical: medical_clinic
+  category: clinical
+  role: clinical
+  question: What happens when a referral is denied?
+  expected_answer: The clinician reviews alternatives and the patient is told the
+    reason.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 8. Referrals and care coordination
+    page: 1
+  hard_fail: cross_role_leak
+- id: MED-048
+  vertical: medical_clinic
+  category: clinical
+  role: clinical
+  question: Can a patient self-refer?
+  expected_answer: Yes, unless the plan requires a primary-care referral.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 8. Referrals and care coordination
+    page: 1
+  hard_fail: unanswerable
+- id: MED-049
+  vertical: medical_clinic
+  category: clinical
+  role: clinical
+  question: Which platform is used for telehealth?
+  expected_answer: The clinic's video platform, reached from the patient portal.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 9. Telehealth
+    page: 1
+  hard_fail: fabricated_number
+- id: MED-050
+  vertical: medical_clinic
+  category: clinical
+  role: clinical
+  question: What consent is required before a telehealth visit?
+  expected_answer: Verbal consent is documented at the start of the visit.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 9. Telehealth
+    page: 1
+  hard_fail: wrong_document
+- id: MED-051
+  vertical: medical_clinic
+  category: clinical
+  role: clinical
+  question: Can a controlled substance be prescribed by telehealth?
+  expected_answer: Only when the clinician and the jurisdiction permit it; the policy
+    requires an in-person evaluation first.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 9. Telehealth
+    page: 1
+  hard_fail: cross_role_leak
+- id: MED-052
+  vertical: medical_clinic
+  category: clinical
+  role: clinical
+  question: What should a patient do if video fails?
+  expected_answer: Call the clinic and switch to telephone; the visit is documented
+    as telephone.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 9. Telehealth
+    page: 1
+  hard_fail: unanswerable
+- id: MED-053
+  vertical: medical_clinic
+  category: clinical
+  role: clinical
+  question: Is a telehealth visit billed differently?
+  expected_answer: The same CPT code is used when the service meets the same criteria.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 9. Telehealth
+    page: 1
+  hard_fail: fabricated_number
+- id: MED-054
+  vertical: medical_clinic
+  category: clinical
+  role: clinical
+  question: Where is the telehealth record kept?
+  expected_answer: In the same chart as an in-person visit.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 9. Telehealth
+    page: 1
+  hard_fail: wrong_document
+- id: MED-055
+  vertical: medical_clinic
+  category: safety
+  role: clinical
+  question: What should a patient do for chest pain?
+  expected_answer: Call 911; do not drive to the clinic.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 10. Emergencies and safety
+    page: 1
+  hard_fail: cross_role_leak
+- id: MED-056
+  vertical: medical_clinic
+  category: safety
+  role: clinical
+  question: Where is the emergency kit?
+  expected_answer: At the nurses' station and in each procedure room.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 10. Emergencies and safety
+    page: 1
+  hard_fail: unanswerable
+- id: MED-057
+  vertical: medical_clinic
+  category: safety
+  role: clinical
+  question: Who checks the emergency kit?
+  expected_answer: The clinical lead monthly, with a signed log.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 10. Emergencies and safety
+    page: 1
+  hard_fail: fabricated_number
+- id: MED-058
+  vertical: medical_clinic
+  category: safety
+  role: clinical
+  question: When is an incident report filed?
+  expected_answer: The same business day as the event.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 10. Emergencies and safety
+    page: 1
+  hard_fail: wrong_document
+- id: MED-059
+  vertical: medical_clinic
+  category: safety
+  role: clinical
+  question: What is the anaphylaxis first step?
+  expected_answer: Give epinephrine per the standing order and call 911.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 10. Emergencies and safety
+    page: 1
+  hard_fail: cross_role_leak
+- id: MED-060
+  vertical: medical_clinic
+  category: safety
+  role: clinical
+  question: When is the clinic closed for a safety event?
+  expected_answer: When the clinical lead determines the environment is unsafe.
+  source:
+    doc: fixtures/corpus/medical/clinic-policy.md
+    section: 10. Emergencies and safety
+    page: 1
+  hard_fail: unanswerable
