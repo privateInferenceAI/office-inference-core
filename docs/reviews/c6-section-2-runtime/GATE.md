@@ -1,6 +1,6 @@
 # C6 Section 2 gate report
 
-**Status:** the runtime core is built and live-tested. This is not a claim that Section 2 is closed.
+**Status:** gate passed on the live box, awaiting owner acceptance. All 19 Section 2 rows are verified.
 
 The live evidence is in this directory. The box was `i-02aba2feef08f8e7b` at `52.204.204.133`, credits account
 `878451098165`, deployment `oi-core-dev-cloud-workspace`.
@@ -36,16 +36,15 @@ The live evidence is in this directory. The box was `i-02aba2feef08f8e7b` at `52
 | AUD-TOOL-001 | The live jobs have a tool row for each search and read, addressed by job and step. |
 | AUD-SPAN-001 | The child rows carry span `child-1` and role `child` under the parent task. |
 | AUD-MODEL-001 | The live jobs have a `model_call` row per completion, addressed by job and step. |
+| AG-MODES-001 | `/ask` answered and created no job (38 to 38); `/jobs` created one queued job (39) with a 600 second budget. |
+| AG-QUEUE-001 | Two definitions, concurrency one: the second job waited `queued` with position 2, then both succeeded. |
+| AG-CHILD-BUDGET-001 | With `child_max_tokens` at 1, the child returned `child_token_budget` spent 994 budget 1; the parent continued. The child row and the parent rows carry 994 tokens. |
+| SEC-AGENT-001 | A child scope naming `send_email` outside the parent made the job fail `definition_child_scope`, and audit row 685 names the tool. |
+| AUD-CHECKPOINT-001 | The kill run wrote resume row 705 naming step `turn-2`, and the 381-event chain verifies intact. |
 
-## Still open
+## Open rows
 
-| Row | What remains |
-|---|---|
-| AG-MODES-001 | A live test that a conversational turn returns inside its deadline and cannot become a task run, and that a task run cannot inherit the conversational deadline. The code paths are separate; the row needs the measurement. |
-| AG-QUEUE-001 | A live run with more accepted jobs than the concurrency limit, and more than one definition. The unit tests cover the claim, the cap and the position; the live deployment has one definition. |
-| AG-CHILD-BUDGET-001 | The child has a step cap and a wall-clock cap. It does not have a token budget, and its spend is not carried in the parent's total. That is the row's requirement. |
-| SEC-AGENT-001 | The child scope is checked before work starts, but a refusal is not yet recorded as a chain row. The row also asks for a test that a child call outside its subset is refused where the call is made. |
-| AUD-CHECKPOINT-001 | Recovery now writes a `resume` row, but the live kill run predates that change. A new kill run is needed to show the row and the chain position. |
+None. The five rows that were open at the first report are verified by the `close/` evidence.
 
 ## Tests
 
@@ -62,4 +61,4 @@ The live runs found and fixed six defects that the unit tests did not:
 
 ## Next
 
-Close the five open rows above. Then Section 3 (MCP gateway and connectors) and the `WS` workspace phase.
+Section 3 (MCP gateway and connectors) and the `WS` workspace phase.

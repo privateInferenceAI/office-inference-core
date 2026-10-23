@@ -1,0 +1,1 @@
+[{"name": "delegate_research", "result": "{\"error\": \"child_token_budget\", \"spent\": 994, \"budget\": 1}", "arguments": "{\"brief\": \"Find the travel approval threshold under 500 USD in the client's documents. Return the exact threshold amount, any relevant policy details, and the source document name or section.\"}"}]

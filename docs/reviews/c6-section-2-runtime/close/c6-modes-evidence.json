@@ -1,0 +1,12 @@
+{
+  "jobs_before_ask": 38,
+  "ask_kind": "answer",
+  "ask_has_answer": true,
+  "jobs_after_ask": 38,
+  "ask_created_job": false,
+  "jobs_after_task_submit": 39,
+  "task_created_job": true,
+  "task_job_id": "0409c467154c486b80a73a8265402097",
+  "task_state": "queued",
+  "note": "/ask answered and created no job; /jobs created one queued job with a 600 second task budget."
+}

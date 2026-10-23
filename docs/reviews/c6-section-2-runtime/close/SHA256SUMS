@@ -1,0 +1,14 @@
+d36140353896f6ddbb7bcb84556b217d34f4d100077a7da67888bc4a5d562a10  docs/reviews/c6-section-2-runtime/close/audit-events.jsonl
+6ead6d286f79d4464c2cc2148b71a1013cea227eab80fd6786830ff86f86ffc8  docs/reviews/c6-section-2-runtime/close/c6-modes-evidence.json
+b71e6ceddd3b11adf5d1e9c8795f358dd293daf69fa417e3aa67f0cabf5bf09b  docs/reviews/c6-section-2-runtime/close/c6-queue-evidence.json
+18208d588042ffe24b0f7bfbe0df19af0bd20a876317bbc848060321f7e788d3  docs/reviews/c6-section-2-runtime/close/checkpoint-audit.txt
+6200706c2827fd35722d7e0256f5c71b61f5723e4b1fb55146d97178a5d70084  docs/reviews/c6-section-2-runtime/close/checkpoint-job.json
+bbb8608a1625ce9cbe783b27161a426ed63ec0c1fb21562363e737cba4ee797d  docs/reviews/c6-section-2-runtime/close/checkpoint-kill-test.json
+f1281df17fbc9e0aa6df1a5020488a5c8b30f685e9225c3678c37af5ecc5c2f7  docs/reviews/c6-section-2-runtime/close/checkpoint-recovery.log
+3fa56ccda699d649bb67db2b802cbf6def8845e465a763561585c50a09583376  docs/reviews/c6-section-2-runtime/close/child-budget-audit.txt
+a4fe0e4a4a5403e9f0bb84d80a85cbcbdce6d025905b5e133034ff2f4c85a9f0  docs/reviews/c6-section-2-runtime/close/child-budget-job.json
+499b8c313c1b88a23f9017f567973a81b285c1f4843da4a3554372b674742004  docs/reviews/c6-section-2-runtime/close/child-token-result.json
+914023f30f437fae9bca2d63f9d9f937543b1755fa4e38955c224221698bdc0a  docs/reviews/c6-section-2-runtime/close/export.txt
+b94e827ad855a41807891acd663e843a537cec8018699f604823d3a4468a9ef6  docs/reviews/c6-section-2-runtime/close/queue-jobs.json
+aed7993adee2ae0aa21eb7034c445c88d7c6071463b37982e619a1086e113957  docs/reviews/c6-section-2-runtime/close/sec-agent-audit.txt
+58d919e885561c93294d875bc8af5febabba5cda87e990f3419d1713a0a007eb  docs/reviews/c6-section-2-runtime/close/verify.txt

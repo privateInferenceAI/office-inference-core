@@ -1,0 +1,20 @@
+{
+  "jobs": {
+    "a2e6bfdec1564f45accc2bbb45fe0926": {
+      "task": "research_brief",
+      "state_at_submit": "running",
+      "queue_position_at_submit": null,
+      "final_state": "succeeded",
+      "attempts": 4
+    },
+    "3c2250ab879e4fe596bcc0c969f320b4": {
+      "task": "research_brief_two",
+      "state_at_submit": "queued",
+      "queue_position_at_submit": 2,
+      "final_state": "succeeded",
+      "attempts": 4
+    }
+  },
+  "concurrency": 1,
+  "note": "One runtime, one slot. The second definition waited queued with a readable position, then ran after the first finished."
+}
