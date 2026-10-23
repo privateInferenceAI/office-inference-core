@@ -1,0 +1,74 @@
+{
+  "timings": [
+    {
+      "scene": "2-policy-answer",
+      "ms": 2381
+    },
+    {
+      "scene": "3-cited-page",
+      "ms": 3589
+    },
+    {
+      "scene": "4-boundary-denial",
+      "ms": 2406
+    },
+    {
+      "scene": "5-denial-in-record",
+      "ms": 1957
+    },
+    {
+      "scene": "6-permitted-answer",
+      "ms": 11437
+    }
+  ],
+  "r2": {
+    "answer": "The mileage rate for reimbursement is 0.67 USD per mile. [3]",
+    "receipt": "Answered from 1 document of 12 read on this machine\n·\n1.9 seconds",
+    "notices": [],
+    "chips": [
+      "3\ncompany/second-synthetic/employee-handbook.md\np.1\n· company"
+    ]
+  },
+  "r3": {
+    "answer": "The primary federal procurement database, FPDS, provides limited information about the countries of origin for goods that DOD procures, as it contains only summary level contract information and does not indicate the country where components are manufactured. [2]",
+    "receipt": "Answered from 1 document of 12 read on this machine\n·\n2.1 seconds",
+    "chips": [
+      "2\ncompany/second-public/government/gao/gao-25-107283-defense-industrial-base.pdf\np.11\n· company"
+    ],
+    "panel": {
+      "head": "company/second-public/government/gao/gao-25-107283-defense-industrial-base.pdf\np.1–38 · access label company · 132 chunks indexed\nClose",
+      "cited": [
+        "page 11 · cited by this answer\nBackground\n16 Buy American Act, Pub. L. No. 72-428 (1933), as amended, codified at 41 U.S.C. §§ 8301-8305. The Buy American statute generally requires federal agencies to purchase domestic end products for use in the United States. Federal Acquisition Regulation 25.101. A manufactured product is defined generally as domestic if it was manufactured in the United States and the cost of the components mined, produced, or manufactured in the United States is greater than 60 percent of the total cost of the components, subject to exceptions. Federal Acquisition Regulation 25.003.\n\nPage 7\n\nGAO-25-107283 Defense Industrial Base",
+        "page 11 · cited by this answer\nBackground\nGovernment Procurement Data Provide DOD with Limited Insight into the Country of Origin of Goods FPDS-the primary government-wide database for federal procurementcontains summary level contract information on goods that federal agencies procure but provides limited information about the countries of origin for these goods. 14 FPDS allows DOD and other federal agencies to record and report information on all contracts they award, track spending, analyze procurement trends, and generate reports for transparency and accountability purposes. 15 We identified two data fields in FPDS that have information on the countries where goods that DOD procures are manufactured: (1) Place of Manufacture, and (2) Country of Product or Service Origin. The data for these two fields provide information on compliance with laws related to domestic sourcing, such as the Buy American Act. 16\n\nPlace of Manufacture field: This field represents whether the end products being procured (manufactured goods only) are manufactured inside or outside the U.S. in accordance with the Buy American Act. The field does not indicate the country where components are manufactured. Options in this field include indicating that the products are made in the U.S., or that they are made outside the U.S. and qualify under one of the regulatory exceptions, or that the contract is subject to the requirements of a trade agreement instead of the Buy American Act requirements. For fiscal years 2020 through 2024, FPDS data show the U.S. as the Place of Manufacture for approximately 95 percent of the obligations for goods that DOD procured.\n\nCountry of Product or Service Origin field: This field represents the country from where the preponderance of the content of the products (goods) or services being procured is derived. If the good or service is a domestic end product, then the U.S. is identified as the Country of\n\n14 FPDS provides details for federal contracts from weapon systems to noncombat goods. Its data go back nearly 50 years and span over several federal agencies. The system includes information on prime contractor supplier names, type of work, location, and contract amounts.\n\n15 DOD uses FPDS foreign sourcing data for various reports submitted to Congress, including the Source Content for Major Defense Acquisition Programs reports and annual Purchases from Foreign Entities reports."
+      ],
+      "scroll": {
+        "top": 14817,
+        "height": 639,
+        "full": 60167
+      },
+      "firstCitedTop": 129
+    }
+  },
+  "r4": {
+    "answer": "I could not find that in the available documents.",
+    "receipt": "12 passages were read, and none was cited\n·\n1.9 seconds",
+    "notices": [
+      "!\nDocuments that answer this more directly exist and are not available to the 'viewer' role. The answer below is drawn from what you can see and may be incomplete."
+    ],
+    "chips": []
+  },
+  "r5": {
+    "scope": "This list is yours alone. It widens when your role holds every permission another person holds. Reading this page is itself recorded. Rows marked sent to the model are calls this deployment is permitted to make, and the audit row is the record of that permission being used.",
+    "count": 4,
+    "first": "10/23/2026, 3:35:05 PM\nDENIED\nA permission was checked or refused\nzoe.reyes@northwind.example\nrow\n113\nrole\nviewer\ndata class\ninternal\nrequest\n47e62d8367fd454a9f56bf48bab5d6a0\n{\n  \"roots\": [\n    \"company\"\n  ],\n  \"stage\": \"retrieval\",\n  \"reason\": \"boundary\",\n  \"endpoint\": \"/ask\",\n  \"disclosure\": \"Documents that answer this more directly exist and are not available to the 'viewer' role. The answer below is drawn from what you can see and may be incomplete.\",\n  \"restricted_matched\": 50,\n  \"restricted_best_score\": 0.6747613\n}"
+  },
+  "r6": {
+    "answer": "Based on the compensation table in the executive compensation document, Northwind's Chief Executive Officer Dana Whitfield's base salary is 385,000 USD [26].",
+    "receipt": "Answered from 1 document of 26 read on this machine\n·\n10.6 seconds",
+    "chips": [
+      "26\nexecutive/second-synthetic/executive-compensation-2025.md\np.1\n· executive"
+    ],
+    "scope": "This list covers 2 people. Their permissions are ones your role holds too. Reading this page is itself recorded. Rows marked sent to the model are calls this deployment is permitted to make, and the audit row is the record of that permission being used.",
+    "rows": 50
+  }
+}

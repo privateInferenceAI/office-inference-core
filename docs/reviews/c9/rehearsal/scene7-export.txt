@@ -1,0 +1,10 @@
+time="2026-10-23T19:41:23Z" level=warning msg="The \"OI_MCP_TOKEN\" variable is not set. Defaulting to a blank string."
+ Container postgres Running 
+ Container postgres Waiting 
+ Container postgres Healthy 
+ Container oi-core-audit-run-c13892f85b1b Creating 
+ Container oi-core-audit-run-c13892f85b1b Created 
+exported 306 event(s) for 2026-10-23
+  /app/exports/2026-10-23/audit-events.jsonl
+  /app/exports/2026-10-23/manifest.json
+  last row hash bb0ba42048b680bc2eb53c9d74200fb4a5337d8f54f5174aefcfc038492c8c26

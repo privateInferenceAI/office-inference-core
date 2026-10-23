@@ -1,0 +1,7 @@
+ id | event_type | outcome |   stage   |  reason  | matched |                                                                                                           payload                                                                                                            
+----+------------+---------+-----------+----------+---------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 51 | access     | denied  | retrieval | boundary | 50      | {"roots": ["company"], "stage": "retrieval", "reason": "boundary", "endpoint": "/ask", "disclosure": "Documents that answer this more directly exist and are not available to the 'viewer' role. The answer below is drawn f
+ 37 | access     | denied  | retrieval | boundary | 50      | {"roots": ["company"], "stage": "retrieval", "reason": "boundary", "endpoint": "/ask", "disclosure": "Documents that answer this more directly exist and are not available to the 'viewer' role. The answer below is drawn f
+ 28 | access     | denied  |           |          |         | {"refusal": "a request may not supply or override its own role", "roots_held": ["company"], "session_id": "xgM2yYOYtCBsAZNs6oOpkvLBaCgbxwHIHFMN6fw8B8Y", "session_role": "viewer", "attempted_role": "executive", "supplied_
+(3 rows)
+

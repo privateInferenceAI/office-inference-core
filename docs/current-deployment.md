@@ -11,7 +11,7 @@ describe how to build and operate the system; where they disagree with this page
 | C6 | Built and verified. Agent runtime, full MCP gateway, client-tenant gateway |
 | C7 | Built and verified. Authenticated sessions, least-privilege support role, secret rotation, TLS, Object Lock |
 | C8 | Partly built. Audit hashes, image scanning, drift reporting, the incident tabletop, backup and the restore/RTO drill, the 20-concurrent load test, the signed release with a tested rollback, the medical golden set with its hard-fail gate, the ingest cycle lock, acceptance on a separate scratch deployment, a blank Spot install with the four probes passing on a partial corpus, the five alarms with a confirmed email subscription, and the cost report with provider lines are verified. SSM-only support and the business rows remain open. SSH is retained by owner decision. |
-| C9 | Not started |
+| C9 | Built and rehearsed on 2026-10-23 on the demo deployment below. Eight scenes, every expected output, evidence in docs/reviews/c9/. The rehearsal used the fallback model because the account's daily Sonnet allotment was exhausted; a timed run on the primary is owed before a client demo. |
 
 The full suite is **1355 passed, 1 skipped** as of the last run on 2026-10-23.
 
@@ -28,6 +28,13 @@ The full suite is **1355 passed, 1 skipped** as of the last run on 2026-10-23.
 | Unrelated workload | 426063972668 | Same tenant, `step0-hello-indexer` (Midnight indexer) on port 8088 | Not part of this deployment; left running |
 | Caddy | 426063972668 | Same tenant | 80 and 443, public |
 | Audit bucket | 878451098165 | S3 `oi-core-audit-dev` | Object Lock, GOVERNANCE, 90 days |
+| Demo deployment (C9) | 878451098165 | `i-0a1a390f790324337`, On-Demand m7i.4xlarge, no Elastic IP, 34.230.74.252 at rehearsal time | Demo only. No alarm publisher, backup timer, SES, SSO, or MCP gateway; eight services. Evidence: docs/reviews/c9/ |
+
+The demo deployment is a separate box built for C9, not the build box and not a client deployment. Its
+deployment id is `oi-core-demo-2026-10-23`, its corpus is the second corpus, and its record contains only
+that deployment's own events. It carries the record fixes the demo depends on: a boundary denial writes an
+`access`/`denied` row and the app shows the disclosure. It is stopped between runs; its root volume survives.
+Build and rehearsal instructions are in `docs/runbooks/demo.md`.
 
 The gateway and connector are in the client tenant. The API calls the gateway at
 `OI_MCP_URL=https://mcp.badj.ai`. The tenant has no database route back to account 878: the API

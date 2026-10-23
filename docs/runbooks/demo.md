@@ -121,10 +121,10 @@ staff token and one with the executive token. Tokens are minted the same morning
 |---|---|---|---|---|
 | 1 | The deployment | 0:00 | `docker compose ps --status running`; API health | Eight running services, Postgres and parser healthy, health names the deployment and the analyst |
 | 2 | A policy answer | 0:45 | Staff asks "What is the mileage rate for reimbursement?" | 0.67 per mile, cited to the handbook and the travel policy, receipt with document count and seconds |
-| 3 | The cited page | 1:45 | Staff asks "By what date must the annual backflow preventer test be completed?" then opens the PDF source | 30 June; the inspection schedule opens at the page the answer used, access label company |
+| 3 | The cited page | 1:45 | Staff asks "What limitation does GAO identify in the primary federal procurement database's information about the origin of defense goods?" then opens the p.2 source | "Limited information about the countries of origin"; the GAO report opens with the Highlights passage on page 2 marked as cited |
 | 4 | Across the boundary | 3:15 | Staff asks "What is Northwind's Chief Executive Officer's base salary?" | No 385,000; a disclosure under the answer that documents exist the role cannot read |
 | 5 | The denial in the record | 4:30 | Staff Activity, outcome denied, open the row; then `audit list --type access` | One access row, outcome denied, reason boundary, roots company, restricted count, disclosure, request id; the CLI shows the same row |
-| 6 | The same question, permitted | 5:45 | Executive tab asks the same question; Activity as executive | 385,000 with the executive compensation citation; the scope line names the people the page covers; the staff denial and the executive answer both appear |
+| 6 | The same question, permitted | 5:45 | Executive tab asks the same question with **Ask without streaming**, then Activity as executive | 385,000 with the executive compensation citation in about 10 seconds; the scope line names the people the page covers; the staff denial and the executive answer both appear |
 | 7 | Export and hand over | 7:00 | `audit backfill`, `audit export`, `audit verify`, `sha256sum`, copy the directory to the laptop | Exported N events, verification ok with the no-anchor completeness note, the file and its manifest on the laptop |
 | 8 | Tamper and fail | 8:45 | Copy the export to `/tmp/tamper`, change one actor with `sed`, verify the copy | FAIL with two independent reasons: the row hash and the file hash against the manifest. Close on what the exported file proves and what it does not |
 
@@ -150,16 +150,27 @@ Copy `exports/$DAY` to the laptop and show the file and its manifest. The verifi
 honest limit: with no anchor it can show the chain is intact and cannot show that rows were not cut
 from the end. Say that sentence out loud in the close.
 
-**Scene 8, the commands.**
+**Scene 8, the commands.** Edit one row, not every row. A global `sed` on the actor changes every
+row that actor appears in, which reports five failures where the demo is about one edit.
 
     cp -r exports/$DAY /tmp/tamper
-    sed -i 's/"actor":"zoe.reyes@northwind.example"/"actor":"someone.else@northwind.example"/' \
-      /tmp/tamper/audit-events.jsonl
+    python3 - <<'PY'
+    import json
+    path = '/tmp/tamper/audit-events.jsonl'
+    rows = [json.loads(line) for line in open(path) if line.strip()]
+    rows[0]['actor'] = 'someone.else@northwind.example'
+    with open(path, 'w') as f:
+        for r in rows:
+            f.write(json.dumps(r, sort_keys=True) + '\n')
+    print('changed row', rows[0].get('id'))
+    PY
     oi --profile tools run -T --rm -v /tmp/tamper:/app/exports \
       audit verify /app/exports/audit-events.jsonl
 
-Expected: `FAIL`, then `row_hash does not match the row contents` and `the file hash does not match
-the manifest`. The clean copy on the laptop is untouched; its hash still matches the manifest.
+Expected: `FAIL`, one `row_hash does not match the row contents` line for the edited row, and `the
+file hash does not match the manifest`. The clean copy on the laptop is untouched; its hash still
+matches the manifest. If the narration is about the denial row, edit that row instead by finding the
+one whose payload carries `"reason": "boundary"`.
 
 **Cut order if it runs long.** Scene 6 first, then scene 2. Never cut 3, 4, 5, 7 or 8. If a scene
 overruns, cut rather than skip the audit proof.
@@ -218,6 +229,11 @@ Keep under `docs/reviews/c9/`:
 - No MCP gateway and no agent runtime. The compose file declares the gateway and this deployment
   stops it on purpose, because the scenes do not use tools. Started without a connector token it
   crash-loops with `MCP_GATEWAY_TOKEN is required`.
+- **The Ask screen's streamed path is single-shot; the JSON button runs the tool-assisted path.** On this
+deployment the two paths can answer differently: the CEO salary question missed the row on the stream and
+found it through the JSON button in about ten seconds. The accuracy profile's measurements are on the
+tool-assisted path, so the executive scene uses **Ask without streaming**. Aligning the stream with it is
+a product gap for after C9, recorded in the rehearsal evidence.
 - The four acceptance probes do not touch the app. The UI checks above are the only acceptance the
   screen gets, so run them.
 - The export is one UTC day. Without an anchor the verifier cannot prove the tail is complete; the

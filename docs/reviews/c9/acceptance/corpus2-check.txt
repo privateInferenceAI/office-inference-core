@@ -1,0 +1,38 @@
+time="2026-10-23T19:29:20Z" level=warning msg="The \"OI_MCP_TOKEN\" variable is not set. Defaulting to a blank string."
+ Container oi-core-eval-run-841adecafedf Creating 
+ Container oi-core-eval-run-841adecafedf Created 
+  PUB_N01 staff     PASS docs=['company/second-public/company/target-corp/10-K_2026-03-11_annual-report.htm', 'company/second-public/company/target-corp/10-K_2026-03-11_annual-report.htm'] kind=answer
+  PUB_P01 staff     PASS docs=['company/second-public/company/intuit-inc/EX-10_2026-01-12_credit-agreement.htm', 'company/second-public/company/autodesk-inc/EX-10_2026-06-15_credit-agreement.htm'] kind=answer
+  PUB_L01 staff     PASS docs=['company/second-public/company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm', 'company/second-public/company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm'] kind=answer
+  SYN_A01 staff     PASS docs=['company/second-synthetic/org-chart.md', 'company/second-synthetic/benefits-summary.md'] kind=answer
+  SYN_A01 executive PASS docs=['executive/second-synthetic/executive-compensation-2025.md', 'executive/second-synthetic/executive-compensation-2025.md'] kind=answer
+
+== summary ==
+{
+  "exact_number": {
+    "runs": 1,
+    "passed": 1,
+    "retrieval_hits": 1,
+    "retrieval_expected": 1
+  },
+  "contract_clause": {
+    "runs": 1,
+    "passed": 1,
+    "retrieval_hits": 1,
+    "retrieval_expected": 1
+  },
+  "long_document": {
+    "runs": 1,
+    "passed": 1,
+    "retrieval_hits": 1,
+    "retrieval_expected": 1
+  },
+  "access_boundary": {
+    "runs": 2,
+    "passed": 2,
+    "retrieval_hits": 1,
+    "retrieval_expected": 1
+  }
+}
+duration: 51.9s
+written: /out/corpus2-check.json

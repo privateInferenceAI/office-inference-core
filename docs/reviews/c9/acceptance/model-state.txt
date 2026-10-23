@@ -1,0 +1,2 @@
+ERR us.anthropic.claude-sonnet-4-6 ThrottlingException An error occurred (ThrottlingException) when calling the Converse operation (reached max retries: 4): Too many tokens per day, please wait before trying again.
+OK us.anthropic.claude-haiku-4-5-20251001-v1:0 ok

@@ -1,0 +1,11 @@
+deployment: oi-core-demo-2026-10-23
+ok   READ       5 row(s), ids [5]..[1], newest first=True, every row carries ['actor', 'at', 'id', 'outcome', 'payload', 'type']
+ok   SCOPED     a ['company'] session asking for adam.hale@northwind.example (['company', 'executive']) -> 200, 0 row(s), restricted=True
+ok   ACTOR      actor=nobody@officeinference.com -> 200, 0 row(s)
+ok   FILTERED   type=model_call -> 2 row(s), all model calls=True; type=not_a_type -> 400 bad_request
+ok   BYREQUEST  request_id 068b6878… -> 1 row(s)
+ok   BYJOB      job 98a6ecf4… -> 3 row(s) naming it
+ok   CAPPED     limit=500 -> 200, limit=5000 -> 400 limit is capped at 500. Page with `since` instead
+ok   RECORDED   9 activity read(s) recorded in the chain
+
+PASSED: 8 right(s) held against the documented activity interface
