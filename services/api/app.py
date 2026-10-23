@@ -1189,10 +1189,18 @@ async def decide_job(job_id: str, request: Request):
     # **The engine continues from the step after the gate.** An approve puts the job back in `running` and
     # nothing would move it further without this. A deny or a change request ends the job, so there is
     # nothing to drive.
+    #
+    # **Two kinds of plan can be waiting.** A workflow task resumes its static plan. An agent definition
+    # resumes the runtime, which reads its pending call and its gate step from the record. Leaving the agent
+    # branch out would leave an approved agent job running with nothing to drive it.
     if job.state == jobs_module.RUNNING:
-        plan = workflow_module.plan_for(job.task)
-        if plan is not None:
-            _workflow_runner(store, plan).resume(job)
+        definition = definitions_module.find(STATE.get("agent_definitions") or [], job.task)
+        if definition is not None:
+            _run_agent_job(job)
+        else:
+            plan = workflow_module.plan_for(job.task)
+            if plan is not None:
+                _workflow_runner(store, plan).resume(job)
 
     # Re-read, for the same reason `POST /jobs` does: the engine advances the job in the store and not in this
     # object, so returning it unchanged would show a client the state before the work it just authorised.
