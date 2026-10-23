@@ -1303,7 +1303,8 @@ items:
     tier: [cloud, office, hosted]
     phase: C8
     verify: the acceptance script passes on a freshly created deployment
-    status: open
+    status: verified
+    evidence: docs/reviews/acceptance-2026-10-23/README.md
   - id: QLT-LOAD-001
     title: The system is load tested with ingestion running
     tier: [cloud, hosted]

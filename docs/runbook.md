@@ -5812,7 +5812,6 @@ on the artifact manifest.
     OPS-ALARM-001      five alarms built; email subscription awaiting confirmation
     OPS-SUPPORT-001    needs approval to remove SSH and use SSM only
     OPS-COST-001       needs the report shape and Marketplace line access
-    QLT-ACCEPT-001     needs a fresh deployment
     BIZ-*              counsel, insurance, contracts, on-call, subprocessors, pricing
 
 ### C8.6 Medical golden set and ingest lock
