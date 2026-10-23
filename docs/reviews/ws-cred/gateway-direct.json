@@ -1,0 +1,11 @@
+{
+  "ok": true,
+  "tool": "send_email",
+  "result": {
+    "sent": true,
+    "to": "anthony@officeinference.com",
+    "subject": "MCP gateway test",
+    "message_id": "010001a166e5a389-ffb2d406-4faa-4abc-a83a-1a58cc8c7b66-000000",
+    "transport": "ses"
+  }
+}
