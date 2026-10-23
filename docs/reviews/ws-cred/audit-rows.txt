@@ -1,0 +1,14 @@
+1028|tool_call|-|turn-1
+1029|model_call|-|turn-1
+1030|tool_call|-|turn-1
+1031|tool_call|-|approval-1
+1032|approval|-|-
+1033|tool_call|-|approval-1
+1034|tool_call|-|act-1
+1035|tool_call|send_email|act-1
+1036|tool_call|-|act-1
+1037|tool_call|-|turn-2
+1038|model_call|-|turn-2
+1039|tool_call|-|turn-2
+1040|tool_call|-|finish
+1041|tool_call|-|finish

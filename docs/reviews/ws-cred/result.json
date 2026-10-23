@@ -1,0 +1,14 @@
+{
+  "job_id": "401a8318c8f1457ab5d1e18c4f048f6a",
+  "at_gate": "awaiting_approval",
+  "digest": "sha256:d11b6c4e49a602b8567aa21ad2ef356a1efb8d069660972ee9f5596175059db8",
+  "final_state": "succeeded",
+  "steps": [
+    "turn-1",
+    "approval-1",
+    "act-1",
+    "turn-2",
+    "finish"
+  ],
+  "outcome_reason": null
+}

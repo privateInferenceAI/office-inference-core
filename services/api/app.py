@@ -67,7 +67,7 @@ import approvals as approvals_module  # noqa: E402
 import definitions as definitions_module  # noqa: E402
 import agent_worker as agent_worker_module  # noqa: E402
 import agent_runtime as agent_runtime_module  # noqa: E402
-import connector_client as connector_client_module  # noqa: E402
+import mcp_client as mcp_client_module  # noqa: E402
 import egress_client as egress_client_module  # noqa: E402
 import workspace_client as workspace_client_module  # noqa: E402
 import redaction  # noqa: E402
@@ -697,15 +697,15 @@ def _run_agent_job_locked(job):
             return
         egress = egress_client_module.EgressClient(egress_url, egress_token)
 
-    connector = None
+    mcp = None
     if definition.get("connector"):
-        connector_url = (os.environ.get("OI_CONNECTOR_URL") or "").strip()
-        connector_token = (os.environ.get("OI_CONNECTOR_TOKEN") or "").strip()
-        if not connector_url or not connector_token:
-            _fail_agent_job(job, "connector_not_configured",
-                            "the definition needs a connector but OI_CONNECTOR_URL or OI_CONNECTOR_TOKEN is unset")
+        mcp_url = (os.environ.get("OI_MCP_URL") or "").strip()
+        mcp_token = (os.environ.get("OI_MCP_TOKEN") or "").strip()
+        if not mcp_url or not mcp_token:
+            _fail_agent_job(job, "mcp_not_configured",
+                            "the definition needs a credential but OI_MCP_URL or OI_MCP_TOKEN is unset")
             return
-        connector = connector_client_module.ConnectorClient(connector_url, connector_token)
+        mcp = mcp_client_module.MCPClient(mcp_url, mcp_token)
 
     # **The child's tools are a subset of the parent's.** A definition that lets a helper read something the
     # parent cannot is a permission hole, so the declaration is checked before any work starts.
@@ -886,8 +886,9 @@ def _run_agent_job_locked(job):
         subject = str((parsed or {}).get("subject") or "")
         body = str((parsed or {}).get("body") or "")
         try:
-            result = connector.send_email(to, subject, body)
-        except connector_client_module.ConnectorClientError as exc:
+            envelope = mcp.call("send_email", {"to": to, "subject": subject, "body": body})
+            result = envelope.get("result") or envelope
+        except mcp_client_module.MCPClientError as exc:
             result = {"sent": False, "error": str(exc), "to": to}
         # **The one action with a real-world recipient.** The row names the recipient and the outcome, and it is
         # written after the gate has been decided and the connector has answered.
@@ -913,7 +914,7 @@ def _run_agent_job_locked(job):
         run_child=run_child if child_specs else None,
         workspace_tool=workspace_tool if workspace is not None else None,
         web_fetch=web_fetch_tool if egress is not None else None,
-        act_tool=send_email_tool if connector is not None else None,
+        act_tool=send_email_tool if mcp is not None else None,
         max_steps=int(definition.get("max_steps") or 12),
         max_messages=int(definition.get("max_messages") or 24),
     )

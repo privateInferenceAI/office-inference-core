@@ -1,0 +1,5 @@
+{
+  "env": "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305\nHOME=/workspace\nHOSTNAME=64253e5cc5df\nLANG=C.UTF-8\nPATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\nPWD=/workspace\nPYTHON_SHA256=c2c4321961fab0fb999d66e0cecf521c2ab3994c7992873ea99e306c1094fd5a\nPYTHON_VERSION=3.12.15\n---\n.oi-cpu\n---\nHOST_HIDDEN\n",
+  "gateway_rc": 1,
+  "gateway_error": "OSError: [Errno 101] Network is unreachable"
+}

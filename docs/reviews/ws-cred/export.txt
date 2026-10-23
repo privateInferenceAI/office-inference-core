@@ -1,0 +1,4 @@
+exported 705 event(s) for 2026-10-23
+  /tmp/chain-mcp.json/audit-events.jsonl
+  /tmp/chain-mcp.json/manifest.json
+  last row hash bfbbfd36690eceac3404594fe47f402e7b04bfb6cc6dbe2b4bf496b518171b3c

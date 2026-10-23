@@ -2514,7 +2514,8 @@ items:
       inspect the sandbox environment and filesystem for connector, model and cloud credentials; none are
       present. A tool that needs a credential is called by the runtime through the MCP gateway, and the sandbox
       cannot reach the gateway directly.
-    status: open
+    status: verified
+    evidence: docs/reviews/ws-cred/README.md
     note: >-
       A credential in a sandbox is a credential in a shell the model can run. The gateway is the only place a
       credential is used, and the client owns it.
