@@ -122,6 +122,11 @@ could start before Postgres accepted connections, fail the first cycle, and then
   schema; stop the API, reset the database, start LiteLLM alone, then start the API.
 - The client app needs a separate /opt/oic-ui archive. The four acceptance probes do not need it; a core-only
   acceptance can skip the app service and still run interface, activity, access and stream.
+- Build the api image before the full build. The MCP gateway's Dockerfile is `FROM oi-core/api:local`, and a
+  parallel build can try to pull that image from a registry and fail with `pull access denied`.
+- The MCP gateway needs `MCP_GATEWAY_TOKEN`, which the renderer emits only when a connector is declared. Without
+  one it restart-loops with `MCP_GATEWAY_TOKEN is required`; the eight services the acceptance names are the core
+  set, so start them explicitly or declare a connector.
 
 ## Rules
 
@@ -420,8 +425,13 @@ docker network create ai-net
 docker network ls | grep ai-net
 ```
 
+**Build the api image first.** The MCP gateway's Dockerfile is `FROM oi-core/api:local`, and a single parallel
+build can try to pull that image from a registry before it exists locally, which fails with
+`pull access denied, repository does not exist`. Two commands remove the race:
+
 ```
 cd /opt/oi-core
+docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env build api
 docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
   --profile tools build
 ```
@@ -450,8 +460,13 @@ done
 
 Expected: `"I'm alive!"` within about 20 seconds, and `docker inspect -f '{{.RestartCount}}' litellm` at 0.
 
+**The MCP gateway is the ninth service and it is not part of the acceptance's eight.** Without a connector
+the renderer emits no `MCP_GATEWAY_TOKEN`, and the gateway exits with `MCP_GATEWAY_TOKEN is required`. Start
+the eight services by name, or declare the connector that needs the gateway:
+
 ```
-docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env up -d
+docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env up -d \
+  postgres litellm embeddings parser vector api app ingestion
 sleep 25
 docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env ps
 ```
@@ -727,6 +742,8 @@ documents together took the last 15 minutes.
 | Symptom | Cause | Smallest fix |
 |---|---|---|
 | `network ai-net declared as external, but could not be found` | Compose expects a network nobody created | `docker network create ai-net` |
+| `failed to resolve source metadata for docker.io/oi-core/api:local` | The full build ran before the api image existed; the MCP gateway builds `FROM` it | `docker compose … build api`, then the full build |
+| `mcp-gateway` restart-loops with `MCP_GATEWAY_TOKEN is required` | No connector is declared, so the renderer emitted no token | Start the eight core services by name, or declare the connector |
 | `LiteLLM Proxy: Database migration cannot proceed…` | The API applied audit migrations before Prisma baselined | `docker compose down`, remove `data/postgres`, start `postgres litellm` first, wait for `/health/liveliness`, then `up -d` |
 | `relation "chunk_index" does not exist` in ingestion logs | Worker started before the API's migrations | `docker restart ingestion` after the API logs `api ready` |
 | `could not measure the embedding dimension` | Embeddings service still loading bge-m3 | Wait for `embeddings (healthy)`, then `docker restart ingestion` |
