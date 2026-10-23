@@ -35,8 +35,8 @@ connector, Caddy and Mailpit. Mailpit captures mail; it does not deliver it.
 | | |
 |---|---|
 | Account | Office Inference, `878451098165` (holds the Activate credits) |
-| Instance | `i-096bebd46308d1673`, m7i.4xlarge, Ubuntu 24.04, 200 GB gp3 encrypted. 16 vCPU, 61 GB RAM, no GPU |
-| Elastic IP | `52.204.202.66` (stable across stops; moved from the retired t3.large) |
+| Instance | `i-02aba2feef08f8e7b`, m7i.4xlarge, Ubuntu 24.04, 200 GB gp3 encrypted. 16 vCPU, 61 GB RAM, no GPU |
+| Elastic IP | `52.204.204.133` (stable across stops; moved from the retired t3.large) |
 | SSH key | `ai-stack-key`, private key at `~/ai-stack/ai-stack-key.pem` on the workstation |
 | SSH allowed from | 47.164.45.109 only (security group `sg-09d9bfffbd28014c9`) |
 | Instance role | `oi-core-dev-instance`: `AmazonSSMManagedInstanceCore` for keyless access, plus `oi-core-dev-bedrock-invoke`, which allows exactly the four models the dev manifest names |
@@ -68,13 +68,13 @@ Qdrant on it.
 From the workstation:
 
     aws ec2 start-instances --profile oi-credits --region us-east-1 \
-      --instance-ids i-096bebd46308d1673
+      --instance-ids i-02aba2feef08f8e7b
     aws ec2 wait instance-running --profile oi-credits --region us-east-1 \
-      --instance-ids i-096bebd46308d1673
+      --instance-ids i-02aba2feef08f8e7b
     aws ec2 describe-addresses --profile oi-credits --region us-east-1 \
       --allocation-ids eipalloc-0f0560d02bcb32517 --query 'Addresses[0].PublicIp' --output text
 
-Expected output: the instance id, then `52.204.202.66`.
+Expected output: the instance id, then `52.204.204.133`.
 
 **Why:** every session starts the same way, and stopping the box between sessions is what keeps the
 credits lasting. The Elastic IP means the address never changes, so nothing in this runbook needs
@@ -82,7 +82,7 @@ editing between sessions.
 
 ### 0.2 Connect
 
-    ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@52.204.202.66
+    ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@52.204.204.133
 
 If SSH complains about key permissions:
 
@@ -90,7 +90,7 @@ If SSH complains about key permissions:
 
 Alternative, no key and no open port:
 
-    aws ssm start-session --profile oi-credits --region us-east-1 --target i-096bebd46308d1673
+    aws ssm start-session --profile oi-credits --region us-east-1 --target i-02aba2feef08f8e7b
 
 **Why:** SSH is convenient during the build. Session Manager is the pattern a client box will use,
 because it needs no inbound port and no key material in the client's hands, and every session is
@@ -175,7 +175,7 @@ Two ways. The first keeps credentials off the server entirely:
 **Option A, copy from the workstation** (run this on the workstation, not the box):
 
     rsync -av --exclude '.git' ~/projects/office-inference-core/ \
-      ubuntu@52.204.202.66:/opt/oi-core/
+      ubuntu@52.204.204.133:/opt/oi-core/
 
 **Option B, clone on the box** (needs GitHub auth on the server):
 
@@ -691,7 +691,7 @@ being a hybrid deployment.
 | Anchor shipped | `anchors/anchor-2026-10-11-00000002.json`, 276 bytes, hashes matched on both sides |
 | Export shipped | `exports/2026-10-11/audit-events.jsonl` (1,299 bytes) and `manifest.json` (405 bytes) |
 | Retention applied | All four objects locked `GOVERNANCE` until **2027-01-09**, from the bucket default |
-| Delete refused | `AccessDenied`, naming `assumed-role/oi-core-dev-instance/i-096bebd46308d1673` and `no identity-based policy allows the s3:DeleteObject action` |
+| Delete refused | `AccessDenied`, naming `assumed-role/oi-core-dev-instance/i-02aba2feef08f8e7b` and `no identity-based policy allows the s3:DeleteObject action` |
 | Deleted tail caught | An export with its last row removed failed verification against the shipped anchor: `the anchored row 768f01c89c08... is missing from this export` |
 
 The delete attempt is what this whole slice exists for. The same call succeeded from a workstation
@@ -5657,13 +5657,16 @@ The runtime is covered by tests/test_agent_runtime.py and the acceptance run in 
 
 The gateway is services/mcp_gateway/gateway.py. It loads a tool registry from the manifest, resolves a session,
 refuses a caller-supplied role, enforces the tool's allowed roles and data classes, applies the egress gate,
-reads the connector credential from a mode-600 file on every call, and writes every refusal to the chain.
+reads the connector credential from a mode-600 file on every call. Refusals on the build box are written to the chain. The tenant gateway has no audit database route, so its refusals return to the API but are not in the Office chain; that is a known gap.
 
 The registry is rendered from the manifest's mcp.tools block into rendered/mcp_tools.json. An undeclared tool is
 refused by name. The credential is never in the API environment, the gateway image or the repository.
 
-    # the gateway tests
-    python3 -m pytest tests/test_mcp_gateway.py -q
+    # the gateway tests, from a full repository checkout with the dev dependencies
+    # (the deployed /opt/oi-core tree omits tests and has no pytest)
+    python3 -m venv ~/venv
+    ~/venv/bin/pip install -r requirements-dev.txt
+    ~/venv/bin/python -m pytest tests/test_mcp_gateway.py -q
 
     # live refusal evidence from 2026-10-23
     # no session: row 1070, invalid session: row 1071, authority claim: row 1072,
@@ -5680,7 +5683,7 @@ listens on loopback 8080, the connector is the systemd unit client-connector on 
     curl -s https://3-85-130-96.sslip.io/health
 
     # restart-safe checks
-    ssh ubuntu@3.85.130.96 'systemctl is-active client-connector; docker ps --format "{{.Names}} {{.Status}}"'
+    ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@3.85.130.96 'systemctl is-active client-connector; docker ps --format "{{.Names}} {{.Status}}"'
 
 Mailpit is a capture, not a delivery service. It is there so the ownership and gateway tests can prove the
 connector received a call. A production connector points at the client's SMTP server or a verified SES identity.
@@ -5688,7 +5691,7 @@ connector received a call. A production connector points at the client's SMTP se
 ### C6.4 Signed session assertions
 
 The tenant has no database route back to account 878. The API mints a short-lived HMAC assertion containing the
-session subject, role and expiry, signed with OI_MCP_SESSION_SECRET. The gateway verifies the signature and
+session subject, role and expiry, signed with OI_MCP_SESSION_SECRET on the API and MCP_SESSION_SECRET on the tenant gateway. The gateway verifies the signature and
 expiry. It still refuses a request that supplies its own role.
 
 The assertion is an identity claim, not a permission claim: the tool's role policy and the data-class policy are
@@ -5730,7 +5733,7 @@ and policy were then deleted, and AssumeRole returned AccessDenied. Access is re
 
 The connector token is in Secrets Manager in account 426. Rotation does not rebuild an image:
 
-    ssh ubuntu@3.85.130.96 'cd /home/ubuntu/client && sudo AWS_DEFAULT_REGION=us-east-1 python3 rotate_connector_secret.py       --secret-id oi-core/connector-token       --token-file /home/ubuntu/client/connector.token       --env-file /home/ubuntu/client/connector.env --service client-connector'
+    ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@3.85.130.96 'cd /home/ubuntu/client && sudo AWS_DEFAULT_REGION=us-east-1 python3 rotate_connector_secret.py       --secret-id oi-core/connector-token       --token-file /home/ubuntu/client/connector.token       --env-file /home/ubuntu/client/connector.env --service client-connector'
 
 The gateway reads the new file on the next call. The connector restarts through systemd. Old token 401, new token
 200, and job 4795a9935e1744a481410971e496e40b sent true on row 1228.
@@ -5738,8 +5741,9 @@ The gateway reads the new file on the next call. The connector restarts through 
 ### C7.4 TLS
 
 Caddy terminates TLS for https://3-85-130-96.sslip.io. The gateway listens on loopback only. Security group
-ingress is 22, 80 and 443; port 8080 is closed externally. HTTP returns 308 to HTTPS. A job sent through the
-HTTPS gateway; audit row 1242.
+ingress is 22, 80 and 443; port 8080 is closed externally. HTTP returns 308 to HTTPS. Job
+57309daac87244d9acea35f4f65dbffb went through the HTTPS gateway; its final state was failed verification, but
+act row 1242 records sent true.
 
     curl -sS https://3-85-130-96.sslip.io/health
     curl -sS -I http://3-85-130-96.sslip.io/health
@@ -5766,8 +5770,9 @@ prompt_sha256 and completion_sha256.
     docker exec api python /app/audit.py export --out /tmp/chain
     docker exec api python /app/audit.py verify /tmp/chain/audit-events.jsonl
 
-    # editing approval_sha256, prompt_sha256 or completion_sha256 in a copy
-    # makes the verifier fail with "row_hash does not match the row contents"
+    # For a version 4 row, editing approval_sha256, prompt_sha256 or completion_sha256
+    # makes the verifier fail with "row_hash does not match the row contents".
+    # Version 3 rows cover only the approval digest.
 
 ### C8.2 Image scanning
 
@@ -5776,7 +5781,8 @@ summary. A systemd timer, oi-image-scan.timer, runs it weekly. LiteLLM 1.104.2 i
 and confirmed in the running container. The current report includes critical findings in litellm, parser and
 postgres; they are recorded, not waived.
 
-    bash scripts/scan_images.sh /var/log/oi-image-scan
+    cd /opt/oi-core
+    sudo bash scripts/scan_images.sh /var/log/oi-image-scan
     systemctl list-timers oi-image-scan.timer --no-pager
 
 ### C8.3 Drift reporting
@@ -5784,7 +5790,8 @@ postgres; they are recorded, not waived.
 scripts/deployment_state.py reports the manifest hash and every compose image pin. Keep the expected state with
 the release and compare:
 
-    python3 scripts/deployment_state.py --compose deploy/office/compose/docker-compose.yml       --manifest rendered/manifest.json --compare expected-state.json
+    cd /opt/oi-core
+    python3 scripts/deployment_state.py --compose deploy/office/compose/docker-compose.yml       --manifest rendered/manifest.json --compare deploy/office/expected-state.json
 
 Changing a pin on the box makes the compare exit 1 with the differing service. The manual's section 26 has the
 operator form.

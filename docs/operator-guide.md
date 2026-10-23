@@ -34,7 +34,7 @@ Where a stage can destroy something, it says so before the command, not after.
 | A machine running Ubuntu 24.04 with **no GPU** | The cloud build does its inference at a provider and its embedding on CPU. The office build is a different target with different hardware | `lsb_release -d` |
 | **16 vCPU, 64 GB RAM, 200 GB disk** | 16 vCPU is what the parser wants; 64 GB because the parser's layout models are the largest thing in the pipeline; 200 GB because a first ingestion of a real corpus and the vector store need room | `nproc`, `free -g`, `df -h /` |
 | **Docker and the compose plugin** | Everything runs in containers | `docker compose version` |
-| **An AWS account** with Bedrock model access | The frontier lane calls Amazon Bedrock. Production uses Nova Micro, Nova Lite and Nova Pro. The renderer also supports an OpenAI-compatible provider; DeepSeek was tested live but production routing stays on Bedrock | The manual's section 3 and Stage 17 list them |
+| **An AWS account** with Bedrock model access | The frontier lane calls Amazon Bedrock. Production uses Nova Micro, Nova Lite and Nova Pro. The renderer also supports an OpenAI-compatible provider; DeepSeek was tested live but production routing stays on Bedrock | The manual's section 3 lists them |
 | **The repository** at `/opt/oi-core` | The path is load-bearing: the systemd unit files hard-code it and the compose file resolves mounts relative to it | `ls /opt/oi-core` |
 | **A free hour** | The first ingestion of a real corpus takes minutes, and the model downloads take longer | — |
 | **A subject the manifest declares** | A session names a subject, and a made-up address is refused rather than defaulted. `rendered/access.json` lists the declared ones, and Stage 13h is where you use it | `oi --profile tools run --rm session mint --dev --subject <yours> --role viewer` |
@@ -3521,15 +3521,15 @@ operator to re-run. A false accusation costs an afternoon; a false acquittal cos
 The first line returns ok. The second returns 308 and a Location header for HTTPS. Ports 3000, 4000, 5432, 8025,
 8080, 8088, 8090 and 8094 are closed externally; 22, 80 and 443 are open.
 
-    ssh ubuntu@3.85.130.96 'systemctl is-active client-connector; docker ps --format "{{.Names}} {{.Status}}"'
-    ssh ubuntu@3.85.130.96 'curl -s http://127.0.0.1:8025/api/v1/messages'
+    ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@3.85.130.96 'systemctl is-active client-connector; docker ps --format "{{.Names}} {{.Status}}"'
+    ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@3.85.130.96 'curl -s http://127.0.0.1:8025/api/v1/messages'
 
 The last command reads Mailpit. It is a capture service. A message there means the connector received the call;
 it does not mean a recipient got an email.
 
 ## 17b. Rotate the connector token
 
-    ssh ubuntu@3.85.130.96 'cd /home/ubuntu/client && sudo AWS_DEFAULT_REGION=us-east-1 python3 rotate_connector_secret.py       --secret-id oi-core/connector-token       --token-file /home/ubuntu/client/connector.token       --env-file /home/ubuntu/client/connector.env --service client-connector'
+    ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@3.85.130.96 'cd /home/ubuntu/client && sudo AWS_DEFAULT_REGION=us-east-1 python3 rotate_connector_secret.py       --secret-id oi-core/connector-token       --token-file /home/ubuntu/client/connector.token       --env-file /home/ubuntu/client/connector.env --service client-connector'
 
 The gateway reads the token file on every call, so it needs no restart. The connector restarts through systemd.
 The old token returns 401 and the new token returns 200. If the connector fails with "Address already in use",
@@ -3537,18 +3537,19 @@ an older manually started connector still owns 8094; stop it and restart the uni
 
 ## 17c. Check audit chain version 4
 
-    ssh ubuntu@52.204.204.133 'docker exec api python /app/audit.py export --out /tmp/chain'
-    ssh ubuntu@52.204.204.133 'docker exec api python /app/audit.py verify /tmp/chain/audit-events.jsonl'
+    ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@52.204.204.133 'docker exec api python /app/audit.py export --out /tmp/chain'
+    ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@52.204.204.133 'docker exec api python /app/audit.py verify /tmp/chain/audit-events.jsonl'
 
-The clean export verifies. Editing approval_sha256, prompt_sha256 or completion_sha256 in a copy makes the
-verifier fail with row_hash does not match the row contents. Older rows keep their versions and keep verifying.
+The clean export verifies. For a version 4 row, editing approval_sha256, prompt_sha256 or completion_sha256 in
+a copy makes the verifier fail with row_hash does not match the row contents. Version 3 rows cover only the
+approval digest. Older rows keep their versions and keep verifying.
 
 ## 17d. Drift and scanning
 
     cd /opt/oi-core
-    python3 scripts/deployment_state.py --compose deploy/office/compose/docker-compose.yml       --manifest rendered/manifest.json --compare expected-state.json
+    python3 scripts/deployment_state.py --compose deploy/office/compose/docker-compose.yml       --manifest rendered/manifest.json --compare deploy/office/expected-state.json
 
-    bash scripts/scan_images.sh /var/log/oi-image-scan
+    sudo bash scripts/scan_images.sh /var/log/oi-image-scan
     systemctl list-timers oi-image-scan.timer --no-pager
 
 A changed image pin makes the compare exit 1 with the differing service. The image scan runs weekly. Its current
@@ -3567,7 +3568,13 @@ Check, in this order:
 5. The audit row's data_class and egress_allowed fields. A regulated call with the lane off is refused before it
    reaches the gateway.
 
-## 17f. What is still open
+## 17f. The audit gap and what is still open
+
+The tenant gateway has no audit database route. Its refusals are returned to the API but are not written to the
+Office chain. Refusals on the build box are recorded; tenant refusals are not. Do not claim otherwise to a
+client.
+
+
 
 The open C8 rows are alarms, backup, RTO, rollback, SSM-only support, cost reporting, golden questions,
 fresh-deployment acceptance and load testing. The BIZ rows need counsel, insurance, contracts, on-call staff,

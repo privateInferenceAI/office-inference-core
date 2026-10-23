@@ -15,7 +15,7 @@ Security group ingress after the change: 22, 80 and 443. Port 8080 was removed.
 - `https://3-85-130-96.sslip.io/health` returns `{"status": "ok"}` with a valid certificate.
 - `http://3-85-130-96.sslip.io/health` returns 308 to the HTTPS URL.
 - External scan of the tenant address: 22, 80 and 443 open; 3000, 4000, 5432, 8025, 8080, 8088, 8090 and 8094 closed.
-- Job `57309daac87244d9acea35f4f65dbffb` went through the HTTPS gateway; audit row 1242 records `sent: true`.
+- Job `57309daac87244d9acea35f4f65dbffb` went through the HTTPS gateway; its final state was failed verification, but audit row 1242 records `sent: true`.
 
 ## Files
 

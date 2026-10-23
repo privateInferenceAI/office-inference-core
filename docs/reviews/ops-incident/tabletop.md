@@ -19,7 +19,7 @@ Stated clock: client notification within 72 hours of awareness.
 | T+48 h | Incident lead | Confirms no other object was public. Closes the containment. |
 | T+5 business days | Team | Writes the review and the test that would catch the next one. |
 
-The 72-hour clock is met with 2 hours and 50 minutes to spare. The tabletop also shows the two steps the
+The 72-hour clock is met with 70 hours and 50 minutes to spare. The tabletop also shows the two steps the
 scenario depends on: containment before preservation is not allowed, and the client notice does not wait for a
 root cause.
 

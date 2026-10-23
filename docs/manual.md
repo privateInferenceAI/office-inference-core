@@ -151,7 +151,7 @@ proves and, more usefully, what it does not.
 
 | Piece | What it is | In this deployment |
 |---|---|---|
-| The machine | One AWS EC2 instance running Docker. No GPU: the generation models live at the provider, and embedding runs on CPU here. **Reranking does not** — this build reranks at Bedrock, and the local reranker container sits behind a bench profile because CPU reranking cannot meet the latency budget | `i-096bebd46308d1673`, an m7i.4xlarge: 16 vCPU, 64 GB RAM, 200 GB disk, Ubuntu 24.04. Check it with `nproc` and `free -g` rather than trusting this row on a deployment you did not build |
+| The machine | One AWS EC2 instance running Docker. No GPU: the generation models live at the provider, and embedding runs on CPU here. **Reranking does not** — this build reranks at Bedrock, and the local reranker container sits behind a bench profile because CPU reranking cannot meet the latency budget | `i-02aba2feef08f8e7b`, an m7i.4xlarge: 16 vCPU, 64 GB RAM, 200 GB disk, Ubuntu 24.04. Check it with `nproc` and `free -g` rather than trusting this row on a deployment you did not build |
 | `postgres` | The database. Holds the gateway's keys and spend, and our own audit record | A container, on the box |
 | `litellm` | The gateway. Every AI call goes through it. It authenticates the caller, checks the role's budget and model permissions, calls the model, and writes down what it cost | A container, on the box |
 | `audit` | The tool that writes and checks the audit record. Runs when you call it, not as a service | A container, started on demand |
@@ -340,7 +340,7 @@ Two ways in, and the second one needs no key and no open port.
 **SSH**, from a workstation holding the private key:
 
 ```
-ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@52.204.202.66
+ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@52.204.204.133
 ```
 
 The security group allows port 22 from one address only. If your address changes, the connection times
@@ -350,7 +350,7 @@ out rather than being refused, and the fix is to update the security group.
 port and no key material:
 
 ```
-aws ssm start-session --profile oi-credits --region us-east-1 --target i-096bebd46308d1673
+aws ssm start-session --profile oi-credits --region us-east-1 --target i-02aba2feef08f8e7b
 ```
 
 Both land you in the same shell as the `ubuntu` user, who can run Docker without `sudo`.
@@ -369,7 +369,7 @@ already fooled one careful reader of an earlier draft. Look at the snap instead,
 snap list amazon-ssm-agent
 sudo snap services amazon-ssm-agent
 aws ssm describe-instance-information --profile oi-credits --region us-east-1 \
-  --filters Key=InstanceIds,Values=i-096bebd46308d1673 \
+  --filters Key=InstanceIds,Values=i-02aba2feef08f8e7b \
   --query 'InstanceInformationList[].{id:InstanceId,ping:PingStatus,agent:AgentVersion}'
 ```
 
@@ -387,8 +387,8 @@ between sessions.
 
 ```
 # from a workstation
-aws ec2 stop-instances  --profile oi-credits --region us-east-1 --instance-ids i-096bebd46308d1673
-aws ec2 start-instances --profile oi-credits --region us-east-1 --instance-ids i-096bebd46308d1673
+aws ec2 stop-instances  --profile oi-credits --region us-east-1 --instance-ids i-02aba2feef08f8e7b
+aws ec2 start-instances --profile oi-credits --region us-east-1 --instance-ids i-02aba2feef08f8e7b
 ```
 
 The address does not change across a stop, so the SSH command above keeps working. The containers are
@@ -2040,8 +2040,8 @@ To add a document, copy it in and wait for the next cycle, or run one now rather
 fifteen minutes:
 
 ```
-scp -i ~/ai-stack/ai-stack-key.pem myfile.pdf ubuntu@52.204.202.66:/opt/oi-core/documents/company/
-ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@52.204.202.66 \
+scp -i ~/ai-stack/ai-stack-key.pem myfile.pdf ubuntu@52.204.204.133:/opt/oi-core/documents/company/
+ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@52.204.204.133 \
   'cd /opt/oi-core && docker exec ingestion python3 /app/ingest.py --documents /documents'
 ```
 
@@ -5401,11 +5401,11 @@ one, which is deliberate, and an operator mid-incident should not discover that 
 
 ```
 aws ec2 describe-instances --profile oi-credits --region us-east-1 \
-  --instance-ids i-096bebd46308d1673 \
+  --instance-ids i-02aba2feef08f8e7b \
   --query 'Reservations[].Instances[].MetadataOptions.HttpPutResponseHopLimit'
 
 aws ec2 modify-instance-metadata-options --profile oi-credits --region us-east-1 \
-  --instance-id i-096bebd46308d1673 --http-put-response-hop-limit 2 --http-tokens required
+  --instance-id i-02aba2feef08f8e7b --http-put-response-hop-limit 2 --http-tokens required
 ```
 
 The value should read 2, and it does on this instance. If the query returns 1 and the gateway says it
@@ -5556,9 +5556,9 @@ the manual also asks you to type.
 
 | Command | What it does |
 |---|---|
-| `ssh -i <key> ubuntu@52.204.202.66` | Get a shell on the machine |
-| `aws ssm start-session --profile oi-credits --region us-east-1 --target i-096bebd46308d1673` | A shell with no key and no open port. Needs the Session Manager plugin locally |
-| `aws ec2 stop-instances` / `start-instances --instance-ids i-096bebd46308d1673` | Stop paying for the machine, or bring it back. The address survives |
+| `ssh -i <key> ubuntu@52.204.204.133` | Get a shell on the machine |
+| `aws ssm start-session --profile oi-credits --region us-east-1 --target i-02aba2feef08f8e7b` | A shell with no key and no open port. Needs the Session Manager plugin locally |
+| `aws ec2 stop-instances` / `start-instances --instance-ids i-02aba2feef08f8e7b` | Stop paying for the machine, or bring it back. The address survives |
 | `aws s3api list-object-versions --bucket oi-core-audit-dev --profile oi-credits` | Every version of every piece of evidence, which is where a repeated anchor filename shows its history |
 | `aws iam get-policy-version --profile oi-credits --policy-arn arn:aws:iam::878451098165:policy/oi-core-dev-bedrock-invoke --version-id v1` | Which models this machine may invoke. **Run from a workstation**, see below |
 | `aws ec2 describe-instances … --query '…MetadataOptions…'` | The metadata hop limit, when the gateway cannot find credentials |
@@ -5878,15 +5878,16 @@ no DNS change was needed: the name resolves to the tenant address. HTTP returns 
 The API calls OI_MCP_URL, which points at the tenant gateway. There is no database route from the tenant back
 to account 878, so the API signs a short-lived HMAC assertion containing the session subject, role and expiry.
 The gateway verifies the signature and expiry and still refuses a caller-supplied role. The signing secret is
-OI_MCP_SESSION_SECRET on both sides.
+OI_MCP_SESSION_SECRET in the API and MCP_SESSION_SECRET in the tenant gateway. The names differ; the value must match.
 
 ### 26.2 What the MCP gateway enforces
 
 The gateway reads the tool registry rendered from the manifest's mcp.tools block. It refuses a tool that is not
 declared, a session that is absent, expired or forged, a request that supplies its own role, a role the tool
-does not allow, a data class the tool does not accept, and a call that fails the egress gate. Each refusal is
-written to the audit chain. The connector credential is a mode-600 file read on each call, so rotation needs no
-redeploy.
+does not allow, a data class the tool does not accept, and a call that fails the egress gate. Refusals on the
+**build box** are written to the audit chain. The tenant gateway has no audit database route, so its refusals
+are returned to the API but are not in the chain; that is a known gap. The connector credential is a mode-600
+file read on each call, so rotation needs no redeploy.
 
 The egress gate is the existing access.egress.frontier_classes policy. With the lane off, a regulated job is
 refused before it exists and the connector sees no call. With the lane on, the call is allowed only after the
@@ -5896,8 +5897,9 @@ gate, and the audit row records the data class, the egress verdict and the redac
 
 Chain version 4 covers the approval digest, the prompt digest and the completion digest. Migration
 027_the_prompt_and_completion_are_in_the_chain.sql added it without rewriting older rows. Older rows keep their
-versions and keep verifying. Editing approval_sha256, prompt_sha256 or completion_sha256 makes the verifier fail
-with "row_hash does not match the row contents".
+versions and keep verifying. For a version 4 row, editing approval_sha256, prompt_sha256 or completion_sha256
+makes the verifier fail with "row_hash does not match the row contents". Version 3 rows cover the approval
+digest only, so their prompt and completion columns were never in their hash.
 
 ### 26.4 Operating commands
 
@@ -5905,13 +5907,14 @@ with "row_hash does not match the row contents".
     curl -s https://3-85-130-96.sslip.io/health
 
     # rotate the connector token, no redeploy
-    ssh ubuntu@3.85.130.96 'cd /home/ubuntu/client && sudo AWS_DEFAULT_REGION=us-east-1 python3 rotate_connector_secret.py       --secret-id oi-core/connector-token       --token-file /home/ubuntu/client/connector.token       --env-file /home/ubuntu/client/connector.env --service client-connector'
+    ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@3.85.130.96 'cd /home/ubuntu/client && sudo AWS_DEFAULT_REGION=us-east-1 python3 rotate_connector_secret.py       --secret-id oi-core/connector-token       --token-file /home/ubuntu/client/connector.token       --env-file /home/ubuntu/client/connector.env --service client-connector'
 
     # deployment state and drift
-    python3 scripts/deployment_state.py --compose /opt/oi-core/deploy/office/compose/docker-compose.yml       --manifest /opt/oi-core/rendered/manifest.json --compare expected-state.json
+    cd /opt/oi-core
+    python3 scripts/deployment_state.py --compose /opt/oi-core/deploy/office/compose/docker-compose.yml       --manifest /opt/oi-core/rendered/manifest.json --compare deploy/office/expected-state.json
 
     # image scan
-    bash scripts/scan_images.sh /var/log/oi-image-scan
+    sudo bash scripts/scan_images.sh /var/log/oi-image-scan
 
     # endpoint ownership check
     python3 scripts/check_client_endpoint.py https://3-85-130-96.sslip.io
@@ -5921,12 +5924,34 @@ sends through the tenant gateway.
 
 ### 26.5 Caveats
 
-Mailpit captures mail instead of delivering it. The tenant address is the instance's current public IP, so an
+Mailpit captures mail instead of delivering it. The connector and Mailpit now bind to loopback; the security
+group is the outer control, not the binding. The tenant address is the instance's current public IP, so an
 Elastic IP is needed before calling it production. The DeepSeek key is in the rendered env for the provider
 comparison and should be rotated. The image scan has current critical findings in litellm, parser and postgres;
-they are recorded, not waived.
+they are recorded, not waived. The tenant gateway does not write refusals to the Office chain, as section 26.2
+says. An unrelated Midnight indexer, step0-hello-indexer, also runs on the tenant on port 8088.
 
-### 26.6 What is still open
+### 26.6 Running an agent job
+
+The API has no host port. Get a shell inside the API container and use the Stage 13j job commands against
+127.0.0.1:8088:
+
+    ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@52.204.204.133
+    docker exec -it api sh
+    curl -s http://127.0.0.1:8088/health
+
+Then follow Stage 13j. The job needs a live session token, a declared task and an input. It stops at the
+approval gate, the approval carries the action digest, and the act step calls `send_email` through the tenant
+gateway. A fresh job and approval is the operator check that the whole C6 path still works.
+
+### 26.7 Workspace host services
+
+The WS workspace, egress proxy and old host gateway are on-demand host processes, not part of the current
+running deployment. They are stopped. If a workspace test needs them, start them from the checkout with the
+service's own `--host 127.0.0.1 --port` arguments; do not expose 8090 to 8093 publicly. The production tool path
+is the tenant gateway, not the 8093 host process.
+
+### 26.8 What is still open
 
 The open C8 rows are alarms, backup and restore, RTO, rollback, SSM-only support, cost reporting, golden
 questions, fresh-deployment acceptance and load testing. The BIZ rows need counsel, insurance, contracts,

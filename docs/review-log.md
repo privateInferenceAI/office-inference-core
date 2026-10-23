@@ -1282,3 +1282,35 @@ remaining failures (27 failing runs of 260, of which 22 sit on four questions an
 acceptance-probe evidence for the live build, and the revised next-work list. The remaining work is not prompt
 tuning: diagnose A06, P05, P06 and U08, add provider fallback, redesign the two bad probes, and widen the
 evaluation set before claiming more.
+
+## C6 to C8 documentation panel, 2026-10-23
+
+**Scope.** The updated manual, runbook and operator guide for C6, C7 and C8, plus the current-deployment page,
+reviewed against the live build box and the badj.ai client tenant. Three reviewers who did not write the work:
+executor, cold reader and fidelity checker, following docs/reviews/acceptance-plan-post-c5.md.
+
+**Baseline.** Full suite 1355 passed, 1 skipped. The tenant was serving TLS and the gateway; the build box had
+eight core containers.
+
+**Round one.** 34 findings: 12 blocking, 18 misleading, 4 cosmetic. The blocking findings were not only wording.
+The documented drift command pointed at a file that did not exist in the checkout; the endpoint check and the
+sudo image scan did not run as written; the tenant registry was hand-maintained and contradicted the manifest;
+the connector and Mailpit were bound to 0.0.0.0 while the docs called them loopback only; the build box still
+ran a stale MCP gateway, Mailpit and four host services; migration 027 existed in the database but not in the
+file tree or the ledger; the build-box instance id in the docs was a stopped instance; and the tabletop's stated
+margin was wrong. Round-one files are docs/reviews/c6-c7-round-1-*.md.
+
+**Fixes.** The tenant registry was synced to the rendered manifest; the connector, Mailpit and gateway are now
+bound to loopback; the build box was cleaned to its eight core containers; migration 027 was added to the box
+and the schema_migrations ledger; the expected-state file, endpoint script and sudo/venv commands were fixed in
+all four pages; the instance id, tabletop margin and failed-job wording were corrected; the tenant gateway's
+audit gap was disclosed rather than papered over; the current 26.x structure now covers running a job and the
+stopped workspace host services.
+
+**Round two.** No blocking finding remained. The reviewers verified the fixes by running the documented
+commands. Two cosmetic residuals were fixed by the Lead: the tamper claim now names chain version 4, and the
+manual section order and working-directory lines are corrected. Round-two files are
+docs/reviews/c6-c7-round-2-*.md.
+
+**Verdict.** Pass after fixes. A competent operator can follow the C6 to C8 sections without the author. The
+tenant gateway audit gap and the open C8 rows are recorded limitations, not documentation defects.
