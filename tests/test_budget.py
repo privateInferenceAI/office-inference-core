@@ -20,6 +20,13 @@ def test_a_throttle_is_retryable():
     assert kind["reason"] == "throttled"
 
 
+def test_a_bedrock_too_many_requests_sentence_is_retryable():
+    """The real Bedrock 429 body, not the SDK type token."""
+    kind = budget_module.classify('Too many requests, please wait before trying again.')
+    assert kind["retryable"] is True
+    assert kind["reason"] == "throttled"
+
+
 def test_a_budget_refusal_is_terminal():
     """Waiting will not help, and the wait would spend the budget the degraded answer needed."""
     kind = budget_module.classify('Budget has been exceeded! Team=analyst')

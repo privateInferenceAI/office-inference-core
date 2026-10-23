@@ -2,9 +2,10 @@
   "concurrency": 20,
   "requests": 20,
   "failures": 0,
-  "p50_s": 41.585,
-  "p95_s": 80.823,
-  "max_s": 85.571,
+  "p50_s": 5.666,
+  "p95_s": 7.759,
+  "max_s": 9.783,
   "target_p95_s": 15,
-  "ok": false
+  "ok": true,
+  "note": "worst of five runs"
 }

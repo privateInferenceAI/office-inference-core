@@ -1,0 +1,10 @@
+{
+  "concurrency": 20,
+  "requests": 20,
+  "failures": 0,
+  "p50_s": 41.585,
+  "p95_s": 80.823,
+  "max_s": 85.571,
+  "target_p95_s": 15,
+  "ok": false
+}

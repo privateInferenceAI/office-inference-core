@@ -78,7 +78,11 @@ RETRYABLE_TYPES = (
     'throttling',
     'throttling_exception',
     'too_many_requests',
+    # The provider message, not the SDK type. Bedrock returns this exact sentence as the body of a 429;
+    # matching only the underscore form classified a real throttle as unrecognised and skipped the retry.
+    'too many requests',
     'rate_limit',
+    'rate limit',
     'service_unavailable',
     'internal_server',
     'timeout',
@@ -184,7 +188,7 @@ def classify(text: str) -> dict:
 
 def _label(matched: str, *, terminal: bool) -> str:
     """A reason a person reads, from a type a gateway sends."""
-    if matched.startswith(('throttl', 'too_many', 'rate_limit')):
+    if matched.startswith(('throttl', 'too_many', 'too many', 'rate_limit', 'rate limit')):
         return 'throttled'
     # The phrase forms as well as the tokens, for the reason the terminal list carries both: what arrives is
     # the provider's message, and a label that only knows the type token falls through to a generic word.
