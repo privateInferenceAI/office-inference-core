@@ -101,7 +101,7 @@ Tenant services, which are not on the build box:
 | caddy | TLS termination and the only public listener | The gateway is unreachable from the API |
 | mailpit | SMTP capture fallback | The connector falls back to capture instead of SES |
 
-The tenant address is https://3-85-130-96.sslip.io. Its security group allows 22, 80 and 443; the gateway is on
+The tenant address is https://mcp.officeinference.com. Its security group allows 22, 80 and 443; the gateway is on
 loopback 8080. Do not expose 8080.
 
 Tools, which run only when called:
@@ -3498,14 +3498,14 @@ operator to re-run. A false accusation costs an afternoon; a false acquittal cos
 
 ## 17a. Check the tenant
 
-    curl -sS https://3-85-130-96.sslip.io/health
-    curl -sS -I http://3-85-130-96.sslip.io/health
+    curl -sS https://mcp.officeinference.com/health
+    curl -sS -I http://mcp.officeinference.com/health
 
 The first line returns ok. The second returns 308 and a Location header for HTTPS. Ports 3000, 4000, 5432, 8025,
 8080, 8088, 8090 and 8094 are closed externally; 22, 80 and 443 are open.
 
-    ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@3.85.130.96 'systemctl is-active client-connector; docker ps --format "{{.Names}} {{.Status}}"'
-    ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@3.85.130.96 'curl -s http://127.0.0.1:8025/api/v1/messages'
+    ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@34.225.62.245 'systemctl is-active client-connector; docker ps --format "{{.Names}} {{.Status}}"'
+    ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@34.225.62.245 'curl -s http://127.0.0.1:8025/api/v1/messages'
 
 The last command reads Mailpit only if the connector has been switched to the fallback. The current connector
 sends through SES as awstest@officeinference.com to that verified address; delivery is real, but the account is
@@ -3513,7 +3513,7 @@ still in the SES sandbox.
 
 ## 17b. Rotate the connector token
 
-    ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@3.85.130.96 'cd /home/ubuntu/client && sudo AWS_DEFAULT_REGION=us-east-1 python3 rotate_connector_secret.py       --secret-id oi-core/connector-token       --token-file /home/ubuntu/client/connector.token       --env-file /home/ubuntu/client/connector.env --service client-connector'
+    ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@34.225.62.245 'cd /home/ubuntu/client && sudo AWS_DEFAULT_REGION=us-east-1 python3 rotate_connector_secret.py       --secret-id oi-core/connector-token       --token-file /home/ubuntu/client/connector.token       --env-file /home/ubuntu/client/connector.env --service client-connector'
 
 The gateway reads the token file on every call, so it needs no restart. The connector restarts through systemd.
 The old token returns 401 and the new token returns 200. If the connector fails with "Address already in use",

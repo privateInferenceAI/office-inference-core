@@ -205,7 +205,7 @@ that answers the C6 and C7 rows.
 | SES email sender | Same tenant | awstest@officeinference.com, verified in the badj account |
 | Caddy | Same tenant | Public 80 and 443 |
 
-The public name is https://3-85-130-96.sslip.io. Caddy holds a Let's Encrypt certificate for it and redirects
+The public name is https://mcp.officeinference.com. Caddy holds a Let's Encrypt certificate for it and redirects
 HTTP to HTTPS. The tenant security group allows 22, 80 and 443; ports 3000, 4000, 5432, 8025, 8080, 8088,
 8090 and 8094 are closed externally.
 
@@ -5874,7 +5874,7 @@ The client tenant is account 426, instance i-0b6aa00095ae40e54. It runs the MCP 
 Caddy and Mailpit. Caddy is the only public listener, on 80 and 443. The gateway is on loopback 8080, the
 connector on 8094 and Mailpit on 1025.
 
-The public name is https://3-85-130-96.sslip.io. Caddy gets a Let's Encrypt certificate for it, which is why
+The public name is https://mcp.officeinference.com. Caddy gets a Let's Encrypt certificate for it, which is why
 no DNS change was needed: the name resolves to the tenant address. HTTP returns 308 to HTTPS.
 
 The API calls OI_MCP_URL, which points at the tenant gateway. There is no database route from the tenant back
@@ -5906,10 +5906,10 @@ digest only, so their prompt and completion columns were never in their hash.
 ### 26.4 Operating commands
 
     # tenant health
-    curl -s https://3-85-130-96.sslip.io/health
+    curl -s https://mcp.officeinference.com/health
 
     # rotate the connector token, no redeploy
-    ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@3.85.130.96 'cd /home/ubuntu/client && sudo AWS_DEFAULT_REGION=us-east-1 python3 rotate_connector_secret.py       --secret-id oi-core/connector-token       --token-file /home/ubuntu/client/connector.token       --env-file /home/ubuntu/client/connector.env --service client-connector'
+    ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@34.225.62.245 'cd /home/ubuntu/client && sudo AWS_DEFAULT_REGION=us-east-1 python3 rotate_connector_secret.py       --secret-id oi-core/connector-token       --token-file /home/ubuntu/client/connector.token       --env-file /home/ubuntu/client/connector.env --service client-connector'
 
     # deployment state and drift
     cd /opt/oi-core
@@ -5919,7 +5919,7 @@ digest only, so their prompt and completion columns were never in their hash.
     sudo bash scripts/scan_images.sh /var/log/oi-image-scan
 
     # endpoint ownership check
-    python3 scripts/check_client_endpoint.py https://3-85-130-96.sslip.io
+    python3 scripts/check_client_endpoint.py https://mcp.officeinference.com
 
 The job path is unchanged: POST /jobs, approve at POST /jobs/<id>/approvals, read GET /jobs/<id>. The act step
 sends through the tenant gateway.
