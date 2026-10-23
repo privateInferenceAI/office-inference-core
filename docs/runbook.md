@@ -14,14 +14,21 @@ the same work in more detail and are not numbered alike, so read the brief for o
 commands.
 
 **How to use this:** work one phase at a time. A phase is not finished until its verification step
-passes. Later phases stay as outlines until we reach them, so nothing here goes stale.
+passes. C6, C7 and the built part of C8 are written as built sections below. Future phases stay as outlines so
+nothing here pretends to be current when it is not.
 
-**Status, 2026-10-16:** **C0 to C5 complete.** Phases 0 to 3 built, run, and verified on the cloud reference
-instance: the gateway, the hash-chained record with export and anchoring, per-role keys with hard budgets,
-document ingestion with citation verification, access control, redaction and retention. C3 added the assistant
-API and its routing, C4 the client application and the contract a second repository builds against, and C5 the
-workflow engine, the approval gate, the two screens that watch and decide, and the email intake connector.
-C6 to C9, and phases 7 to 11 below, are still outlines.
+**Status, 2026-10-23:** **C0 to C7 complete. C8 partly built.** C6 added the durable agent runtime and the full
+MCP gateway, and the gateway and connector now run in badj.ai client tenant account 426 behind TLS. C7 added
+authenticated-session refusals in the chain, a least-privilege support role that cannot read documents, secret
+rotation from Secrets Manager, TLS with a closed plaintext port, and Object Lock matched to the contract. C8 has
+four verified rows: audit chain version 4, scheduled image scanning, deployment-state drift reporting, and the
+incident tabletop. The rest of C8 and the business rows are open.
+
+The authoritative current snapshot is docs/current-deployment.md. Section Phase C6 to C8 below has the commands.
+
+The build box is in Office Inference account 878. The client tenant is badj.ai account 426, instance
+i-0b6aa00095ae40e54, public name https://3-85-130-96.sslip.io. The tenant runs the MCP gateway, the email
+connector, Caddy and Mailpit. Mailpit captures mail; it does not deliver it.
 
 ## The environment we are building on
 
@@ -34,8 +41,10 @@ C6 to C9, and phases 7 to 11 below, are still outlines.
 | SSH allowed from | 47.164.45.109 only (security group `sg-09d9bfffbd28014c9`) |
 | Instance role | `oi-core-dev-instance`: `AmazonSSMManagedInstanceCore` for keyless access, plus `oi-core-dev-bedrock-invoke`, which allows exactly the four models the dev manifest names |
 | Inference | Bedrock, us-east-1. No model runs on this box |
+| Client tenant | badj.ai account 426063972668, instance i-0b6aa00095ae40e54, public name https://3-85-130-96.sslip.io |
+| Tenant services | MCP gateway loopback 8080, connector systemd port 8094, Caddy 80 and 443, Mailpit 1025 |
 | Region | us-east-1 |
-| State | **stopped** when not in use |
+| State | Build box: stopped when not in use. Client tenant: running while it serves the gateway |
 
 Why this shape: an Elastic IP so the address survives stops; a keyless SSM role so access does not
 depend on a key file; and a security group that publishes nothing but SSH from one address. That is
@@ -5629,25 +5638,192 @@ PASS  CON-LEAST-001   6 probe(s), reached: own_mailbox; granted scopes Mail.Read
 enumeration and it was caught, which is what makes the one-mailbox result on the left evidence rather than a
 line that would print the same thing whatever the credential could reach.
 
-## Phase 7 — Agent runtime and MCP gateway  *(outline)*
+## Phase C6 — Agent runtime and MCP gateway, as built
 
-The agent loop with tools, sessions, and human-in-the-loop.
+C6 is built and verified. The gate and evidence are in docs/reviews/ws-gate/ and the MCP gateway review is in
+docs/reviews/mcp-gateway/. The client-tenant evidence is in docs/reviews/mcp-owned/.
 
-## Phase 8 — Frontier lane  *(outline)*
+### C6.1 The durable agent runtime
 
-Routing by data class, redaction, approvals, and a test proving nothing leaves when the lane is off.
+The runtime is one agent loop with tools, an attempt and time budget, a child-token budget, context trimming and
+startup recovery. Every step is persisted before it runs, so a restart resumes rather than repeats. The approval
+gate holds a tool call, writes the pending action to the job row, and records the approval as a chain row. The
+runtime records only the held tool call in the approved delta, which is the fix that avoided Bedrock rejecting the
+turn after approval with a missing toolResult block.
 
-## Phase 9 — Office appliance  *(outline)*
+The runtime is covered by tests/test_agent_runtime.py and the acceptance run in docs/reviews/ws-acceptance/.
 
-Backup, restore drill, signed updates with rollback, drift reporting, support tunnel.
+### C6.2 The MCP gateway
 
-## Phase 10 — Voice  *(outline)*
+The gateway is services/mcp_gateway/gateway.py. It loads a tool registry from the manifest, resolves a session,
+refuses a caller-supplied role, enforces the tool's allowed roles and data classes, applies the egress gate,
+reads the connector credential from a mode-600 file on every call, and writes every refusal to the chain.
+
+The registry is rendered from the manifest's mcp.tools block into rendered/mcp_tools.json. An undeclared tool is
+refused by name. The credential is never in the API environment, the gateway image or the repository.
+
+    # the gateway tests
+    python3 -m pytest tests/test_mcp_gateway.py -q
+
+    # live refusal evidence from 2026-10-23
+    # no session: row 1070, invalid session: row 1071, authority claim: row 1072,
+    # undeclared tool: row 1073, data class: row 1074, role policy: row 1090,
+    # expired session: row 1091
+
+### C6.3 The client tenant
+
+The production gateway and connector are in badj.ai account 426, instance i-0b6aa00095ae40e54. The gateway
+listens on loopback 8080, the connector is the systemd unit client-connector on loopback 8094, Caddy owns public
+80 and 443, and Mailpit captures SMTP on loopback 1025.
+
+    # tenant health
+    curl -s https://3-85-130-96.sslip.io/health
+
+    # restart-safe checks
+    ssh ubuntu@3.85.130.96 'systemctl is-active client-connector; docker ps --format "{{.Names}} {{.Status}}"'
+
+Mailpit is a capture, not a delivery service. It is there so the ownership and gateway tests can prove the
+connector received a call. A production connector points at the client's SMTP server or a verified SES identity.
+
+### C6.4 Signed session assertions
+
+The tenant has no database route back to account 878. The API mints a short-lived HMAC assertion containing the
+session subject, role and expiry, signed with OI_MCP_SESSION_SECRET. The gateway verifies the signature and
+expiry. It still refuses a request that supplies its own role.
+
+The assertion is an identity claim, not a permission claim: the tool's role policy and the data-class policy are
+still enforced after it. The secret is in the mode-600 rendered env on the build box and in the gateway
+environment on the tenant. Rotate it with the same procedure as any shared secret and update both sides.
+
+### C6.5 The egress gate on a tool call
+
+send_email consults the manifest's access.egress.frontier_classes before the gateway. Denied: the job is
+refused before it exists, the connector sees nothing, and the audit row says egress_allowed false. Allowed: the
+body is redacted when access.egress.redaction is on, the gateway is called with egress_approved true, and the
+audit row records data_class, egress_allowed and the redaction counts.
+
+    # lane-off evidence: regulated job refused before creation, docs/reviews/mcp-egress/lane-off.json
+    # lane-on evidence: job b36f84f12f7d428fa205c844afe319e0 succeeded, audit row 1148 sent true
+
+The first lane-on attempt succeeded while the send was denied because the tool gate read the env and the job
+boundary read the manifest. The gate now reads the manifest first. That is why the audit row exists at all.
+
+## Phase C7 — Security, as built
+
+C7 is built and verified. Evidence is in docs/reviews/sec-auth/, sec-least/, sec-secret/, sec-tls/ and aud-lock/.
+
+### C7.1 Authenticated session, not a caller role
+
+    # no token -> 401, row 1218
+    # valid session plus role: executive -> 403, row 1219
+
+The no-session refusal used to return without writing anything. The /ask path now records the attempt before it
+returns. The forged-role path records the session role and the attempted role.
+
+### C7.2 Least-privilege support role
+
+The role office-inference-support in account 426 trusted only Office Inference's DSHAgentRole, allowed SSM and no
+S3. Assuming it and reading a real object in disk-ingest-documents-878451098165 returned AccessDenied. The role
+and policy were then deleted, and AssumeRole returned AccessDenied. Access is revocable from the client account.
+
+### C7.3 Secret rotation from Secrets Manager
+
+The connector token is in Secrets Manager in account 426. Rotation does not rebuild an image:
+
+    ssh ubuntu@3.85.130.96 'cd /home/ubuntu/client && sudo AWS_DEFAULT_REGION=us-east-1 python3 rotate_connector_secret.py       --secret-id oi-core/connector-token       --token-file /home/ubuntu/client/connector.token       --env-file /home/ubuntu/client/connector.env --service client-connector'
+
+The gateway reads the new file on the next call. The connector restarts through systemd. Old token 401, new token
+200, and job 4795a9935e1744a481410971e496e40b sent true on row 1228.
+
+### C7.4 TLS
+
+Caddy terminates TLS for https://3-85-130-96.sslip.io. The gateway listens on loopback only. Security group
+ingress is 22, 80 and 443; port 8080 is closed externally. HTTP returns 308 to HTTPS. A job sent through the
+HTTPS gateway; audit row 1242.
+
+    curl -sS https://3-85-130-96.sslip.io/health
+    curl -sS -I http://3-85-130-96.sslip.io/health
+
+### C7.5 Object Lock and the contract
+
+The audit bucket oi-core-audit-dev has Object Lock enabled with default GOVERNANCE mode for 90 days. The
+retention clause in docs/contracts/audit-evidence-retention.md names the same mode and period, and limits bypass
+to the account administrator. AUD-LOCK-001 is a consistency check; counsel review is BIZ-LEGAL-001 and
+BIZ-CONTRACT-001.
+
+## Phase C8 — Operations, partly built
+
+Four C8 rows are verified. The rest are open and need a decision or an external party; the table in
+docs/current-deployment.md names the blocker for each.
+
+### C8.1 Audit chain version 4
+
+Chain version 4 covers the approval digest, the prompt digest and the completion digest. Migration
+027_the_prompt_and_completion_are_in_the_chain.sql added it without rewriting older rows. The export carries
+prompt_sha256 and completion_sha256.
+
+    # clean export
+    docker exec api python /app/audit.py export --out /tmp/chain
+    docker exec api python /app/audit.py verify /tmp/chain/audit-events.jsonl
+
+    # editing approval_sha256, prompt_sha256 or completion_sha256 in a copy
+    # makes the verifier fail with "row_hash does not match the row contents"
+
+### C8.2 Image scanning
+
+scripts/scan_images.sh scans every deployment image with Trivy and writes one JSON report per image plus a
+summary. A systemd timer, oi-image-scan.timer, runs it weekly. LiteLLM 1.104.2 is recorded beside its compose pin
+and confirmed in the running container. The current report includes critical findings in litellm, parser and
+postgres; they are recorded, not waived.
+
+    bash scripts/scan_images.sh /var/log/oi-image-scan
+    systemctl list-timers oi-image-scan.timer --no-pager
+
+### C8.3 Drift reporting
+
+scripts/deployment_state.py reports the manifest hash and every compose image pin. Keep the expected state with
+the release and compare:
+
+    python3 scripts/deployment_state.py --compose deploy/office/compose/docker-compose.yml       --manifest rendered/manifest.json --compare expected-state.json
+
+Changing a pin on the box makes the compare exit 1 with the differing service. The manual's section 26 has the
+operator form.
+
+### C8.4 Incident response
+
+docs/runbooks/incident-response.md is the runbook. docs/reviews/ops-incident/tabletop.md is the public-artifact
+tabletop: containment before evidence export, first client notice at 70 minutes against a 72-hour clock, second
+update at 24 hours. Two gaps are recorded: no acceptance probe for public-access settings, and no owning job id
+on the artifact manifest.
+
+### C8.5 Still open
+
+    OPS-ALARM-001      needs a notification destination and a confirmed subscription
+    OPS-BACKUP-001     needs a restore target and a drill
+    OPS-RTO-001        needs the drill's recorded elapsed time
+    OPS-UPDATE-001     needs release signing and a rollback target
+    OPS-SUPPORT-001    needs approval to remove SSH and use SSM only
+    OPS-COST-001       needs the report shape and Marketplace line access
+    QLT-GOLDEN-001     needs a vertical and sixty client-approved questions
+    QLT-ACCEPT-001     needs a fresh deployment
+    QLT-LOAD-001       needs a concurrency target and latency budget
+    BIZ-*              counsel, insurance, contracts, on-call, subprocessors, pricing
+
+## Future phases
+
+### Phase 9 — Office appliance  *(outline)*
+
+Backup, restore drill, signed updates with rollback, drift reporting, support tunnel. The drift reporting and the
+SSM role exist; the backup drill and the signed update do not.
+
+### Phase 10 — Voice  *(outline)*
 
 LiveKit cascade: speech to text, model, text to speech, with the transcript audited.
 
-## Phase 11 — Flagship demo  *(outline)*
+### Phase 11 — Flagship demo  *(outline)*
 
 The denial appeal agent end to end.
+
 
 ---
 
@@ -5845,8 +6021,10 @@ query; the second-corpus measurement records that limit and the marker chunk say
 1. One phase at a time. Verify before moving on.
 2. Every component gets its reasoning recorded here when it is added, not later.
 3. Every image is digest-pinned with its version in a comment.
-4. Nothing publishes a port except ingress.
-5. Stop the instance when you stop working. The credits are generous, not infinite.
+4. Nothing publishes a port except ingress. On the tenant, that is Caddy on 80 and 443; the gateway stays on loopback.
+5. Stop the build box when you stop working. The credits are generous, not infinite.
+6. The client tenant is not a build box. Leave it running while it serves the gateway, and do not expose 8080.
+7. Mailpit is a capture, not a delivery service. A message in Mailpit proves the connector worked, not that a recipient received mail.
 
 ---
 

@@ -4,6 +4,10 @@ Merged 2026-10-10 from four independent design passes, checked against live AWS 
 could be checked. This is meant to be built from, not discussed. Where the passes disagreed, the
 decision is made here and the argument is given.
 
+**Current status, 2026-10-23.** C0 to C7 are built and verified; C8 is partly built. The current deployment
+splits the API and database (account 878) from the MCP gateway, connector and TLS edge (badj.ai client tenant
+account 426). The authoritative snapshot is docs/current-deployment.md.
+
 **Cloud first, on purpose.** One CPU instance, Bedrock for inference, no GPU. Ironing out problems on
 cheap hardware produces the cloud demo and the cloud product. The office build reuses every component
 and swaps the substrate.

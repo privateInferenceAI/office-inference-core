@@ -1,5 +1,10 @@
 # Handover: Office Inference Core, C6 agent runtime and MCP gateway
 
+**Historical document, 2026-10-22.** C6 is now built and verified. This handover describes the plan that was
+carried out; it is kept for the reasoning. The current state, topology and open rows are in
+docs/current-deployment.md. The C6 evidence is in docs/reviews/ws-gate/, docs/reviews/mcp-gateway/ and
+docs/reviews/mcp-owned/.
+
 **Written 2026-10-22 by the agent who finished the answer-quality and simplification work.** Read the whole
 document before you touch anything. It is long on purpose. Anthony asked the previous handover to be long because
 a handover that leaves you guessing costs the first hour of the engagement.

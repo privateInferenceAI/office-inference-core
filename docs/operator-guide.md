@@ -12,6 +12,12 @@ it breaks. Where the manual says *what*, this says *why* and *in what order*.
 measurements recorded as they were taken. It is history. This guide is a procedure, and it is written to
 be run again on a different machine.
 
+**Current state, 2026-10-23.** This guide was written across C1 to C5. C6 and C7 are now built, and the
+current deployment has a client tenant in badj.ai account 426 running the MCP gateway, the email connector,
+Caddy and Mailpit. The authoritative snapshot is docs/current-deployment.md. The operating additions are in
+Stage 17 at the end of this guide. Where this guide says something does not exist yet, check that page first;
+the phase table there is the newer statement.
+
 ## How to use it
 
 Each stage ends with a **checkpoint** — one command and the output that means the stage worked. Do not
@@ -28,7 +34,7 @@ Where a stage can destroy something, it says so before the command, not after.
 | A machine running Ubuntu 24.04 with **no GPU** | The cloud build does its inference at a provider and its embedding on CPU. The office build is a different target with different hardware | `lsb_release -d` |
 | **16 vCPU, 64 GB RAM, 200 GB disk** | 16 vCPU is what the parser wants; 64 GB because the parser's layout models are the largest thing in the pipeline; 200 GB because a first ingestion of a real corpus and the vector store need room | `nproc`, `free -g`, `df -h /` |
 | **Docker and the compose plugin** | Everything runs in containers | `docker compose version` |
-| **An AWS account** with Bedrock model access | The frontier lane calls Amazon Bedrock. Four models: three Nova and one DeepSeek in the reference deployment | The manual's section 3 lists them |
+| **An AWS account** with Bedrock model access | The frontier lane calls Amazon Bedrock. Production uses Nova Micro, Nova Lite and Nova Pro. The renderer also supports an OpenAI-compatible provider; DeepSeek was tested live but production routing stays on Bedrock | The manual's section 3 and Stage 17 list them |
 | **The repository** at `/opt/oi-core` | The path is load-bearing: the systemd unit files hard-code it and the compose file resolves mounts relative to it | `ls /opt/oi-core` |
 | **A free hour** | The first ingestion of a real corpus takes minutes, and the model downloads take longer | — |
 | **A subject the manifest declares** | A session names a subject, and a made-up address is refused rather than defaulted. `rendered/access.json` lists the declared ones, and Stage 13h is where you use it | `oi --profile tools run --rm session mint --dev --subject <yours> --role viewer` |
@@ -40,10 +46,14 @@ hardware limit.
 
 ## The shape of the thing
 
-Eight containers run all the time: the six on the retrieval path below, and the assistant API and the app,
-which are the two things a person or a client actually talks to. Five tools run when you call them, and the
-intake connector runs from the checkout because it has no compose service yet. Knowing which is which makes the
-rest of this guide readable.
+Eight containers run all the time on the build box: the six on the retrieval path below, and the assistant
+API and the app, which are the two things a person or a client actually talks to. Five tools run when you call
+them, and the intake connector runs from the checkout because it has no compose service yet.
+
+A second host now exists. The client tenant in badj.ai account 426 runs the MCP gateway, the email connector,
+Caddy and Mailpit. Caddy is the only public listener. The API reaches the gateway over HTTPS, and the gateway
+reaches the connector on loopback. Mailpit captures mail instead of delivering it. Knowing which host a
+component is on is now part of reading this guide.
 
 ```
                     ┌──────────────────────────────────────────┐
@@ -80,6 +90,18 @@ Long-running services, and what each is for:
 | `embeddings` | Turns text into vectors, on CPU | Ingestion fails; retrieval fails |
 | `api` | The assistant API. One surface for questions, jobs, documents and the record, with sessions read from a token | Nothing a client calls answers, including the app |
 | `app` | The client application: Ask, Do, Job, Review, Activity. It holds no model key and no database credential | The screens are gone and the API is reached directly or not at all |
+
+Tenant services, which are not on the build box:
+
+| Tenant container or unit | Its job | If it is down |
+|---|---|---|
+| client-mcp-gateway | Resolves the signed session, enforces tool role and data-class policy, applies the egress gate, calls one connector | No tool call leaves the API |
+| client-connector | The email connector. Accepts a send only from the gateway | A send fails and the audit row says so |
+| caddy | TLS termination and the only public listener | The gateway is unreachable from the API |
+| mailpit | SMTP capture for the ownership test | The connector receives a send but cannot hand it on |
+
+The tenant address is https://3-85-130-96.sslip.io. Its security group allows 22, 80 and 443; the gateway is on
+loopback 8080. Do not expose 8080.
 
 Tools, which run only when called:
 
@@ -1653,8 +1675,9 @@ which is exactly what a disk failure takes away. The second protects the *record
 compliance claim, and does nothing for the documents or the keys.
 
 **A truthful sentence to a client today:** *the audit record ships continuously to write-once storage in your
-account, so the evidence survives this machine; the documents and the configuration do not yet have a
-backup procedure, and that arrives with C8.*
+account, so the evidence survives this machine; the MCP gateway and connector run in your tenant behind TLS; the
+documents and the configuration do not yet have a backup procedure, and that arrives with the open C8 rows.*
+The gateway and TLS are now built. Backup, restore, RTO, alarms and rollback are not.
 
 ## 12c. What a restore will have to cover when it is built
 
@@ -3483,3 +3506,70 @@ The guide's checkpoints are the part that earns its keep.
 **A check that reports a problem is worth less than a check that reports the right problem.** The anchor
 verifier accused intact files of tampering, and the retention job reported `INCOMPLETE` while telling the
 operator to re-run. A false accusation costs an afternoon; a false acquittal costs the client's evidence.
+
+---
+
+# Stage 17: the client tenant, TLS and the C8 operations
+
+**Goal:** operate the pieces added after this guide was written, and know which C8 rows are still open.
+
+## 17a. Check the tenant
+
+    curl -sS https://3-85-130-96.sslip.io/health
+    curl -sS -I http://3-85-130-96.sslip.io/health
+
+The first line returns ok. The second returns 308 and a Location header for HTTPS. Ports 3000, 4000, 5432, 8025,
+8080, 8088, 8090 and 8094 are closed externally; 22, 80 and 443 are open.
+
+    ssh ubuntu@3.85.130.96 'systemctl is-active client-connector; docker ps --format "{{.Names}} {{.Status}}"'
+    ssh ubuntu@3.85.130.96 'curl -s http://127.0.0.1:8025/api/v1/messages'
+
+The last command reads Mailpit. It is a capture service. A message there means the connector received the call;
+it does not mean a recipient got an email.
+
+## 17b. Rotate the connector token
+
+    ssh ubuntu@3.85.130.96 'cd /home/ubuntu/client && sudo AWS_DEFAULT_REGION=us-east-1 python3 rotate_connector_secret.py       --secret-id oi-core/connector-token       --token-file /home/ubuntu/client/connector.token       --env-file /home/ubuntu/client/connector.env --service client-connector'
+
+The gateway reads the token file on every call, so it needs no restart. The connector restarts through systemd.
+The old token returns 401 and the new token returns 200. If the connector fails with "Address already in use",
+an older manually started connector still owns 8094; stop it and restart the unit.
+
+## 17c. Check audit chain version 4
+
+    ssh ubuntu@52.204.204.133 'docker exec api python /app/audit.py export --out /tmp/chain'
+    ssh ubuntu@52.204.204.133 'docker exec api python /app/audit.py verify /tmp/chain/audit-events.jsonl'
+
+The clean export verifies. Editing approval_sha256, prompt_sha256 or completion_sha256 in a copy makes the
+verifier fail with row_hash does not match the row contents. Older rows keep their versions and keep verifying.
+
+## 17d. Drift and scanning
+
+    cd /opt/oi-core
+    python3 scripts/deployment_state.py --compose deploy/office/compose/docker-compose.yml       --manifest rendered/manifest.json --compare expected-state.json
+
+    bash scripts/scan_images.sh /var/log/oi-image-scan
+    systemctl list-timers oi-image-scan.timer --no-pager
+
+A changed image pin makes the compare exit 1 with the differing service. The image scan runs weekly. Its current
+report includes critical findings in litellm, parser and postgres; read docs/reviews/ops-cve/ before assuming the
+list is clean.
+
+## 17e. If a message does not arrive
+
+Check, in this order:
+
+1. The job result and the tool_call row: did the gateway return sent true?
+2. The gateway health through Caddy.
+3. The connector unit on the tenant.
+4. Mailpit's message list. A message there means the connector worked, but the SMTP target is the capture server,
+   not a real mail server.
+5. The audit row's data_class and egress_allowed fields. A regulated call with the lane off is refused before it
+   reaches the gateway.
+
+## 17f. What is still open
+
+The open C8 rows are alarms, backup, RTO, rollback, SSM-only support, cost reporting, golden questions,
+fresh-deployment acceptance and load testing. The BIZ rows need counsel, insurance, contracts, on-call staff,
+subprocessors and pricing. docs/current-deployment.md lists each with its blocker. Do not tell a client that
+backup or paging exists; it does not.

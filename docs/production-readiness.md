@@ -8,7 +8,34 @@ either written down with a reason or removed on purpose.
 
 **Status key:** done · partial · missing
 
+## Current status, 2026-10-23
+
+This page was written on 2026-10-10. The rows below are the original assessment and they are kept as history.
+The current state is:
+
+| Area | Current state |
+|---|---|
+| Phases | C1 to C7 built and verified; C8 partly built |
+| Authentication | A session token exists and roles come from it; people-facing sign-in is still missing |
+| Scoped keys and budgets | Per-role keys and ceilings are built and tested |
+| Secrets | Connector token is in Secrets Manager and rotates; other rendered secrets are still a mode-600 file |
+| TLS | Real at the client-tenant edge through Caddy; the build box still has no ingress |
+| Redaction and egress | The existing data-class gate and redaction are wired into the tool call; lane-off and lane-on are proved |
+| Audit | Chain version 4 covers approval, prompt and completion; Object Lock is GOVERNANCE for 90 days; export and anchor exist |
+| Vulnerability scanning | A weekly Trivy scan exists; the current report has critical findings, recorded and not waived |
+| Drift | A deployment-state report compares manifest hash and image pins |
+| Incident response | Runbook and tabletop exist; the 72-hour notice clock is met in the tabletop |
+| Backup, restore, RTO | Still missing; open C8 rows |
+| Alarms, rollback, SSM-only support, cost reporting | Still missing or partial; open C8 rows |
+| Golden questions, fresh-deployment acceptance, load test | Still missing; open C8 rows |
+| Business rows | Contracts, insurance, legal review, on-call, subprocessors and pricing remain open |
+
+The authoritative list, with blockers, is docs/current-deployment.md. The rows below describe the 2026-10-10
+view; read them as the gap analysis that got us here, not as the current status.
+
 ---
+
+
 
 ## 1. Hardware: what each deployment tier actually needs
 
