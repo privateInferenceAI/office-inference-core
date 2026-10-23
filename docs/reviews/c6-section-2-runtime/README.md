@@ -93,6 +93,22 @@ Job `88b19c45060f4e319665611d98e301bf` was killed while `turn-2` was running.
 - The audit rows show the interrupted turn at 419 and 420 and the recovered turn at 421 onward. The chain
   export holds 97 events and verifies intact.
 
+## Context trim live run
+
+Job `095074f74297432bbc3b9ddf736a2c55` ran with the `research_brief` definition's `max_messages` temporarily
+set to 4, so the trim had to happen.
+
+- The job succeeded in 8 steps and 66.2 seconds.
+- The chain holds `context_trim` rows at turns 2, 3, 4, 5, 6 and 7, with dropped counts 0, 3, 5, 8, 11 and 14.
+  The rows name the step, the reason (`message_cap`), the dropped count and the ceiling.
+- The first trim attempt failed because the audit tool did not accept `context_trim`, then because the trim
+  kept a tool result without its assistant call. Both are fixed.
+- The chain export holds 203 events and verifies intact.
+- The original definition was restored and the API restarted after the run.
+
+The trimmed run took more turns than an untrimmed one because the model lost evidence it had already read. That
+is the cost of a small ceiling, and the chain now shows it rather than hiding it.
+
 ## What this proves
 
 - A definition job is claimed by the dispatcher and runs without an inline request.
@@ -107,7 +123,6 @@ Job `88b19c45060f4e319665611d98e301bf` was killed while `turn-2` was running.
 - A real irreversible connector. The gate mechanics are live-tested; the email connector is not.
 - Token budgets for the child. The child has a step cap and a wall-clock cap; the token ceiling is not enforced
   yet.
-- A live context trim. The trim path has unit tests; no live run has forced a trim yet.
 - The workspace sandbox, web access, artifacts and workspace UI. That is the WS phase.
 
 ## Reproduce
@@ -138,6 +153,15 @@ Export and verify the chain:
 - `export.txt`: the export summary and last row hash.
 - `jobs.json`: the two post-fix successful jobs as returned by the API.
 - `api.log`: the API startup log from the final deployment.
+- `SHA256SUMS`: hashes for the files above.
+
+## Files in context/
+
+- `job-after.json`: the trimmed job.
+- `audit-rows.txt`: the `context_trim` rows and surrounding calls.
+- `audit-events.jsonl`: the 203-event chain export.
+- `verify.txt`: the verifier's result.
+- `export.txt`: the export summary.
 - `SHA256SUMS`: hashes for the files above.
 
 ## Files in recovery/
