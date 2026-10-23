@@ -41,6 +41,9 @@ class RuntimeContext:
     tools: list
     verify: Optional[Callable[[str, dict], Optional[str]]] = None
     on_model_call: Optional[Callable[[dict], None]] = None
+    # A child brief goes in, a structured JSON result comes out. The controller does not know how the child
+    # runs; the deployment supplies a read-only child loop with its own budget.
+    run_child: Optional[Callable[[str], str]] = None
     max_steps: int = DEFAULT_MAX_STEPS
     max_messages: int = DEFAULT_MAX_MESSAGES
     messages: list = field(default_factory=list)
@@ -226,7 +229,19 @@ class AgentPlan:
             name = call.get("name") or ""
             arguments = call.get("arguments") or "{}"
             try:
-                result = context.toolbox.execute(name, arguments)
+                if name == "delegate_research":
+                    if context.run_child is None:
+                        result = json.dumps({"error": "this definition has no child runner"})
+                    else:
+                        brief = ""
+                        try:
+                            parsed = json.loads(arguments or "{}")
+                            brief = str(parsed.get("brief") or "")
+                        except (ValueError, TypeError):
+                            brief = ""
+                        result = context.run_child(brief)
+                else:
+                    result = context.toolbox.execute(name, arguments)
             except tool_loop.ToolAuditError as exc:
                 # **A tool with no audit row is a gap in the record, not a tool failure to retry.** The
                 # answer path tolerates a lost audit row; the runtime does not.

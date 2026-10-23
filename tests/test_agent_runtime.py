@@ -132,6 +132,29 @@ def test_a_resumed_plan_reads_the_last_turn_outcome_from_the_record():
     assert spec.name == "finish"
 
 
+def test_the_parent_can_ask_one_read_only_child_for_a_brief():
+    model = FakeModel([
+        {"content": "", "tool_calls": [{"id": "child-call", "name": "delegate_research",
+                                         "arguments": '{"brief": "Find the travel threshold"}'}],
+         "error": None},
+        {"content": "The helper found 500 USD [1].", "tool_calls": [], "error": None},
+    ])
+    toolbox = FakeToolbox()
+    ctx = context(model, toolbox, verify=lambda answer, evidence: None)
+    briefs = []
+    ctx.run_child = lambda brief: (briefs.append(brief) or
+                                   '{"brief": "The threshold is 500 USD [1].", "sources": []}')
+    job, store = make_job(ctx)
+
+    result = agent_runtime.run(store, job, ctx)
+
+    assert result.job.state == jobs.SUCCEEDED
+    assert briefs == ["Find the travel threshold"]
+    assert toolbox.calls == [], "the child must use its own tool box, not the parent's"
+    assert [step.name for step in result.job.steps] == ["turn-1", "turn-2", "finish"]
+    assert result.job.result["answer"] == "The helper found 500 USD [1]."
+
+
 def test_an_irreversible_tool_call_stops_at_the_gate_and_runs_only_after_approval():
     """AG-GATE-001 and AG-IRREVERSIBLE-001: the call is held, the digest covers it, and the act is once."""
     model = FakeModel([

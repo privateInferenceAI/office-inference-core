@@ -603,6 +603,12 @@ def _agent_verify(definition: dict):
     return None
 
 
+CHILD_PROMPT = """You are a read-only research helper. Answer the brief from the client's documents.
+Use the tools to find evidence. Every claim must carry the number the tool printed in square brackets, for
+example [1]. You cannot take actions, cannot delegate, and must return a short structured brief with the sources
+you actually read. If the evidence does not contain the answer, say so plainly."""
+
+
 def _run_agent_job(job):
     """One claimed agent job: resolve the session, build the real tools and gateway call, run the plan.
 
@@ -622,9 +628,71 @@ def _run_agent_job(job):
 
     model = model_for(definition.get("role") or session.role)
 
+    # **The child's tools are a subset of the parent's.** A definition that lets a helper read something the
+    # parent cannot is a permission hole, so the declaration is checked before any work starts.
+    parent_tools = {str(name) for name in (definition.get("tools") or [])}
+    child_names = [str(name) for name in (definition.get("child_tools") or [])]
+    if any(name not in parent_tools for name in child_names):
+        _fail_agent_job(job, "definition_child_scope",
+                        f"child tools {sorted(set(child_names) - parent_tools)} are not parent tools")
+        return
+    child_specs = [tool for tool in tool_loop.active_tools()
+                   if tool["function"]["name"] in set(child_names)]
+    child_count = 0
+
     def step_name() -> str:
         fresh = STATE["jobs"].get(job.job_id)
         return fresh.steps[-1].name if fresh is not None and fresh.steps else ""
+
+    def run_child(brief: str) -> str:
+        """One read-only child: its own tool box, its own budget, its own span, no delegation."""
+        nonlocal child_count
+        child_count += 1
+        span = f"child-{child_count}"
+        child_box = tool_loop.ToolBox(STATE["services"], session.permit(), session.role,
+                                      strict_audit=True)
+
+        def child_audit(event, actor, actor_role, outcome, payload, **extra):
+            addressed = dict(payload or {}, job_id=job.job_id, task=job.task,
+                             step=step_name(), span=span, role="child")
+            audit(event, session.subject, session.role, outcome, addressed, **extra)
+
+        child_box.audit = child_audit
+        messages = [{"role": "system", "content": CHILD_PROMPT},
+                    {"role": "user", "content": brief or "Find the answer to the task."}]
+        child_seconds = max(10.0, min(120.0, float(definition.get("child_max_seconds") or 60)))
+        child_budget = budget_module.Budget(total=child_seconds, reserve=0.0)
+        for _child_step in range(4):
+            if time.monotonic() - child_budget.started > child_seconds:
+                return json.dumps({"error": "child_deadline"})
+            reply = _tool_chat(session, model, messages, child_specs, child_budget)
+            if reply.get("error"):
+                return json.dumps({"error": str(reply["error"])})
+            addressed = {"job_id": job.job_id, "task": job.task, "step": step_name(),
+                         "span": span, "role": "child", "model": model,
+                         "content_chars": len((reply.get("content") or "")),
+                         "attribution": reply.get("attribution") or {}}
+            audit("model_call", session.subject, session.role, "ok", addressed, model=model)
+            calls = reply.get("tool_calls") or []
+            if not calls:
+                sources = [{"doc_id": getattr(passage, "doc_id", ""),
+                            "page": getattr(passage, "page_start", None)}
+                           for passage in child_box.evidence]
+                return json.dumps({"brief": (reply.get("content") or "").strip(),
+                                   "sources": sources, "evidence": len(child_box.evidence)})
+            messages.append({"role": "assistant", "content": reply.get("content") or "",
+                             "tool_calls": [{"id": call.get("id") or "", "type": "function",
+                                             "function": {"name": call.get("name") or "",
+                                                          "arguments": call.get("arguments") or "{}"}}
+                                            for call in calls]})
+            for call in calls:
+                try:
+                    result = child_box.execute(call.get("name") or "", call.get("arguments") or "{}")
+                except Exception as exc:  # noqa: BLE001
+                    result = json.dumps({"error": f"child tool failed: {type(exc).__name__}"})
+                messages.append({"role": "tool", "tool_call_id": call.get("id") or "",
+                                 "content": str(result)})
+        return json.dumps({"error": "child_step_limit"})
 
     def tool_audit(event, actor, actor_role, outcome, payload, **extra):
         # **The row has to name the job and the step, not only the tool.** A tool row that cannot be tied
@@ -648,9 +716,10 @@ def _run_agent_job(job):
         definition=definition,
         call_model=lambda messages, tools: _tool_chat(session, model, messages, tools, budget),
         toolbox=toolbox,
-        tools=tool_loop.active_tools(),
+        tools=tool_loop.agent_tools(definition),
         verify=_agent_verify(definition),
         on_model_call=model_audit,
+        run_child=run_child if child_specs else None,
         max_steps=int(definition.get("max_steps") or 12),
         max_messages=int(definition.get("max_messages") or 24),
     )

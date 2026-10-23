@@ -100,6 +100,26 @@ TOOLS = [
     },
 ]
 
+# **The one tool that is not a retrieval call.** A definition with `child_tools` gets a helper it can ask for a
+# narrow read-only brief. The helper cannot act, cannot delegate again and cannot see the parent's conversation.
+DELEGATE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "delegate_research",
+        "description": (
+            "Send one narrow research brief to a read-only helper. Use it for a side lookup that would "
+            "clutter your own context. The helper returns facts with sources and cannot take any action."),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "brief": {"type": "string",
+                          "description": "what the helper should find, in one or two sentences"},
+            },
+            "required": ["brief"],
+        },
+    },
+}
+
 _PROMPT_HEAD = (
     "You answer questions about a client's own documents.\n"
     "You have tools. search_documents searches the documents; read_passages opens a document around a "
@@ -1032,6 +1052,20 @@ class ToolBox:
 def active_tools() -> list:
     """The tools the answer path offers. One path, so one list."""
     return list(TOOLS)
+
+
+def agent_tools(definition: dict) -> list:
+    """The tools one agent definition offers: the retrieval tools, plus the helper when the definition has
+    child tools.
+
+    **The helper is not in `TOOLS`.** The answer path must never be able to call it; only the runtime, and only
+    for a definition that declares child tools. The child's own tool list is built by the caller from
+    `child_tools`, so the parent's permission is not inherited by accident.
+    """
+    tools = list(TOOLS)
+    if definition.get("child_tools"):
+        tools.append(DELEGATE_TOOL)
+    return tools
 
 
 def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
