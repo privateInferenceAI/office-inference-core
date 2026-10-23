@@ -1,0 +1,12 @@
+{
+  "client_endpoint": {
+    "url": "http://3.85.130.96:8080",
+    "result": "client-owned",
+    "exit": 0
+  },
+  "vendor_endpoint": {
+    "url": "https://mcp.officeinference.com",
+    "result": "refused",
+    "exit": 1
+  }
+}

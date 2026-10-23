@@ -549,6 +549,7 @@ services:
       # by the API and not by the sandbox.
       OI_MCP_URL: ${OI_MCP_URL:-}
       OI_MCP_TOKEN: ${OI_MCP_TOKEN:-}
+      OI_MCP_SESSION_SECRET: ${OI_MCP_SESSION_SECRET:-}
       # The existing egress policy and redaction switch for tool calls that leave the box.
       FRONTIER_CLASSES: ${FRONTIER_CLASSES:-}
       EGRESS_REDACTION: ${EGRESS_REDACTION:-on}

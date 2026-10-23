@@ -147,3 +147,54 @@ def test_a_connector_failure_is_typed(tmp_path):
                                  audit=Recorder().audit, transport=broken)
     status, payload = call(service, {"tool": "send_email", "session": "valid", "arguments": {}})
     assert status == 502 and "connector" in payload["detail"]
+
+
+def _assertion(secret: str, *, role: str = "viewer", subject: str = "dana", exp=None) -> str:
+    import base64, hashlib, hmac, time
+    payload = {"sub": subject, "role": role, "exp": int(time.time()) + 60 if exp is None else exp}
+    body = base64.urlsafe_b64encode(json.dumps(payload, sort_keys=True).encode()).decode().rstrip("=")
+    return body + "." + hmac.new(secret.encode(), body.encode(), hashlib.sha256).hexdigest()
+
+
+def _assertion_gateway(tmp_path, secret="assertion-secret"):
+    os.environ["MCP_SESSION_SECRET"] = secret
+    try:
+        rec = Recorder()
+        credential = tmp_path / "connector.token"
+        credential.write_text("connector-secret")
+        os.chmod(credential, 0o600)
+        tools = {"send_email": {"url": "http://connector/send", "credential_file": str(credential),
+                                "allowed_roles": ["viewer"], "data_classes": ["internal"], "egress": True}}
+        service = gateway.MCPGateway(tools, "gateway-token", audit=rec.audit, transport=rec.transport)
+    finally:
+        os.environ.pop("MCP_SESSION_SECRET", None)
+    return service, rec
+
+
+def test_a_signed_session_assertion_carries_identity_without_a_database(tmp_path):
+    service, rec = _assertion_gateway(tmp_path)
+    token = _assertion("assertion-secret")
+    status, payload = call(service, {"tool": "send_email", "session_assertion": token,
+                                     "arguments": {"to": "client@badj.ai"}})
+    assert status == 200 and payload["result"]["sent"] is True
+    assert rec.events[-1]["subject"] == "dana"
+
+
+def test_an_expired_assertion_is_refused(tmp_path):
+    service, rec = _assertion_gateway(tmp_path)
+    status, payload = call(service, {"tool": "send_email", "session_assertion": _assertion("assertion-secret", exp=1)})
+    assert status == 401 and payload["error"] == "invalid_session"
+    assert rec.events[-1]["payload"]["refusal"] == "invalid_session"
+
+
+def test_an_assertion_with_the_wrong_signature_is_refused(tmp_path):
+    service, _ = _assertion_gateway(tmp_path)
+    status, payload = call(service, {"tool": "send_email", "session_assertion": _assertion("wrong-secret")})
+    assert status == 401 and payload["error"] == "invalid_session"
+
+
+def test_a_body_role_is_refused_even_with_a_valid_assertion(tmp_path):
+    service, rec = _assertion_gateway(tmp_path)
+    token = _assertion("assertion-secret")
+    status, payload = call(service, {"tool": "send_email", "session_assertion": token, "role": "admin"})
+    assert status == 403 and payload["error"] == "refused_authority_claim"

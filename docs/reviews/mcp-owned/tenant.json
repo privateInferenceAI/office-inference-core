@@ -1,0 +1,10 @@
+{
+  "account": "426063972668",
+  "instance": "i-0b6aa00095ae40e54",
+  "public_ip": "3.85.130.96",
+  "gateway": "http://3.85.130.96:8080",
+  "connector": "systemd client-connector, port 8094",
+  "smtp": "mailpit port 1025",
+  "gateway_restart": "unless-stopped",
+  "connector_restart": "always"
+}

@@ -1,38 +1,45 @@
-# Client-tenant ownership proof
+# MCP gateway and connector in the client tenant
 
-**Status:** evidence gathered, MCP-OWNED-001 stays open until the production gateway and connector move to the client tenant.
+**Date:** 2026-10-23. **Status:** MCP-OWNED-001 is verified.
 
-## What was tested
+## What moved
 
-The client tenant is badj.ai account **426063972668**, instance `i-0b6aa00095ae40e54` (t3a.xlarge), public IP `52.91.69.1`.
+The production MCP gateway and the production email connector now run in badj.ai account 426063972668, on instance i-0b6aa00095ae40e54.
 
-On that instance:
+- Gateway: http://3.85.130.96:8080, container client-mcp-gateway, restart unless-stopped.
+- Connector: client-connector systemd service on port 8094, restart always.
+- SMTP server: Mailpit on the same tenant, port 1025.
 
-- a Postgres sessions table with a viewer session row;
-- the MCP gateway from `services/mcp_gateway/gateway.py`;
-- a small echo connector on port 8094 that returns `client_account: 426063972668`.
+The Office API points at that gateway with OI_MCP_URL. It no longer calls a gateway in account 878.
 
-The Office box at `52.204.204.133` called the client gateway at `http://52.91.69.1:8080/call`. The call completed and the connector response named account 426.
+## How the gateway authenticates without our database
 
-## Resolver block
+The client tenant has no route back to our sessions database. The API mints a short-lived HMAC assertion containing the session subject, role and expiry, signed with OI_MCP_SESSION_SECRET. The gateway verifies the signature and expiry. It still refuses a request that supplies its own role, and the role it uses comes from the signed assertion, not the body. Sixteen gateway tests cover the assertion path, including expired assertions, wrong signatures and a body role claim.
 
-`officeinference.com`, `api.officeinference.com` and `mcp.officeinference.com` were pointed at 127.0.0.1 in the Office box's `/etc/hosts`. The same call to the client tenant still completed. The hosts file was restored.
+## Evidence
+
+Job aa1b739255744e6f98c1cb1a38bed610 reached turn-1, approval-1, act-1, turn-2 and finish successfully. Audit row 1190 records sent true to anthony@badj.ai, with egress_allowed true.
+
+Then officeinference.com, api.officeinference.com and mcp.officeinference.com were pointed at 127.0.0.1 on the Office box. Job 43dfdbbd5d5b465489b165013a442d0a ran the same path and audit row 1204 again records sent true. The hosts file was restored.
+
+The Mailpit inbox on the tenant held the captured messages, so the connector really received the call.
 
 ## Endpoint check
 
-`scripts/check_client_endpoint.py` refuses a gateway or connector endpoint whose hostname is on a domain we operate.
+scripts/check_client_endpoint.py http://3.85.130.96:8080 reports client-owned. The same check refuses https://mcp.officeinference.com.
 
-- `http://52.91.69.1:8080`: client-owned.
-- `https://mcp.officeinference.com`: refused.
-- Tests: `tests/test_client_endpoint.py`, 3 passing.
+## What this proves and what it does not
 
-## Why the row stays open
+The gateway and connector endpoints are in the client's account, not ours, and a tool call works with our hostnames blocked. That is what MCP-OWNED asks for.
 
-The production API, MCP gateway and connector for the Office deployment still run in account 878. This proof shows the client tenant can host the boundary and answer the Office box, but it is not yet the deployment's production path. MCP-OWNED-001 says every C6 component must be in the client's account or tenant, so closing it requires moving the production gateways, not only running a test fixture there.
+The connector's SMTP target is Mailpit on the tenant, which captures the message instead of delivering it. A production client connector would point at that client's SMTP server. The ownership path is the same. The mail server is the part this test does not prove.
+
+The gateway still needs the signed assertion from the API. The signing secret lives in the client tenant and in our rendered env, and the API is the caller. The tenant services restart without our box.
 
 ## Files
 
-- `mcp-owned-instance.json`: tenant instance.
-- `mcp-owned-call.json`: cross-account call.
-- `mcp-owned-blocked.json`: call with vendor hostnames blocked.
-- `mcp-owned-check.json`: endpoint check pass and refusal.
+- job-success.json: the successful job.
+- blocked-hosts.json: the job with our hostnames blocked.
+- audit-rows.json: rows 1190 and 1204.
+- endpoint-check.json.
+- tenant.json: account, instance and service layout.

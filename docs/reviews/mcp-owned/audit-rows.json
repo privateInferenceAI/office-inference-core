@@ -1,0 +1,32 @@
+{
+  "rows": [
+    {
+      "id": 1190,
+      "payload": {
+        "to": "anthony@badj.ai",
+        "sent": true,
+        "step": "act-1",
+        "task": "workspace_brief",
+        "tool": "send_email",
+        "job_id": "aa1b739255744e6f98c1cb1a38bed610",
+        "data_class": "internal",
+        "egress_allowed": true,
+        "redaction_count": 0
+      }
+    },
+    {
+      "id": 1204,
+      "payload": {
+        "to": "anthony@badj.ai",
+        "sent": true,
+        "step": "act-1",
+        "task": "workspace_brief",
+        "tool": "send_email",
+        "job_id": "43dfdbbd5d5b465489b165013a442d0a",
+        "data_class": "internal",
+        "egress_allowed": true,
+        "redaction_count": 0
+      }
+    }
+  ]
+}

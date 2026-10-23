@@ -1,0 +1,13 @@
+{
+  "job_id": "aa1b739255744e6f98c1cb1a38bed610",
+  "at_gate": "awaiting_approval",
+  "final_state": "succeeded",
+  "steps": [
+    "turn-1",
+    "approval-1",
+    "act-1",
+    "turn-2",
+    "finish"
+  ],
+  "outcome_reason": null
+}

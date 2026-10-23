@@ -8,12 +8,16 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import base64
+import hashlib
+import hmac
 import json
 import os
 import secrets
 import stat
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -37,7 +41,9 @@ class MCPGateway:
             raise ValueError("the gateway refuses to start without a token")
         self.tools = tools
         self.token = token
-        self._session_resolver = session_resolver or self._session_from_db
+        self._session_secret = os.environ.get("MCP_SESSION_SECRET", "")
+        self._session_resolver = session_resolver or (
+            self._session_from_assertion if self._session_secret else self._session_from_db)
         self._audit = audit or self._audit_tool
         self._transport = transport or self._post
         self._credential_loader = credential_loader or self._read_credential
@@ -71,7 +77,8 @@ class MCPGateway:
             self._record("denied", "none", None, {"refusal": "authority_claim", "field": claimed})
             return 403, {"error": "refused_authority_claim",
                          "detail": "a request may not supply its own authority"}
-        token = str(payload.get("session") or payload.get("session_sha256") or "")
+        token = str(payload.get("session_assertion") or payload.get("session")
+                    or payload.get("session_sha256") or "")
         if not token:
             self._record("denied", "none", None, {"refusal": "no_session"})
             return 401, {"error": "no_session"}
@@ -130,6 +137,32 @@ class MCPGateway:
                          "payload": payload})
         except Exception:  # noqa: BLE001
             pass
+
+    def _session_from_assertion(self, token: str) -> dict:
+        """Verify a short-lived HMAC assertion minted by the API.
+
+        The client-tenant gateway has no route back to our sessions database. It still must not accept a
+        role chosen by the caller, so the API signs the subject, role and expiry with a secret both sides
+        hold. The gateway verifies; it never trusts a field from the request body.
+        """
+        try:
+            body, signature = token.rsplit(".", 1)
+            expected = hmac.new(self._session_secret.encode(), body.encode(), hashlib.sha256).hexdigest()
+            if not hmac.compare_digest(signature, expected):
+                raise SessionRefused("the session assertion signature is invalid")
+            padded = body + "=" * (-len(body) % 4)
+            payload = json.loads(base64.urlsafe_b64decode(padded))
+            if int(payload.get("exp") or 0) < int(time.time()):
+                raise SessionRefused("the session assertion has expired")
+            subject = str(payload.get("sub") or "")
+            role = str(payload.get("role") or "")
+            if not subject or not role:
+                raise SessionRefused("the session assertion is missing its subject or role")
+            return {"subject": subject, "role": role}
+        except SessionRefused:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise SessionRefused(f"the session assertion is unreadable: {type(exc).__name__}") from exc
 
     def _session_from_db(self, token: str) -> dict:
         database_url = os.environ.get("DATABASE_URL", "")
