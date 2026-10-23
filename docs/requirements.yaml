@@ -2556,7 +2556,8 @@ items:
       allowed web source, runs a calculation in code, spawns one read-only child, checkpoints, stops for approval
       on a test send, resumes after a process restart without repeating a step, produces an artifact, and leaves a
       chain that verifies.
-    status: open
+    status: verified
+    evidence: docs/reviews/ws-acceptance/README.md
     note: >-
       This is the WS exit line. It is the C6 acceptance plus the workspace layer, not a replacement for either.
 

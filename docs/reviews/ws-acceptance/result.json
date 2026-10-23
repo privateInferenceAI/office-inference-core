@@ -1,0 +1,86 @@
+{
+  "job_id": "2a983a879115486c8bac089f2ffd9f95",
+  "restarted": true,
+  "restart_at_steps": [
+    {
+      "name": "turn-1",
+      "state": "succeeded"
+    },
+    {
+      "name": "turn-2",
+      "state": "running"
+    }
+  ],
+  "gate_steps": [
+    "turn-1",
+    "turn-2",
+    "turn-2",
+    "turn-3",
+    "approval-3"
+  ],
+  "final_state": "succeeded",
+  "outcome_reason": null,
+  "steps": [
+    {
+      "name": "turn-1",
+      "state": "succeeded",
+      "attempt": 1
+    },
+    {
+      "name": "turn-2",
+      "state": "failed",
+      "attempt": 2
+    },
+    {
+      "name": "turn-2",
+      "state": "succeeded",
+      "attempt": 3
+    },
+    {
+      "name": "turn-3",
+      "state": "succeeded",
+      "attempt": 4
+    },
+    {
+      "name": "approval-3",
+      "state": "succeeded",
+      "attempt": 5
+    },
+    {
+      "name": "act-3",
+      "state": "succeeded",
+      "attempt": 6
+    },
+    {
+      "name": "turn-4",
+      "state": "succeeded",
+      "attempt": 7
+    },
+    {
+      "name": "turn-5",
+      "state": "succeeded",
+      "attempt": 8
+    },
+    {
+      "name": "finish",
+      "state": "succeeded",
+      "attempt": 9
+    }
+  ],
+  "artifacts": [
+    {
+      "key": "artifacts/2a983a879115486c8bac089f2ffd9f95/e1281b5eba41aef459d05b9ec37654ca25cc51d890228efbac1c01ffb63e9aaf",
+      "path": "acceptance.txt",
+      "bytes": 671,
+      "store": "s3",
+      "sha256": "e1281b5eba41aef459d05b9ec37654ca25cc51d890228efbac1c01ffb63e9aaf"
+    },
+    {
+      "key": "artifacts/2a983a879115486c8bac089f2ffd9f95/480fde0d66da2d56e24f62a4c4bbd033afdedc89f316ad482c65adade3125ead",
+      "path": "input.txt",
+      "bytes": 16,
+      "store": "s3",
+      "sha256": "480fde0d66da2d56e24f62a4c4bbd033afdedc89f316ad482c65adade3125ead"
+    }
+  ]
+}

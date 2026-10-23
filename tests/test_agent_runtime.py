@@ -205,6 +205,35 @@ def test_an_irreversible_tool_call_stops_at_the_gate_and_runs_only_after_approva
     assert second.job.result["answer"] == "The message was sent [1]."
 
 
+def test_a_gated_turn_records_only_the_held_call_when_the_model_asked_for_several():
+    """The assistant message after the gate must not carry a tool call with no tool result."""
+    model = FakeModel([
+        {"content": "I will send and search.", "tool_calls": [
+            {"id": "call-send", "name": "send_email", "arguments": '{"to": "dana@example.com"}'},
+            {"id": "call-search", "name": "search_documents", "arguments": '{"query": "policy"}'},
+        ], "error": None},
+        {"content": "The message was sent [1].", "tool_calls": [], "error": None},
+    ])
+    toolbox = FakeToolbox(result='{"sent": true}')
+    ctx = context(model, toolbox, verify=lambda answer, evidence: None)
+    job, store = make_job(ctx)
+
+    first = agent_runtime.run(store, job, ctx)
+    assert first.job.state == jobs.AWAITING_APPROVAL
+    events = store.events_since(job.job_id, 0)
+    turn = next(event for event in events
+                if event["event"] == "step" and event["data"].get("step") == "turn-1"
+                and event["data"].get("output"))
+    calls = turn["data"]["output"]["delta"][0]["tool_calls"]
+    assert [call["id"] for call in calls] == ["call-send"]
+
+    approved = jobs.decide(first.job, store, approvals.DECISION_APPROVE,
+                           first.job.pending_action_digest)
+    second = agent_runtime.run(store, approved, ctx)
+    assert second.job.state == jobs.SUCCEEDED
+    assert toolbox.calls == [("send_email", '{"to": "dana@example.com"}')]
+
+
 def test_a_denied_irreversible_call_never_runs_and_the_job_fails():
     model = FakeModel([
         {"content": "", "tool_calls": [{"id": "call-send", "name": "send_email",

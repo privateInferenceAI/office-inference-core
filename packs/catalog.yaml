@@ -105,6 +105,7 @@ packs:
         role: analyst
         tools: [search_documents, read_passages, workspace_write, workspace_read, workspace_list, workspace_run,
                 web_fetch, send_email]
+        child_tools: [search_documents, read_passages]
         workspace: true
         web: true
         connector: true
