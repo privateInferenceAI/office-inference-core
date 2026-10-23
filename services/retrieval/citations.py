@@ -248,7 +248,12 @@ def verify_claim(text: str, passages: list, min_score: float = MIN_PARSE_SCORE) 
     # The confidence gate. It applies to numbers and identifiers only, because prose read imperfectly is still
     # readable prose and a digit read imperfectly is a different number. This is the document-level version of
     # a check the architecture specifies per page.
-    figures = numbers_in(text) | set(identifier_extractor.extract(text))
+    # **A citation marker is a pointer, not a figure.** The supported form is `[n]`, and the number
+    # extractor read the `12` in `[12]` as a number the cited passage had to contain. Correct sentences were
+    # therefore refused as soon as an answer cited ten or more passages. Strip the marker before every literal
+    # check; the claim's text keeps its markers, because that is what the reader is shown.
+    literal = CITATION.sub(" ", text)
+    figures = numbers_in(literal) | set(identifier_extractor.extract(literal))
     if figures:
         for passage in supporting:
             score = getattr(passage, "parse_score", None)
@@ -271,7 +276,7 @@ def verify_claim(text: str, passages: list, min_score: float = MIN_PARSE_SCORE) 
     # Written out rather than relying on `&` and `-` binding the way it looks like they do, which they do not.
     # The first version read as though it intersected with the claim's figures and happened to be right because
     # the missing set is a subset of them.
-    claimed_numbers = numbers_in(text)
+    claimed_numbers = numbers_in(literal)
     missing_numbers = sorted(claimed_numbers - haystack_numbers)
     if missing_numbers:
         claim.verdict = "refused"
@@ -285,7 +290,7 @@ def verify_claim(text: str, passages: list, min_score: float = MIN_PARSE_SCORE) 
     # directly reported `pub515` as missing from a passage that says exactly that in its long form. Comparing
     # canonical forms is the same equality the retrieval arm uses, so the two cannot disagree about what
     # counts as the same reference.
-    claimed_identifiers = identifier_extractor.canonical_set(text)
+    claimed_identifiers = identifier_extractor.canonical_set(literal)
     present_identifiers = identifier_extractor.canonical_set(haystack)
     missing_identifiers = sorted(
         token for token in claimed_identifiers
@@ -298,7 +303,7 @@ def verify_claim(text: str, passages: list, min_score: float = MIN_PARSE_SCORE) 
                         f"form.")
         return claim
 
-    for quoted in QUOTED.findall(text):
+    for quoted in QUOTED.findall(literal):
         if _normal(quoted) not in haystack_normal:
             claim.verdict = "refused"
             claim.reason = "quote_not_in_source"

@@ -298,3 +298,17 @@ def test_the_splitter_never_drops_a_marker():
     text = "One.[1] Two.[2] Three. [3] Four.[4]"
     found = [m for claim in citations.split_claims(text) for m in citations.CITATION.findall(claim)]
     assert sorted(found) == ["1", "2", "3", "4"], found
+
+
+# --------------------------------------------------------------------------- citation markers
+
+def test_a_citation_marker_above_nine_is_not_a_figure():
+    """**A pointer was read as a number.** The supported marker form is `[n]`, and the number extractor read
+    the `12` in `[12]` as a figure its cited passage had to contain. Any correct answer citing ten or more
+    passages was therefore refused as `number_not_in_source`, which on the accuracy profile (twelve seed
+    passages) is not an edge case. The marker stays in the sentence; it is stripped before the checks."""
+    ps = [Passage(f"company/filler-{n}.md", f"filler passage {n}") for n in range(1, 12)]
+    ps.append(Passage("company/fee-schedule-2026.md", "The standard labour rate is 145.00 per hour."))
+    result = citations.verify("The standard labour rate is 145.00 per hour.[12]", ps)
+    assert result.all_supported, result.claims[0].detail
+    assert result.claims[0].citations == [12]
