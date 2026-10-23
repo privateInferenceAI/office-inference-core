@@ -1,0 +1,12 @@
+{
+  "client_endpoint": {
+    "url": "http://52.91.69.1:8080",
+    "result": "client-owned",
+    "exit": 0
+  },
+  "vendor_endpoint": {
+    "url": "https://mcp.officeinference.com",
+    "result": "refused: 'mcp.officeinference.com' is on a domain we operate; a client endpoint must not be",
+    "exit": 1
+  }
+}

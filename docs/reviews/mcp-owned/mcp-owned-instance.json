@@ -1,0 +1,13 @@
+{
+  "account": "426063972668",
+  "account_email": "anthony@badj.ai",
+  "instance_id": "i-0b6aa00095ae40e54",
+  "instance_type": "t3a.xlarge",
+  "public_ip": "52.91.69.1",
+  "private_ip": "172.31.41.108",
+  "region": "us-east-1",
+  "gateway_port": 8080,
+  "connector_port": 8094,
+  "session_subject": "client-user@badj.ai",
+  "session_role": "viewer"
+}

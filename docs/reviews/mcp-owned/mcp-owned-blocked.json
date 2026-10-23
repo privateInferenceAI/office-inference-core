@@ -1,0 +1,21 @@
+{
+  "resolver_block": [
+    "officeinference.com",
+    "api.officeinference.com",
+    "mcp.officeinference.com"
+  ],
+  "target": "http://52.91.69.1:8080/call",
+  "response": {
+    "ok": true,
+    "result": {
+      "client_account": "426063972668",
+      "echo": {
+        "body": "vendor hostnames blocked",
+        "subject": "resolver blocked",
+        "to": "client@badj.ai"
+      },
+      "sent": true
+    },
+    "tool": "send_email"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "source": "Office Inference box 52.204.204.133",
+  "target": "http://52.91.69.1:8080/call",
+  "request": {
+    "tool": "send_email",
+    "session_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "arguments": {
+      "to": "client@badj.ai",
+      "subject": "cross account",
+      "body": "from office box"
+    }
+  },
+  "response": {
+    "ok": true,
+    "result": {
+      "client_account": "426063972668",
+      "echo": {
+        "body": "from office box",
+        "subject": "cross account",
+        "to": "client@badj.ai"
+      },
+      "sent": true
+    },
+    "tool": "send_email"
+  }
+}
