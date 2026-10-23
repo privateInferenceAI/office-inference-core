@@ -10,7 +10,7 @@ describe how to build and operate the system; where they disagree with this page
 | C1 to C5 | Built and verified |
 | C6 | Built and verified. Agent runtime, full MCP gateway, client-tenant gateway |
 | C7 | Built and verified. Authenticated sessions, least-privilege support role, secret rotation, TLS, Object Lock |
-| C8 | Partly built. Audit hashes, image scanning, drift reporting, the incident tabletop, backup and the restore/RTO drill, the 20-concurrent load test, the signed release with a tested rollback, the medical golden set with its hard-fail gate, the ingest cycle lock, and acceptance on a separate scratch deployment are verified. Five alarms are built and awaiting the email subscription confirmation. SSM-only support, cost reporting and the business rows are open |
+| C8 | Partly built. Audit hashes, image scanning, drift reporting, the incident tabletop, backup and the restore/RTO drill, the 20-concurrent load test, the signed release with a tested rollback, the medical golden set with its hard-fail gate, the ingest cycle lock, acceptance on a separate scratch deployment, the five alarms with a confirmed email subscription, and the cost report with provider lines are verified. SSM-only support and the business rows remain open. SSH is retained by owner decision. |
 | C9 | Not started |
 
 The full suite is **1355 passed, 1 skipped** as of the last run on 2026-10-23.
@@ -105,8 +105,8 @@ the client tenant.
    are not waived. Evidence: docs/reviews/ops-cve/upgrade-2026-10-23/.
 5. **Backup and the restore/RTO drill exist.** The bucket is in account 878, daily at 02:00 UTC. The measured
    state restore was 48 seconds and the full drill 15 minutes 42 seconds against a 4-hour RTO. The backup target
-   is not client-owned yet. No alarm, rollback, SSM-only support, cost report, golden question set or
-   fresh-deployment acceptance exists yet.
+   is not client-owned yet. SSM-only support remains open by owner decision (SSH is retained); the BIZ rows
+   remain open. Alarms, signed releases, cost reporting, the golden set and acceptance are now built.
 6. **The 20-concurrent load test now passes.** The fix moves the blocking retrieval, model loop and audit write
    into the thread pool. Five repeated runs improved from p95 80.8 seconds to a worst p95 of 7.8 seconds, with
    zero failures and a 9.8-second maximum. The before and after are in docs/reviews/ops-load/.
@@ -120,9 +120,7 @@ the client tenant.
 
 | Row | What it needs |
 |---|---|
-| OPS-ALARM-001 | Five alarms and the SNS topic are built; the anthony@officeinference.com subscription is awaiting confirmation |
-| OPS-SUPPORT-001 | Approval to remove SSH and cut the client box to SSM only |
-| OPS-COST-001 | Cost Explorer / Marketplace report access and a decision on the report shape |
+| OPS-SUPPORT-001 | Owner decision: keep SSH for now. The SSM-only cutover is not being made. |
 | BIZ-* | Counsel, insurance, contracts, on-call staff, subprocessors and pricing decisions |
 
 ## Evidence

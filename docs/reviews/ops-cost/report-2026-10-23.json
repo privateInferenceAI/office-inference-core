@@ -1,0 +1,47 @@
+{
+  "account": "878451098165",
+  "generated_at": "2026-10-23",
+  "periods": [
+    {
+      "end": "2026-10-01",
+      "label": "previous month",
+      "provider_lines": {},
+      "services": {},
+      "start": "2026-09-01",
+      "total": 0.0
+    },
+    {
+      "end": "2026-10-24",
+      "label": "current month to date",
+      "provider_lines": {
+        "Amazon Bedrock": 7.6963,
+        "Claude Haiku 4.5 (Amazon Bedrock Edition)": 194.7737,
+        "Claude Opus 4.5 (Amazon Bedrock Edition)": 0.0002,
+        "Claude Opus 4.6 (Amazon Bedrock Edition)": 0.0003,
+        "Claude Sonnet 4.5 (Amazon Bedrock Edition)": 13.8521,
+        "Claude Sonnet 4.6 (Amazon Bedrock Edition)": 91.5415,
+        "Cohere Rerank v3.5 (Amazon Bedrock Edition)": 85.924
+      },
+      "services": {
+        "AWS Cost Explorer": 0.06,
+        "Amazon Bedrock": 7.6963,
+        "Amazon Elastic Compute Cloud - Compute": 227.501,
+        "Amazon Relational Database Service": 0.0009,
+        "Amazon Simple Email Service": 0.0019,
+        "Amazon Simple Storage Service": 2.4426,
+        "Amazon Virtual Private Cloud": 1.6725,
+        "AmazonCloudWatch": 0.0001,
+        "Claude Haiku 4.5 (Amazon Bedrock Edition)": 194.7737,
+        "Claude Opus 4.5 (Amazon Bedrock Edition)": 0.0002,
+        "Claude Opus 4.6 (Amazon Bedrock Edition)": 0.0003,
+        "Claude Sonnet 4.5 (Amazon Bedrock Edition)": 13.8521,
+        "Claude Sonnet 4.6 (Amazon Bedrock Edition)": 91.5415,
+        "Cohere Rerank v3.5 (Amazon Bedrock Edition)": 85.924,
+        "EC2 - Other": 8.1961,
+        "Tax": 3.86
+      },
+      "start": "2026-10-01",
+      "total": 637.5232
+    }
+  ]
+}

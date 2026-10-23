@@ -5809,9 +5809,7 @@ on the artifact manifest.
 
 ### C8.5 Still open
 
-    OPS-ALARM-001      five alarms built; email subscription awaiting confirmation
     OPS-SUPPORT-001    needs approval to remove SSH and use SSM only
-    OPS-COST-001       needs the report shape and Marketplace line access
     BIZ-*              counsel, insurance, contracts, on-call, subprocessors, pricing
 
 ### C8.6 Medical golden set and ingest lock
@@ -5824,6 +5822,15 @@ scripts/check_medical_hard_fails.py.
 The ingest cycle lock closes RET-INGEST-002. Both paths take /state/ingest.lock. A scheduled cycle skips while a
 manual cycle holds it, and a second manual cycle is refused. Evidence: docs/reviews/ret-ingest/ and
 docs/reviews/medical-golden/.
+
+### C8.7 Cost report and confirmed alarms
+
+The cost report reads Cost Explorer by service and shows the provider lines separately: Claude Haiku, Claude
+Sonnet, Cohere Rerank and Amazon Bedrock. Run it on the box with scripts/cost_report.py. Evidence:
+docs/reviews/ops-cost/.
+
+The five alarms publish to SNS oi-core-alarms. The anthony@officeinference.com subscription is confirmed. The
+metrics publisher runs every five minutes and the audit check daily. Evidence: docs/reviews/ops-alarm/.
 
 ## Future phases
 

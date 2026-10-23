@@ -1813,6 +1813,16 @@ the chunk_index. The hard-fail gate is scripts/check_medical_hard_fails.py; its 
 numbers, wrong documents, cross-role leaks and unanswerable answers. Clinical review is waived for the test set.
 Evidence: docs/reviews/medical-golden/.
 
+## 13f. Cost reporting and the alarm destination
+
+Cost reporting reads Cost Explorer by service, not only the generic Amazon Bedrock line. Claude Haiku, Claude
+Sonnet, Cohere Rerank and Amazon Bedrock each appear as their own line. The current report is under
+docs/reviews/ops-cost/.
+
+The five alarms publish to the SNS topic oi-core-alarms. The anthony@officeinference.com subscription is
+confirmed, and a test transition has been delivered. The metric publisher runs every five minutes; the audit
+check runs daily. Evidence: docs/reviews/ops-alarm/.
+
 ## 13h.1. Why there is an API at all, and why it has no port
 
 Every capability the system has is reachable through this one interface, and it has no user interface of its
