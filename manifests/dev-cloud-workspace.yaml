@@ -12,7 +12,7 @@ client:
   name: Office Inference Dev Workspace
   deployment_id: oi-core-dev-cloud-workspace
 profile: cloud
-packs: [core, document-chat, agentic-desk]
+packs: [core, document-chat, agentic-desk, workspace]
 models:
   front_desk:
     local: ""

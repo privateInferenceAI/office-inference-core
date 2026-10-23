@@ -84,11 +84,23 @@ packs:
         verify: citations_present
         needs_approval: true
 
+  - id: workspace
+    name: Cloud Workspace
+    sold: true
+    description: >-
+      A task-scoped cloud workspace: files, shell and code execution in a destroyed-at-the-end sandbox,
+      an allowlisted web path, and artifacts in the client's store. Cloud and hosted only.
+    services:
+      - workspace-host
+      - egress-proxy
+      - artifact-store
+    requires: [core, document-chat, agentic-desk]
+    definitions:
       - id: workspace_brief
         label: Workspace brief
         description: >-
           Work in a task-scoped sandbox: write files, run code and produce an artifact, then return a brief
-          with citations. The sandbox has no network and is destroyed when the task ends.
+          with citations. The sandbox has no network; an approved URL is fetched through the egress service.
         mode: task
         role: analyst
         tools: [search_documents, read_passages, workspace_write, workspace_read, workspace_list, workspace_run,

@@ -1,0 +1,12 @@
+ok   dev-cloud-accuracy.yaml  (profile=cloud, packs=['core'])
+ok   dev-cloud-claude.yaml  (profile=cloud, packs=['core'])
+ok   dev-cloud-workspace.yaml  (profile=cloud, packs=['core', 'document-chat', 'agentic-desk', 'workspace'])
+ok   dev-cloud.yaml  (profile=cloud, packs=['core'])
+ok   dev-office.yaml  (profile=office, packs=['core'])
+ok   example-compliant-cloud.yaml  (profile=cloud, packs=['document-chat', 'agentic-desk', 'compliance-pack'])
+ok   example-hybrid.yaml  (profile=hybrid, packs=['document-chat', 'workflow-automation', 'agentic-desk', 'frontier-lane'])
+ok   example-in-office.yaml  (profile=office, packs=['document-chat', 'workflow-automation', 'voice'])
+ok   example-standard-cloud.yaml  (profile=cloud, packs=['document-chat', 'workflow-automation'])
+ok   fresh-install-2026-10-22.yaml  (profile=cloud, packs=['core'])
+
+10/10 manifests valid; 9 packs known
