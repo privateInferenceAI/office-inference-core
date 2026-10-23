@@ -1,0 +1,52 @@
+{
+  "health": [
+    200,
+    {
+      "status": "ok"
+    }
+  ],
+  "no_auth": [
+    401,
+    {
+      "error": "unauthorised"
+    }
+  ],
+  "write": [
+    200,
+    {
+      "bytes": 13,
+      "path": "a.txt",
+      "sha256": "0deffcd57e27644f41ddd5a74f3ccea861387e1c6a0c99dbe5fd18fa1640f2de"
+    }
+  ],
+  "read": [
+    200,
+    {
+      "bytes": 13,
+      "content": "c2VydmljZSBoZWxsbw==",
+      "path": "a.txt",
+      "truncated": false
+    }
+  ],
+  "run": [
+    200,
+    {
+      "returncode": 0,
+      "stderr": "",
+      "stdout": "service hello\n"
+    }
+  ],
+  "cleanup": [
+    200,
+    {
+      "cleaned": true,
+      "task_id": "t1"
+    }
+  ],
+  "health_again": [
+    200,
+    {
+      "status": "ok"
+    }
+  ]
+}
