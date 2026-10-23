@@ -1,0 +1,19 @@
+{
+  "images": {
+    "api": "oi-core/api:local",
+    "app": "oi-core/app:local",
+    "embeddings": "ghcr.io/huggingface/text-embeddings-inference@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d",
+    "eval": "oi-core/eval:local",
+    "ingestion": "oi-core/ingestion:local",
+    "litellm": "oi-core/litellm:local",
+    "llamacpp": "ghcr.io/ggml-org/llama.cpp@sha256:bf3da52e92c083472b3d1c9f9da081f423ab9def95a87ec4bba51940382d75fd",
+    "mcp-gateway": "oi-core/mcp-gateway:local",
+    "parser": "oi-core/parser:local",
+    "postgres": "postgres:16-alpine",
+    "reranker": "ghcr.io/huggingface/text-embeddings-inference@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d",
+    "retention": "oi-core/retention:local",
+    "session": "oi-core/session:local",
+    "vector": "qdrant/qdrant@sha256:b7b0444c4c351c970b98e90a6f89c2ee4287c65b44e52b4cb503fa5b2aa927ad"
+  },
+  "manifest_sha256": "20ce7cd221cf7bca9495af3acdcacbd26ab686a914fa56c71bf82b14cc6c0d52"
+}

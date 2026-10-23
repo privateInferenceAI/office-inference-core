@@ -19,10 +19,11 @@ The full suite is **1355 passed, 1 skipped** as of the last run on 2026-10-23.
 
 | Piece | Account | Host | Exposure |
 |---|---|---|---|
-| API, Postgres, LiteLLM, ingestion, retrieval, audit tool | 878451098165, Office Inference | Build box `i-096bebd46308d1673` | No public port. The API is reached from inside the box or its containers |
+| API, Postgres, LiteLLM, ingestion, retrieval, audit tool | 878451098165, Office Inference | Build box `i-02aba2feef08f8e7b`, 52.204.204.133 | No public port. The API is reached from inside the box or its containers |
 | MCP gateway | 426063972668, badj.ai client tenant | `i-0b6aa00095ae40e54`, `3.85.130.96` | HTTPS only through Caddy at `https://3-85-130-96.sslip.io`. Gateway listens on loopback, 8080 |
 | Email connector | 426063972668 | Same tenant, systemd `client-connector`, port 8094 | Loopback only |
 | SMTP capture | 426063972668 | Same tenant, Mailpit port 1025 | Loopback only |
+| Unrelated workload | 426063972668 | Same tenant, `step0-hello-indexer` (Midnight indexer) on port 8088 | Not part of this deployment; left running |
 | Caddy | 426063972668 | Same tenant | 80 and 443, public |
 | Audit bucket | 878451098165 | S3 `oi-core-audit-dev` | Object Lock, GOVERNANCE, 90 days |
 
@@ -34,6 +35,10 @@ caller-supplied role.
 The connector's SMTP target is **Mailpit**, which captures mail instead of delivering it. That is deliberate
 for the ownership and gateway tests. A production connector must point at the client's SMTP server or a
 verified SES identity.
+
+The tenant gateway has no `AUDIT_TOOL` and no route to the Office audit database. Its refusals are returned to
+the API but are not written to the Office chain. That is a known gap in the client-tenant deployment, not a
+claim the docs should make. Refusals that run on the build box are still recorded.
 
 ## Network and TLS
 
@@ -66,17 +71,17 @@ curl -s https://3-85-130-96.sslip.io/health
 ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@52.204.204.133 'docker exec api python -c "import urllib.request; print(urllib.request.urlopen(\"http://127.0.0.1:8088/health\").read().decode())"'
 
 # Rotate the connector token from Secrets Manager; no redeploy
-ssh ubuntu@3.85.130.96 'cd /home/ubuntu/client && sudo AWS_DEFAULT_REGION=us-east-1 python3 rotate_connector_secret.py \
+ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@3.85.130.96 'cd /home/ubuntu/client && sudo AWS_DEFAULT_REGION=us-east-1 python3 rotate_connector_secret.py \
   --secret-id oi-core/connector-token \
   --token-file /home/ubuntu/client/connector.token \
   --env-file /home/ubuntu/client/connector.env --service client-connector'
 
 # Deployment state and drift, from the checkout on the box
 python3 scripts/deployment_state.py --compose /opt/oi-core/deploy/office/compose/docker-compose.yml \
-  --manifest /opt/oi-core/rendered/manifest.json --compare expected-state.json
+  --manifest /opt/oi-core/rendered/manifest.json --compare deploy/office/expected-state.json
 
 # Weekly image scan, installed as oi-image-scan.timer
-bash scripts/scan_images.sh /var/log/oi-image-scan
+sudo bash scripts/scan_images.sh /var/log/oi-image-scan
 ```
 
 Job runs are unchanged: create a job with `POST /jobs`, approve at the gate with

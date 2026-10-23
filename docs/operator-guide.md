@@ -3521,15 +3521,15 @@ operator to re-run. A false accusation costs an afternoon; a false acquittal cos
 The first line returns ok. The second returns 308 and a Location header for HTTPS. Ports 3000, 4000, 5432, 8025,
 8080, 8088, 8090 and 8094 are closed externally; 22, 80 and 443 are open.
 
-    ssh ubuntu@3.85.130.96 'systemctl is-active client-connector; docker ps --format "{{.Names}} {{.Status}}"'
-    ssh ubuntu@3.85.130.96 'curl -s http://127.0.0.1:8025/api/v1/messages'
+    ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@3.85.130.96 'systemctl is-active client-connector; docker ps --format "{{.Names}} {{.Status}}"'
+    ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@3.85.130.96 'curl -s http://127.0.0.1:8025/api/v1/messages'
 
 The last command reads Mailpit. It is a capture service. A message there means the connector received the call;
 it does not mean a recipient got an email.
 
 ## 17b. Rotate the connector token
 
-    ssh ubuntu@3.85.130.96 'cd /home/ubuntu/client && sudo AWS_DEFAULT_REGION=us-east-1 python3 rotate_connector_secret.py       --secret-id oi-core/connector-token       --token-file /home/ubuntu/client/connector.token       --env-file /home/ubuntu/client/connector.env --service client-connector'
+    ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@3.85.130.96 'cd /home/ubuntu/client && sudo AWS_DEFAULT_REGION=us-east-1 python3 rotate_connector_secret.py       --secret-id oi-core/connector-token       --token-file /home/ubuntu/client/connector.token       --env-file /home/ubuntu/client/connector.env --service client-connector'
 
 The gateway reads the token file on every call, so it needs no restart. The connector restarts through systemd.
 The old token returns 401 and the new token returns 200. If the connector fails with "Address already in use",
@@ -3537,8 +3537,8 @@ an older manually started connector still owns 8094; stop it and restart the uni
 
 ## 17c. Check audit chain version 4
 
-    ssh ubuntu@52.204.204.133 'docker exec api python /app/audit.py export --out /tmp/chain'
-    ssh ubuntu@52.204.204.133 'docker exec api python /app/audit.py verify /tmp/chain/audit-events.jsonl'
+    ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@52.204.204.133 'docker exec api python /app/audit.py export --out /tmp/chain'
+    ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@52.204.204.133 'docker exec api python /app/audit.py verify /tmp/chain/audit-events.jsonl'
 
 The clean export verifies. Editing approval_sha256, prompt_sha256 or completion_sha256 in a copy makes the
 verifier fail with row_hash does not match the row contents. Older rows keep their versions and keep verifying.
@@ -3546,9 +3546,9 @@ verifier fail with row_hash does not match the row contents. Older rows keep the
 ## 17d. Drift and scanning
 
     cd /opt/oi-core
-    python3 scripts/deployment_state.py --compose deploy/office/compose/docker-compose.yml       --manifest rendered/manifest.json --compare expected-state.json
+    python3 scripts/deployment_state.py --compose deploy/office/compose/docker-compose.yml       --manifest rendered/manifest.json --compare deploy/office/expected-state.json
 
-    bash scripts/scan_images.sh /var/log/oi-image-scan
+    sudo bash scripts/scan_images.sh /var/log/oi-image-scan
     systemctl list-timers oi-image-scan.timer --no-pager
 
 A changed image pin makes the compare exit 1 with the differing service. The image scan runs weekly. Its current
