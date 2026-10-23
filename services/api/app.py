@@ -596,6 +596,14 @@ def _fail_agent_job(job, reason: str, detail: str) -> None:
     fresh = STATE["jobs"].get(job.job_id)
     if fresh is None or fresh.state in jobs_module.TERMINAL:
         return
+    # **A refused job is a fact in the record, not only a job row.** The SEC-AGENT refusal and every other
+    # start failure get a chain row naming the cause, so a deployment can answer why work stopped.
+    try:
+        audit("access", job.subject, job.actor_role, "denied",
+              {"job_id": job.job_id, "task": job.task, "reason": reason, "detail": detail,
+               "stage": "agent_runtime"})
+    except Exception:  # noqa: BLE001 - the job failure still has to be written
+        pass
     try:
         jobs_module.transition(fresh, jobs_module.FAILED, reason=reason)
         fresh.result = {"error": detail}
@@ -677,6 +685,7 @@ def _run_agent_job_locked(job):
     child_specs = [tool for tool in tool_loop.active_tools()
                    if tool["function"]["name"] in set(child_names)]
     child_count = 0
+    child_tokens_total = 0
 
     def step_name() -> str:
         fresh = STATE["jobs"].get(job.job_id)
@@ -684,9 +693,10 @@ def _run_agent_job_locked(job):
 
     def run_child(brief: str) -> str:
         """One read-only child: its own tool box, its own budget, its own span, no delegation."""
-        nonlocal child_count
+        nonlocal child_count, child_tokens_total
         child_count += 1
         span = f"child-{child_count}"
+        max_child_tokens = int(definition.get("child_max_tokens") or 12000)
         child_box = tool_loop.ToolBox(STATE["services"], session.permit(), session.role,
                                       strict_audit=True)
 
@@ -706,18 +716,30 @@ def _run_agent_job_locked(job):
             reply = _tool_chat(session, model, messages, child_specs, child_budget)
             if reply.get("error"):
                 return json.dumps({"error": str(reply["error"])})
+            usage = reply.get("usage") or {}
+            tokens = int(usage.get("prompt_tokens") or 0) + int(usage.get("completion_tokens") or 0)
+            if tokens <= 0:
+                # **An estimate is still a budget.** A provider that omits usage must not make the child
+                # unmeasured; four characters per token is the same rough ratio the budget is set in.
+                tokens = max(1, len((reply.get("content") or "")) // 4)
+            child_tokens_total += tokens
             addressed = {"job_id": job.job_id, "task": job.task, "step": step_name(),
                          "span": span, "role": "child", "model": model,
                          "content_chars": len((reply.get("content") or "")),
+                         "tokens": tokens, "child_tokens_total": child_tokens_total,
                          "attribution": reply.get("attribution") or {}}
             audit("model_call", session.subject, session.role, "ok", addressed, model=model)
+            if child_tokens_total > max_child_tokens:
+                return json.dumps({"error": "child_token_budget", "spent": child_tokens_total,
+                                   "budget": max_child_tokens})
             calls = reply.get("tool_calls") or []
             if not calls:
                 sources = [{"doc_id": getattr(passage, "doc_id", ""),
                             "page": getattr(passage, "page_start", None)}
                            for passage in child_box.evidence]
                 return json.dumps({"brief": (reply.get("content") or "").strip(),
-                                   "sources": sources, "evidence": len(child_box.evidence)})
+                                   "sources": sources, "evidence": len(child_box.evidence),
+                                   "tokens": child_tokens_total})
             messages.append({"role": "assistant", "content": reply.get("content") or "",
                              "tool_calls": [{"id": call.get("id") or "", "type": "function",
                                              "function": {"name": call.get("name") or "",
@@ -744,6 +766,7 @@ def _run_agent_job_locked(job):
         # is not this row and does not replace it.
         addressed = {"job_id": job.job_id, "task": job.task, "step": step_name(),
                      "model": model, "content_chars": len((reply.get("content") or "")),
+                     "child_tokens": child_tokens_total,
                      "attribution": reply.get("attribution") or {}}
         audit("model_call", session.subject, session.role, "ok", addressed, model=model)
 
@@ -1466,7 +1489,7 @@ def _tool_chat(session, model: str, messages: list, tools, request_budget):
                 calls.append({"id": call.get("id") or "", "name": function.get("name") or "",
                               "arguments": function.get("arguments") or "{}"})
             return {"content": message.get("content") or "", "tool_calls": calls, "error": None,
-                    "attribution": attribution}
+                    "attribution": attribution, "usage": data.get("usage") or {}}
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode(errors="replace")[:300]
             kind = budget_module.classify(detail)
