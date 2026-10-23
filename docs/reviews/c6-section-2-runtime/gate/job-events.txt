@@ -1,0 +1,15 @@
+1|step|turn-1|running|
+2|step|turn-1|succeeded|
+3|step|||sha256:f7198afb972a30d8dee77f0dffacc03c1d5f88adcde57a3d40ce59bc41b0d3bb
+4|step|approval-1|awaiting_approval|sha256:f7198afb972a30d8dee77f0dffacc03c1d5f88adcde57a3d40ce59bc41b0d3bb
+5|step|||
+6|step|approval-1|succeeded|
+7|step|act-1|running|
+8|step|act-1|succeeded|
+9|step|turn-2|running|
+10|step|turn-2|succeeded|
+11|step|turn-3|running|
+12|step|turn-3|succeeded|
+13|step|finish|running|
+14|step|finish|succeeded|
+15|done|||
