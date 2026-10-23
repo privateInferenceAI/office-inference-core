@@ -12,6 +12,8 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "services" / "api"))
 sys.path.insert(0, str(ROOT / "services" / "retrieval"))
@@ -774,3 +776,19 @@ def test_a_whole_table_blob_that_already_carries_its_context_is_not_prefixed_twi
     passage = FakePassage("c1", blob, kind="table", table_id="t1")
     rendered = toolbox.render([passage])
     assert rendered.count("Columns:") == 1, rendered
+
+
+def test_the_answer_path_swallows_an_audit_failure_but_the_strict_toolbox_does_not():
+    """Two callers, two contracts. The answer path must not lose an answer to a record failure; the runtime
+    must not continue a tool call that left no row."""
+    def broken_audit(*args, **kwargs):
+        raise RuntimeError("the chain is full")
+
+    forgiving = tool_loop.ToolBox(services=object(), permit=FakePermit(), role="staff",
+                                  audit=broken_audit)
+    assert "unknown tool" in forgiving.execute("not_a_tool", "{}")
+
+    strict = tool_loop.ToolBox(services=object(), permit=FakePermit(), role="staff",
+                               audit=broken_audit, strict_audit=True)
+    with pytest.raises(tool_loop.ToolAuditError):
+        strict.execute("not_a_tool", "{}")

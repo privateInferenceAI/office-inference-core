@@ -503,6 +503,15 @@ def _table_prefix_from_blob(text: str) -> str:
     return (f"Table: {caption}. Columns: {block}." if caption else f"Columns: {block}.")
 
 
+class ToolAuditError(Exception):
+    """The tool audit did not write, and this run is not allowed to continue without it.
+
+    The answer path deliberately tolerates an audit failure so a model call is never lost to the record. The
+    agent runtime cannot: a tool call that leaves no row is a gap in the record a client is paying for. A strict
+    toolbox raises this and the runtime fails the step.
+    """
+
+
 class ToolBox:
     """The tools, the evidence they produce, and the access rules they apply.
 
@@ -511,11 +520,12 @@ class ToolBox:
     """
 
     def __init__(self, services, permit, role: str, audit=None, search_limit: int = 8,
-                 read_limit: int = 12, max_evidence: int | None = None):
+                 read_limit: int = 12, max_evidence: int | None = None, strict_audit: bool = False):
         self.services = services
         self.permit = permit
         self.role = role
         self.audit = audit
+        self.strict_audit = strict_audit
         self.search_limit = search_limit
         self.read_limit = read_limit
         self.max_evidence = _PROFILE.max_evidence if max_evidence is None else max_evidence
@@ -1001,6 +1011,7 @@ class ToolBox:
         except Exception as exc:  # noqa: BLE001 - a tool failure must not end the request
             out = json.dumps({"error": f"the tool failed: {type(exc).__name__}"})
         if self.audit is not None:
+            audit_error = None
             try:
                 payload = {"tool": name, "argument_chars": len(arguments or ""),
                            "results": len(self.evidence),
@@ -1011,8 +1022,10 @@ class ToolBox:
                 payload.update(getattr(self, "_last_facts", {}) or {})
                 self.audit("tool_call", "", "", "ok" if not out.startswith('{"error"') else "error",
                            payload, tool=name)
-            except Exception:  # noqa: BLE001 - the audit is not allowed to break a request
-                pass
+            except Exception as exc:  # noqa: BLE001
+                audit_error = exc
+            if audit_error is not None and self.strict_audit:
+                raise ToolAuditError(f"the tool audit failed: {type(audit_error).__name__}") from audit_error
         return out
 
 
