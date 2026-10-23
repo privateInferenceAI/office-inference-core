@@ -10,7 +10,7 @@ describe how to build and operate the system; where they disagree with this page
 | C1 to C5 | Built and verified |
 | C6 | Built and verified. Agent runtime, full MCP gateway, client-tenant gateway |
 | C7 | Built and verified. Authenticated sessions, least-privilege support role, secret rotation, TLS, Object Lock |
-| C8 | Partly built. Audit hashes, image scanning, drift reporting and the incident tabletop are verified. Alarming, backup and restore, rollback, SSM-only support, cost reporting, golden questions, acceptance on a fresh deployment, load test and the business rows are open |
+| C8 | Partly built. Audit hashes, image scanning, drift reporting, the incident tabletop, backup and the restore/RTO drill are verified. Alarming, rollback, SSM-only support, cost reporting, golden questions, acceptance on a fresh deployment, load test and the business rows are open |
 | C9 | Not started |
 
 The full suite is **1355 passed, 1 skipped** as of the last run on 2026-10-23.
@@ -53,8 +53,8 @@ claim the docs should make. Refusals that run on the build box are still recorde
 Production routing is still Bedrock in account 878: `front_desk` Nova Micro, `analyst` Nova Lite, `reader`
 Nova Pro, with an analyst fallback. The renderer supports an OpenAI-compatible provider and it was tested live
 against DeepSeek (`https://api.deepseek.com`, model `deepseek-flash`) with the same three policy questions
-answered correctly on both providers. The DeepSeek key is in the box's mode-600 rendered env only; it is not in
-the repository.
+answered correctly on both providers. The DeepSeek key lives in AWS Secrets Manager as deepseek-oi-key; the box
+materializes it into the mode-600 rendered env. It is not in the repository.
 
 ## Audit record
 
@@ -94,14 +94,21 @@ the client tenant.
 1. **Mail is delivered through SES only to the verified address.** awstest@officeinference.com is verified in
    the badj account; the account is in the SES sandbox. Arbitrary client recipients need SES production access.
    Mailpit is a fallback capture service.
-2. **The tenant's public address is derived from its IP.** If the instance is stopped and gets a new address,
-   the hostname and certificate change. Allocate an Elastic IP before calling it production.
-3. **The DeepSeek key is in the rendered env** because the provider comparison needed it. Rotate it and remove
-   it after the comparison is done.
+2. **Elastic IP 34.225.62.245 is allocated but not associated.** The stable name mcp.badj.ai needs an A record
+   at Porkbun, or the address can use the new sslip name after association. Until then the tenant remains on its
+   IP-derived name.
+3. **The DeepSeek key comes from Secrets Manager.** The secret is deepseek-oi-key in account 878. The old key was
+   replaced and the LiteLLM environment restarted. Revoke the old key at the provider when you are satisfied with
+   the comparison.
 4. **The image scan has current critical findings.** They are recorded in `docs/reviews/ops-cve/`. They are not
    waived.
-5. **No alarm, backup, restore drill, rollback, SSM-only support, cost report, golden question set,
-   fresh-deployment acceptance or load test exists yet.** Those are the open C8 rows.
+5. **Backup and the restore/RTO drill exist.** The bucket is in account 878, daily at 02:00 UTC. The measured
+   state restore was 48 seconds and the full drill 15 minutes 42 seconds against a 4-hour RTO. The backup target
+   is not client-owned yet. No alarm, rollback, SSM-only support, cost report, golden question set,
+   fresh-deployment acceptance or successful load test exists yet.
+6. **The 20-concurrent load test failed the 15-second p95 target.** The measured p95 was 80.8 seconds and the
+   maximum 85.6 seconds, with zero failures. This is a capacity result, not a correctness failure. It is recorded
+   in docs/reviews/ops-load/ and the load row stays open.
 6. **The tenant gateway does not write refusals to the Office chain.** It has no audit database route. Build-box
    refusals are recorded; tenant-gateway refusals return to the API only. This is a recorded gap, not a claim
    to paper over.
@@ -113,7 +120,7 @@ the client tenant.
 | Row | What it needs |
 |---|---|
 | OPS-ALARM-001 | A notification destination and a confirmed subscription |
-| OPS-BACKUP-001, OPS-RTO-001 | A restore target, an acceptable downtime window, and a drill |
+| QLT-LOAD-001 | The 20-concurrent run has p95 80.8 seconds against a 15-second target. Capacity work is needed before the row can close |
 | OPS-UPDATE-001 | A release signing source and rollback target |
 | OPS-SUPPORT-001 | Approval to remove SSH and cut the client box to SSM only |
 | OPS-COST-001 | Cost Explorer / Marketplace report access and a decision on the report shape |

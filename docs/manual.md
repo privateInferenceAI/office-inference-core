@@ -23,9 +23,9 @@ a gateway, records what it did, ships that record off the machine, and can prove
 It reads a client's documents (13a to 13f), has an assistant API and routing (13g and 13h), a client
 application (13i), approvals and workflows (13j to 13m), a durable agent runtime and MCP gateway in the
 client's tenant (26), TLS and signed session assertions (26), and an audit chain whose version 4 covers the
-approval, prompt and completion digests. Section 26 is the current topology and operation. Alarms, backup and
-restore, rollback, SSM-only support, cost reporting, the golden question set, fresh-deployment acceptance, load
-testing and the business rows are still open.
+approval, prompt and completion digests. Section 26 is the current topology and operation. Backup and the restore/RTO drill are built. Alarms, rollback,
+SSM-only support, cost reporting, the golden question set, fresh-deployment acceptance, a successful load test
+and the business rows are still open.
 
 Sections 1 to 25 are ordered by when they were written rather than by what a reader needs first, so
 the appendix pages (13a to 13m) sit between section 20 and the troubleshooting part rather than beside the
@@ -326,8 +326,9 @@ so rather than implying otherwise.
 **Update, 2026-10-23.** The right-hand column is historical. C4, C5, C6 and C7 are now built: the client
 application, the approval gate and workflows, the durable agent runtime and MCP gateway, and TLS with signed
 session assertions. C8 is partly built: audit hash coverage, scheduled image scanning, deployment-state drift
-reporting and an incident tabletop are verified; alarms, backup and restore, rollback, SSM-only support, cost
-reporting, golden questions, fresh-deployment acceptance and load testing are open. The authoritative list is
+reporting, an incident tabletop, and backup with a 48-second restore and 15-minute full drill are verified; alarms,
+rollback, SSM-only support, cost reporting, golden questions, fresh-deployment acceptance, load testing and the
+business rows are open. The authoritative list is
 docs/current-deployment.md. |
 
 ---
@@ -5757,7 +5758,7 @@ is explained.
 | C5 | Workflows and the first connector, with an approval gate | **Built.** Sections 13j to 13m |
 | C6 | The agent runtime and the MCP gateway | Built and verified. Section 26 |
 | C7 | Ingress, TLS, identity, least privilege, secret rotation and Object Lock | Built and verified. Section 26 |
-| C8 | Alarms, backups, restore and RTO, rollback, SSM-only support, cost reporting, golden questions, acceptance, load test | Partly built. Audit hashes, scanning, drift and the incident tabletop are verified |
+| C8 | Alarms, backups, restore and RTO, rollback, SSM-only support, cost reporting, golden questions, acceptance, load test | Partly built. Audit hashes, scanning, drift, incident, backup and RTO are verified; load test failed its latency target |
 | C9 | The demonstration | Not built |
 
 **Update, 2026-10-23.** The phase table above is the build plan, not the current state. C6 and C7 are built and
@@ -5955,6 +5956,7 @@ is the tenant gateway, not the 8093 host process.
 
 ### 26.8 What is still open
 
-The open C8 rows are alarms, backup and restore, RTO, rollback, SSM-only support, cost reporting, golden
-questions, fresh-deployment acceptance and load testing. The BIZ rows need counsel, insurance, contracts,
+The open C8 rows are alarms, rollback, SSM-only support, cost reporting, golden questions, fresh-deployment
+acceptance and load testing. The 20-concurrent load test failed its 15-second p95 target at 80.8 seconds; that is
+recorded as a capacity result, not a pass. The BIZ rows need counsel, insurance, contracts,
 on-call staff, subprocessors and pricing decisions. docs/current-deployment.md lists each with its blocker.
