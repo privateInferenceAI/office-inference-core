@@ -1,3 +1,5 @@
 5562313830a737eb981aed15788c6fc3227f82061743abb7314d579b8312cafa  docs/reviews/ws-limits/limits.json
-e70082d9989594d438c72836b198c1316a0b0806868aaba87f7bb0d2cc180055  docs/reviews/ws-limits/README.md
-940d640a72fcb169f0242ca8b776ef851c95e923d9ee27e7d9e3b4baf4a7f82e  docs/reviews/ws-limits/SHA256SUMS
+2edab7176c6be66481df1b29ff019e7dfaf61745f1f6b501f867547fcc13bba4  docs/reviews/ws-limits/limits-typed.json
+c624490e17383ac8cdb8886c4f9c6013c8aaee6f0fbf0cba88f91432b4638d0d  docs/reviews/ws-limits/README.md
+5eff0d1adae95c6c1f3c7aefd7b528ea8bfc62aea82a9735689c73c3436176fd  docs/reviews/ws-limits/SHA256SUMS
+0e127296749dcb287da6a295601145327b07b5d4925ff78f3fb3ab38ff8c7acd  docs/reviews/ws-limits/token-budget.json

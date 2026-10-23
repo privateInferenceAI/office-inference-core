@@ -39,6 +39,10 @@ class SandboxQuota(SandboxError):
     """The task wrote more than its disk allowance."""
 
 
+class SandboxResource(SandboxError):
+    """The container was killed by a resource limit, such as the memory ceiling."""
+
+
 @dataclass(frozen=True)
 class Limits:
     """Per-task ceilings. They are passed to Docker and checked after the command for disk."""
@@ -130,6 +134,11 @@ class DockerSandbox:
         after = self.size_bytes(task_id)
         if after > self.limits.disk_mb * 1024 * 1024:
             raise SandboxQuota(f"the task wrote {after} bytes, over its {self.limits.disk_mb} MB allowance")
+        # **Exit 137 is SIGKILL.** Inside the task container the usual cause is the memory ceiling, and a
+        # return code alone is not a cause a client can act on. The container is already gone, so the typed
+        # error is the only record the caller gets.
+        if result.returncode == 137:
+            raise SandboxResource("the task was killed by a resource limit, likely its memory ceiling")
         return result
 
     def run_shell(self, task_id: str, script: str, *, timeout: Optional[int] = None) -> subprocess.CompletedProcess:

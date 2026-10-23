@@ -708,6 +708,7 @@ def _run_agent_job_locked(job):
                    if tool["function"]["name"] in set(child_names)]
     child_count = 0
     child_tokens_total = 0
+    parent_tokens_total = 0
 
     def step_name() -> str:
         fresh = STATE["jobs"].get(job.job_id)
@@ -783,12 +784,27 @@ def _run_agent_job_locked(job):
         addressed = dict(payload or {}, job_id=job.job_id, task=job.task, step=step_name())
         audit(event, session.subject, session.role, outcome, addressed, **extra)
 
+    def call_model(messages: list, tools: list) -> dict:
+        """One parent model call, with a running token budget over the whole job."""
+        nonlocal parent_tokens_total
+        reply = _tool_chat(session, model, messages, tools, budget)
+        if reply.get("error"):
+            return reply
+        usage = reply.get("usage") or {}
+        tokens = int(usage.get("prompt_tokens") or 0) + int(usage.get("completion_tokens") or 0)
+        if tokens <= 0:
+            tokens = max(1, len((reply.get("content") or "")) // 4)
+        parent_tokens_total += tokens
+        if parent_tokens_total > int(definition.get("max_tokens") or 60000):
+            return {"error": "token_budget"}
+        return reply
+
     def model_audit(reply):
         # One row per model completion the runtime makes, not one per job. The answer path's per-answer row
         # is not this row and does not replace it.
         addressed = {"job_id": job.job_id, "task": job.task, "step": step_name(),
                      "model": model, "content_chars": len((reply.get("content") or "")),
-                     "child_tokens": child_tokens_total,
+                     "child_tokens": child_tokens_total, "parent_tokens": parent_tokens_total,
                      "attribution": reply.get("attribution") or {}}
         audit("model_call", session.subject, session.role, "ok", addressed, model=model)
 
@@ -855,7 +871,7 @@ def _run_agent_job_locked(job):
     budget = budget_module.Budget(total=max(60.0, float(job.time_budget_s)), reserve=0.0)
     context = agent_runtime_module.RuntimeContext(
         definition=definition,
-        call_model=lambda messages, tools: _tool_chat(session, model, messages, tools, budget),
+        call_model=call_model,
         toolbox=toolbox,
         tools=tool_loop.agent_tools(definition),
         verify=_agent_verify(definition),
