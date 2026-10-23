@@ -1,0 +1,97 @@
+# C6 Section 2 runtime evidence
+
+**Date:** 2026-10-23. **Box:** `i-02aba2feef08f8e7b`, m7i.4xlarge, us-east-1b, credits account
+`878451098165`, public IP `52.204.204.133`. **Deployment:** `oi-core-dev-cloud-workspace`, cloud profile.
+
+This is the first live run of the agent runtime on a real deployment. It is not the section gate: the approval
+gate, sub-agents, context summaries and the kill/restart test are still open. It is enough to show that a claimed
+definition job runs through the real gateway, the real tools, the engine step rows and the v3 audit chain.
+
+## What was deployed
+
+The box was a core-only cloud deployment. It was rendered from `manifests/dev-cloud-workspace.yaml` into
+`/opt/oi-core/rendered`, which added:
+
+- packs `core, document-chat, agentic-desk`
+- one definition, `research_brief`, role `analyst`, tools `search_documents`, `read_passages`, `query_rows`
+- `agentic.runtime_count: 1`
+- `rendered/agent_definitions.json`
+
+The API image was built from the integration branch at commit `934bf4a` (runtime commit `7333a8e` plus the
+Section 1 merge). The box database was already on chain version 3 from the Section 1 deployment.
+
+## The live runs
+
+The first two runs failed for real product reasons, and both were fixed.
+
+| Job | State | What happened |
+|---|---|---|
+| `50b5ab951d1b42aab3e3c4f0d4b126b1` | failed, `verification` | The runtime omitted the job input from the model prompt. The model answered the definition description as if it had been greeted. Fixed by passing `run.input`. |
+| `af2c72a083e047c1b32bb71cdbed8d4d` | failed, `verification` | The model used tools correctly and wrote a good brief, but cited files by name instead of the tool's numbered evidence. Fixed by making the citation format explicit. |
+| `69ad59730f0345b997cb32ef92821f0f` | succeeded | First successful run: 4 steps, 12.3 seconds, cited answer. The chain check then found no model-call rows and no job or step on the tool rows. |
+| `2426a6306cd3408995a809f73cd0735f` | succeeded | After the audit fix: 4 steps, 12.3 seconds, 3 `model_call` rows, 3 real `tool_call` rows and 8 engine step rows. |
+| `e7d41c0e3a0847de9533ff4019dd44fd` | succeeded | After the Section 1 merge: 3 steps, 6.0 seconds, cited answer. This is the run that proves the v3 chain and the runtime coexist. |
+
+The successful answer for job `2426a6306cd3408995a809f73cd0735f` is a cited expense-policy brief. It names the
+Travel and Expense Policy and the Employee Handbook and carries `[1]`, `[8]`, `[5]` and `[24]` citations.
+
+## Audit chain
+
+The chain export holds 49 events. It verifies intact with the v3 verifier. No external anchor was supplied, so
+this proves the links are intact, not that no row was deleted from the end.
+
+For job `2426a6306cd3408995a809f73cd0735f` the chain holds:
+
+- 3 `model_call` rows, one per model completion, each with `job_id`, `task` and `step`.
+- 3 `tool_call` rows for `search_documents` and the two `read_passages` calls, each with the job and step.
+- 8 engine rows, one started and one succeeded row for each of the four steps.
+
+Rows 361 to 374 are the job's rows. The model rows name `bedrock/us.anthropic.claude-sonnet-4-6` in the
+attribution payload.
+
+## What this proves
+
+- A definition job is claimed by the dispatcher and runs without an inline request.
+- One model turn is one engine step, and each step is a row a client can read.
+- The real gateway, the real session, the real toolbox and the signing key are wired correctly.
+- A tool failure in the strict audit path fails the step instead of losing the row.
+- The runtime writes the model row and the tool row the record needs, addressed by job and step.
+- The chain stays intact with v3 rows and the runtime's rows in it.
+
+## What this does not prove
+
+- The approval gate for an irreversible tool call. Not built yet.
+- Sub-agents and their budgets, child rules and spans. Not built yet.
+- Context summaries written to the chain when older results leave the prompt. Not built yet.
+- A kill and restart at an iteration boundary. Not run yet.
+- The workspace sandbox, web access, artifacts and workspace UI. That is the WS phase.
+
+## Reproduce
+
+On the box, from `/opt/oi-core`:
+
+    python3 scripts/render_manifest.py --manifest manifests/dev-cloud-workspace.yaml --root /opt/oi-core
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env build api
+    docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env up -d --no-deps api
+
+Mint a development session and submit a job:
+
+    docker exec api python /app/services/session/cli.py mint \
+      --subject probe-staff@officeinference.com --role viewer --ttl 2 --dev --json
+
+Then POST to `http://127.0.0.1:8088/jobs` from inside the API container, with the session token in the
+`session` field of the JSON body. Poll `GET /jobs/{id}` with `X-OI-Session`.
+
+Export and verify the chain:
+
+    docker exec api python /app/audit.py export --out /tmp/chain.json
+    docker exec api python /app/audit.py verify /tmp/chain.json/audit-events.jsonl
+
+## Files in raw/
+
+- `audit-events.jsonl`: the 49-event chain export.
+- `verify.txt`: the verifier's result.
+- `export.txt`: the export summary and last row hash.
+- `jobs.json`: the two post-fix successful jobs as returned by the API.
+- `api.log`: the API startup log from the final deployment.
+- `SHA256SUMS`: hashes for the files above.
