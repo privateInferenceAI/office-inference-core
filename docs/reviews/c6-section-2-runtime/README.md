@@ -49,6 +49,23 @@ For job `2426a6306cd3408995a809f73cd0735f` the chain holds:
 Rows 361 to 374 are the job's rows. The model rows name `bedrock/us.anthropic.claude-sonnet-4-6` in the
 attribution payload.
 
+## Gate live run
+
+Job `af8ab77097f945c196a59eb22c5e602e` stopped at the gate before its first tool call.
+
+- At the gate: state `awaiting_approval`, steps `turn-1` and `approval-1`, pending target
+  `search_documents`, digest `sha256:f7198afb...`.
+- The approval route accepted the digest, resumed the runtime, and the job finished with six steps:
+  `turn-1`, `approval-1`, `act-1`, `turn-2`, `turn-3`, `finish` in 27.7 seconds.
+- The chain row for `search_documents` is row 391, after the approval row 388 and the act row 390. No
+  `search_documents` row exists before the approval.
+- The chain export holds 68 events and verifies intact.
+
+**The test used `search_documents` as the gated tool.** The `research_brief` definition normally lists
+`send_email` as irreversible, but there is no email connector yet, so the live test temporarily marked a
+read-only tool as irreversible to exercise the gate. The original definition was restored and the API
+restarted after the run. This proves the gate mechanics and the resume path, not the email connector.
+
 ## What this proves
 
 - A definition job is claimed by the dispatcher and runs without an inline request.
@@ -60,7 +77,7 @@ attribution payload.
 
 ## What this does not prove
 
-- The approval gate for an irreversible tool call. Not built yet.
+- A real irreversible connector. The gate mechanics are live-tested; the email connector is not.
 - Sub-agents and their budgets, child rules and spans. Not built yet.
 - Context summaries written to the chain when older results leave the prompt. Not built yet.
 - A kill and restart at an iteration boundary. Not run yet.
@@ -94,4 +111,15 @@ Export and verify the chain:
 - `export.txt`: the export summary and last row hash.
 - `jobs.json`: the two post-fix successful jobs as returned by the API.
 - `api.log`: the API startup log from the final deployment.
+- `SHA256SUMS`: hashes for the files above.
+
+## Files in gate/
+
+- `job-after.json`: the job after approval and success.
+- `job-events.txt`: the step events, including the gate and the act.
+- `audit-rows.txt`: the chain rows for the job, showing the approval before the act and the act before the
+  tool call.
+- `audit-events.jsonl`: the 68-event chain export.
+- `verify.txt`: the verifier's result.
+- `export.txt`: the export summary.
 - `SHA256SUMS`: hashes for the files above.
