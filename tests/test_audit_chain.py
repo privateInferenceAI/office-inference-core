@@ -19,7 +19,9 @@ import types
 from pathlib import Path
 
 # The service imports psycopg at module level, so the same stub the other audit tests use.
-if "psycopg" not in sys.modules:
+try:
+    import psycopg  # noqa: F401 - the real driver when it is installed
+except ImportError:
     psycopg = types.ModuleType("psycopg")
     psycopg.connect = lambda *a, **k: None
     psycopg.types = types.ModuleType("psycopg.types")
@@ -133,8 +135,13 @@ def test_the_migration_carries_the_same_formula_as_the_verifier():
 
 def test_a_row_from_a_newer_writer_is_reported_rather_than_miscounted():
     """A row claiming a version this verifier does not know cannot be checked. Reporting it as a mismatch would
-    call it tampering; saying nothing would let it pass. It is reported as unchecked, which is what it is."""
-    assert audit.KNOWN_CHAIN_VERSION == 2
-    migration = (ROOT / "db" / "migrations" / "013_chain_covers_redaction.sql").read_text()
+    call it tampering; saying nothing would let it pass. It is reported as unchecked, which is what it is.
+
+    The ceiling moved to 3 in migration 025, so the guard is read from there now. 013's copy of the message is
+    history; the function that runs is the newest one, and that is the one this test has to read.
+    """
+    assert audit.KNOWN_CHAIN_VERSION == 3
+    migration = (ROOT / "db" / "migrations" / "025_the_approval_is_in_the_chain.sql").read_text()
     assert "chain version % has no canonical form" in migration, \
         "the writer accepts versions the verifier cannot check"
+    assert "new.chain_version > 3" in migration, "the guard's ceiling and the verifier's disagree"

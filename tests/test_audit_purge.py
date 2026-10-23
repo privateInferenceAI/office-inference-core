@@ -155,7 +155,8 @@ def test_the_tombstone_names_what_was_removed(connection):
     cursor = connection()
     assert audit.cmd_purge(purge_args(reason="court order")) == 0
     insert_params = next(p for q, p in cursor.executed if q.lower().startswith("insert"))
-    payload = insert_params[-1]
+    raw = insert_params[-1]
+    payload = getattr(raw, "obj", raw)  # psycopg's Jsonb wrapper; the no-driver stub is the identity
     assert payload["deleted_count"] == 3
     assert payload["first_id"] == 1 and payload["last_id"] == 3
     assert payload["reason"] == "court order"

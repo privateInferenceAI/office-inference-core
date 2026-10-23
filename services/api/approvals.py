@@ -21,6 +21,7 @@ three honestly.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Optional
 
 #: The four assurance values, and **only the first is reachable today.**
@@ -91,6 +92,9 @@ def identity_for(session) -> dict:
     return {
         "assurance": resolve_assurance(claimed),
         "basis": BASIS_SESSION_TOKEN,
+        # **The session id is not a person and it is not a secret.** It is the handle the record needs to
+        # answer "which session made this decision" without claiming who was holding it.
+        "session_id": getattr(session, "session_id", "") or "",
         "claimed_subject": getattr(session, "subject", "") or "unknown",
         "claimed_role": getattr(session, "role", "") or "unknown",
     }
@@ -188,3 +192,53 @@ def describe(record: dict) -> str:
                 f"identified: {UNVERIFIED_REASON}.")
 
     return f"{said} at {when} by {identity.get('claimed_subject')} ({role})."
+
+
+# --------------------------------------------------------------------------- the decision and its record
+
+def decide_and_record(*, store, job, decision: str, action_digest_quoted: str, session,
+                      reason: str = "", note: str = "", mint=None, key_path=None,
+                      deployment_id: str = "", audit=None):
+    """Apply a decision and write its chain row, in one transaction when the store is durable.
+
+    **The property this exists for is the one C5's engine already keeps.** The route used to call
+    `jobs.decide()` and then the audit tool, which opened its own connection: the decision committed first,
+    and a failed audit write left a decided job with no record of who decided it. That is the same gap the
+    engine's transaction closes for step rows, and the approval route is the second writer of the gate.
+
+    A durable store takes the engine's `PostgresUnit`: the state change, the job events and the chain row all
+    run on one cursor and commit together. A memory store has no transaction, so the test double writes the
+    same record through the injected `audit` callback and says so.
+
+    The record is built BEFORE `jobs.decide()`, because `state_before` is part of it and the decision moves
+    the job. Building it after the transition would record a state the decision was never made in.
+    """
+    import jobs as jobs_module
+
+    signed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    record = build_payload(session, job, decision, reason, note, action_digest_quoted, signed_at)
+
+    if getattr(store, "durable", False):
+        if mint is None:
+            raise RuntimeError("a durable approval needs a statement-minting callable")
+        from workflow.engine import PostgresUnit
+
+        unit = PostgresUnit(store, mint=mint, deployment_id=deployment_id or job.deployment_id,
+                            key_path=key_path)
+        with unit:
+            jobs_module.decide(job, unit, decision, action_digest_quoted)
+            unit.record(
+                statement=unit.mint(job.subject, job.actor_role),
+                event_type="approval",
+                outcome="ok",
+                data_class=job.data_class,
+                deployment_id=deployment_id or job.deployment_id,
+                payload=record,
+                tool_name=job.task,
+            )
+        return store.get(job.job_id) or job
+
+    jobs_module.decide(job, store, decision, action_digest_quoted)
+    if audit is not None:
+        audit("approval", session.subject, session.role, "ok", record, tool=job.task)
+    return store.get(job.job_id) or job
