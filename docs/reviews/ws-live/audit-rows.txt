@@ -1,0 +1,14 @@
+718|tool_call|turn-1|-|turn-1|-|-
+719|model_call|-|analyst|turn-1|-|-
+720|tool_call|workspace_write|-|turn-1|-|-
+721|tool_call|search_documents|-|turn-1|-|-
+722|tool_call|turn-1|-|turn-1|-|-
+723|tool_call|turn-2|-|turn-2|-|-
+724|model_call|-|analyst|turn-2|-|-
+725|tool_call|workspace_run|-|turn-2|-|-
+726|tool_call|turn-2|-|turn-2|-|-
+727|tool_call|turn-3|-|turn-3|-|-
+728|model_call|-|analyst|turn-3|-|-
+729|tool_call|turn-3|-|turn-3|-|-
+730|tool_call|finish|-|finish|-|-
+731|tool_call|finish|-|finish|-|-
