@@ -1,0 +1,16 @@
+{
+  "wall": {
+    "typed": true,
+    "detail": "the command exceeded 2 seconds"
+  },
+  "memory": {
+    "returncode": 137,
+    "stdout": "",
+    "stderr_tail": ""
+  },
+  "disk": {
+    "typed": true,
+    "detail": "the task already uses 2097152 bytes"
+  },
+  "leftover": []
+}
