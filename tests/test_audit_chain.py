@@ -140,8 +140,8 @@ def test_a_row_from_a_newer_writer_is_reported_rather_than_miscounted():
     The ceiling moved to 3 in migration 025, so the guard is read from there now. 013's copy of the message is
     history; the function that runs is the newest one, and that is the one this test has to read.
     """
-    assert audit.KNOWN_CHAIN_VERSION == 3
-    migration = (ROOT / "db" / "migrations" / "025_the_approval_is_in_the_chain.sql").read_text()
+    assert audit.KNOWN_CHAIN_VERSION == 4
+    migration = (ROOT / "db" / "migrations" / "027_the_prompt_and_completion_are_in_the_chain.sql").read_text()
     assert "chain version % has no canonical form" in migration, \
         "the writer accepts versions the verifier cannot check"
-    assert "new.chain_version > 3" in migration, "the guard's ceiling and the verifier's disagree"
+    assert "new.chain_version > 4" in migration, "the guard's ceiling and the verifier's disagree"

@@ -365,7 +365,7 @@ def legacy_row(version: int, event_type: str, actor: str, ts_iso: str, payload: 
         previous = head[0] if head else None
         cur.execute("""
             select audit_row_canonical(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                                       0, '{}'::jsonb, 0, null::boolean, null::text)""",
+                                       0, '{}'::jsonb, 0, null::boolean, null::text, null::text, null::text)""",
                     (version, ts_iso, event_type, actor, "system", DEPLOYMENT, "internal", "ok",
                      "", "", "", audit.sha256_hex(text), len(text), previous))
         row_hash = audit.sha256_hex(cur.fetchone()[0])
@@ -385,11 +385,11 @@ def legacy_row(version: int, event_type: str, actor: str, ts_iso: str, payload: 
 
 
 @needs_database
-def test_an_approval_written_through_the_writer_carries_a_digest_and_chain_version_3():
+def test_an_approval_written_through_the_writer_carries_a_digest_and_chain_version_4():
     written = insert_approval({"decision": "approve", "reason": "", "action_digest": "sha256:abc"})
     event_type, version, approval, digest, row_hash, _ = row(written["id"])
     assert event_type == "approval"
-    assert version == 3
+    assert version == 4
     assert approval is not None
     assert digest == audit.sha256_hex(audit.canonical_json(approval))
     assert digest == written["approval_sha256"]
@@ -486,7 +486,7 @@ def test_the_database_and_the_verifier_agree_on_every_version(tmp_path):
     identifiers = {
         1: legacy_row(1, "access", "agree-one", "2026-10-01T00:00:03.000000Z", {"agrees": 1}),
         2: legacy_row(2, "access", "agree-two", "2026-10-01T00:00:04.000000Z", {"agrees": 2}),
-        3: insert_approval({"decision": "approve", "action_digest": "sha256:ghi"})["id"],
+        4: insert_approval({"decision": "approve", "action_digest": "sha256:ghi"})["id"],
     }
     assert export_and_verify(tmp_path) == 0
     exported = {value["id"]: value for value in (
@@ -502,7 +502,7 @@ def test_the_database_and_the_verifier_agree_on_every_version(tmp_path):
                                            %s::text, %s::text, %s::text, %s::text, %s::text,
                                            %s::text, %s::text, %s::integer, %s::text,
                                            %s::integer, %s::jsonb, %s::integer, %s::boolean,
-                                           %s::text)""",
+                                           %s::text, %s::text, %s::text)""",
                         (value["chain_version"], value["ts_iso"], value["event_type"], value["actor"],
                          value["actor_role"], value["deployment_id"], value["data_class"],
                          value["outcome"], value["tool"], value["model"], value["request_id"],
@@ -511,7 +511,8 @@ def test_the_database_and_the_verifier_agree_on_every_version(tmp_path):
                          audit.canonical_json(value["redactions"])
                          if value["redactions"] is not None else None,
                          value["unverified_card_shapes"], value["egress_allowed"],
-                         value["approval_sha256"]))
+                         value["approval_sha256"], value["prompt_sha256"],
+                         value["completion_sha256"]))
             database = cur.fetchone()[0]
         assert database == audit.row_canonical(value), (
             f"the database and the verifier disagree about a version {version} row")
@@ -523,11 +524,11 @@ def test_the_database_and_the_verifier_agree_on_every_version(tmp_path):
 # columns it knows about passes forever while a new one sits outside the chain, which is how the approval column
 # stayed out for two phases. The database test below asserts that this list and the table are the same set.
 
-CANONICAL_V3 = {
+CANONICAL_V4 = {
     "ts_iso", "event_type", "actor", "actor_role", "deployment_id", "data_class", "outcome",
     "tool", "model", "request_id", "payload_sha256", "payload_bytes", "prev_hash",
     "redaction_count", "redactions", "unverified_card_shapes", "egress_allowed",
-    "approval_sha256",
+    "approval_sha256", "prompt_sha256", "completion_sha256",
 }
 
 #: Content columns, and the digest covering each one. Content is hashed rather than cast into the canonical
@@ -539,7 +540,7 @@ COVERED_BY = {
 
 #: Digests named by AUD-APPROVAL-001 as coverage. The stored prompt and completion live inside the payload,
 #: which payload_sha256 covers; these are the narrower hashes recorded beside it.
-CONTENT_DIGESTS = {"prompt_sha256", "completion_sha256"}
+CONTENT_DIGESTS = set()
 
 #: Columns a reader does not treat as a fact about the event, each with its reason. An entry without a reason is
 #: the next AUD-APPROVAL-001, so the reason is part of the entry.
@@ -556,9 +557,9 @@ BOOKKEEPING = {
 
 def test_the_approval_is_covered_by_a_digest_the_canonical_string_carries():
     assert COVERED_BY["approval"] == "approval_sha256"
-    assert "approval_sha256" in CANONICAL_V3
+    assert "approval_sha256" in CANONICAL_V4
     for column, cover in COVERED_BY.items():
-        assert cover in CANONICAL_V3 or cover in CONTENT_DIGESTS, (
+        assert cover in CANONICAL_V4 or cover in CONTENT_DIGESTS, (
             f"{column} is said to be covered by {cover}, which is not covered by anything")
 
 
@@ -580,7 +581,7 @@ def test_a_column_that_carries_meaning_is_covered_by_the_chain_or_a_content_hash
             where p.proname = 'audit_row_canonical' and n.nspname = current_schema()""")
         function_count, arguments = cur.fetchone()
 
-    classified = CANONICAL_V3 | set(COVERED_BY) | CONTENT_DIGESTS | set(BOOKKEEPING)
+    classified = CANONICAL_V4 | set(COVERED_BY) | CONTENT_DIGESTS | set(BOOKKEEPING)
 
     unclassified = set(columns) - classified
     assert not unclassified, (
@@ -599,6 +600,6 @@ def test_a_column_that_carries_meaning_is_covered_by_the_chain_or_a_content_hash
         name = part.split()[0]
         if name.startswith("p_") and name != "p_chain_version":
             argument_names.add(name[2:])
-    assert argument_names == CANONICAL_V3, (
+    assert argument_names == CANONICAL_V4, (
         "the database canonical function's arguments and the verifier's field list have drifted apart: "
-        f"{sorted(argument_names ^ CANONICAL_V3)}")
+        f"{sorted(argument_names ^ CANONICAL_V4)}")
