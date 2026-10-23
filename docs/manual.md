@@ -2714,6 +2714,13 @@ reply. Page drift is also not a reason to drop a claim: it is reported by `check
 the words are right and the place is wrong, and a person can act on that. A claim is marked rather than
 dropped, so a reader can see which sentence failed and why.
 
+**A citation marker is not a figure.** The supported form is `[n]`, and the verifier strips the marker
+before the numeric, identifier and quote checks. The first version did not, so the `12` in `[12]` was read as
+a number the cited passage had to contain, and a correct answer citing ten or more passages was refused as
+`number_not_in_source`. The accuracy profile seeds twelve passages, so this was one query away rather than an
+edge case. Found by running the boundary question on the live box on 2026-10-23: the answer cited `[14]` and
+the verifier reported that the passage did not state 14.
+
 **Three rules keep the false refusals down**, because a check that refuses correct answers gets turned off
 and a check that is turned off catches nothing. Numbers compare with trailing zeros dropped only, so `145.00`,
 `145.0` and `145` are one number, and the leading zero of `0.67` is left alone because stripping it once
