@@ -2320,7 +2320,8 @@ items:
       connector endpoint we operate is refused by a check of the same kind intake's cord-check makes; and
       with every hostname we control blocked at the resolver, a tool call still completes. The test fails if
       any C6 component lives with us.
-    status: open
+    status: verified
+    evidence: docs/reviews/mcp-owned/README.md
     note: >-
       BIZ-INDEPENDENT-001 applied to C6, and the same reasoning that killed the hosted intake address in C5:
       a client who takes the system over cannot depend on a registry we run. **The tier is cloud and office
