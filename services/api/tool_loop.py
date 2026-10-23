@@ -120,6 +120,62 @@ DELEGATE_TOOL = {
     },
 }
 
+
+# **The workspace tools are not in TOOLS either.** They run inside the task sandbox, and only a definition that
+# declares the workspace gets them. The service enforces the container boundary; the runtime enforces the audit
+# and the task id.
+WORKSPACE_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "workspace_write",
+            "description": "Write a text file in the task workspace. The path is relative to /workspace.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "relative path inside the workspace"},
+                    "content": {"type": "string", "description": "the file's text"},
+                },
+                "required": ["path", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "workspace_read",
+            "description": "Read a text file from the task workspace.",
+            "parameters": {
+                "type": "object",
+                "properties": {"path": {"type": "string", "description": "relative path inside the workspace"}},
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "workspace_list",
+            "description": "List the files in the task workspace and their sizes.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "workspace_run",
+            "description": (
+                "Run a shell command inside the task sandbox. There is no network. The command runs as a "
+                "non-root user in a read-only root with only /workspace writable."),
+            "parameters": {
+                "type": "object",
+                "properties": {"command": {"type": "string", "description": "the shell command to run"}},
+                "required": ["command"],
+            },
+        },
+    },
+]
+
 _PROMPT_HEAD = (
     "You answer questions about a client's own documents.\n"
     "You have tools. search_documents searches the documents; read_passages opens a document around a "
@@ -1065,6 +1121,8 @@ def agent_tools(definition: dict) -> list:
     tools = list(TOOLS)
     if definition.get("child_tools"):
         tools.append(DELEGATE_TOOL)
+    if definition.get("workspace"):
+        tools.extend(WORKSPACE_TOOLS)
     return tools
 
 

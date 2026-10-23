@@ -504,6 +504,14 @@ services:
       CONTENT_MODE_INTERNAL: ${CONTENT_MODE_INTERNAL:-redacted}
       CONTENT_MODE_CONFIDENTIAL: ${CONTENT_MODE_CONFIDENTIAL:-hash}
       CONTENT_MODE_REGULATED: ${CONTENT_MODE_REGULATED:-hash}
+      # **The workspace host, when this deployment has one.** Empty means the workspace definitions fail typed
+      # rather than smuggling a shell into the API host. The token is internal to the deployment.
+      OI_WORKSPACE_URL: ${OI_WORKSPACE_URL:-}
+      OI_WORKSPACE_TOKEN: ${OI_WORKSPACE_TOKEN:-}
+    # The workspace service is on the host in the first build. The API reaches it through the Docker bridge
+    # gateway; a deployment with a separate workspace host sets OI_WORKSPACE_URL to that host instead.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       # The rendered registry and signing key, read-only. The API mints statements; it does not administer.
       - ${OI_ROOT}/rendered:/app/rendered:ro

@@ -47,6 +47,9 @@ class RuntimeContext:
     # A child brief goes in, a structured JSON result comes out. The controller does not know how the child
     # runs; the deployment supplies a read-only child loop with its own budget.
     run_child: Optional[Callable[[str], str]] = None
+    # A workspace tool name and its JSON arguments go in, a result string comes out. The deployment supplies the
+    # client to the workspace service; the controller only routes the call and keeps the step.
+    workspace_tool: Optional[Callable[[str, str], str]] = None
     max_steps: int = DEFAULT_MAX_STEPS
     max_messages: int = DEFAULT_MAX_MESSAGES
     messages: list = field(default_factory=list)
@@ -244,7 +247,9 @@ class AgentPlan:
             name = call.get("name") or ""
             arguments = call.get("arguments") or "{}"
             try:
-                if name == "delegate_research":
+                if name.startswith("workspace_") and context.workspace_tool is not None:
+                    result = context.workspace_tool(name, arguments)
+                elif name == "delegate_research":
                     if context.run_child is None:
                         result = json.dumps({"error": "this definition has no child runner"})
                     else:

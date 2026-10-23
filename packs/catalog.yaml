@@ -84,6 +84,21 @@ packs:
         verify: citations_present
         needs_approval: true
 
+      - id: workspace_brief
+        label: Workspace brief
+        description: >-
+          Work in a task-scoped sandbox: write files, run code and produce an artifact, then return a brief
+          with citations. The sandbox has no network and is destroyed when the task ends.
+        mode: task
+        role: analyst
+        tools: [search_documents, read_passages, workspace_write, workspace_read, workspace_list, workspace_run]
+        workspace: true
+        max_steps: 14
+        max_seconds: 600
+        max_tokens: 80000
+        verify: citations_present
+        needs_approval: true
+
   - id: voice
     name: Voice
     sold: true

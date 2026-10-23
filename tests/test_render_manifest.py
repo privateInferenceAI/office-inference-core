@@ -259,7 +259,7 @@ def test_the_agentic_pack_renders_its_definitions_and_their_budgets(tmp_path):
     assert render(WORKSPACE, tmp_path).returncode == 0
     rendered = json.loads((tmp_path / "agent_definitions.json").read_text())
     definitions = {entry["id"]: entry for entry in rendered["definitions"]}
-    assert set(definitions) == {"research_brief"}
+    assert set(definitions) == {"research_brief", "workspace_brief"}
     brief = definitions["research_brief"]
     assert brief["role"] == "analyst"
     assert brief["tools"] == ["search_documents", "read_passages", "query_rows"]
