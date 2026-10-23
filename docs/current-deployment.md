@@ -96,11 +96,9 @@ the client tenant.
    Mailpit is a fallback capture service.
 2. **The Elastic IP 34.225.62.245 is associated.** The public API name is mcp.badj.ai, an A record at Porkbun.
    Caddy has a certificate for it and scripts/check_client_endpoint.py reports it as client-owned. The earlier
-   mcp.officeinference.com name is still served by Caddy as a convenience alias, but it is a vendor domain and is
-   not the API URL or the ownership evidence.
+   mcp.officeinference.com name was deleted from DNS and removed from Caddy; it is not an alias any more.
 3. **The DeepSeek key comes from Secrets Manager.** The secret is deepseek-oi-key in account 878. The old key was
-   replaced and the LiteLLM environment restarted. Revoke the old key at the provider when you are satisfied with
-   the comparison.
+   replaced, the LiteLLM environment restarted, and the owner revoked the old key on 2026-10-23.
 4. **The image scan has current critical findings.** They are recorded in `docs/reviews/ops-cve/`. They are not
    waived.
 5. **Backup and the restore/RTO drill exist.** The bucket is in account 878, daily at 02:00 UTC. The measured

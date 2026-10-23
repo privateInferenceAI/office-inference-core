@@ -2,8 +2,5 @@
   "date": "2026-10-23",
   "url": "https://mcp.badj.ai",
   "result": "client-owned",
-  "office_alias": {
-    "url": "https://mcp.officeinference.com",
-    "result": "refused: domain we operate"
-  }
+  "retired_alias": "mcp.officeinference.com was deleted from DNS and removed from Caddy"
 }

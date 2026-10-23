@@ -2,8 +2,7 @@
 
 **Date:** 2026-10-23. **Status:** MCP-OWNED-001 is verified. The public API name is `mcp.badj.ai`, which
 resolves to the tenant Elastic IP and passes `scripts/check_client_endpoint.py` as client-owned. The earlier
-`mcp.officeinference.com` name is still served as a convenience alias, but it is a vendor domain and is not used
-as the API URL or as ownership evidence.
+`mcp.officeinference.com` record was deleted and removed from Caddy; it is not an alias any more.
 
 ## What moved
 
