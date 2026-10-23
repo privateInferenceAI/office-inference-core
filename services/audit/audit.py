@@ -1039,7 +1039,7 @@ def build_parser() -> argparse.ArgumentParser:
     record = sub.add_parser("record")
     record.add_argument("--type", required=True,
                         choices=["model_call", "tool_call", "approval", "access",
-                                 "config_change", "login",
+                                 "config_change", "login", "context_trim", "resume",
                                  # Recorded by `reattest`, but accepted here too so a caller that has already
                                  # built a statement can write one through the generic path. The generic path
                                  # does not check the superseded row; `reattest` is the command that does.
