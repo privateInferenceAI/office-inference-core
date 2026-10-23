@@ -1,0 +1,8 @@
+{
+  "clean": "ok, 914 events, chain intact",
+  "approval_sha256": "FAIL row_hash does not match the row contents",
+  "prompt_sha256": "FAIL row_hash does not match the row contents",
+  "completion_sha256": "FAIL row_hash does not match the row contents",
+  "row": 1250,
+  "chain_version": 4
+}

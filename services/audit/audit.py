@@ -165,12 +165,15 @@ def row_canonical(row: dict) -> str:
     ])
     if version < 3:
         return version_two
-    return version_two + "|" + (row.get("approval_sha256") or "")
+    version_three = version_two + "|" + (row.get("approval_sha256") or "")
+    if version < 4:
+        return version_three
+    return version_three + "|" + (row.get("prompt_sha256") or "") + "|" + (row.get("completion_sha256") or "")
 
 
 # The newest chain version this verifier understands. A row claiming a higher one cannot be checked, and saying
 # so is better than computing a hash from the wrong formula and calling the mismatch tampering.
-KNOWN_CHAIN_VERSION = 3
+KNOWN_CHAIN_VERSION = 4
 
 
 # --------------------------------------------------------------------------- migrate
@@ -718,6 +721,7 @@ def cmd_export(args) -> int:
             select id, occurred_at, ts_iso, event_type, actor, actor_role, deployment_id,
                    data_class, outcome, tool, model, request_id, approval, approval_sha256,
                    payload_sha256, payload_bytes, payload, prev_hash, row_hash, chain_version,
+                   prompt_sha256, completion_sha256,
                    redaction_count, redactions, unverified_card_shapes, egress_allowed
             from audit_events
             where occurred_at >= %s and occurred_at < %s + interval '1 day'
