@@ -5759,9 +5759,10 @@ BIZ-CONTRACT-001.
 
 ## Phase C8 — Operations, partly built
 
-Seven C8 rows are verified: audit chain version 4, image scanning, drift, the incident tabletop, backup, the
-restore/RTO drill, and the 20-concurrent load test at a worst p95 of 7.8 seconds across five runs. The rest are open and need a decision or
-an external party; docs/current-deployment.md names the blocker for each.
+Nine C8 rows are verified: audit chain version 4, image scanning, drift, the incident tabletop, backup, the
+restore/RTO drill, the 20-concurrent load test, the signed release with rollback, and the medical golden set with
+its hard-fail gate. The ingest cycle lock closes RET-INGEST-002. The remaining C8 rows are alarms, SSM-only
+support, cost reporting and fresh-deployment acceptance; docs/current-deployment.md names the blocker for each.
 
 ### C8.1 Audit chain version 4
 
@@ -5808,13 +5809,22 @@ on the artifact manifest.
 
 ### C8.5 Still open
 
-    OPS-ALARM-001      needs a notification destination and a confirmed subscription
-    OPS-UPDATE-001     needs release signing and a rollback target
+    OPS-ALARM-001      five alarms built; email subscription awaiting confirmation
     OPS-SUPPORT-001    needs approval to remove SSH and use SSM only
     OPS-COST-001       needs the report shape and Marketplace line access
-    QLT-GOLDEN-001     needs a vertical and sixty client-approved questions
     QLT-ACCEPT-001     needs a fresh deployment
     BIZ-*              counsel, insurance, contracts, on-call, subprocessors, pricing
+
+### C8.6 Medical golden set and ingest lock
+
+The synthetic medical source is indexed under company/medical. The 60-question set validates 60 of 60 against
+the live chunk_index. The hard-fail gate self-test catches a fabricated number, a wrong document, a cross-role
+leak and an unanswerable answer. The suite is docs/eval/medical-data-questions.yaml; the gate is
+scripts/check_medical_hard_fails.py.
+
+The ingest cycle lock closes RET-INGEST-002. Both paths take /state/ingest.lock. A scheduled cycle skips while a
+manual cycle holds it, and a second manual cycle is refused. Evidence: docs/reviews/ret-ingest/ and
+docs/reviews/medical-golden/.
 
 ## Future phases
 

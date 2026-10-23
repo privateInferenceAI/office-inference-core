@@ -2,8 +2,9 @@ vertical: medical_clinic
 status: draft
 source_docs:
 - fixtures/corpus/medical/clinic-policy.md
-note: Synthetic draft. Clinical and compliance review required before use as a client
-  acceptance set.
+note: Synthetic draft. Clinical review waived by the owner for test use. Unanswerable
+  behavior is proven by the gate self-test, not by a fabricated answer in this 60-question
+  set.
 questions:
 - id: MED-001
   vertical: medical_clinic
@@ -48,7 +49,7 @@ questions:
     doc: fixtures/corpus/medical/clinic-policy.md
     section: 1. Clinic hours and access
     page: 1
-  hard_fail: unanswerable
+  hard_fail: wrong_document
 - id: MED-005
   vertical: medical_clinic
   category: operations
@@ -92,7 +93,7 @@ questions:
     doc: fixtures/corpus/medical/clinic-policy.md
     section: 2. Appointments and cancellations
     page: 1
-  hard_fail: unanswerable
+  hard_fail: wrong_document
 - id: MED-009
   vertical: medical_clinic
   category: operations
@@ -137,7 +138,7 @@ questions:
     doc: fixtures/corpus/medical/clinic-policy.md
     section: 2. Appointments and cancellations
     page: 1
-  hard_fail: unanswerable
+  hard_fail: wrong_document
 - id: MED-013
   vertical: medical_clinic
   category: billing
@@ -182,7 +183,7 @@ questions:
     doc: fixtures/corpus/medical/clinic-policy.md
     section: 3. Insurance and authorization
     page: 1
-  hard_fail: unanswerable
+  hard_fail: wrong_document
 - id: MED-017
   vertical: medical_clinic
   category: billing
@@ -227,7 +228,7 @@ questions:
     doc: fixtures/corpus/medical/clinic-policy.md
     section: 4. Billing and payments
     page: 1
-  hard_fail: unanswerable
+  hard_fail: wrong_document
 - id: MED-021
   vertical: medical_clinic
   category: billing
@@ -271,7 +272,7 @@ questions:
     doc: fixtures/corpus/medical/clinic-policy.md
     section: 4. Billing and payments
     page: 1
-  hard_fail: unanswerable
+  hard_fail: wrong_document
 - id: MED-025
   vertical: medical_clinic
   category: records
@@ -316,7 +317,7 @@ questions:
     doc: fixtures/corpus/medical/clinic-policy.md
     section: 5. Medical records
     page: 1
-  hard_fail: unanswerable
+  hard_fail: wrong_document
 - id: MED-029
   vertical: medical_clinic
   category: records
@@ -361,7 +362,7 @@ questions:
     doc: fixtures/corpus/medical/clinic-policy.md
     section: 6. Privacy and disclosures
     page: 1
-  hard_fail: unanswerable
+  hard_fail: wrong_document
 - id: MED-033
   vertical: medical_clinic
   category: privacy
@@ -406,7 +407,7 @@ questions:
     doc: fixtures/corpus/medical/clinic-policy.md
     section: 6. Privacy and disclosures
     page: 1
-  hard_fail: unanswerable
+  hard_fail: wrong_document
 - id: MED-037
   vertical: medical_clinic
   category: clinical
@@ -452,7 +453,7 @@ questions:
     doc: fixtures/corpus/medical/clinic-policy.md
     section: 7. Prescriptions and refills
     page: 1
-  hard_fail: unanswerable
+  hard_fail: wrong_document
 - id: MED-041
   vertical: medical_clinic
   category: clinical
@@ -498,7 +499,7 @@ questions:
     doc: fixtures/corpus/medical/clinic-policy.md
     section: 8. Referrals and care coordination
     page: 1
-  hard_fail: unanswerable
+  hard_fail: wrong_document
 - id: MED-045
   vertical: medical_clinic
   category: clinical
@@ -543,7 +544,7 @@ questions:
     doc: fixtures/corpus/medical/clinic-policy.md
     section: 8. Referrals and care coordination
     page: 1
-  hard_fail: unanswerable
+  hard_fail: wrong_document
 - id: MED-049
   vertical: medical_clinic
   category: clinical
@@ -589,7 +590,7 @@ questions:
     doc: fixtures/corpus/medical/clinic-policy.md
     section: 9. Telehealth
     page: 1
-  hard_fail: unanswerable
+  hard_fail: wrong_document
 - id: MED-053
   vertical: medical_clinic
   category: clinical
@@ -633,7 +634,7 @@ questions:
     doc: fixtures/corpus/medical/clinic-policy.md
     section: 10. Emergencies and safety
     page: 1
-  hard_fail: unanswerable
+  hard_fail: wrong_document
 - id: MED-057
   vertical: medical_clinic
   category: safety
@@ -677,4 +678,4 @@ questions:
     doc: fixtures/corpus/medical/clinic-policy.md
     section: 10. Emergencies and safety
     page: 1
-  hard_fail: unanswerable
+  hard_fail: wrong_document

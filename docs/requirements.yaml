@@ -764,7 +764,8 @@ items:
       that replaces the loop rather than joining it. Then load a few hundred documents in one go and assert the
       cycle finishes with zero failures. A load that dead-letters documents because two workers shared one
       embedding service fails the row.
-    status: open
+    status: verified
+    evidence: docs/reviews/ret-ingest/README.md
     note: >-
       Found on 2026-10-16 while loading the group-01 and group-02 corpus. A manual `docker exec ... ingest.py`
       ran beside the fifteen-minute service cycle, both workers loaded one embedding service, TEI answered
@@ -1283,7 +1284,8 @@ items:
     tier: [cloud, office, hosted]
     phase: C8
     verify: the suite runs and blocks a release when a hard-fail category triggers
-    status: open
+    status: verified
+    evidence: docs/reviews/medical-golden/README.md
   - id: QLT-TEST-001
     title: Every service ships unit and integration tests that run without a database or a GPU
     tier: [cloud, office, hosted]
