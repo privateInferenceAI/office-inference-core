@@ -13,6 +13,30 @@
   ],
   "additionalProperties": false,
   "properties": {
+    "mcp": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The tools this deployment's MCP gateway is allowed to call. The renderer writes this block to rendered/mcp_tools.json; the gateway refuses anything absent from it.",
+      "properties": {
+        "tools": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "path"],
+            "properties": {
+              "name": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+              "path": {"type": "string"},
+              "credential_file": {"type": "string"},
+              "allowed_roles": {"type": "array", "items": {"type": "string"}, "default": []},
+              "data_classes": {"type": "array", "items": {"type": "string"}, "default": []},
+              "egress": {"type": "boolean", "default": false}
+            }
+          }
+        }
+      }
+    },
     "agentic": {
       "type": "object",
       "additionalProperties": false,

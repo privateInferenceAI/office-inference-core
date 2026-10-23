@@ -202,3 +202,12 @@ agentic:
       tier: analyst
       touches: [documents]
       needs_approval: true
+
+mcp:
+  tools:
+    - name: send_email
+      path: /send
+      credential_file: /app/rendered/connector.token
+      allowed_roles: [viewer, analyst, admin]
+      data_classes: [internal]
+      egress: true

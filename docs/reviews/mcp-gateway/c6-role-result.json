@@ -1,0 +1,9 @@
+{
+  "role_policy": [
+    403,
+    {
+      "detail": "role 'viewer' does not hold 'send_email'",
+      "error": "role_policy"
+    }
+  ]
+}

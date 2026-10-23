@@ -469,6 +469,38 @@ services:
         condition: service_healthy
     networks: [ai-net]
 
+  mcp-gateway:
+    # **The only process that holds connector credentials.** The API calls it with the gateway token; the
+    # gateway reads the session row, applies the tool policy and adds the connector credential at the boundary.
+    build:
+      context: ${OI_ROOT}
+      dockerfile: services/mcp_gateway/Dockerfile
+    image: oi-core/mcp-gateway:local
+    container_name: mcp-gateway
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      MCP_GATEWAY_TOKEN: ${OI_MCP_TOKEN}
+      MCP_TOOLS_FILE: /app/rendered/mcp_tools.json
+      CONNECTOR_URL: http://host.docker.internal:8092
+      AUDIT_TOOL: /app/audit.py
+      AUDIT_DEV: "1"
+      CONTENT_DEFAULT: ${CONTENT_DEFAULT:-hash}
+      CONTENT_MODE_PUBLIC: ${CONTENT_MODE_PUBLIC:-full}
+      CONTENT_MODE_INTERNAL: ${CONTENT_MODE_INTERNAL:-redacted}
+      CONTENT_MODE_CONFIDENTIAL: ${CONTENT_MODE_CONFIDENTIAL:-hash}
+      CONTENT_MODE_REGULATED: ${CONTENT_MODE_REGULATED:-hash}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ${OI_ROOT}/rendered:/app/rendered:ro
+      # The chain's one writer. A refusal that is not in the chain is not a refusal this system made.
+      - ${OI_ROOT}/services/audit/audit.py:/app/audit.py:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [ai-net]
+
   api:
     # The assistant API. The only thing a client application talks to, and the only thing that holds the
     # signing key a model call is authenticated with.

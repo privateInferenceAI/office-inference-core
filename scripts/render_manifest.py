@@ -556,6 +556,11 @@ def main() -> int:
         key_path.write_text(env["OI_ASSERTION_SECRET"] + "\n")
     key_path.chmod(0o600)
 
+    mcp_tools = {}
+    for tool in (manifest.get("mcp") or {}).get("tools") or []:
+        mcp_tools[tool["name"]] = {key: value for key, value in tool.items() if key != "name"}
+    (out_dir / "mcp_tools.json").write_text(json.dumps({"tools": mcp_tools}, indent=2, sort_keys=True) + "\n")
+
     registry = build_access_registry(manifest)
     (out_dir / "access.json").write_text(json.dumps(registry, indent=2, sort_keys=True) + "\n")
 

@@ -1,0 +1,17 @@
+{
+  "tools": {
+    "send_email": {
+      "allowed_roles": [
+        "viewer",
+        "analyst",
+        "admin"
+      ],
+      "credential_file": "/app/rendered/connector.token",
+      "data_classes": [
+        "internal"
+      ],
+      "egress": true,
+      "path": "/send"
+    }
+  }
+}

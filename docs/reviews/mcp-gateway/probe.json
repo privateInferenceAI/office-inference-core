@@ -1,0 +1,40 @@
+{
+  "tools": {
+    "tools": [
+      "send_email"
+    ]
+  },
+  "no_session": [
+    401,
+    {
+      "error": "no_session"
+    }
+  ],
+  "bad_session": [
+    401,
+    {
+      "error": "invalid_session"
+    }
+  ],
+  "authority_claim": [
+    403,
+    {
+      "detail": "a request may not supply its own authority",
+      "error": "refused_authority_claim"
+    }
+  ],
+  "undeclared": [
+    403,
+    {
+      "detail": "tool 'wire_money' is not declared for this deployment",
+      "error": "not_declared"
+    }
+  ],
+  "regulated": [
+    403,
+    {
+      "detail": "the tool does not accept 'regulated' data",
+      "error": "data_class"
+    }
+  ]
+}

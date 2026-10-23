@@ -16,12 +16,15 @@ class MCPClient:
         self.token = token or ""
         self.timeout = timeout
 
-    def call(self, tool: str, arguments: dict) -> dict:
+    def call(self, tool: str, arguments: dict, *, session_sha256: str = "",
+             data_class: str = "internal", egress_approved: bool = False) -> dict:
         if not self.base_url or not self.token:
             raise MCPClientError("MCP gateway URL and token are required")
         request = urllib.request.Request(
             self.base_url + "/call",
-            data=json.dumps({"tool": tool, "arguments": arguments}).encode(), method="POST",
+            data=json.dumps({"tool": tool, "arguments": arguments,
+                             "session_sha256": session_sha256, "data_class": data_class,
+                             "egress_approved": egress_approved}).encode(), method="POST",
             headers={"Content-Type": "application/json", "Authorization": "Bearer " + self.token})
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:

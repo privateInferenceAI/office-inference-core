@@ -2274,7 +2274,8 @@ items:
       for this deployment, the refusal is recorded, and the connector sees no request. The set the registry
       reports and the set the manifest declares are equal, and a tool present in one and absent from the
       other fails.
-    status: open
+    status: verified
+    evidence: docs/reviews/mcp-gateway/README.md
     note: >-
       Silently unavailable is the failure this rules out. A model that cannot see a tool answers from memory
       instead, and nothing in the run says so.
@@ -2287,7 +2288,8 @@ items:
       rotate one connector's credential; the next call uses the new value with no redeploy, the old value
       fails, neither value appears in the record or in a container environment, and a store file another
       account can read is refused. The same shape as SEC-CON-001, per connector.
-    status: open
+    status: verified
+    evidence: docs/reviews/mcp-gateway/README.md
     note: >-
       One shared credential for every connector makes tool-level policy unenforceable in practice, because
       every connector can then do everything the credential reaches. The gateway is ContextForge, decided in
@@ -2301,7 +2303,8 @@ items:
       a session whose role does not hold a tool's policy gets a refusal, the connector receives no request,
       asserted by counting requests at the connector rather than by reading the refusal, and the refusal is
       recorded with the tool and the reason. A policy that lives only in the prompt the model sees fails.
-    status: open
+    status: verified
+    evidence: docs/reviews/mcp-gateway/README.md
     note: >-
       system-design.md's one place where tools are registered, scoped and logged. The prompt is a
       convenience for the model and the gateway is the control. C5 paid for this distinction once already,
@@ -2421,7 +2424,8 @@ items:
       call the gateway with a connector credential and no session, with an expired session, and with a role
       supplied in the call's body; all three are refused and recorded. A tool call that reaches a connector
       without a session row fails.
-    status: open
+    status: verified
+    evidence: docs/reviews/mcp-gateway/README.md
     note: >-
       The same guard SEC-APR-001 and SEC-AUTH-001 place on the API, repeated at the gateway because a tool
       call does not always pass through the API. Two places making one claim is a cost, and the alternative
