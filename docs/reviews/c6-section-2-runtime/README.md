@@ -81,6 +81,18 @@ and the model called `delegate_research`.
 The child used the same session permit and a subset of the parent's declared tools. It had no delegate tool, so
 it could not spawn another child.
 
+## Kill and restart live run
+
+Job `88b19c45060f4e319665611d98e301bf` was killed while `turn-2` was running.
+
+- At the kill: state `running`, attempts 2, steps `turn-1` succeeded and `turn-2` running.
+- The API container was killed and restarted. Its log says `agent dispatcher: recovering 1 running job(s)`.
+- After recovery: the interrupted `turn-2` row is failed with kind `stopped`, a new `turn-2` row succeeded,
+  then `turn-3` and `finish` succeeded. The job finished in 21.3 seconds.
+- `turn-1` did not repeat. The recovered job has one succeeded row for it.
+- The audit rows show the interrupted turn at 419 and 420 and the recovered turn at 421 onward. The chain
+  export holds 97 events and verifies intact.
+
 ## What this proves
 
 - A definition job is claimed by the dispatcher and runs without an inline request.
@@ -95,8 +107,7 @@ it could not spawn another child.
 - A real irreversible connector. The gate mechanics are live-tested; the email connector is not.
 - Token budgets for the child. The child has a step cap and a wall-clock cap; the token ceiling is not enforced
   yet.
-- Context summaries written to the chain when older results leave the prompt. Not built yet.
-- A kill and restart at an iteration boundary. Not run yet.
+- A live context trim. The trim path has unit tests; no live run has forced a trim yet.
 - The workspace sandbox, web access, artifacts and workspace UI. That is the WS phase.
 
 ## Reproduce
@@ -127,6 +138,16 @@ Export and verify the chain:
 - `export.txt`: the export summary and last row hash.
 - `jobs.json`: the two post-fix successful jobs as returned by the API.
 - `api.log`: the API startup log from the final deployment.
+- `SHA256SUMS`: hashes for the files above.
+
+## Files in recovery/
+
+- `job-after.json`: the recovered job.
+- `audit-rows.txt`: the audit rows for the killed and recovered turns.
+- `recovery.log`: the API startup line that names the recovered job.
+- `audit-events.jsonl`: the 97-event chain export.
+- `verify.txt`: the verifier's result.
+- `export.txt`: the export summary.
 - `SHA256SUMS`: hashes for the files above.
 
 ## Files in subagent/
