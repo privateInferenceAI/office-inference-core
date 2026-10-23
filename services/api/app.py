@@ -30,6 +30,7 @@ import re
 import time
 import subprocess
 import sys
+import threading
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -355,6 +356,15 @@ async def lifespan(app: FastAPI):
             poll_s=float(os.environ.get("OI_AGENT_POLL_S", "0.5")))
         if worker.start():
             STATE["agent_worker"] = worker
+            # **A job left running by a dead process is not queued, so the claim loop will never see it.**
+            # The lease holder recovers those jobs on startup. Each runs in its own thread so a slow resume
+            # does not hold up the API's startup or the dispatcher's first claim.
+            recovered = STATE["jobs"].running_jobs(definition_ids)
+            for stale in recovered:
+                threading.Thread(target=_run_agent_job, args=(stale,),
+                                 name=f"agent-recover-{stale.job_id}", daemon=True).start()
+            if recovered:
+                print(f"agent dispatcher: recovering {len(recovered)} running job(s)", flush=True)
         else:
             print("agent dispatcher: singleton lease not held; this process is not a worker", flush=True)
     print(f"api ready: registry={registry_path} model_role_default={DEFAULT_MODEL_ROLE} "
