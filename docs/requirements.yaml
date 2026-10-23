@@ -318,7 +318,8 @@ items:
     tier: [cloud, hosted]
     phase: C7
     verify: the contract and the bucket configuration name the same mode and period
-    status: open
+    status: verified
+    evidence: docs/reviews/aud-lock/README.md
   - id: AUD-RETAIN-001
     title: Audit retention meets the compliance profile, six years for a broker-dealer
     tier: [cloud, hosted]
