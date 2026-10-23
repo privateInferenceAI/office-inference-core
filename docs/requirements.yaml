@@ -91,7 +91,8 @@ items:
     tier: [cloud, hosted]
     phase: C7
     verify: an external port scan of the instance address returns nothing, and HTTP redirects to HTTPS
-    status: open
+    status: verified
+    evidence: docs/reviews/sec-tls/README.md
   - id: SEC-ACL-001
     title: Role-based access filtering happens inside the search, before any model sees a passage
     tier: [cloud, office]

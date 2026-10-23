@@ -1,0 +1,9 @@
+{
+  "job_id": "57309daac87244d9acea35f4f65dbffb",
+  "final_state": "failed",
+  "outcome_reason": "verification",
+  "audit_row": {
+    "id": 1242,
+    "sent": true
+  }
+}
