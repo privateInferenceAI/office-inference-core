@@ -14,7 +14,7 @@ be run again on a different machine.
 
 **Current state, 2026-10-23.** This guide was written across C1 to C5. C6 and C7 are now built, and the
 current deployment has a client tenant in badj.ai account 426 running the MCP gateway, the email connector,
-Caddy and Mailpit. The authoritative snapshot is docs/current-deployment.md. The operating additions are in
+Caddy, Mailpit and SES email. The authoritative snapshot is docs/current-deployment.md. The operating additions are in
 Stage 17 at the end of this guide. Where this guide says something does not exist yet, check that page first;
 the phase table there is the newer statement.
 
@@ -51,8 +51,9 @@ API and the app, which are the two things a person or a client actually talks to
 them, and the intake connector runs from the checkout because it has no compose service yet.
 
 A second host now exists. The client tenant in badj.ai account 426 runs the MCP gateway, the email connector,
-Caddy and Mailpit. Caddy is the only public listener. The API reaches the gateway over HTTPS, and the gateway
-reaches the connector on loopback. Mailpit captures mail instead of delivering it. Knowing which host a
+Caddy, Mailpit and SES email. Caddy is the only public listener. The API reaches the gateway over HTTPS, and
+the gateway reaches the connector on loopback. The connector sends through SES as
+awstest@officeinference.com; Mailpit is the capture fallback. Knowing which host a
 component is on is now part of reading this guide.
 
 ```
@@ -98,7 +99,7 @@ Tenant services, which are not on the build box:
 | client-mcp-gateway | Resolves the signed session, enforces tool role and data-class policy, applies the egress gate, calls one connector | No tool call leaves the API |
 | client-connector | The email connector. Accepts a send only from the gateway | A send fails and the audit row says so |
 | caddy | TLS termination and the only public listener | The gateway is unreachable from the API |
-| mailpit | SMTP capture for the ownership test | The connector receives a send but cannot hand it on |
+| mailpit | SMTP capture fallback | The connector falls back to capture instead of SES |
 
 The tenant address is https://3-85-130-96.sslip.io. Its security group allows 22, 80 and 443; the gateway is on
 loopback 8080. Do not expose 8080.
@@ -3524,8 +3525,9 @@ The first line returns ok. The second returns 308 and a Location header for HTTP
     ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@3.85.130.96 'systemctl is-active client-connector; docker ps --format "{{.Names}} {{.Status}}"'
     ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@3.85.130.96 'curl -s http://127.0.0.1:8025/api/v1/messages'
 
-The last command reads Mailpit. It is a capture service. A message there means the connector received the call;
-it does not mean a recipient got an email.
+The last command reads Mailpit only if the connector has been switched to the fallback. The current connector
+sends through SES as awstest@officeinference.com to that verified address; delivery is real, but the account is
+still in the SES sandbox.
 
 ## 17b. Rotate the connector token
 
@@ -3563,8 +3565,8 @@ Check, in this order:
 1. The job result and the tool_call row: did the gateway return sent true?
 2. The gateway health through Caddy.
 3. The connector unit on the tenant.
-4. Mailpit's message list. A message there means the connector worked, but the SMTP target is the capture server,
-   not a real mail server.
+4. The SES identity and message ID. The current connector sends through SES; Mailpit is only the fallback
+   capture path.
 5. The audit row's data_class and egress_allowed fields. A regulated call with the lane off is refused before it
    reaches the gateway.
 
