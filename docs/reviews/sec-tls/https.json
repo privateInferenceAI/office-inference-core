@@ -1,0 +1,13 @@
+{
+  "health": {
+    "status": 200,
+    "body": {
+      "status": "ok"
+    }
+  },
+  "redirect": {
+    "status": 308,
+    "location": "https://3-85-130-96.sslip.io/health"
+  },
+  "certificate": "valid Let's Encrypt certificates for 3-85-130-96.sslip.io"
+}
