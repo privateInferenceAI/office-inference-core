@@ -24,6 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import artifact_store  # noqa: E402
 import workspace  # noqa: E402
 
 MAX_BODY = 2 * 1024 * 1024
@@ -35,7 +36,7 @@ class WorkspaceService:
 
     def __init__(self, sandbox, token: str, *, max_body: int = MAX_BODY,
                  max_output: int = MAX_OUTPUT, artifact_root: str | Path | None = None,
-                 max_artifact_bytes: int = 2 * 1024 * 1024):
+                 max_artifact_bytes: int = 2 * 1024 * 1024, object_store=None):
         if not token:
             raise ValueError("the workspace service refuses to start without a token")
         self.sandbox = sandbox
@@ -45,6 +46,7 @@ class WorkspaceService:
         self.artifact_root = Path(artifact_root or (Path(sandbox.root).parent / "artifacts")).resolve()
         self.artifact_root.mkdir(parents=True, exist_ok=True)
         self.max_artifact_bytes = max_artifact_bytes
+        self.object_store = object_store
 
     def handle(self, method: str, path: str, headers: dict, body: bytes):
         try:
@@ -88,7 +90,7 @@ class WorkspaceService:
         except workspace.SandboxError as exc:
             return 400, {"error": "sandbox", "detail": str(exc)}
         except Exception as exc:  # noqa: BLE001 - the service must answer, not crash
-            return 500, {"error": "internal", "detail": type(exc).__name__}
+            return 500, {"error": "internal", "detail": f"{type(exc).__name__}: {exc}"}
 
     # ---- auth and helpers
 
@@ -194,6 +196,8 @@ class WorkspaceService:
         task_id = self._task(payload)
         destination = self.artifact_root / task_id
         records = self.sandbox.collect_artifacts(task_id, destination)
+        if self.object_store is not None:
+            records = self.object_store.put(task_id, destination, records)
         return 200, {"task_id": task_id, "artifacts": records}
 
     def _artifact(self, payload: dict):
@@ -203,6 +207,15 @@ class WorkspaceService:
         sha = str(payload.get("sha256") or "")
         if not re.fullmatch(r"[0-9a-f]{64}", sha):
             return 400, {"error": "sha256 must be 64 lowercase hex characters"}
+        if self.object_store is not None:
+            try:
+                data = self.object_store.get(task_id, sha)
+            except artifact_store.ArtifactStoreError:
+                return 404, {"error": "no such artifact"}
+            if len(data) > self.max_artifact_bytes:
+                return 413, {"error": "artifact too large for one download"}
+            return 200, {"task_id": task_id, "sha256": sha, "bytes": len(data),
+                         "content": base64.b64encode(data).decode()}
         target = (self.artifact_root / task_id / sha).resolve()
         base = (self.artifact_root / task_id).resolve()
         if base not in target.parents:
@@ -249,10 +262,24 @@ class _Handler(BaseHTTPRequestHandler):
         return
 
 
+def object_store_from_env():
+    """An S3 store when the deployment names a bucket, otherwise the local artifact root."""
+    bucket = (os.environ.get("WORKSPACE_S3_BUCKET") or "").strip()
+    if not bucket:
+        return None
+    return artifact_store.S3ArtifactStore(
+        bucket=bucket,
+        endpoint_url=(os.environ.get("WORKSPACE_S3_ENDPOINT") or "").strip(),
+        region=(os.environ.get("WORKSPACE_S3_REGION") or "us-east-1").strip(),
+        access_key=(os.environ.get("WORKSPACE_S3_ACCESS_KEY") or "").strip(),
+        secret_key=(os.environ.get("WORKSPACE_S3_SECRET_KEY") or "").strip(),
+        prefix=(os.environ.get("WORKSPACE_S3_PREFIX") or "artifacts").strip())
+
+
 def serve(root: str, token: str, host: str = "0.0.0.0", port: int = 8090,
-          image: str = workspace.DEFAULT_IMAGE):
+          image: str = workspace.DEFAULT_IMAGE, object_store=None):
     sandbox = workspace.DockerSandbox(root, image=image)
-    _Handler.service = WorkspaceService(sandbox, token)
+    _Handler.service = WorkspaceService(sandbox, token, object_store=object_store)
     server = ThreadingHTTPServer((host, port), _Handler)
     server.serve_forever()
 
@@ -269,7 +296,7 @@ def main(argv: list[str] | None = None) -> int:
         print("WORKSPACE_TOKEN is required; refusing to start an unauthenticated workspace service",
               file=sys.stderr)
         return 2
-    serve(args.root, token, args.host, args.port, args.image)
+    serve(args.root, token, args.host, args.port, args.image, object_store_from_env())
     return 0
 
 

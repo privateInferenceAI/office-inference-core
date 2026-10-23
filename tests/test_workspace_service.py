@@ -26,10 +26,30 @@ class FakeRunner:
         return subprocess.CompletedProcess(argv, 0, self.stdout, self.stderr)
 
 
-def make_service(tmp_path, *, max_body=service_module.MAX_BODY):
+class FakeObjectStore:
+    def __init__(self):
+        self.objects = {}
+        self.puts = []
+
+    def put(self, task_id, source, records):
+        uploaded = []
+        for record in records:
+            data = (Path(source) / record["sha256"]).read_bytes()
+            key = f"artifacts/{task_id}/{record['sha256']}"
+            self.objects[(task_id, record["sha256"])] = data
+            self.puts.append(key)
+            uploaded.append(dict(record, key=key, store="s3"))
+        return uploaded
+
+    def get(self, task_id, sha256):
+        return self.objects[(task_id, sha256)]
+
+
+def make_service(tmp_path, *, max_body=service_module.MAX_BODY, object_store=None):
     runner = FakeRunner("hello", "")
     sandbox = workspace.DockerSandbox(tmp_path / "tasks", runner=runner)
-    return service_module.WorkspaceService(sandbox, "secret-token", max_body=max_body), sandbox, runner
+    return service_module.WorkspaceService(sandbox, "secret-token", max_body=max_body,
+                                          object_store=object_store), sandbox, runner
 
 
 def call(service, path, body=None, *, token="secret-token", method="POST"):
@@ -118,6 +138,22 @@ def test_artifacts_are_collected_before_cleanup_and_downloadable_afterward(tmp_p
     status, artifact = call(service, "/artifact", {"task_id": "t1", "sha256": record["sha256"]})
     assert status == 200
     assert base64.b64decode(artifact["content"]) == b"artifact body"
+
+
+def test_an_s3_store_receives_the_upload_and_serves_the_download(tmp_path):
+    store = FakeObjectStore()
+    service, _, _ = make_service(tmp_path, object_store=store)
+    content = base64.b64encode(b"object body").decode()
+    assert call(service, "/write", {"task_id": "t1", "path": "out.txt", "content": content})[0] == 200
+    status, collected = call(service, "/artifacts", {"task_id": "t1"})
+    assert status == 200, collected
+    record = collected["artifacts"][0]
+    assert record["store"] == "s3" and store.puts
+
+    assert call(service, "/cleanup", {"task_id": "t1"})[0] == 200
+    status, artifact = call(service, "/artifact", {"task_id": "t1", "sha256": record["sha256"]})
+    assert status == 200
+    assert base64.b64decode(artifact["content"]) == b"object body"
 
 
 def test_an_artifact_path_must_be_a_content_hash(tmp_path):
