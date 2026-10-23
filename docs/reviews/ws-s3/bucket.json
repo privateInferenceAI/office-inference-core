@@ -1,0 +1,16 @@
+{
+  "bucket": "oi-core-workspace-artifacts-878451098165",
+  "account": "878451098165",
+  "region": "us-east-1",
+  "public_access_block": {
+    "BlockPublicAcls": true,
+    "IgnorePublicAcls": true,
+    "BlockPublicPolicy": true,
+    "RestrictPublicBuckets": true
+  },
+  "encryption": "SSE-S3 (AES256)",
+  "versioning": "Enabled",
+  "lifecycle": "expire 365 days, abort incomplete multipart after 7",
+  "instance_role": "oi-core-dev-instance",
+  "policy": "s3:ListBucket/GetBucketLocation on bucket; GetObject/PutObject/DeleteObject on bucket/*"
+}

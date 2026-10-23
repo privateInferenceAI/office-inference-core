@@ -2471,7 +2471,8 @@ items:
       objects, the task's result names them, and the client app can download both. A retention policy deletes an
       artifact after its window and records the deletion. An artifact written before a cancellation survives and
       is listed.
-    status: open
+    status: verified
+    evidence: docs/reviews/ws-s3/README.md
     note: >-
       The output belongs in the client's estate. The sandbox is disposable; the artifact is not.
 
