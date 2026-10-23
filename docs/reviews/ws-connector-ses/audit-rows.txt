@@ -1,0 +1,14 @@
+850|tool_call|-|-|-|turn-1
+851|model_call|-|-|-|turn-1
+852|tool_call|-|-|-|turn-1
+853|tool_call|-|-|-|approval-1
+854|approval|-|-|-|-
+855|tool_call|-|-|-|approval-1
+856|tool_call|-|-|-|act-1
+857|tool_call|send_email|anthony@officeinference.com|true|act-1
+858|tool_call|-|-|-|act-1
+859|tool_call|-|-|-|turn-2
+860|model_call|-|-|-|turn-2
+861|tool_call|-|-|-|turn-2
+862|tool_call|-|-|-|finish
+863|tool_call|-|-|-|finish

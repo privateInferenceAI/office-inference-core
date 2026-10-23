@@ -2500,7 +2500,8 @@ items:
       sends exactly once; the chain records the tool call, the approval and the result. Rotate the connector
       credential and the next send uses the new value without a redeploy; the old value fails. A send the client's
       policy forbids is refused before the connector is reached.
-    status: open
+    status: verified
+    evidence: docs/reviews/ws-connector-ses/README.md
     note: >-
       The first connector is a product decision: client SMTP or Microsoft 365 Graph Mail.Send. Graph reuses the
       intake app registration but needs a consent and a licensed mailbox. SMTP is simpler and client-owned.
