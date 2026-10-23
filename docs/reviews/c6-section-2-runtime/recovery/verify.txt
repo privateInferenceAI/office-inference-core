@@ -1,0 +1,3 @@
+ok   /tmp/chain-recovery.json/audit-events.jsonl: 97 event(s), chain intact
+     note: no external anchor was supplied, so completeness cannot be shown: deleting rows from the end and re-exporting would still verify. Pass --anchor with the file written by the anchor job
+     note: chained from row 334 (3df8a6c8318e...), which is not in this file
