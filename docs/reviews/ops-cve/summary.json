@@ -1,0 +1,67 @@
+{
+  "ghcr.io_huggingface_text-embeddings-inference": {
+    "critical": 0,
+    "high": 16,
+    "vulnerabilities": 366
+  },
+  "oi-core_api_local": {
+    "critical": 0,
+    "high": 44,
+    "vulnerabilities": 170
+  },
+  "oi-core_app_local": {
+    "critical": 0,
+    "high": 44,
+    "vulnerabilities": 170
+  },
+  "oi-core_eval_local": {
+    "critical": 0,
+    "high": 44,
+    "vulnerabilities": 170
+  },
+  "oi-core_ingestion_local": {
+    "critical": 0,
+    "high": 44,
+    "vulnerabilities": 170
+  },
+  "oi-core_litellm_local": {
+    "critical": 1,
+    "high": 4,
+    "vulnerabilities": 35
+  },
+  "oi-core_mcp-gateway_local": {
+    "critical": 0,
+    "high": 44,
+    "vulnerabilities": 170
+  },
+  "oi-core_parser_local": {
+    "critical": 5,
+    "high": 38,
+    "vulnerabilities": 83
+  },
+  "oi-core_retention_local": {
+    "critical": 0,
+    "high": 44,
+    "vulnerabilities": 170
+  },
+  "oi-core_session_local": {
+    "critical": 0,
+    "high": 44,
+    "vulnerabilities": 170
+  },
+  "oi-core_workspace_local": {
+    "critical": 0,
+    "high": 44,
+    "vulnerabilities": 172
+  },
+  "postgres_16-alpine": {
+    "critical": 1,
+    "high": 25,
+    "vulnerabilities": 61
+  },
+  "qdrant_qdrant": {
+    "critical": 0,
+    "high": 45,
+    "vulnerabilities": 166
+  }
+}
