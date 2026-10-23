@@ -202,7 +202,7 @@ that answers the C6 and C7 rows.
 | API, Postgres, LiteLLM, ingestion, retrieval, audit tool | Office Inference account 878, build box | No public port |
 | MCP gateway | badj.ai client tenant account 426, instance i-0b6aa00095ae40e54 | Loopback 8080, reached through Caddy |
 | Email connector | Same tenant, systemd client-connector | Loopback 8094 |
-| Mailpit | Same tenant | Loopback 1025 |
+| SES email sender | Same tenant | awstest@officeinference.com, verified in the badj account |
 | Caddy | Same tenant | Public 80 and 443 |
 
 The public name is https://3-85-130-96.sslip.io. Caddy holds a Let's Encrypt certificate for it and redirects
@@ -213,8 +213,9 @@ The API calls the tenant gateway through OI_MCP_URL. The tenant has no route bac
 the API mints a short-lived HMAC session assertion and the gateway verifies it. The gateway still refuses any
 request that supplies its own role.
 
-The connector's SMTP target is Mailpit. It captures mail; it does not deliver it. A production connector must
-use the client's SMTP server or a verified SES identity. See docs/current-deployment.md for the current
+The connector now sends through SES from awstest@officeinference.com to that same verified address. The badj
+account is still in the SES sandbox, so arbitrary client recipients need production access. Mailpit remains a
+capture fallback. See docs/current-deployment.md for the current
 snapshot and the open rows.
 
 ## 4. The two paths: a request, and its record
@@ -5924,8 +5925,9 @@ sends through the tenant gateway.
 
 ### 26.5 Caveats
 
-Mailpit captures mail instead of delivering it. The connector and Mailpit now bind to loopback; the security
-group is the outer control, not the binding. The tenant address is the instance's current public IP, so an
+Email is delivered through SES to awstest@officeinference.com, the verified identity in the badj account. The
+account is still in the SES sandbox; arbitrary recipients need production access. Mailpit remains a fallback
+capture service and binds to loopback; the security group is the outer control. The tenant address is the instance's current public IP, so an
 Elastic IP is needed before calling it production. The DeepSeek key is in the rendered env for the provider
 comparison and should be rotated. The image scan has current critical findings in litellm, parser and postgres;
 they are recorded, not waived. The tenant gateway does not write refusals to the Office chain, as section 26.2

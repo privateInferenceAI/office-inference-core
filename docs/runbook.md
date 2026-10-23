@@ -28,7 +28,8 @@ The authoritative current snapshot is docs/current-deployment.md. Section Phase 
 
 The build box is in Office Inference account 878. The client tenant is badj.ai account 426, instance
 i-0b6aa00095ae40e54, public name https://3-85-130-96.sslip.io. The tenant runs the MCP gateway, the email
-connector, Caddy and Mailpit. Mailpit captures mail; it does not deliver it.
+connector, Caddy and Mailpit. The connector sends through SES as awstest@officeinference.com to that verified
+address. Mailpit remains a capture fallback.
 
 ## The environment we are building on
 
@@ -42,7 +43,7 @@ connector, Caddy and Mailpit. Mailpit captures mail; it does not deliver it.
 | Instance role | `oi-core-dev-instance`: `AmazonSSMManagedInstanceCore` for keyless access, plus `oi-core-dev-bedrock-invoke`, which allows exactly the four models the dev manifest names |
 | Inference | Bedrock, us-east-1. No model runs on this box |
 | Client tenant | badj.ai account 426063972668, instance i-0b6aa00095ae40e54, public name https://3-85-130-96.sslip.io |
-| Tenant services | MCP gateway loopback 8080, connector systemd port 8094, Caddy 80 and 443, Mailpit 1025 |
+| Tenant services | MCP gateway loopback 8080, connector systemd port 8094, Caddy 80 and 443, Mailpit 1025 fallback, SES identity awstest@officeinference.com |
 | Region | us-east-1 |
 | State | Build box: stopped when not in use. Client tenant: running while it serves the gateway |
 
@@ -5677,7 +5678,8 @@ refused by name. The credential is never in the API environment, the gateway ima
 
 The production gateway and connector are in badj.ai account 426, instance i-0b6aa00095ae40e54. The gateway
 listens on loopback 8080, the connector is the systemd unit client-connector on loopback 8094, Caddy owns public
-80 and 443, and Mailpit captures SMTP on loopback 1025.
+80 and 443. The connector sends through SES as awstest@officeinference.com; Mailpit on loopback 1025 is the
+capture fallback.
 
     # tenant health
     curl -s https://3-85-130-96.sslip.io/health
@@ -5685,8 +5687,8 @@ listens on loopback 8080, the connector is the systemd unit client-connector on 
     # restart-safe checks
     ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@3.85.130.96 'systemctl is-active client-connector; docker ps --format "{{.Names}} {{.Status}}"'
 
-Mailpit is a capture, not a delivery service. It is there so the ownership and gateway tests can prove the
-connector received a call. A production connector points at the client's SMTP server or a verified SES identity.
+The connector sends through SES to the verified awstest@officeinference.com identity. The badj SES account is
+still in the sandbox, so arbitrary recipients need production access. Mailpit remains a capture fallback.
 
 ### C6.4 Signed session assertions
 
@@ -6031,7 +6033,7 @@ query; the second-corpus measurement records that limit and the marker chunk say
 4. Nothing publishes a port except ingress. On the tenant, that is Caddy on 80 and 443; the gateway stays on loopback.
 5. Stop the build box when you stop working. The credits are generous, not infinite.
 6. The client tenant is not a build box. Leave it running while it serves the gateway, and do not expose 8080.
-7. Mailpit is a capture, not a delivery service. A message in Mailpit proves the connector worked, not that a recipient received mail.
+7. Mailpit is a capture fallback. The current connector sends through SES to awstest@officeinference.com; arbitrary recipients need SES production access.
 
 ---
 

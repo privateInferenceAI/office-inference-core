@@ -8,7 +8,8 @@ The production MCP gateway and the production email connector now run in badj.ai
 
 - Gateway: http://3.85.130.96:8080, container client-mcp-gateway, restart unless-stopped.
 - Connector: client-connector systemd service on port 8094, restart always.
-- SMTP server: Mailpit on the same tenant, port 1025.
+- SMTP server: Mailpit on the same tenant, port 1025. It is now the fallback; the connector sends through SES
+  as awstest@officeinference.com after the later email cutover.
 
 The Office API points at that gateway with OI_MCP_URL. It no longer calls a gateway in account 878.
 
@@ -22,7 +23,8 @@ Job aa1b739255744e6f98c1cb1a38bed610 reached turn-1, approval-1, act-1, turn-2 a
 
 Then officeinference.com, api.officeinference.com and mcp.officeinference.com were pointed at 127.0.0.1 on the Office box. Job 43dfdbbd5d5b465489b165013a442d0a went through the same act path; its final job state was failed verification, but the act row 1204 records sent true. The hosts file was restored.
 
-The Mailpit inbox on the tenant held the captured messages, so the connector really received the call.
+The Mailpit inbox on the tenant held the captured messages at the time, so the connector received the call.
+The connector was later switched to SES and sent through the verified awstest@officeinference.com identity.
 
 ## Endpoint check
 

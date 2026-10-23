@@ -22,7 +22,8 @@ The full suite is **1355 passed, 1 skipped** as of the last run on 2026-10-23.
 | API, Postgres, LiteLLM, ingestion, retrieval, audit tool | 878451098165, Office Inference | Build box `i-02aba2feef08f8e7b`, 52.204.204.133 | No public port. The API is reached from inside the box or its containers |
 | MCP gateway | 426063972668, badj.ai client tenant | `i-0b6aa00095ae40e54`, `3.85.130.96` | HTTPS only through Caddy at `https://3-85-130-96.sslip.io`. Gateway listens on loopback, 8080 |
 | Email connector | 426063972668 | Same tenant, systemd `client-connector`, port 8094 | Loopback only |
-| SMTP capture | 426063972668 | Same tenant, Mailpit port 1025 | Loopback only |
+| Email delivery | 426063972668 | Same tenant, SES identity awstest@officeinference.com | Sends through SES; the account is still in the sandbox |
+| Mailpit fallback | 426063972668 | Same tenant, port 1025 | Capture only; retained as a fallback |
 | Unrelated workload | 426063972668 | Same tenant, `step0-hello-indexer` (Midnight indexer) on port 8088 | Not part of this deployment; left running |
 | Caddy | 426063972668 | Same tenant | 80 and 443, public |
 | Audit bucket | 878451098165 | S3 `oi-core-audit-dev` | Object Lock, GOVERNANCE, 90 days |
@@ -32,9 +33,9 @@ The gateway and connector are in the client tenant. The API calls the gateway at
 mints a short-lived HMAC session assertion and the gateway verifies it. The gateway still refuses a
 caller-supplied role.
 
-The connector's SMTP target is **Mailpit**, which captures mail instead of delivering it. That is deliberate
-for the ownership and gateway tests. A production connector must point at the client's SMTP server or a
-verified SES identity.
+The connector now sends through SES from awstest@officeinference.com to the same verified address. The badj
+SES account is still in the sandbox, so arbitrary recipients need production access. Mailpit is retained as a
+capture fallback, not the delivery path.
 
 The tenant gateway has no `AUDIT_TOOL` and no route to the Office audit database. Its refusals are returned to
 the API but are not written to the Office chain. That is a known gap in the client-tenant deployment, not a
@@ -90,8 +91,9 @@ the client tenant.
 
 ## Caveats an operator must know
 
-1. **Mail is captured, not delivered.** Mailpit on the tenant holds the messages. Nothing leaves for a real
-   recipient.
+1. **Mail is delivered through SES only to the verified address.** awstest@officeinference.com is verified in
+   the badj account; the account is in the SES sandbox. Arbitrary client recipients need SES production access.
+   Mailpit is a fallback capture service.
 2. **The tenant's public address is derived from its IP.** If the instance is stopped and gets a new address,
    the hostname and certificate change. Allocate an Elastic IP before calling it production.
 3. **The DeepSeek key is in the rendered env** because the provider comparison needed it. Rotate it and remove
