@@ -247,6 +247,12 @@ def insert_event(cur, *, event_type, actor, actor_role, deployment_id, data_clas
     caller cannot skip it, and this function computes it so a caller never supplies it.
     """
     approval_sha256 = approval_digest(approval)
+    # **The lock is acquired before the insert, not only inside the trigger.** The trigger's advisory lock
+    # serializes the hash computation, but the bigserial id is assigned before the trigger runs. Two writers
+    # can therefore acquire ids in one order and the lock in the other, and the row with the lower id can
+    # chain from the row with the higher id. That is a fork even though every individual write was serialized.
+    # Taking the lock here makes id order and chain order the same for every writer that uses this function.
+    cur.execute("select pg_advisory_xact_lock(hashtext('audit_events_chain'))")
     cur.execute("""
         insert into audit_events
           (event_type, actor, actor_role, deployment_id, data_class, outcome,
@@ -522,6 +528,7 @@ def cmd_purge(args) -> int:
         with conn.transaction():
             with conn.cursor() as cur:
                 cur.execute("set local oi.allow_audit_maintenance = 'on'")
+                cur.execute("select pg_advisory_xact_lock(hashtext('audit_events_chain'))")
                 cur.execute("""
                     insert into audit_events
                       (event_type, actor, actor_role, deployment_id, data_class, outcome,
@@ -691,6 +698,7 @@ def cmd_backfill(args) -> int:
                     payload["error_budget_spend"] = budget_spend
             payload_sha = sha256_hex(canonical_json(payload))
             actor = "gateway-key:" + hashlib.sha256((api_key or "unknown").encode()).hexdigest()[:8]
+            cur.execute("select pg_advisory_xact_lock(hashtext('audit_events_chain'))")
             cur.execute("""
                 insert into audit_events
                   (occurred_at, event_type, actor, actor_role, deployment_id, data_class,

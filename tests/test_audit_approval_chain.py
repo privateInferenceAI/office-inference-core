@@ -194,13 +194,29 @@ def insert_parameters(cursor: Recorder) -> dict:
     Read from the SQL rather than written out, so a column added to the writer and not to this test shows up as
     a length mismatch instead of shifting every value one place to the left.
     """
-    query, params = cursor.statements[0]
+    insert_statements = [statement for statement in cursor.statements
+                         if "insert into audit_events" in statement[0]]
+    assert insert_statements, "could not find the audit insert statement"
+    query, params = insert_statements[0]
     match = re.search(r"insert into audit_events\s*\(([^)]+)\)\s*values", query)
     assert match, "could not find the audit insert statement"
     columns = [column.strip() for column in match.group(1).replace("\n", " ").split(",") if column.strip()]
     assert len(columns) == len(params), (
         f"the insert takes {len(columns)} parameters and got {len(params)}")
     return dict(zip(columns, params))
+
+
+def test_the_writer_takes_the_chain_lock_before_the_insert():
+    """The sequence id is assigned before the insert, so the lock has to come first."""
+    cursor = Recorder()
+    audit.insert_event(
+        cursor, event_type="approval", actor="dana", actor_role="staff", deployment_id=DEPLOYMENT,
+        data_class="internal", outcome="ok", stored_payload={"stage": "approval"},
+        payload_sha256="a" * 64)
+    statements = [query for query, _ in cursor.statements]
+    lock_index = next(i for i, query in enumerate(statements) if "pg_advisory_xact_lock" in query)
+    insert_index = next(i for i, query in enumerate(statements) if "insert into audit_events" in query)
+    assert lock_index < insert_index
 
 
 def write(approval=None) -> dict:
