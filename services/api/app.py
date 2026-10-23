@@ -886,8 +886,11 @@ def _run_agent_job_locked(job):
         subject = str((parsed or {}).get("subject") or "")
         body = str((parsed or {}).get("body") or "")
         data_class = job.data_class or "internal"
-        frontier_classes = [part.strip() for part in
-                            (os.environ.get("FRONTIER_CLASSES") or "").split(",") if part.strip()]
+        manifest_egress = (((STATE.get("manifest") or {}).get("access") or {}).get("egress") or {})
+        frontier_classes = list(manifest_egress.get("frontier_classes") or [])
+        if not frontier_classes:
+            frontier_classes = [part.strip() for part in
+                                (os.environ.get("FRONTIER_CLASSES") or "").split(",") if part.strip()]
         permitted, why = routing.gate(data_class, frontier_classes)
         redaction_record = {"redaction_count": 0}
         if not permitted:

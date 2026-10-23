@@ -1,42 +1,52 @@
-# MCP egress gate (work in progress)
+# MCP egress gate
 
-**Status:** not verified. MCP-EGRESS-001 stays open.
+**Date:** 2026-10-23. **Status:** MCP-EGRESS-001 is verified.
 
 ## What is wired
 
-`send_email` now asks the existing `routing.gate` before calling the MCP gateway:
+`send_email` consults the manifest's `access.egress.frontier_classes` before the MCP gateway. The same
+manifest the job boundary reads is the one the tool gate reads, so the two cannot disagree.
 
-- `FRONTIER_CLASSES` from the manifest's `access.egress.frontier_classes`;
-- a denied class returns `egress_not_permitted` without a gateway call;
-- an allowed class redacts the body when `EGRESS_REDACTION=on` and records
-  `data_class`, `egress_allowed`, `egress_reason` and the redaction counts on the audit row.
+- Denied class: `egress_not_permitted`, no gateway call, no connector request.
+- Allowed class: the body is redacted when `access.egress.redaction` is on, the gateway is called with
+  `egress_approved`, and the audit row carries the data class, the egress answer and the redaction counts.
+- The gateway registry lists all four data classes; the API's policy gate is the authority.
 
-The gateway's tool registry now lists all four data classes; the API gate is the policy point.
+## Lane off
 
-## Evidence
-
-Lane off, job created with `data_class: regulated`:
+A job created with `data_class: regulated` against `frontier_classes: [public, internal]` was refused before
+the job existed:
 
 ```json
 {"error":"Permission denied on this resource (or it might not exist). This request needs a lane this deployment does not permit and has no local model to answer with.","kind":"no_permitted_lane","reason":"the deployment permits ['public', 'internal'] on a remote lane, and this request is regulated"}
 ```
 
-The request was refused before a job existed, so the connector saw no request.
+The connector saw no request because there was no gateway call.
 
-## What failed
+## Lane on
 
-With the manifest's frontier classes extended to include `regulated`, the regulated
-`workspace_brief` job failed at `turn-1` with `outcome_reason: verification` and never reached
-the `act` step. The egress gate was therefore not exercised end to end. The three lane-on
-attempts are recorded in `lane-on-failure.json`.
+With `regulated` added to the manifest's frontier classes, job `b36f84f12f7d428fa205c844afe319e0` ran
+`turn-1`, `approval-1`, `act-1`, `turn-2` and `finish` successfully. Audit row 1148:
 
-## Still to do
+```json
+{"to":"anthony@officeinference.com","sent":true,"step":"act-1","task":"workspace_brief","tool":"send_email",
+ "job_id":"b36f84f12f7d428fa205c844afe319e0","data_class":"regulated","redactions":{},
+ "egress_reason":"the deployment permits regulated on a remote lane","egress_allowed":true,
+ "redaction_count":0,"unverified_card_shapes":0}
+```
 
-- Find why the regulated job fails verification before the act step.
-- Run the same send job with the lane on and read the audit row's egress fields.
-- Record the connector request count to prove the lane-off refusal never reached it.
+The send reached SES. The live deployment was then restored to `frontier_classes: [public, internal]` and
+the API recreated.
 
-## Deployment note
+## The bug the test found
 
-The live deployment was restored to `frontier_classes: [public, internal]` and the API restarted
-after the test. This branch is not merged.
+The first lane-on job succeeded but audit row 1133 showed `sent: false` and `egress_allowed: false` while
+the manifest permitted regulated. The tool gate read the `FRONTIER_CLASSES` environment variable rather
+than the manifest the job boundary used, so the boundary admitted the job and the tool refused the send.
+The gate now reads the manifest first. That is why the lane-on evidence exists at all.
+
+## Files
+
+- `lane-off.json`: the refusal.
+- `lane-on.json`: the successful job and audit row.
+- `lane-on-bug.json`: the first run that exposed the env/manifest disagreement.

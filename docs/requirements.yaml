@@ -2337,7 +2337,8 @@ items:
       connector sees no request; with the lane on, the call is allowed only after the existing egress gate
       has seen it, and the record carries what left and the redaction summary. A remote tool call that
       reaches a third party with regulated material and no gate fails.
-    status: open
+    status: verified
+    evidence: docs/reviews/mcp-egress/README.md
     note: >-
       The rule SEC-REDACT-001 and the egress gate already apply to model calls, extended to tools, because a
       connector is a second door out of the building. For the office build this is the product's defining
