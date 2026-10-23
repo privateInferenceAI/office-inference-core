@@ -2983,6 +2983,34 @@ between attempts, and the record shows what the far side said. A far side that i
 duplicate, and no amount of engine design changes that.
 
 
+## 13k. Before a demo
+
+**The runbook is [`docs/runbooks/demo.md`](runbooks/demo.md).** It holds the eight scenes, the commands
+and the evidence. This is the short list that must be true thirty minutes before the clock starts, and
+the limits the demo deployment does not cover.
+
+| Check | What to run | Expected |
+|---|---|---|
+| Health | `oi ps` | Eight services; Postgres and parser healthy |
+| API | the `/health` line printed from inside the API container | the deployment id and the analyst role |
+| App | `200` from `/` and a health document from `/api/health` | the bundle loads and the proxy reaches the API |
+| Chain | export today and verify it | `chain intact` |
+| Model | the last `model_call` row in `audit_events` | `bedrock/us.anthropic.claude-sonnet-4-6`, `fallback_used false` |
+| Corpus | `select count(distinct doc_id), count(*) from chunk_index;` | `80|24296` and zero dead-lettered files |
+| Tokens | mint the staff and executive sessions with a 12-hour TTL | both print a token and an expiry |
+| Tunnel | load the app and paste the staff token | the Ask screen answers |
+| Alarms | the five `oi-core-*` alarms | OK. The demo box does not publish `OI/Health` metrics and is not covered |
+| Tenant | the badj tenant instance | stopped. Do not thaw it for a demo |
+| Email | none | SES is in the sandbox; the demo does not use it |
+
+**Run acceptance the business day before the rehearsal when you can.** The export is one UTC day, so
+acceptance rows written on the same day appear in the file the audience is handed. The note can say
+so, and the file is still that deployment's own record, but a clean demo day is easier to defend.
+
+**Write the limit down rather than implying coverage.** The demo box is a demo deployment: no backup
+timer, no alarm publisher, no SES and no SSO. The five alarms belong to the build box. If a scene
+does not exercise a control, the demo does not claim it.
+
 # Stage 14: onboarding a second client's corpus
 
 **Goal:** add a corpus to a deployment that is already holding one, without disturbing it.
