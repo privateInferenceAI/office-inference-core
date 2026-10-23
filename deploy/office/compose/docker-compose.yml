@@ -352,6 +352,8 @@ services:
     environment:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      # An OpenAI-compatible provider's key comes from the rendered env, never from the config file.
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       LITELLM_LOG: WARNING
       # Bedrock, for the cloud build's frontier lane. The gateway picks up credentials from the
       # instance role through the metadata service, so no key material lands in this file. The

@@ -1,0 +1,20 @@
+[
+  {
+    "question": "What is the mileage rate for reimbursement? Answer in one sentence.",
+    "kind": null,
+    "model": "analyst",
+    "answer": "The mileage rate for reimbursement is 0.67 USD per mile [1][2][5][6]."
+  },
+  {
+    "question": "What is the travel approval threshold under 500 USD? Answer in one sentence.",
+    "kind": null,
+    "model": "analyst",
+    "answer": "The travel approval threshold under 500 USD is \"Direct manager\" [3]."
+  },
+  {
+    "question": "What is the receipt threshold for an expense? Answer in one sentence.",
+    "kind": null,
+    "model": "analyst",
+    "answer": "A receipt is required for every expense of 25 USD or more [1]."
+  }
+]

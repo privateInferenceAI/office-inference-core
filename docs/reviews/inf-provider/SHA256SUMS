@@ -1,0 +1,5 @@
+eaa7d5b0e40ad01623c8eb594d815a9e3e769deb96569056c1722a8435375f62  docs/reviews/inf-provider/bedrock-suite.json
+cada9a9724b1af10d520f2fbebcbfc4f9ea902189f1611a7d3a4c6e5b728260b  docs/reviews/inf-provider/deepseek-suite.json
+fd028e29aa9009e3c70d2ce46bdcc4cfe2de5d741d35c1087556e57b7b76f393  docs/reviews/inf-provider/example-deepseek.yaml
+5df475d3d343da100099c680910bf9f9ef681de7133b4226e34a66769ef84038  docs/reviews/inf-provider/litellm.yaml
+db56f7ec45480413aff326bd5cdab1122ba73f381752162df253f63a78dac518  docs/reviews/inf-provider/README.md

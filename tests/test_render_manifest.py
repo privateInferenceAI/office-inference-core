@@ -383,3 +383,37 @@ def test_an_office_build_renders_no_fallback(tmp_path):
     built = renderer.build_litellm_config(manifest, {})
     assert "analyst-fallback" not in [entry["model_name"] for entry in built["model_list"]]
     assert "fallbacks" not in built["litellm_settings"]
+
+
+def test_an_openai_compatible_provider_renders_with_the_key_only_in_env(tmp_path):
+    """INF-PROVIDER-001: the gateway config names the env var, never the key."""
+    manifest = yaml.safe_load(CLOUD.read_text())
+    manifest["models"]["analyst"]["provider"] = {
+        "base_url": "https://api.deepseek.com",
+        "model": "deepseek-flash",
+        "api_key_env": "DEEPSEEK_API_KEY",
+    }
+    source = tmp_path / "provider.yaml"
+    source.write_text(yaml.safe_dump(manifest, sort_keys=False))
+    (tmp_path / "env").write_text("DEEPSEEK_API_KEY=sk-not-a-real-key\n")
+
+    assert render(source, tmp_path).returncode == 0
+    entry = next(e for e in gateway_entries(tmp_path) if e["model_name"] == "analyst")
+    assert entry["litellm_params"]["model"] == "openai/deepseek-flash"
+    assert entry["litellm_params"]["api_base"] == "https://api.deepseek.com"
+    assert entry["litellm_params"]["api_key"] == "os.environ/DEEPSEEK_API_KEY"
+    assert "sk-not-a-real-key" not in (tmp_path / "litellm.yaml").read_text()
+
+
+def test_an_office_build_refuses_the_remote_provider(tmp_path):
+    manifest = yaml.safe_load(OFFICE.read_text())
+    manifest["models"]["analyst"]["provider"] = {
+        "base_url": "https://api.deepseek.com",
+        "model": "deepseek-flash",
+        "api_key_env": "DEEPSEEK_API_KEY",
+    }
+    source = tmp_path / "provider.yaml"
+    source.write_text(yaml.safe_dump(manifest, sort_keys=False))
+    result = render(source, tmp_path / "out")
+    assert result.returncode != 0
+    assert "must not send generations off the box" in result.stdout + result.stderr
