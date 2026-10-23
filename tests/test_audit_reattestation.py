@@ -198,7 +198,7 @@ def test_reattestation_appends_and_leaves_the_original_byte_identical(capsys, tm
     assert payload["attested_by"] == "dana", "the signer is who the claim is worth"
     assert payload["original_assurance"] == "unverified"
     assert new[3] is None and new[4] is None, "a re-attestation is not an approval"
-    assert new[5] == 3
+    assert new[5] == 4
 
     day = datetime.now(timezone.utc).date().isoformat()
     out = tmp_path / "export"

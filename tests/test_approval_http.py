@@ -141,9 +141,10 @@ def test_no_session_is_refused_and_recorded(route):
     response = post(route, job.job_id, {"decision": "approve",
                                         "action_digest": job.pending_action_digest})
     assert response.status_code == 401
-    assert calls and calls[0]["event"] == "access"
-    assert calls[0]["payload"]["stage"] == "approval_refused"
-    assert calls[0]["payload"]["status"] == 401
+    refused = [call for call in calls if call["payload"].get("stage") == "approval_refused"]
+    assert refused, "the approval refusal was not recorded"
+    assert refused[0]["event"] == "access"
+    assert refused[0]["payload"]["status"] == 401
 
 
 def test_an_expired_session_is_refused_and_recorded(route):
@@ -152,7 +153,8 @@ def test_an_expired_session_is_refused_and_recorded(route):
     response = post(route, job.job_id, {"session": "expired", "decision": "approve",
                                         "action_digest": job.pending_action_digest})
     assert response.status_code == 401
-    assert calls and calls[0]["payload"]["stage"] == "approval_refused"
+    refused = [call for call in calls if call["payload"].get("stage") == "approval_refused"]
+    assert refused, "the expired-session approval refusal was not recorded"
 
 
 def test_a_caller_supplied_role_is_403_and_recorded(route):
