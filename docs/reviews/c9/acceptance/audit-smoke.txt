@@ -1,0 +1,7 @@
+ id | event_type | outcome |                      resolved                       | fallback 
+----+------------+---------+-----------------------------------------------------+----------
+ 50 | model_call | ok      | bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0 | true
+ 49 | model_call | ok      | bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0 | true
+ 44 | model_call | ok      | bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0 | true
+(3 rows)
+

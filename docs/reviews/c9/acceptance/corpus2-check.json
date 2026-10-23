@@ -1,0 +1,841 @@
+{
+  "ran_at": "2026-10-23T19:30:12Z",
+  "context": {
+    "timestamp": "2026-10-23T19:30:12Z",
+    "git_commit": null,
+    "oi_env": {},
+    "oi_env_source": "runner process environment",
+    "images": {},
+    "load_average": 0.92,
+    "mem_available_mb": 44500,
+    "hostname": "f58cf140973b",
+    "instance_id": null,
+    "gates": null
+  },
+  "latency": {
+    "count": 5,
+    "p50_ms": 8908,
+    "p95_ms": 21379,
+    "max_ms": 21379
+  },
+  "duration_seconds": 51.9,
+  "answers": true,
+  "summary": {
+    "exact_number": {
+      "runs": 1,
+      "passed": 1,
+      "retrieval_hits": 1,
+      "retrieval_expected": 1
+    },
+    "contract_clause": {
+      "runs": 1,
+      "passed": 1,
+      "retrieval_hits": 1,
+      "retrieval_expected": 1
+    },
+    "long_document": {
+      "runs": 1,
+      "passed": 1,
+      "retrieval_hits": 1,
+      "retrieval_expected": 1
+    },
+    "access_boundary": {
+      "runs": 2,
+      "passed": 2,
+      "retrieval_hits": 1,
+      "retrieval_expected": 1
+    }
+  },
+  "absent_pattern_hits": {},
+  "invalid_questions": [],
+  "results": [
+    {
+      "id": "PUB_N01",
+      "category": "exact_number",
+      "role": "staff",
+      "question": "What net sales did Target Corporation report for fiscal 2025 in its consolidated statements of operations, in millions?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/second-public/company/target-corp/10-K_2026-03-11_annual-report.htm"
+        ],
+        "contains": [
+          "104,780"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/second-public/company/target-corp/10-K_2026-03-11_annual-report.htm",
+          "company/second-public/company/target-corp/10-K_2026-03-11_annual-report.htm",
+          "company/second-public/company/target-corp/10-K_2026-03-11_annual-report.htm",
+          "company/second-public/company/deere-co/10-Q_2026-08-27_quarterly-report.htm",
+          "company/second-public/company/target-corp/DEF14A_2026-04-27_proxy-statement.htm"
+        ],
+        "kinds": [
+          "table",
+          "table",
+          "table",
+          "table_row",
+          "table"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Target Corporation reported net sales of **$104,780 million** for fiscal 2025 in its consolidated statements of operations [2][3].",
+        "elapsed_ms": 4071,
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/second-public/company/target-corp/10-K_2026-03-11_annual-report.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/target-corp/10-K_2026-03-11_annual-report.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/target-corp/10-K_2026-03-11_annual-report.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/deere-co/10-Q_2026-08-27_quarterly-report.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/target-corp/DEF14A_2026-04-27_proxy-statement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/target-corp/DEF14A_2026-04-27_proxy-statement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/target-corp/10-K_2026-03-11_annual-report.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/target-corp/DEF14A_2026-04-27_proxy-statement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/target-corp/10-K_2026-03-11_annual-report.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/caterpillar-inc/10-K_2026-02-13_annual-report.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/target-corp/10-K_2026-03-11_annual-report.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/target-corp/DEF14A_2026-04-27_proxy-statement.htm",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 0,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/second-public/company/target-corp/10-K_2026-03-11_annual-report.htm"
+        ]
+      }
+    },
+    {
+      "id": "PUB_P01",
+      "category": "contract_clause",
+      "role": "staff",
+      "question": "Under Intuit's Credit Agreement dated January 9, 2026, what is the base maximum Leverage Ratio the company may not exceed at the end of any four-consecutive-fiscal-quarter period, before any acquisition-related increase?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/second-public/company/intuit-inc/EX-10_2026-01-12_credit-agreement.htm"
+        ],
+        "contains": [
+          "4.00"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/second-public/company/intuit-inc/EX-10_2026-01-12_credit-agreement.htm",
+          "company/second-public/company/autodesk-inc/EX-10_2026-06-15_credit-agreement.htm",
+          "company/second-public/company/autodesk-inc/EX-10_2026-06-15_credit-agreement.htm",
+          "company/second-public/company/intuit-inc/EX-10_2026-01-12_credit-agreement.htm",
+          "company/second-public/company/intuit-inc/EX-10_2026-01-12_credit-agreement.htm"
+        ],
+        "kinds": [
+          "prose",
+          "prose",
+          "prose",
+          "prose",
+          "prose"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Based on the evidence already retrieved, I have the answer. In passage [7], the Intuit Credit Agreement dated January 9, 2026 clearly states the Maximum Leverage Ratio covenant:\n\nUnder Intuit's Credit Agreement dated January 9, 2026, the base maximum Leverage Ratio the company may not exceed at the end of any four-consecutive-fiscal-quarter period, before any acquisition-related increase, is **4.00 to 1.00** [7].",
+        "elapsed_ms": 8908,
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/second-public/company/kroger-co/DEF14A_2026-05-13_proxy-statement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/intuit-inc/EX-10_2026-01-12_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/autodesk-inc/EX-10_2026-06-15_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/target-corp/10-K_2026-03-11_annual-report.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/autodesk-inc/EX-10_2026-06-15_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/target-corp/10-K_2026-03-11_annual-report.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/intuit-inc/EX-10_2026-01-12_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/intuit-inc/DEF14A_2025-11-26_proxy-statement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/intuit-inc/EX-10_2026-01-12_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/intuit-inc/DEF14A_2025-11-26_proxy-statement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/target-corp/10-K_2026-03-11_annual-report.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/intuit-inc/DEF14A_2025-11-26_proxy-statement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/intuit-inc/EX-10_2026-01-12_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/intuit-inc/EX-10_2026-01-12_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/intuit-inc/EX-10_2026-01-12_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/intuit-inc/EX-10_2026-01-12_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/intuit-inc/EX-10_2026-01-12_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/intuit-inc/EX-10_2026-01-12_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/intuit-inc/EX-10_2026-01-12_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/intuit-inc/EX-10_2026-01-12_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/intuit-inc/EX-10_2026-01-12_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/intuit-inc/EX-10_2026-01-12_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/intuit-inc/EX-10_2026-01-12_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/intuit-inc/EX-10_2026-01-12_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/intuit-inc/EX-10_2026-01-12_credit-agreement.htm",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 2,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/second-public/company/intuit-inc/EX-10_2026-01-12_credit-agreement.htm"
+        ]
+      }
+    },
+    {
+      "id": "PUB_L01",
+      "category": "long_document",
+      "role": "staff",
+      "question": "Under Caterpillar's Fifth Amended and Restated Credit Agreement (Three-Year Facility), what is the Current Termination Date?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "company/second-public/company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm"
+        ],
+        "contains": [
+          "August 27, 2029"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/second-public/company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm",
+          "company/second-public/company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm",
+          "company/second-public/company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm",
+          "company/second-public/company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm",
+          "company/second-public/company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm"
+        ],
+        "kinds": [
+          "prose",
+          "prose",
+          "prose",
+          "prose",
+          "prose"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Based on the search results provided, I can answer your question directly from the evidence already retrieved.\n\nUnder Caterpillar's Fifth Amended and Restated Credit Agreement (Three-Year Facility), the Current Termination Date is **August 27, 2029** [1].\n\nThis is stated in the definition of \"Current Termination Date\" which specifies: \"means, with respect to any Bank at any time, August 27, 2029, or such later date to which the 'Current Termination Date' shall then have been extended with the consent of such Bank...\"",
+        "elapsed_ms": 4944,
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/second-public/company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/caterpillar-inc/10-K_2026-02-13_annual-report.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/caterpillar-inc/10-K_2026-02-13_annual-report.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/caterpillar-inc/10-K_2026-02-13_annual-report.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/caterpillar-inc/10-K_2026-02-13_annual-report.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/caterpillar-inc/10-K_2026-02-13_annual-report.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 2,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "company/second-public/company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm"
+        ]
+      }
+    },
+    {
+      "id": "SYN_A01",
+      "category": "access_boundary",
+      "role": "staff",
+      "question": "What is Northwind's Chief Executive Officer's base salary?",
+      "expected": {
+        "answered": false,
+        "denied": true,
+        "forbidden_docs": [
+          "executive/second-synthetic/executive-compensation-2025.md",
+          "executive/second-synthetic/board-minutes-2025-03.md"
+        ]
+      },
+      "retrieval": {
+        "role": "staff",
+        "docs": [
+          "company/second-synthetic/org-chart.md",
+          "company/second-synthetic/benefits-summary.md",
+          "company/second-synthetic/employee-handbook.md",
+          "company/second-synthetic/employee-directory.csv",
+          "company/second-synthetic/offer-letter-template.md"
+        ],
+        "kinds": [
+          "prose",
+          "table",
+          "table",
+          "table",
+          "prose"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": true,
+        "withheld": 0,
+        "reason": "a passage the 'staff' role may not see matched this question better than any passage it may see, so the answer drawn from what is available is incomplete by construction.",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "I could not find that in the available documents.\n\nThe passages contain Dana Whitfield's hire date, job title, and contact information [6], but do not include her base salary amount. Passage [9] shows compensation data for \"Chief Executive\" but only displays \"$290.93\" and \"$582\" without context or labels explaining what these figures represent, making it impossible to determine if either represents a base salary.",
+        "elapsed_ms": 21379,
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/second-synthetic/org-chart.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-synthetic/benefits-summary.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-synthetic/employee-handbook.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-synthetic/benefits-summary.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-synthetic/budget.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-synthetic/employee-directory.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-synthetic/employee-handbook.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-synthetic/customer-price-list.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-public/government/dol/fr-2026-20447-transparency-in-coverage.pdf",
+            "page_start": 76
+          },
+          {
+            "doc_id": "company/second-synthetic/employee-directory.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-synthetic/employee-directory.csv",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-synthetic/fy2025-pl-and-balance-sheet.csv",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 1,
+        "notice": ""
+      },
+      "retrieval_hit": null,
+      "score": {
+        "pass": true,
+        "declined": true,
+        "refusal_text": true,
+        "forbidden_cited": [],
+        "leaked_value": false,
+        "retrieval_hit": null,
+        "expected_docs": []
+      }
+    },
+    {
+      "id": "SYN_A01",
+      "category": "access_boundary",
+      "role": "executive",
+      "question": "What is Northwind's Chief Executive Officer's base salary?",
+      "expected": {
+        "answered": true,
+        "docs": [
+          "executive/second-synthetic/executive-compensation-2025.md",
+          "executive/second-synthetic/board-minutes-2025-03.md"
+        ],
+        "contains": [
+          "385,000"
+        ]
+      },
+      "retrieval": {
+        "role": "executive",
+        "docs": [
+          "executive/second-synthetic/executive-compensation-2025.md",
+          "executive/second-synthetic/executive-compensation-2025.md",
+          "executive/second-synthetic/acquisition-target-assessment.md",
+          "executive/second-synthetic/acquisition-target-assessment.md",
+          "company/second-synthetic/org-chart.md"
+        ],
+        "kinds": [
+          "prose",
+          "prose",
+          "table_row",
+          "table_row",
+          "prose"
+        ],
+        "pages": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "denied": false,
+        "withheld": 0,
+        "reason": "",
+        "passages": 5
+      },
+      "answer": {
+        "answer": "Based on the executive compensation document, Northwind's Chief Executive Officer Dana Whitfield has a 2025 base salary of **385,000 USD** [27].",
+        "elapsed_ms": 10659,
+        "kind": "answer",
+        "reason": "no trigger fired",
+        "citations": [
+          {
+            "doc_id": "company/second-public/company/hca-healthcare-inc/DEF14A_2026-03-13_proxy-statement.htm",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/second-synthetic/executive-compensation-2025.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/second-synthetic/executive-compensation-2025.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/second-synthetic/acquisition-target-assessment.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/second-synthetic/acquisition-target-assessment.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-synthetic/org-chart.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/second-synthetic/acquisition-target-assessment.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/second-synthetic/board-minutes-2025-03.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/second-synthetic/acquisition-target-assessment.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/second-synthetic/acquisition-target-assessment.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/second-synthetic/acquisition-target-assessment.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-synthetic/benefits-summary.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/second-synthetic/acquisition-target-assessment.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "company/second-synthetic/benefits-summary.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/second-synthetic/executive-compensation-2025.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/second-synthetic/executive-compensation-2025.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/second-synthetic/executive-compensation-2025.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/second-synthetic/executive-compensation-2025.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/second-synthetic/executive-compensation-2025.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/second-synthetic/executive-compensation-2025.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/second-synthetic/executive-compensation-2025.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/second-synthetic/executive-compensation-2025.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/second-synthetic/executive-compensation-2025.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/second-synthetic/executive-compensation-2025.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/second-synthetic/executive-compensation-2025.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/second-synthetic/executive-compensation-2025.md",
+            "page_start": 1
+          },
+          {
+            "doc_id": "executive/second-synthetic/executive-compensation-2025.md",
+            "page_start": 1
+          }
+        ],
+        "passages": 0,
+        "unsupported": 1,
+        "notice": ""
+      },
+      "retrieval_hit": true,
+      "score": {
+        "pass": true,
+        "contains_ok": true,
+        "cited_ok": true,
+        "retrieval_hit": true,
+        "expected_docs": [
+          "executive/second-synthetic/executive-compensation-2025.md",
+          "executive/second-synthetic/board-minutes-2025-03.md"
+        ]
+      }
+    }
+  ]
+}

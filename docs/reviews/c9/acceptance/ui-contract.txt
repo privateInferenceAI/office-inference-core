@@ -1,0 +1,3 @@
+OK    the app's contract matches http://127.0.0.1:8090/api
+      14 path(s): /activity, /approvals, /ask, /ask/stream, /documents/{doc_id}, /health, /jobs, /jobs/{job_id}, /jobs/{job_id}/approvals, /jobs/{job_id}/artifacts, /jobs/{job_id}/artifacts/{sha256}, /jobs/{job_id}/events, /jobs/{job_id}/{action}, /tasks
+      25 model(s)

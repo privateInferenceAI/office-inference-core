@@ -5786,7 +5786,7 @@ is explained.
 | C6 | The agent runtime and the MCP gateway | Built and verified. Section 26 |
 | C7 | Ingress, TLS, identity, least privilege, secret rotation and Object Lock | Built and verified. Section 26 |
 | C8 | Alarms, backups, restore and RTO, rollback, SSM-only support, cost reporting, golden questions, acceptance, load test | Partly built. Audit hashes, scanning, drift, incident, backup/RTO, load, signed release/rollback, medical golden, alarms, cost and acceptance are verified; SSM-only support is open by owner decision |
-| C9 | The demonstration | Not built |
+| C9 | The demonstration | Built and rehearsed on 2026-10-23. Eight scenes, every expected output. Evidence: docs/reviews/c9/. The run used the fallback model because the primary was throttled; a timed run on the primary is owed before a client demo |
 
 **Update, 2026-10-23.** The phase table above is the build plan, not the current state. C6 and C7 are built and
 verified. C8 has six verified rows: prompt and completion hashes in chain version 4, scheduled image scanning,
@@ -6020,3 +6020,20 @@ docs/reviews/ops-alarm/.
   Reset the database and start LiteLLM alone, then start the API.
 - The client app needs a separate /opt/oic-ui archive. The four acceptance probes do not need it, so a core-only
   acceptance can skip the app service.
+
+### 26.12 The demo deployment and the eight-scene rehearsal
+
+The demo deployment is `oi-core-demo-2026-10-23`, built on a dedicated On-Demand m7i.4xlarge from
+`manifests/demo-cloud.yaml` and the second corpus. It is not the build box and not a client deployment. The
+runbook is docs/runbooks/demo.md and the rehearsal evidence is docs/reviews/c9/.
+
+Every scene produced its expected output: a cited mileage answer, the GAO source page opened at the cited
+part, a staff denial with the disclosure shown, the boundary row read out of the record, the executive answer
+of 385,000, a 306-event export that verified clean, and a one-row tamper that failed on both the row hash and
+the file hash. One product gap was found by running it: the streamed Ask path is single-shot while the JSON
+path runs the tool-assisted retrieval, and the CEO salary question can miss the row on the stream. Scene 6
+therefore uses **Ask without streaming**, and aligning the two paths is recorded as work after C9.
+
+The run used the fallback model. The account's daily Sonnet allotment was exhausted at acceptance time and
+LiteLLM fell back to Haiku 4.5, which the audit rows record. A timed rehearsal on the primary model is still
+owed before a client demo; the pre-demo check in the operator guide exists for that.

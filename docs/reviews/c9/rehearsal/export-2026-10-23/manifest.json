@@ -1,0 +1,12 @@
+{
+  "deployment_id": "oi-core-demo-2026-10-23",
+  "date": "2026-10-23",
+  "event_count": 306,
+  "first_id": 1,
+  "first_prev_hash": null,
+  "last_id": 306,
+  "last_row_hash": "bb0ba42048b680bc2eb53c9d74200fb4a5337d8f54f5174aefcfc038492c8c26",
+  "file": "audit-events.jsonl",
+  "file_sha256": "4c6d0639b38f82d6750b243633b6abe96db027cabdcd99f101c1dda545ad34a2",
+  "generated_at": "2026-10-23T19:41:24.220167+00:00"
+}

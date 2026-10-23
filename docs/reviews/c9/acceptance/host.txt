@@ -1,0 +1,7 @@
+Docker version 29.9.2, build a82e528
+Docker Compose version v5.6.1
+7.0.0-1014-aws
+16
+               total        used        free      shared  buff/cache   available
+Mem:              61          15          21           0          25          45
+/dev/root       193G   26G  168G  14% /

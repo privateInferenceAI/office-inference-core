@@ -1,0 +1,117 @@
+{
+  "kind": "degraded",
+  "reason": "unclassified",
+  "lane": "frontier",
+  "detail": "the model call failed in a way this deployment does not recognise, so the answer below comes from your own documents",
+  "passages": [
+    {
+      "index": 1,
+      "doc_id": "company/second-synthetic/expense-report-form.csv",
+      "acl": "company",
+      "page_start": 1,
+      "page_end": 1,
+      "excerpt": "# Instructions: submit within 30 days of the last expense date. Itemize every line. Attach a receipt for any line of 25.00 or more. Mileage is claimed at 0.67 per mile."
+    },
+    {
+      "index": 2,
+      "doc_id": "company/second-synthetic/travel-and-expense-policy.md",
+      "acl": "company",
+      "page_start": 1,
+      "page_end": 1,
+      "excerpt": "5. Meals and per diem\n5.5 Business meals with customers or candidates are reimbursed at actual cost with an itemized receipt and a list of attendees. The limit is 75 USD per attendee. Above that, the department head approves in writing befo"
+    },
+    {
+      "index": 3,
+      "doc_id": "company/second-synthetic/employee-handbook.md",
+      "acl": "company",
+      "page_start": 1,
+      "page_end": 1,
+      "excerpt": "8. Expenses, travel and corporate card > 8.3 Receipts\nA receipt is required for every expense of\n25 USD or more\n. Below 25 USD, the expense still needs a date, a description and the business purpose. A credit card slip is not a receipt; the"
+    },
+    {
+      "index": 4,
+      "doc_id": "company/second-synthetic/employee-handbook.md",
+      "acl": "company",
+      "page_start": 1,
+      "page_end": 1,
+      "excerpt": "Employee Handbook\nJury duty | Paid up to 10 days per year\nPer diem | 65 USD domestic Tier 1 or 2, 55 USD Tier 3, 110 USD international\nReceipts | Required at 25 USD and above\nMileage | 0.67 USD per mile\nExpenses due | Within 30 days of the "
+    },
+    {
+      "index": 5,
+      "doc_id": "company/second-synthetic/employee-handbook.md",
+      "acl": "company",
+      "page_start": 1,
+      "page_end": 1,
+      "excerpt": "Columns: 3.6 | 1 January 2022 | Remote work pilot added, two days per week / 3.7 | 1 July 2022 | Sick time accrual changed to 1 hour per 30 hours. 3.8 | 1 January 2023 | Mileage rate updated, receipt threshold set at 25 USD"
+    },
+    {
+      "index": 6,
+      "doc_id": "company/second-synthetic/travel-and-expense-policy.md",
+      "acl": "company",
+      "page_start": 1,
+      "page_end": 1,
+      "excerpt": "9. Corporate card\n9.4 A lost or stolen card is reported to the card issuer immediately and to the Controller the same day. Reserved test card number 4111 1111 1111 1111 appears on training material only and is a reserved value, not a real a"
+    },
+    {
+      "index": 7,
+      "doc_id": "company/second-synthetic/employee-handbook.md",
+      "acl": "company",
+      "page_start": 1,
+      "page_end": 1,
+      "excerpt": "Columns: 3.7 | 1 July 2022 | Sick time accrual changed to 1 hour per 30 hours / 3.8 | 1 January 2023 | Mileage rate updated, receipt threshold set at 25 USD. 3.9 | 1 January 2024 | Parental leave extended to 6 weeks paid"
+    },
+    {
+      "index": 8,
+      "doc_id": "company/second-synthetic/employee-handbook.md",
+      "acl": "company",
+      "page_start": 1,
+      "page_end": 1,
+      "excerpt": "Columns: 3.8 | 1 January 2023 | Mileage rate updated, receipt threshold set at 25 USD / 3.9 | 1 January 2024 | Parental leave extended to 6 weeks paid. 4.0 | 1 July 2024 | Data classification added, AI tool rules added"
+    },
+    {
+      "index": 9,
+      "doc_id": "company/second-synthetic/employee-handbook.md",
+      "acl": "company",
+      "page_start": 1,
+      "page_end": 1,
+      "excerpt": "Columns: Holidays | 11 paid holidays in 2025. Mileage | 0.67 USD per mile"
+    },
+    {
+      "index": 10,
+      "doc_id": "company/second-public/company/caterpillar-inc/EX-10_2026-09-01_credit-agreement.htm",
+      "acl": "company",
+      "page_start": 1,
+      "page_end": 1,
+      "excerpt": "Commitment Fee Rate | 0.040% | 0.050% | 0.060% | 0.080%"
+    },
+    {
+      "index": 11,
+      "doc_id": "company/second-synthetic/travel-and-expense-policy.md",
+      "acl": "company",
+      "page_start": 1,
+      "page_end": 1,
+      "excerpt": "Columns: Review cycle | Annual, next review November 2025. Laundry | Reimbursable on trips of five nights or more, up to 25 USD per trip"
+    },
+    {
+      "index": 12,
+      "doc_id": "company/second-synthetic/travel-and-expense-policy.md",
+      "acl": "company",
+      "page_start": 1,
+      "page_end": 1,
+      "excerpt": "Columns: Review cycle | Annual, next review November 2025. Tips | Reimbursable up to 20 percent for meals that are not per diem; 2 USD per bag for luggage"
+    }
+  ],
+  "attempts": 1,
+  "threshold": null,
+  "partial_output": false,
+  "budget": {
+    "elapsed_ms": 1425,
+    "remaining_ms": 28574,
+    "first_token_ms": null,
+    "first_token_seconds": 1.5,
+    "stall_seconds": 5.0,
+    "total_seconds": 30.0,
+    "reserve_seconds": 1.2,
+    "taxonomy_version": 1
+  }
+}

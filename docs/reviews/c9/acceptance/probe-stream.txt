@@ -1,0 +1,10 @@
+ok   END-TO-END  3 frame(s), 12 citation(s), answer starts 'The mileage rate for reimbursement is 0.67 USD per mile. [3]'
+            if it were absent: a stream that lost the answer or its citations is not the same capability
+ok   TTFT        first token at 699ms of 1877ms total, 25 frame(s)
+            if it were absent: a response that arrives whole has a first token at the total time, which is not streaming
+ok   INCREMENTAL 25 frame(s) at 13 distinct arrival times, spread 1.88s, X-Accel-Buffering='no'
+            if it were absent: one frame containing the whole answer means something upstream is buffering
+ok   REDACTED    canary in any frame: no; the stream reported redactions {'phone': 2}
+            if it were absent: a value that reaches the browser mid-stream cannot be recalled, so the control has to be before the frame rather than after the answer
+
+PASSED: 4 right(s) held against the streaming service

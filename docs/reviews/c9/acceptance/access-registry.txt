@@ -1,0 +1,3 @@
+deployment oi-core-demo-2026-10-23
+roles {'viewer': []}
+users ['adam.hale@northwind.example', 'probe-exec@officeinference.com', 'probe-staff@officeinference.com', 'zoe.reyes@northwind.example']

@@ -1,0 +1,15 @@
+curlimages/curl:latest 11e64e28c5f5 35.9MB
+ghcr.io/huggingface/text-embeddings-inference:<none> 2538ea1c9640 938MB
+oi-core-audit:latest 1cd63a379e83 210MB
+oi-core-keys:latest 7dd6b7ca231c 210MB
+oi-core/api:local 0edc9819418f 329MB
+oi-core/app:local 99ff0c95fd5e 178MB
+oi-core/eval:local bac7375c3401 275MB
+oi-core/ingestion:local c679ef64cd61 194MB
+oi-core/litellm:local 2e4001d1bddb 1.71GB
+oi-core/mcp-gateway:local 1aea9c73dd1f 329MB
+oi-core/parser:local b26cc71d2b39 8.59GB
+oi-core/postgres:local aab9cf453e2a 422MB
+oi-core/retention:local 548a7eadc9ff 209MB
+oi-core/session:local f47a34c12398 227MB
+qdrant/qdrant:<none> b7b0444c4c35 291MB

@@ -1,0 +1,128 @@
+{
+  "answer": "Based on the evidence already retrieved, I can answer your question.\n\nThe mileage rate is **0.67 USD per mile** [1][8][9].\n\nThis rate is confirmed across multiple documents in your company's policies. It was updated effective January 1, 2023 [2][3][5], and is the current 2025 standard rate used by the company [7]. The rate covers fuel, wear, and insurance for personal vehicle mileage on approved business travel [9].",
+  "model": "analyst",
+  "resolved_model": "bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0",
+  "configured_model": "bedrock/us.anthropic.claude-sonnet-4-6",
+  "model_group": "analyst-fallback",
+  "fallback_used": true,
+  "role": "viewer",
+  "roots": [
+    "company"
+  ],
+  "citations": [
+    {
+      "index": 1,
+      "doc_id": "company/second-synthetic/employee-handbook.md",
+      "acl": "company",
+      "page_start": 1,
+      "page_end": 1
+    },
+    {
+      "index": 2,
+      "doc_id": "company/second-synthetic/employee-handbook.md",
+      "acl": "company",
+      "page_start": 1,
+      "page_end": 1
+    },
+    {
+      "index": 3,
+      "doc_id": "company/second-synthetic/employee-handbook.md",
+      "acl": "company",
+      "page_start": 1,
+      "page_end": 1
+    },
+    {
+      "index": 4,
+      "doc_id": "company/second-synthetic/expense-report-form.csv",
+      "acl": "company",
+      "page_start": 1,
+      "page_end": 1
+    },
+    {
+      "index": 5,
+      "doc_id": "company/second-synthetic/employee-handbook.md",
+      "acl": "company",
+      "page_start": 1,
+      "page_end": 1
+    },
+    {
+      "index": 6,
+      "doc_id": "company/second-synthetic/travel-and-expense-policy.md",
+      "acl": "company",
+      "page_start": 1,
+      "page_end": 1
+    },
+    {
+      "index": 7,
+      "doc_id": "company/second-synthetic/travel-and-expense-policy.md",
+      "acl": "company",
+      "page_start": 1,
+      "page_end": 1
+    },
+    {
+      "index": 8,
+      "doc_id": "company/second-synthetic/employee-handbook.md",
+      "acl": "company",
+      "page_start": 1,
+      "page_end": 1
+    },
+    {
+      "index": 9,
+      "doc_id": "company/second-synthetic/employee-handbook.md",
+      "acl": "company",
+      "page_start": 1,
+      "page_end": 1
+    },
+    {
+      "index": 10,
+      "doc_id": "company/second-synthetic/expense-report-form.csv",
+      "acl": "company",
+      "page_start": 1,
+      "page_end": 1
+    },
+    {
+      "index": 11,
+      "doc_id": "company/second-synthetic/employee-handbook.md",
+      "acl": "company",
+      "page_start": 1,
+      "page_end": 1
+    },
+    {
+      "index": 12,
+      "doc_id": "company/second-public/company/kroger-co/10-Q_2026-09-18_quarterly-report.htm",
+      "acl": "company",
+      "page_start": 1,
+      "page_end": 1
+    }
+  ],
+  "supported": [
+    "The mileage rate is **0.67 USD per mile** [1][8][9].",
+    "The rate covers fuel, wear, and insurance for personal vehicle mileage on approved business travel [9]."
+  ],
+  "unsupported": [
+    {
+      "text": "Based on the evidence already retrieved, I can answer your question.",
+      "reason": "no_citation",
+      "detail": "the sentence carries no citation marker, so none of the checks could be run on it"
+    },
+    {
+      "text": "This rate is confirmed across multiple documents in your company's policies.",
+      "reason": "no_citation",
+      "detail": "the sentence carries no citation marker, so none of the checks could be run on it"
+    },
+    {
+      "text": "It was updated effective January 1, 2023 [2][3][5], and is the current 2025 standard rate used by the company [7].",
+      "reason": "identifier_not_in_source",
+      "detail": "names january1 and the cited passage does not mention it. This is the check that catches a citation to the right document and the wrong form."
+    }
+  ],
+  "redactions": {},
+  "notice": "",
+  "lane": "frontier",
+  "escalated": false,
+  "trigger": "",
+  "reason": "no trigger fired",
+  "denied": false,
+  "disclosure": "",
+  "request_id": "2c3ed49f7399495899d967e54f0ceeb3"
+}

@@ -1,0 +1,12 @@
+EXEC trial 1 | What is Northwind's Chief Executive Officer's base salary? | has385 True | fallback True | Based on the compensation table in the executive compensation document, Northwind's Chief Executive Officer Dana Whitfie
+EXEC trial 2 | What is Northwind's Chief Executive Officer's base salary? | has385 True | fallback True | Based on the compensation table in the executive compensation document, Northwind's Chief Executive Officer Dana Whitfie
+STAFF | What is Northwind's Chief Executive Officer's base salary? | denied True | has385 False | I could not find that in the available documents. While the passages confirm that Dana Whitfield is the Chief Executive 
+---
+EXEC trial 1 | What is Dana Whitfield's base salary? | has385 True | fallback True | Based on the evidence already retrieved, Dana Whitfield's base salary is **385,000 USD** [1][4].  This is Dana Whitfield
+EXEC trial 2 | What is Dana Whitfield's base salary? | has385 True | fallback True | Based on the evidence already retrieved, Dana Whitfield's base salary is **385,000 USD** [1][4].  This is Dana Whitfield
+STAFF | What is Dana Whitfield's base salary? | denied True | has385 False | I could not find that in the available documents. While passage [4] shows a base salary of "58,400 USD" with a start dat
+---
+EXEC trial 1 | What base salary does Northwind pay its Chief Executive Officer? | has385 True | fallback True | Northwind pays its Chief Executive Officer, Dana Whitfield, a base salary of "385,000" USD [24].
+EXEC trial 2 | What base salary does Northwind pay its Chief Executive Officer? | has385 True | fallback True | Northwind pays its Chief Executive Officer, Dana Whitfield, a base salary of "385,000" USD [24].
+STAFF | What base salary does Northwind pay its Chief Executive Officer? | denied True | has385 False | I could not find that in the available documents. While the passages confirm Dana Whitfield is the Chief Executive Offic
+---
