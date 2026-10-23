@@ -1,0 +1,33 @@
+{
+  "rows": [
+    {
+      "id": 1218,
+      "actor": "unauthenticated",
+      "payload": {
+        "stage": "session",
+        "refusal": "no_session",
+        "endpoint": "/ask"
+      }
+    },
+    {
+      "id": 1219,
+      "actor": "probe-staff@officeinference.com",
+      "payload": {
+        "refusal": "a request may not supply or override its own role",
+        "session_role": "viewer",
+        "attempted_role": "executive",
+        "supplied_field": "role"
+      }
+    },
+    {
+      "id": 1220,
+      "actor": "probe-staff@officeinference.com",
+      "payload": {
+        "refusal": "a request may not supply its own authority",
+        "endpoint": "/ask",
+        "session_role": "viewer",
+        "supplied_field": "role"
+      }
+    }
+  ]
+}
