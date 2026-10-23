@@ -2,6 +2,10 @@
 
 **Date:** 2026-10-23. **Status:** QLT-LOAD-001 verified. Five after-runs, zero failures.
 
+**Audit-chain note:** an earlier concurrent run exposed a chain fork caused by id assignment racing the
+advisory lock. The writer now takes the lock before the insert. See docs/reviews/audit-chain-fork/. The final
+20-concurrent run exported 1547 events with an intact chain.
+
 ## Test
 
 - Tool: scripts/load_test.py, run inside the API container against http://127.0.0.1:8088.
