@@ -549,6 +549,9 @@ services:
       # by the API and not by the sandbox.
       OI_MCP_URL: ${OI_MCP_URL:-}
       OI_MCP_TOKEN: ${OI_MCP_TOKEN:-}
+      # The existing egress policy and redaction switch for tool calls that leave the box.
+      FRONTIER_CLASSES: ${FRONTIER_CLASSES:-}
+      EGRESS_REDACTION: ${EGRESS_REDACTION:-on}
     # The workspace service is on the host in the first build. The API reaches it through the Docker bridge
     # gateway; a deployment with a separate workspace host sets OI_WORKSPACE_URL to that host instead.
     extra_hosts:

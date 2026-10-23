@@ -209,5 +209,5 @@ mcp:
       path: /send
       credential_file: /app/rendered/connector.token
       allowed_roles: [viewer, analyst, admin]
-      data_classes: [internal]
+      data_classes: [public, internal, confidential, regulated]
       egress: true
