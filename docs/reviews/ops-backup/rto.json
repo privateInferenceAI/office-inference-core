@@ -1,0 +1,13 @@
+{
+  "backup": "s3://oi-core-backups-878451098165/backups/20261023T122439Z/",
+  "restore_start": "2026-10-23T12:24:55Z",
+  "cited_answer": "2026-10-23T12:25:43Z",
+  "state_restore_seconds": 48,
+  "full_drill_seconds": 942,
+  "audit_events": 964,
+  "chain_intact": true,
+  "qdrant_points": 24296,
+  "rpo_hours": 24,
+  "rto_hours": 4,
+  "within_rto": true
+}

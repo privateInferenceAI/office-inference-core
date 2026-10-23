@@ -5759,8 +5759,9 @@ BIZ-CONTRACT-001.
 
 ## Phase C8 — Operations, partly built
 
-Four C8 rows are verified. The rest are open and need a decision or an external party; the table in
-docs/current-deployment.md names the blocker for each.
+Six C8 rows are verified: audit chain version 4, image scanning, drift, the incident tabletop, backup and the
+restore/RTO drill. The load test failed its latency target and stays open. The rest are open and need a decision
+or an external party; docs/current-deployment.md names the blocker for each.
 
 ### C8.1 Audit chain version 4
 
@@ -5808,8 +5809,6 @@ on the artifact manifest.
 ### C8.5 Still open
 
     OPS-ALARM-001      needs a notification destination and a confirmed subscription
-    OPS-BACKUP-001     needs a restore target and a drill
-    OPS-RTO-001        needs the drill's recorded elapsed time
     OPS-UPDATE-001     needs release signing and a rollback target
     OPS-SUPPORT-001    needs approval to remove SSH and use SSM only
     OPS-COST-001       needs the report shape and Marketplace line access
@@ -5823,7 +5822,7 @@ on the artifact manifest.
 ### Phase 9 — Office appliance  *(outline)*
 
 Backup, restore drill, signed updates with rollback, drift reporting, support tunnel. The drift reporting and the
-SSM role exist; the backup drill and the signed update do not.
+SSM role exist. The backup and restore drill now exist; the signed update and rollback do not.
 
 ### Phase 10 — Voice  *(outline)*
 

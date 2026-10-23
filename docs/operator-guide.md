@@ -1632,71 +1632,53 @@ gone afterwards, and the tombstone records that they went rather than what they 
 
 ---
 
-# Stage 12: backup and restore, which do not exist yet
+# Stage 12: backup and restore, now built
 
-**Goal:** know what protects this deployment's data today, and what does not.
+**Goal:** know what protects this deployment's data, how to take a backup, and how to restore one.
 
-**This stage is short because the feature is not built.** There is no backup script in this repository, no
-`services/backup/`, and no restore procedure. `OPS-BACKUP-001` in `docs/requirements.yaml` reads *"Backups
-restore, proven by a drill"* and its status is **open**, phase C8.
+The backup is built and the restore drill passed on 2026-10-23. The backup bucket is in Office Inference's account
+for this development deployment; a client deployment needs the same bucket in the client's account.
 
-That is not an oversight in the guide. It is the state of the system, and a guide that skipped the stage
-would leave an operator assuming something exists that does not.
+## 12a. What is protected now
 
-## 12a. What is protected today, and by what
-
-| Data | Where it lives | What protects it today |
+| Data | Where it lives | Backed up |
 |---|---|---|
-| The audit record | `postgres`, volume under `data/postgres` | The bucket it ships to, with Object Lock — **the record, not the database** |
-| Documents | `documents/` on the host | Nothing. The client's own copies are the backup, which is a real answer for a purge and not one for a disk failure |
-| The vector store | `data/qdrant/` | Nothing. It is derived data and can be rebuilt by re-ingesting, at the cost of the parse time |
-| The manifest and the rendered env | `manifests/`, `rendered/env` | Git for the manifest; **`rendered/env` is gitignored and holds the generated secrets** |
-| API keys | `rendered/keys.json` | Nothing |
-| Retention policy, holds, version registry | `postgres` | Nothing |
+| Postgres: audit, manifests, lexical index, sessions, jobs | postgres container | yes, nightly pg_dump |
+| Rendered configuration and secrets | /opt/oi-core/rendered | yes, in the encrypted state archive |
+| Manifests | /opt/oi-core/manifests | yes; also in git |
+| Documents | /opt/oi-core/documents | yes |
+| Qdrant vectors | /opt/oi-core/data/qdrant | yes; restored in the drill |
+| Container images | host Docker | no; the restore target rebuilds or already has them |
 
-**The one that should worry you is `rendered/env`.** It holds the Postgres password and the LiteLLM master
-key, it is generated once, and it is deliberately not in git. Lose it and you cannot authenticate to your
-own database or gateway; the data is intact and unreachable. **Copy it somewhere safe by hand, now**, and
-treat that as the minimum viable backup until C8.
+The bucket is oi-core-backups-878451098165, versioned, encrypted with SSE-S3, and public access is blocked.
+The systemd timer oi-backup.timer runs daily at 02:00 UTC.
 
-## 12b. What an operator can do today, and what it does not cover
+## 12b. Take a backup
 
-Two things are available, and neither is a backup:
+    ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@52.204.204.133
+    cd /opt/oi-core
+    python3 scripts/backup_deployment.py --root /opt/oi-core --out /var/backups/oi-core
 
-```
-# the vector store is derived, so re-ingesting rebuilds it
-docker exec ingestion python3 /app/ingest.py --documents /documents
+The script writes a Postgres dump and a state archive, prints the S3 path and checksums, and uploads directly.
+Do not put the rendered env or the database dump anywhere unencrypted.
 
-# the record can be exported and shipped, which is what the bucket is for
-oi run --rm audit export --date "$(date -u +%Y-%m-%d)"
-```
+## 12c. Restore drill
 
-The first is a slow rebuild rather than a restore, and it depends on the documents still being on disk —
-which is exactly what a disk failure takes away. The second protects the *record* off-machine, which is the
-compliance claim, and does nothing for the documents or the keys.
+The drill ran on scratch instance i-096bebd46308d1673. The state restore took **48 seconds**; the full drill from
+starting the scratch instance took **15 minutes 42 seconds**, against a 4-hour RTO. The restored API answered a
+cited question and the 964-event audit chain verified.
 
-**A truthful sentence to a client today:** *the audit record ships continuously to write-once storage in your
-account, so the evidence survives this machine; the MCP gateway and connector run in your tenant behind TLS; the
-documents and the configuration do not yet have a backup procedure, and that arrives with the open C8 rows.*
-The gateway and TLS are now built. Backup, restore, RTO, alarms and rollback are not.
+The repeatable procedure is docs/reviews/ops-backup/README.md; the contract numbers are in
+docs/contracts/backup-and-recovery.md. The restore target must have the container images and compose definition;
+the backup restores state, not the runtime base.
 
-## 12c. What a restore will have to cover when it is built
+**A truthful sentence to a client today:** the audit record ships to write-once storage, the gateway and
+connector run in your tenant behind TLS, and daily backups restore to a working system in under 16 minutes in the
+last drill. The backup bucket is still in our account for this dev deployment; moving it to the client account is
+part of the independence work.
 
-Recorded here so the operator knows what to ask for, and so whoever builds it has the list:
-
-- `postgres` — the record, the manifest, the lexical index, the version registry, holds and policy. A
-  `pg_dump` and a matching `rendered/env`, or the dump is unusable
-- `documents/` — the client's files, which the system does not own and should not be the only copy of
-- `data/qdrant/` — derivable, so a restore may legitimately choose to re-ingest instead, and the choice
-  should be deliberate because re-ingesting a scanned corpus takes hours
-- `rendered/env` and `rendered/keys.json` — small, secret, and the difference between a restorable
-  deployment and an unreachable one
-- `manifests/` — in git already
-- The **restore drill** the requirement asks for: a restore that produces a working system, with the
-  elapsed time recorded as the RTO. A backup nobody has restored is a hypothesis
-
-**Checkpoint.** You can answer two questions: where is `rendered/env` copied to, and who knows. If the
-answer to the second is "nobody", that is the finding.
+**Checkpoint.** You can name the backup bucket, the 02:00 UTC timer, the last measured RTO and where the restore
+runbook is.
 
 ---
 
@@ -3578,7 +3560,8 @@ client.
 
 
 
-The open C8 rows are alarms, backup, RTO, rollback, SSM-only support, cost reporting, golden questions,
-fresh-deployment acceptance and load testing. The BIZ rows need counsel, insurance, contracts, on-call staff,
-subprocessors and pricing. docs/current-deployment.md lists each with its blocker. Do not tell a client that
-backup or paging exists; it does not.
+The open C8 rows are alarms, rollback, SSM-only support, cost reporting, golden questions, fresh-deployment
+acceptance and load testing. Backup and the restore/RTO drill are now built and verified. The 20-concurrent load
+test failed its 15-second p95 target at 80.8 seconds; that is a capacity result, not a pass. The BIZ rows need
+counsel, insurance, contracts, on-call staff, subprocessors and pricing. docs/current-deployment.md lists each
+with its blocker. Do not tell a client that paging exists; it does not.

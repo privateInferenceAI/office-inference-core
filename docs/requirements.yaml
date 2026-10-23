@@ -1221,13 +1221,15 @@ items:
     tier: [cloud, hosted, office]
     phase: C8
     verify: a restore from backup produces a working system, and the elapsed time is recorded as the RTO
-    status: open
+    status: verified
+    evidence: docs/reviews/ops-backup/README.md
   - id: OPS-RTO-001
     title: Recovery objectives are measured, not asserted
     tier: [cloud, hosted, office]
     phase: C8
     verify: the RTO and RPO in the contract match the last drill's recorded numbers
-    status: open
+    status: verified
+    evidence: docs/reviews/ops-backup/README.md
   - id: OPS-UPDATE-001
     title: Releases are signed and a bad one rolls back
     tier: [cloud, office]
