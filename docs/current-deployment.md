@@ -21,6 +21,7 @@ The full suite is **1355 passed, 1 skipped** as of the last run on 2026-10-23.
 |---|---|---|---|
 | API, Postgres, LiteLLM, ingestion, retrieval, audit tool | 878451098165, Office Inference | Build box `i-02aba2feef08f8e7b`, 52.204.204.133 | No public port. The API is reached from inside the box or its containers |
 | MCP gateway | 426063972668, badj.ai client tenant | `i-0b6aa00095ae40e54`, `34.225.62.245` | HTTPS only through Caddy at `https://mcp.badj.ai`. Gateway listens on loopback, 8080 |
+| Tenant state | 426063972668, badj.ai client tenant | Instance stopped 2026-10-23; Elastic IP and DNS retained | Test fixture frozen to stop compute billing; thaw with docs/reviews/client-tenant-freeze/ |
 | Email connector | 426063972668 | Same tenant, systemd `client-connector`, port 8094 | Loopback only |
 | Email delivery | 426063972668 | Same tenant, SES identity awstest@officeinference.com | Sends through SES; the account is still in the sandbox |
 | Mailpit fallback | 426063972668 | Same tenant, port 1025 | Capture only; retained as a fallback |
@@ -99,8 +100,9 @@ the client tenant.
    mcp.officeinference.com name was deleted from DNS and removed from Caddy; it is not an alias any more.
 3. **The DeepSeek key comes from Secrets Manager.** The secret is deepseek-oi-key in account 878. The old key was
    replaced, the LiteLLM environment restarted, and the owner revoked the old key on 2026-10-23.
-4. **The image scan has current critical findings.** They are recorded in `docs/reviews/ops-cve/`. They are not
-   waived.
+4. **The three critical image findings are patched.** Postgres gosu, LiteLLM certifi and parser certifi/Pillow
+   were upgraded on 2026-10-23 and the three patched images scan with zero criticals. High findings remain and
+   are not waived. Evidence: docs/reviews/ops-cve/upgrade-2026-10-23/.
 5. **Backup and the restore/RTO drill exist.** The bucket is in account 878, daily at 02:00 UTC. The measured
    state restore was 48 seconds and the full drill 15 minutes 42 seconds against a 4-hour RTO. The backup target
    is not client-owned yet. No alarm, rollback, SSM-only support, cost report, golden question set or

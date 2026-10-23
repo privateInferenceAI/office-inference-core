@@ -12,6 +12,19 @@
 # client documents in their original form.
 FROM ghcr.io/docling-project/docling-serve-cpu@sha256:225c8586e20d5d0fc6811a9e0e044fa602bcc4393f00389009bad42d6787b58f
 
+# **Two critical Python packages in the pinned base.** certifi 2026.7.22 carries the compromised emSign
+# intermediate CA (GHSA-6q48-6c7w-9gw2), and Pillow 12.3.0 has four critical image-parsing CVEs fixed in
+# 13.0.0. Docling pulls both. Upgrading them here keeps the base image, weights and entrypoint unchanged;
+# the parser probe has to prove Pillow 13 still reads the document formats the service advertises.
+USER root
+RUN /opt/app-root/bin/python -m pip install --no-cache-dir --upgrade \
+    "certifi>=2026.10.19" "pillow>=13.0.0" \
+    # **pip is removed after the one install.** Its vendored certifi is the old package the scanner
+    # reports; the runtime does not need pip. Only the upgraded application packages remain.
+    && rm -rf /opt/app-root/lib64/python3.12/site-packages/pip \
+              /opt/app-root/lib64/python3.12/site-packages/pip-*.dist-info \
+              /opt/app-root/bin/pip*
+
 # The service is one file and it imports only what the image already installs: fastapi, uvicorn, docling.
 COPY parser_service.py /app/parser_service.py
 
