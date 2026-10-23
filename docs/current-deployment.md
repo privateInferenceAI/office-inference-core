@@ -10,7 +10,7 @@ describe how to build and operate the system; where they disagree with this page
 | C1 to C5 | Built and verified |
 | C6 | Built and verified. Agent runtime, full MCP gateway, client-tenant gateway |
 | C7 | Built and verified. Authenticated sessions, least-privilege support role, secret rotation, TLS, Object Lock |
-| C8 | Partly built. Audit hashes, image scanning, drift reporting, the incident tabletop, backup and the restore/RTO drill, the 20-concurrent load test, and the signed release with a tested rollback are verified. Five alarms are built and awaiting the email subscription confirmation. SSM-only support, cost reporting, golden questions, acceptance on a fresh deployment and the business rows are open |
+| C8 | Partly built. Audit hashes, image scanning, drift reporting, the incident tabletop, backup and the restore/RTO drill, the 20-concurrent load test, the signed release with a tested rollback, the medical golden set with its hard-fail gate, and the ingest cycle lock are verified. Five alarms are built and awaiting the email subscription confirmation. SSM-only support, cost reporting, acceptance on a fresh deployment and the business rows are open |
 | C9 | Not started |
 
 The full suite is **1355 passed, 1 skipped** as of the last run on 2026-10-23.
@@ -123,7 +123,6 @@ the client tenant.
 | OPS-ALARM-001 | Five alarms and the SNS topic are built; the anthony@officeinference.com subscription is awaiting confirmation |
 | OPS-SUPPORT-001 | Approval to remove SSH and cut the client box to SSM only |
 | OPS-COST-001 | Cost Explorer / Marketplace report access and a decision on the report shape |
-| QLT-GOLDEN-001 | A drafted 60-question medical set exists at docs/eval/medical-golden-questions.draft.yaml. Clinical review, loading and a hard-fail run are still required |
 | QLT-ACCEPT-001 | A fresh deployment to run acceptance against |
 | BIZ-* | Counsel, insurance, contracts, on-call staff, subprocessors and pricing decisions |
 

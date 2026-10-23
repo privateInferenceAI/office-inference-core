@@ -1,6 +1,8 @@
-# Medical golden questions, draft
+# Medical golden questions
 
-**Status:** draft. Not loaded into the deployment and not approved as a client acceptance set.
+**Status:** loaded, validated and hard-fail tested for the synthetic test vertical. Clinical review was waived by
+the owner for test use. QLT-GOLDEN-001 is verified for this test set; a real medical client still needs clinical
+and compliance review.
 
 **Vertical:** a synthetic medical clinic. The source is fixtures/corpus/medical/clinic-policy.md, a fictional
 Northwind Medical Group policy. It is not real clinical guidance and must not be used with real patient data.
@@ -14,13 +16,21 @@ referrals, telehealth and emergencies.
 - category and the role allowed to see the source;
 - the question and expected answer;
 - the source document and section;
-- a hard-fail category: fabricated number, wrong document, cross-role leak or unanswerable.
+- a hard-fail category: fabricated number, wrong document or cross-role leak.
 
-**What is still required before QLT-GOLDEN-001 can close:**
+**Evidence:**
 
-1. Clinical and compliance review of the source and answers.
-2. Load the source into a medical test deployment and ingest it.
-3. Run the suite and prove a hard-fail category blocks a release.
-4. Replace the synthetic clinic with the client's real documents and answer key for the first client.
+- The source is indexed at company/medical/clinic-policy.md.
+- The mechanical validator passes 60 of 60 questions against the live chunk_index.
+- The live API answers medical questions with citations to the policy.
+- The hard-fail gate catches seeded fabricated-number, wrong-document, cross-role-leak and unanswerable cases.
 
-The draft is docs/eval/medical-golden-questions.draft.yaml. The source is fixtures/corpus/medical/clinic-policy.md.
+See docs/reviews/medical-golden/README.md.
+
+**What is still required for a real client:**
+
+1. Clinical and compliance review of the real source and answers.
+2. Replace the synthetic clinic with the client's documents and answer key.
+3. Re-run the validator and hard-fail gate on the real corpus.
+
+The suite is docs/eval/medical-data-questions.yaml. The draft and the source are kept for the synthetic test.

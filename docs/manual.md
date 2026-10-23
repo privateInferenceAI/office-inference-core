@@ -2297,6 +2297,18 @@ the service ignores looks like a missing feature rather than a malformed request
 - A cycle exits non-zero with no failure in the log: the exit code is non-zero when any document failed,
   deliberately, so a scheduled run surfaces a bad file. `--status` names it.
 
+### 13a.1 The ingest cycle lock
+
+The scheduled loop and a manual docker exec are separate processes. Both take an exclusive lock on
+/state/ingest.lock for the whole cycle.
+
+- The scheduled loop runs with INGEST_SCHEDULED=1. If a manual run holds the lock, it prints
+  "another ingest cycle is running; skipping this scheduled cycle" and exits 0.
+- A second manual run is refused with exit 1.
+- After the holder releases, the next manual or scheduled cycle runs normally.
+
+The test and evidence are in docs/reviews/ret-ingest/README.md.
+
 ## 13b. Retrieval
 
 Retrieval is what chooses the passages an answer is built from. Two searches run and their results are fused.
@@ -5758,7 +5770,7 @@ is explained.
 | C5 | Workflows and the first connector, with an approval gate | **Built.** Sections 13j to 13m |
 | C6 | The agent runtime and the MCP gateway | Built and verified. Section 26 |
 | C7 | Ingress, TLS, identity, least privilege, secret rotation and Object Lock | Built and verified. Section 26 |
-| C8 | Alarms, backups, restore and RTO, rollback, SSM-only support, cost reporting, golden questions, acceptance, load test | Partly built. Audit hashes, scanning, drift, incident, backup/RTO and the 20-concurrent load test are verified |
+| C8 | Alarms, backups, restore and RTO, rollback, SSM-only support, cost reporting, golden questions, acceptance, load test | Partly built. Audit hashes, scanning, drift, incident, backup/RTO, load, signed release/rollback and the medical golden set are verified; alarms await the email confirmation |
 | C9 | The demonstration | Not built |
 
 **Update, 2026-10-23.** The phase table above is the build plan, not the current state. C6 and C7 are built and
@@ -5961,3 +5973,13 @@ The open C8 rows are alarms, rollback, SSM-only support, cost reporting, golden 
 acceptance. The 20-concurrent load test now passes at a worst p95 of 7.8 seconds across five runs after the
 after are in docs/reviews/ops-load/. The BIZ rows need counsel, insurance, contracts,
 on-call staff, subprocessors and pricing decisions. docs/current-deployment.md lists each with its blocker.
+
+### 26.9 Medical golden set and hard-fail gate
+
+The synthetic medical clinic policy is loaded at documents/company/medical/clinic-policy.md and indexed. The
+60-question suite is docs/eval/medical-data-questions.yaml. The mechanical validator passes 60 of 60 against the
+live chunk_index. The API answered two medical questions with citations to the policy.
+
+The hard-fail gate is scripts/check_medical_hard_fails.py. Its self-test catches fabricated numbers, wrong
+documents, cross-role leaks and unanswerable answers. Clinical review was waived by the owner for this test set.
+Evidence: docs/reviews/medical-golden/README.md.

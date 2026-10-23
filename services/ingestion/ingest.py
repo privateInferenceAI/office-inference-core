@@ -18,6 +18,7 @@ a client's index.
 """
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import csv
 import json
@@ -110,6 +111,27 @@ def is_transient(exc: BaseException) -> bool:
 # Where the last cycle's result is written, for the healthcheck to read. A worker with no listening socket
 # cannot be asked whether it is well, so it records the answer instead.
 STATE_PATH = Path(os.environ.get("INGEST_STATE_PATH", "/state/last-cycle.json"))
+# **One ingest at a time.** The scheduled shell loop and an operator's docker exec are separate processes;
+# both run this file. The cycle lock is in the state volume, which both mounts. A manual run holds it for the
+# whole cycle, so the scheduled loop cannot start beside it. The scheduled loop skips its turn rather than
+# blocking, so a long backfill does not leave the worker asleep for hours after the backfill ends.
+LOCK_PATH = Path(os.environ.get("INGEST_LOCK_PATH", "/state/ingest.lock"))
+
+
+def acquire_cycle_lock():
+    """The exclusive cycle lock, or None when another ingest holds it."""
+    try:
+        handle = os.open(str(LOCK_PATH), os.O_CREAT | os.O_RDWR, 0o600)
+    except OSError as exc:
+        print(f"cannot open the ingest lock {LOCK_PATH}: {exc}", file=sys.stderr)
+        return None
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(handle)
+        return None
+    return handle
+
 
 # **Where a rejected document becomes a worklist rather than a row.** A dead letter lives in the manifest, which
 # is durable and invisible: a table nobody queries is not a list a person can act on. This directory is mounted
@@ -2212,6 +2234,14 @@ def main(argv: list[str] | None = None) -> int:
               + ". The next cycle will try them again.")
         return 0
 
+    if not args.dry_run:
+        lock_handle = acquire_cycle_lock()
+        if lock_handle is None:
+            if os.environ.get("INGEST_SCHEDULED") == "1":
+                print("another ingest cycle is running; skipping this scheduled cycle")
+                return 0
+            print("another ingest cycle is running; refusing to start a second manual cycle")
+            return 1
     services = Services()
     manifest = MemoryManifest() if args.dry_run else build_manifest(os.environ.get("DATABASE_URL"))
     documents_root = Path(args.documents)
