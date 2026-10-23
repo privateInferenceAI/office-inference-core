@@ -5887,7 +5887,8 @@ OI_MCP_SESSION_SECRET in the API and MCP_SESSION_SECRET in the tenant gateway. T
 The gateway reads the tool registry rendered from the manifest's mcp.tools block. It refuses a tool that is not
 declared, a session that is absent, expired or forged, a request that supplies its own role, a role the tool
 does not allow, a data class the tool does not accept, and a call that fails the egress gate. Refusals on the
-**build box** are written to the audit chain. The tenant gateway has no audit database route, so its refusals
+**build box** are written to the audit chain. The tenant gateway has no database route, but the API records a
+gateway 403 or local egress refusal as a denied tool_call in the Office chain; its refusals
 are returned to the API but are not in the chain; that is a known gap. The connector credential is a mode-600
 file read on each call, so rotation needs no redeploy.
 
@@ -5931,7 +5932,7 @@ account is still in the SES sandbox; arbitrary recipients need production access
 capture service and binds to loopback; the security group is the outer control. The tenant address is the instance's current public IP, so an
 Elastic IP is needed before calling it production. The DeepSeek key is in the rendered env for the provider
 comparison and should be rotated. The image scan has current critical findings in litellm, parser and postgres;
-they are recorded, not waived. The tenant gateway does not write refusals to the Office chain, as section 26.2
+they are recorded, not waived. Tenant gateway refusals are recorded by the API as denied tool_call rows, as section 26.2
 says. An unrelated Midnight indexer, step0-hello-indexer, also runs on the tenant on port 8088.
 
 ### 26.6 Running an agent job

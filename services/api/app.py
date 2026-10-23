@@ -936,11 +936,21 @@ def _run_agent_job_locked(job):
                 result = {"sent": False, "error": str(exc), "to": to}
         # **The one action with a real-world recipient.** The row names the recipient, the outcome, the data
         # class that left and the redaction summary; a regulated send that never passed the gate says so.
+        #
+        # **A tenant refusal is an audit event too.** The tenant gateway returns its policy refusal to the API,
+        # but it has no route into this database. Before this branch the API wrote outcome=ok for a refused send
+        # and the row did not say why. The API now classifies the returned error and records a denied row for a
+        # gateway 403 or a local egress refusal. That closes the gap from the side that owns the chain.
+        error = str(result.get("error") or "")
+        denied = (not result.get("sent")
+                  and (result.get("error") == "egress_not_permitted" or error.startswith("gateway returned 403")))
+        outcome = "ok" if result.get("sent") else ("denied" if denied else "error")
         try:
-            audit("tool_call", session.subject, session.role, "ok",
+            audit("tool_call", session.subject, session.role, outcome,
                   {"job_id": job.job_id, "task": job.task, "step": step_name(), "tool": "send_email",
                    "to": to, "sent": bool(result.get("sent")), "data_class": data_class,
                    "egress_allowed": permitted, "egress_reason": why,
+                   "refused": denied, "error": error[:300],
                    **redaction_record}, tool="send_email")
         except Exception as exc:  # noqa: BLE001
             raise tool_loop.ToolAuditError(f"the connector audit failed: {type(exc).__name__}") from exc

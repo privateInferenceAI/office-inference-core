@@ -5658,7 +5658,7 @@ The runtime is covered by tests/test_agent_runtime.py and the acceptance run in 
 
 The gateway is services/mcp_gateway/gateway.py. It loads a tool registry from the manifest, resolves a session,
 refuses a caller-supplied role, enforces the tool's allowed roles and data classes, applies the egress gate,
-reads the connector credential from a mode-600 file on every call. Refusals on the build box are written to the chain. The tenant gateway has no audit database route, so its refusals return to the API but are not in the Office chain; that is a known gap.
+reads the connector credential from a mode-600 file on every call. Refusals on the build box are written to the chain. The tenant gateway has no database route, but the API records a gateway 403 or local egress refusal as a denied tool_call in the Office chain. The live tenant path has not been re-exercised since the tenant was stopped.
 
 The registry is rendered from the manifest's mcp.tools block into rendered/mcp_tools.json. An undeclared tool is
 refused by name. The credential is never in the API environment, the gateway image or the repository.
