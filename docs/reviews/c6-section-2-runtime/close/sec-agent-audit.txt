@@ -1,0 +1,1 @@
+685|access|probe-staff@officeinference.com|denied|{"task": "research_brief", "stage": "agent_runtime", "detail": "child tools ['send_email'] are not parent tools", "job_id": "a82e02d33ff345b0b3627b2cdb41727c", "reason": "definition_child_scope"}

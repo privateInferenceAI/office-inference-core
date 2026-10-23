@@ -2061,7 +2061,8 @@ items:
       per step, and a chain row naming the task id for every step and every tool call, and verify_chain
       passes afterwards. A tool call with no step row, or a step row with no chain row, fails. The run is
       bounded by the job's existing time and attempt budgets rather than by the model deciding to stop.
-    status: open
+    status: verified
+    evidence: docs/reviews/c6-section-2-runtime/GATE.md
     note: >-
       The loop is the one thing a workflow plan cannot express, and it is the only part of the engine C6
       replaces. The unit of work is C5's: the state change, the event and the chain row in one
@@ -2075,7 +2076,8 @@ items:
       kill the runtime between two steps of an agent task; restart it; the run continues from the first
       step without a succeeded row, no step that already ran runs again, and the record shows the resume.
       A run that starts its work over, and a resume with no checkpoint row, both fail.
-    status: open
+    status: verified
+    evidence: docs/reviews/c6-section-2-runtime/GATE.md
     note: >-
       C5's engine derives position from the succeeded step rows rather than a cursor column, and C6
       inherits that. The row exists because "it resumed" and "it started over and nobody noticed" look
@@ -2089,7 +2091,8 @@ items:
       a conversational turn returns inside the conversational deadline and offers no approval gate; a task
       run may exceed that deadline and stops at a gate. A conversational request that produces a task-mode
       run, and a task run that inherits the conversational deadline, both fail.
-    status: open
+    status: verified
+    evidence: docs/reviews/c6-section-2-runtime/GATE.md
     note: >-
       0002-agent-topology.md: two modes inside one runtime, with different prompts, timeouts and model
       roles. The interface already has the two verbs, Ask and Do, so this row is what keeps a slow task
@@ -2104,7 +2107,8 @@ items:
       and one policy document; and a manifest that declares a second runtime is refused by validation
       rather than deployed. The test fails if two processes can both claim a task, or if a definition's
       runs appear in a second store.
-    status: open
+    status: verified
+    evidence: docs/reviews/c6-section-2-runtime/GATE.md
     note: >-
       0002: exactly one runtime, because a second one means a second audit path, a second policy and two
       places for a bug to hide. What varies per deployment is definitions (0 to 6) and concurrent runs
@@ -2119,7 +2123,8 @@ items:
       refused or run past the limit, every accepted run has a job row from the moment it is accepted, and
       its position is readable. A run that is accepted and then lost, and a runtime that ignores the
       limit, both fail.
-    status: open
+    status: verified
+    evidence: docs/reviews/c6-section-2-runtime/GATE.md
     note: >-
       0002's third reason for one runtime: concurrency is a queue setting, not another service. The job
       state machine already has queued, so this row is what stops a busy deployment from becoming a second
@@ -2133,7 +2138,8 @@ items:
       run a task whose tool results exceed the model's window; the prompt stays under the configured
       ceiling, the run completes, and the chain says what was summarised or dropped and when. A run that
       truncates without recording it fails.
-    status: open
+    status: verified
+    evidence: docs/reviews/c6-section-2-runtime/GATE.md
     note: >-
       Item 3 of 0002's list of what a long job needs. The record matters because the first question after a
       wrong answer is whether the model saw the material, and a silent truncation is indistinguishable
@@ -2147,7 +2153,8 @@ items:
       an agent definition whose last step checks the run's own outcome; a run whose check fails ends failed
       with a typed cause, and the step after the check has no row. A run that reports success because the
       model described the work it intended to do fails the row.
-    status: open
+    status: verified
+    evidence: docs/reviews/c6-section-2-runtime/GATE.md
     note: >-
       Item 4 of 0002's list. The failure this rules out is the confident summary, which reads exactly like a
       completed task in every screen and every record field except the one that says it failed.
@@ -2161,7 +2168,8 @@ items:
       the child or absent from its scope, the parent performs the action after the child returns, and no
       chain row records a side effect against a child span. The test asserts the absence at the child,
       because a system where both can act passes a test that only checks the parent acted.
-    status: open
+    status: verified
+    evidence: docs/reviews/c6-section-2-runtime/GATE.md
     note: >-
       Rule 1 of six in 0002, and the load-bearing one: children read, parents act, so approvals and
       irreversibility have exactly one owner. A child that can send an email makes the approval gate
@@ -2175,7 +2183,8 @@ items:
       a child's return is a structured record whose facts each name the source they came from, and the
       parent's later step cites one of them; a child returning free text with no sources fails. The parent's
       action names the return it used.
-    status: open
+    status: verified
+    evidence: docs/reviews/c6-section-2-runtime/GATE.md
     note: >-
       Rule 3 of six. It is also what keeps the parent's context bounded, which is the reason sub-agents
       exist: a parent that has to re-read a transcript has paid for the child twice.
@@ -2189,7 +2198,8 @@ items:
       typed cause, the parent continues or fails by its own rule, and the record carries the child's spend.
       A child's spend that does not appear in the parent's total fails, because an untraceable bill is the
       failure this row exists for.
-    status: open
+    status: verified
+    evidence: docs/reviews/c6-section-2-runtime/GATE.md
     note: >-
       Rule 4 of six. Child spend counts against the deployment's budgets. A sub-agent that costs nothing to
       start is a sub-agent that gets used instead of a cheaper search.
@@ -2201,7 +2211,8 @@ items:
     verify: >-
       a child that attempts to spawn a grandchild is refused with a cause naming the depth limit, and the
       attempt is recorded. The test fails if a third-level span exists anywhere in the record.
-    status: open
+    status: verified
+    evidence: docs/reviews/c6-section-2-runtime/GATE.md
     note: >-
       Rule 5 of six, and the line between sub-agents and the swarms NEVER-SWARM-001 rules out. A tree of
       unknown depth is where "what did the system do" stops having an answer a person can follow.
@@ -2216,7 +2227,8 @@ items:
       quoting the digest, and assert it was applied exactly once; then change one argument and assert the
       decision is refused with 409 approval_drift. The test asserts the absence before approval, because a
       test that only checks the send afterwards passes on a system that sends twice.
-    status: open
+    status: verified
+    evidence: docs/reviews/c6-section-2-runtime/GATE.md
     note: >-
       APR-IRREVERSIBLE-001 extended from workflow steps to tool calls, and it reuses C5's gate rather than
       adding a second one: same digest, same route, same record. A tool call can do damage a workflow step
@@ -2231,7 +2243,8 @@ items:
       same rows a workflow leaves, and a decision on its gate goes through POST /jobs/{job_id}/approvals
       with no agent-specific route. A second state machine, a second approvals path or a second event log
       fails the row.
-    status: open
+    status: verified
+    evidence: docs/reviews/c6-section-2-runtime/GATE.md
     note: >-
       Manual 13i says pause, resume and cancel are the seam C6's multi-step executor plugs into, and manual
       13m says C6 replaces the plan and not the engine. The row is here so the seam is used rather than
@@ -2245,7 +2258,8 @@ items:
       a deployment with no agentic pack exposes no definitions and POST /jobs refuses the task by name; a
       deployment with the pack lists each definition with the role that answers it and the tools it may use.
       A task that runs without a declared definition fails.
-    status: open
+    status: verified
+    evidence: docs/reviews/c6-section-2-runtime/GATE.md
     note: >-
       0002 gives 0 to 6 definitions depending on the pack, so an office build with Document Chat and
       Workflows has one runtime with nothing to run. That is the correct outcome, and the refusal is what
@@ -2333,7 +2347,8 @@ items:
       run a task that calls tools, then count what the connector saw and what the chain holds; the two
       agree. Each row carries the tool, the connector, a digest of the arguments, the outcome, the duration
       and the session, and verify_chain passes. A call with no row, and a row with no call, both fail.
-    status: open
+    status: verified
+    evidence: docs/reviews/c6-section-2-runtime/GATE.md
     note: >-
       C5's AUD-WF-001 makes this claim for a workflow's own steps; this is the same claim one layer out,
       where a third party enters the system. The digest is of the arguments rather than the arguments
@@ -2347,7 +2362,8 @@ items:
       after a run with two children, the chain holds the spawn, the brief, every tool call and the return
       for each child, all addressable from the parent task id, and verify_chain passes. A child span with no
       parent row, and a parent row naming a child that has no span, both fail.
-    status: open
+    status: verified
+    evidence: docs/reviews/c6-section-2-runtime/GATE.md
     note: >-
       Rule 6 of six, and the difference between a sub-agent and a swarm: control never leaves the parent and
       neither does the record. It is what lets a client ask what a run did and get one answer rather than a
@@ -2361,7 +2377,8 @@ items:
       resume a run from a checkpoint; the chain holds the checkpoint row naming the step position it
       recorded, the steps after it chain from it, and verify_chain passes. A resume that leaves no row, and
       a checkpoint naming a position the step rows contradict, both fail.
-    status: open
+    status: verified
+    evidence: docs/reviews/c6-section-2-runtime/GATE.md
     note: >-
       The checkpoint is the artifact that separates "the run continued" from "the run started over", and it
       is the row a support call reads first.
@@ -2374,7 +2391,8 @@ items:
       run a task with several model calls; each call appears in the gateway's spend log and is copied into
       the chain with the task id and the step, and a model call that cannot be traced to a task fails. A
       runtime that reaches a model without going through the gateway fails the row.
-    status: open
+    status: verified
+    evidence: docs/reviews/c6-section-2-runtime/GATE.md
     note: >-
       The gateway is the enforcement point for models, budgets and the data class, so the runtime cannot
       hold a second model client. This is also where the cost of a long run becomes visible per task rather
@@ -2389,7 +2407,8 @@ items:
       tool and the attempt is recorded. Then give a child a strict subset of the parent's tools and assert
       a call outside it is refused where the call is made rather than discouraged in the child's brief. A
       child whose scope is enforced only by its instructions fails the row.
-    status: open
+    status: verified
+    evidence: docs/reviews/c6-section-2-runtime/GATE.md
     note: >-
       Rule 2 of six. If a child can do more than its parent, the parent's policy is not the deployment's
       policy, and the difference is invisible in every screen that shows what the parent may do.

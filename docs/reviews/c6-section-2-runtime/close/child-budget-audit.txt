@@ -1,0 +1,13 @@
+686|tool_call|turn-1|-|turn-1|-|-|-|-
+687|model_call|-|analyst|turn-1|-|-|-|0
+688|model_call|-|analyst|turn-1|child-1|994|994|-
+689|tool_call|turn-1|-|turn-1|-|-|-|-
+690|tool_call|turn-2|-|turn-2|-|-|-|-
+691|model_call|-|analyst|turn-2|-|-|-|994
+692|tool_call|search_documents|-|turn-2|-|-|-|-
+693|tool_call|turn-2|-|turn-2|-|-|-|-
+694|tool_call|turn-3|-|turn-3|-|-|-|-
+695|model_call|-|analyst|turn-3|-|-|-|994
+696|tool_call|turn-3|-|turn-3|-|-|-|-
+697|tool_call|finish|-|finish|-|-|-|-
+698|tool_call|finish|-|finish|-|-|-|-
