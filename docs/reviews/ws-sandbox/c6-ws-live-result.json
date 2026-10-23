@@ -1,0 +1,19 @@
+{
+  "directory": "/home/ubuntu/ws-test/live-task-1",
+  "write_rc": 0,
+  "write_out": "hello from the sandbox",
+  "write_err": "",
+  "escape_rc": 0,
+  "escape_out": "HOST_HIDDEN\n1000\nETC_VISIBLE",
+  "network_rc": 1,
+  "network_err": "OSError: [Errno 101] Network is unreachable",
+  "artifacts": [
+    {
+      "path": "out.txt",
+      "sha256": "f98287e4bc26a8db2a8983136c074d71773568423db1c49f1be9321daf76b113",
+      "bytes": 22
+    }
+  ],
+  "artifact_text": "hello from the sandbox",
+  "directory_after_cleanup": false
+}
