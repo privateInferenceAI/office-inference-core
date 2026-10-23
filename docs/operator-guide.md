@@ -3554,9 +3554,9 @@ Check, in this order:
 
 ## 17f. The audit gap and what is still open
 
-The tenant gateway has no audit database route. Its refusals are returned to the API but are not written to the
-Office chain. Refusals on the build box are recorded; tenant refusals are not. Do not claim otherwise to a
-client.
+The tenant gateway still has no database route, but the API now records a gateway 403 or a local egress refusal
+as a denied tool_call in the Office chain. Refusals on the build box were already recorded. The live tenant path
+has not been re-exercised since the tenant was stopped; the code is deployed on the dev box.
 
 
 
