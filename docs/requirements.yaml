@@ -2483,7 +2483,8 @@ items:
       a person starts a workspace task in the app, watches steps appear, opens an artifact, approves a pending
       send, and reads the resulting activity row. A task with no artifact shows that it produced none rather
       than an empty panel that looks broken.
-    status: open
+    status: verified
+    evidence: docs/reviews/ws-ui/README.md
     note: >-
       The existing Ask, Do, Review, Activity and Settings screens are the base. The workspace adds the run view,
       the artifact viewer and the live detail a person needs to trust the work.
