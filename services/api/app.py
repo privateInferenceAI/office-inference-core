@@ -520,6 +520,20 @@ def _tasks_this_deployment_declares() -> list[dict]:
     return definitions_module.merge_tasks(declared, STATE.get("agent_definitions") or [])
 
 
+def _job_payload(job, store=None) -> dict:
+    """A job as the API returns it, with its place in the queue when it is queued.
+
+    **The queue position is read from the store, not stored on the job.** A job row that carried a position
+    would be wrong the moment somebody ahead of it finished; the count is cheap and always current. Only a
+    queued job has a position, because a running job is not in the queue.
+    """
+    payload = job.to_dict(include_result=True)
+    position = (store or STATE.get("jobs")).queue_position(job.job_id)
+    if position is not None:
+        payload["queue_position"] = position
+    return payload
+
+
 def _step_once(job, attempt):
     """One attempt: a question through the same pipeline `/ask` uses.
 
@@ -916,7 +930,7 @@ async def get_job(job_id: str, request: Request):
     job = _find_job(job_id, session)
     if job is None:
         return JSONResponse({"error": "no such job", "kind": "not_found"}, status_code=404)
-    return JSONResponse(job.to_dict(include_result=True), status_code=200)
+    return JSONResponse(_job_payload(job), status_code=200)
 
 
 @app.get("/jobs/{job_id}/events", responses={
