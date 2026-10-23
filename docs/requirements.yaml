@@ -1245,7 +1245,8 @@ items:
     tier: [cloud, office, hosted]
     phase: C8
     verify: changing a pin on the box makes the reported state differ from the repository
-    status: open
+    status: verified
+    evidence: docs/reviews/ops-drift/README.md
   - id: OPS-SUPPORT-001
     title: Support access is SSM only, consented, and logged
     tier: [cloud, office, hosted]

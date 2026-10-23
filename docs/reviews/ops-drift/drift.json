@@ -1,0 +1,6 @@
+{
+  "expected_image": "oi-core/litellm:local",
+  "drifted_image": "oi-core/litellm:drifted",
+  "compare_drift": "litellm: expected 'oi-core/litellm:local', found 'oi-core/litellm:drifted'",
+  "compare_clean": "no drift"
+}
