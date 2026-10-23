@@ -109,6 +109,24 @@ set to 4, so the trim had to happen.
 The trimmed run took more turns than an untrimmed one because the model lost evidence it had already read. That
 is the cost of a small ceiling, and the chain now shows it rather than hiding it.
 
+## Pause, resume and cancel live run
+
+Pause and resume:
+
+- Job `b366c97bfc5946f0a4e3837f703532d4` was paused while `turn-1` was running. The pause request returned
+  state `paused`; the job stayed paused.
+- The resume request returned state `running`, and the job finished with four steps: `turn-1`, `turn-2`,
+  `turn-3`, `finish`. There are no duplicate step rows.
+- The first pause test produced duplicate `turn-1` and `turn-2` rows because the resume started a second
+  runner before the first returned. A per-job lock now serialises the runtime; this run is the proof of the fix.
+
+Cancel:
+
+- Job `06cd13cb34584c4dbef5259daa36b02c` was cancelled while `turn-1` was running. The final state is
+  `cancelled` and it stays cancelled.
+
+The chain export holds 284 events and verifies intact.
+
 ## What this proves
 
 - A definition job is claimed by the dispatcher and runs without an inline request.
@@ -123,6 +141,8 @@ is the cost of a small ceiling, and the chain now shows it rather than hiding it
 - A real irreversible connector. The gate mechanics are live-tested; the email connector is not.
 - Token budgets for the child. The child has a step cap and a wall-clock cap; the token ceiling is not enforced
   yet.
+- A live test of a pause that lands exactly between two steps. The tested pause landed during a running step and
+  the engine returned cleanly after it.
 - The workspace sandbox, web access, artifacts and workspace UI. That is the WS phase.
 
 ## Reproduce
@@ -153,6 +173,15 @@ Export and verify the chain:
 - `export.txt`: the export summary and last row hash.
 - `jobs.json`: the two post-fix successful jobs as returned by the API.
 - `api.log`: the API startup log from the final deployment.
+- `SHA256SUMS`: hashes for the files above.
+
+## Files in control/
+
+- `jobs.json`: the paused and resumed job and the cancelled job.
+- `audit-rows.txt`: the audit rows for both.
+- `audit-events.jsonl`: the 284-event chain export.
+- `verify.txt`: the verifier's result.
+- `export.txt`: the export summary.
 - `SHA256SUMS`: hashes for the files above.
 
 ## Files in context/
