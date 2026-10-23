@@ -1265,7 +1265,8 @@ items:
     tier: [cloud, hosted, office]
     phase: C8
     verify: a tabletop walkthrough of a data-exposure scenario produces a timeline that meets the stated clock
-    status: open
+    status: verified
+    evidence: docs/reviews/ops-incident/README.md
   - id: OPS-ONCALL-001
     title: Someone can be reached 24x7, or the promise is reduced to what one person can keep
     tier: [cloud, hosted]
