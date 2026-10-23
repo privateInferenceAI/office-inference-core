@@ -2456,7 +2456,8 @@ items:
       tool on and the domain allowed, the fetch returns a page and the chain records the destination, the data
       class and the redaction summary. With the domain not on the allowlist, the fetch is refused and the proxy
       sees no request.
-    status: open
+    status: verified
+    evidence: docs/reviews/ws-egress/README.md
     note: >-
       This is the cloud rule, not the office rule. The client's allowlist and data classes decide what leaves the
       VPC; the proxy records it. The office build has no internet at all.
