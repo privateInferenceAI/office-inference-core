@@ -10,7 +10,7 @@ describe how to build and operate the system; where they disagree with this page
 | C1 to C5 | Built and verified |
 | C6 | Built and verified. Agent runtime, full MCP gateway, client-tenant gateway |
 | C7 | Built and verified. Authenticated sessions, least-privilege support role, secret rotation, TLS, Object Lock |
-| C8 | Partly built. Audit hashes, image scanning, drift reporting, the incident tabletop, backup and the restore/RTO drill are verified. Alarming, rollback, SSM-only support, cost reporting, golden questions, acceptance on a fresh deployment, load test and the business rows are open |
+| C8 | Partly built. Audit hashes, image scanning, drift reporting, the incident tabletop, backup and the restore/RTO drill, and the 20-concurrent load test are verified. Alarming, rollback, SSM-only support, cost reporting, golden questions, acceptance on a fresh deployment and the business rows are open |
 | C9 | Not started |
 
 The full suite is **1355 passed, 1 skipped** as of the last run on 2026-10-23.
@@ -103,15 +103,15 @@ the client tenant.
    waived.
 5. **Backup and the restore/RTO drill exist.** The bucket is in account 878, daily at 02:00 UTC. The measured
    state restore was 48 seconds and the full drill 15 minutes 42 seconds against a 4-hour RTO. The backup target
-   is not client-owned yet. No alarm, rollback, SSM-only support, cost report, golden question set,
-   fresh-deployment acceptance or successful load test exists yet.
-6. **The 20-concurrent load test failed the 15-second p95 target.** The measured p95 was 80.8 seconds and the
-   maximum 85.6 seconds, with zero failures. This is a capacity result, not a correctness failure. It is recorded
-   in docs/reviews/ops-load/ and the load row stays open.
-6. **The tenant gateway does not write refusals to the Office chain.** It has no audit database route. Build-box
+   is not client-owned yet. No alarm, rollback, SSM-only support, cost report, golden question set or
+   fresh-deployment acceptance exists yet.
+6. **The 20-concurrent load test now passes.** The fix moves the blocking retrieval, model loop and audit write
+   into the thread pool. Five repeated runs improved from p95 80.8 seconds to a worst p95 of 7.8 seconds, with
+   zero failures and a 9.8-second maximum. The before and after are in docs/reviews/ops-load/.
+7. **The tenant gateway does not write refusals to the Office chain.** It has no audit database route. Build-box
    refusals are recorded; tenant-gateway refusals return to the API only. This is a recorded gap, not a claim
    to paper over.
-7. **An unrelated Midnight indexer, step0-hello-indexer, runs on the tenant on 8088.** It is not part of this
+8. **An unrelated Midnight indexer, step0-hello-indexer, runs on the tenant on 8088.** It is not part of this
    deployment.
 
 ## Open rows, with what blocks them
@@ -119,13 +119,11 @@ the client tenant.
 | Row | What it needs |
 |---|---|
 | OPS-ALARM-001 | A notification destination and a confirmed subscription |
-| QLT-LOAD-001 | The 20-concurrent run has p95 80.8 seconds against a 15-second target. Capacity work is needed before the row can close |
 | OPS-UPDATE-001 | A release signing source and rollback target |
 | OPS-SUPPORT-001 | Approval to remove SSH and cut the client box to SSM only |
 | OPS-COST-001 | Cost Explorer / Marketplace report access and a decision on the report shape |
 | QLT-GOLDEN-001 | A drafted 60-question medical set exists at docs/eval/medical-golden-questions.draft.yaml. Clinical review, loading and a hard-fail run are still required |
 | QLT-ACCEPT-001 | A fresh deployment to run acceptance against |
-| QLT-LOAD-001 | A concurrency target and latency budget |
 | BIZ-* | Counsel, insurance, contracts, on-call staff, subprocessors and pricing decisions |
 
 ## Evidence

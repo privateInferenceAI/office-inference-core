@@ -39,6 +39,13 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 from sse_starlette.sse import EventSourceResponse
 
+# **The blocking work runs in the thread pool, not on the event loop.** /ask used to call retrieval, the
+# multi-step model loop and the audit subprocess directly from an async handler. One request blocked the
+# loop and every other request queued behind it; a 20-concurrent run measured p95 80.8 seconds because the
+# server was serialising what the client sent at once. The thread pool is the smallest change that lets the
+# existing synchronous pipeline run concurrently without rewriting it.
+from starlette.concurrency import run_in_threadpool
+
 # This service's own directory, because the code is imported as modules rather than run as a package. Without
 # it `import streaming` finds nothing, which is how the first deploy of the streaming step failed: the container
 # restarted in a loop while the path was correct in the checkout and wrong in the image.
@@ -459,7 +466,8 @@ async def ask(request: Request):
     # it. Minted here rather than at the model call because the refusal paths need one too.
     request_id = uuid.uuid4().hex
     try:
-        session, permit, model, result, decision, data_class = answer_module.prepare(
+        session, permit, model, result, decision, data_class = await run_in_threadpool(
+            answer_module.prepare,
             token=token, question=(body.get("question") or "").strip(), body=body,
             ctx=STATE["ctx"], resolve=_resolve, model_for=model_for, role_lane=role_lane,
             frontier_model_for=frontier_model_for, local_lane_available=local_lane_available,
@@ -482,7 +490,8 @@ async def ask(request: Request):
     # row instead of being credited to the primary. Empty until a call succeeds.
     attribution: dict = {}
     try:
-        loop = _generate_with_tools(session, permit, model, question_text, result, request_budget)
+        loop = await run_in_threadpool(
+            _generate_with_tools, session, permit, model, question_text, result, request_budget)
     except Exception as exc:  # noqa: BLE001 - the single-shot path is the fallback, not a failure response
         print(f"tool-loop unavailable, using the single-shot path: {type(exc).__name__}", flush=True)
         loop = {"answer": None, "reason": "tool_loop_error", "evidence": []}
@@ -495,28 +504,30 @@ async def ask(request: Request):
             import dataclasses
             result = dataclasses.replace(result, passages=loop["evidence"])
     else:
-        generated, generation, attribution = _generate(
-            session, permit, model, question_text, result.passages, request_budget)
+        generated, generation, attribution = await run_in_threadpool(
+            _generate, session, permit, model, question_text, result.passages, request_budget)
     if generated is None:
         reason, kind, attempts, attempt_errors = generation if isinstance(generation, tuple) else (
             "unclassified", {}, 1, [])
-        return JSONResponse(answer_module.degraded(
-            reason=reason, detail=_degrade_detail(reason), passages=result.passages,
-            request_budget=request_budget, attempts=attempts,
-            threshold=request_budget.timed_out(), partial_output=False, lane=decision.lane,
-            session=session, model=model, data_class=data_class, audit=audit,
-            audit_facts=budget_module.audit_facts(
-                reason=reason, matched=(kind or {}).get("matched", ""),
-                retryable=bool((kind or {}).get("retryable")), attempts=attempts,
-                threshold=request_budget.timed_out(), budget=request_budget, partial_output=False,
-                errors=attempt_errors, lane=decision.lane, data_class=data_class)).payload,
-            status_code=200)
+        degraded = await run_in_threadpool(
+            lambda: answer_module.degraded(
+                reason=reason, detail=_degrade_detail(reason), passages=result.passages,
+                request_budget=request_budget, attempts=attempts,
+                threshold=request_budget.timed_out(), partial_output=False, lane=decision.lane,
+                session=session, model=model, data_class=data_class, audit=audit,
+                audit_facts=budget_module.audit_facts(
+                    reason=reason, matched=(kind or {}).get("matched", ""),
+                    retryable=bool((kind or {}).get("retryable")), attempts=attempts,
+                    threshold=request_budget.timed_out(), budget=request_budget, partial_output=False,
+                    errors=attempt_errors, lane=decision.lane, data_class=data_class)))
+        return JSONResponse(degraded.payload, status_code=200)
 
-    decided = answer_module.finish(
-        question=(body.get("question") or "").strip(), answer=generated, session=session, permit=permit,
-        model=model, result=result, decision=decision, data_class=data_class,
-        request_budget=request_budget, redaction_report=None, audit=audit,
-        resolved_model=resolved_model, attributed=attribution, request_id=request_id)
+    decided = await run_in_threadpool(
+        lambda: answer_module.finish(
+            question=(body.get("question") or "").strip(), answer=generated, session=session,
+            permit=permit, model=model, result=result, decision=decision, data_class=data_class,
+            request_budget=request_budget, redaction_report=None, audit=audit,
+            resolved_model=resolved_model, attributed=attribution, request_id=request_id))
     return JSONResponse(decided.payload, status_code=decided.status)
 
 
@@ -1650,7 +1661,7 @@ def _generate(session, permit, model: str, question: str, passages: list, budget
             return content, None, attribution
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode(errors="replace")[:400]
-            kind = budget_module.classify(detail)
+            kind = budget_module.classify(f"{exc.code} {detail}")
             errors.append({"attempt": attempt, "status": exc.code, "reason": kind["reason"],
                            "matched": kind["matched"], "retryable": kind["retryable"]})
             retry_after = exc.headers.get("Retry-After") if exc.headers else None
@@ -1733,7 +1744,7 @@ def _tool_chat(session, model: str, messages: list, tools, request_budget):
                     "attribution": attribution, "usage": data.get("usage") or {}}
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode(errors="replace")[:300]
-            kind = budget_module.classify(detail)
+            kind = budget_module.classify(f"{exc.code} {detail}")
             if not kind["retryable"] or attempts >= 2:
                 return {"error": kind["reason"]}
             time.sleep(0.5)
@@ -2242,7 +2253,7 @@ async def _frames(session, permit, model: str, question: str, result, requested_
             break
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode(errors="replace")[:400]
-            kind = budget_module.classify(detail)
+            kind = budget_module.classify(f"{exc.code} {detail}")
             errors.append({"attempt": attempt, "status": exc.code, "reason": kind["reason"],
                            "matched": kind["matched"], "retryable": kind["retryable"]})
             last_kind = kind

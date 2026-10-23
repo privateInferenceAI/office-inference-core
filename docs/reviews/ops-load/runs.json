@@ -1,0 +1,57 @@
+[
+  {
+    "run": 1,
+    "concurrency": 20,
+    "requests": 20,
+    "failures": 0,
+    "p50_s": 5.666,
+    "p95_s": 7.759,
+    "max_s": 9.783,
+    "target_p95_s": 15,
+    "ok": true
+  },
+  {
+    "run": 2,
+    "concurrency": 20,
+    "requests": 20,
+    "failures": 0,
+    "p50_s": 4.849,
+    "p95_s": 7.34,
+    "max_s": 7.368,
+    "target_p95_s": 15,
+    "ok": true
+  },
+  {
+    "run": 3,
+    "concurrency": 20,
+    "requests": 20,
+    "failures": 0,
+    "p50_s": 4.76,
+    "p95_s": 7.182,
+    "max_s": 7.546,
+    "target_p95_s": 15,
+    "ok": true
+  },
+  {
+    "run": 4,
+    "concurrency": 20,
+    "requests": 20,
+    "failures": 0,
+    "p50_s": 4.717,
+    "p95_s": 6.664,
+    "max_s": 7.028,
+    "target_p95_s": 15,
+    "ok": true
+  },
+  {
+    "run": 5,
+    "concurrency": 20,
+    "requests": 20,
+    "failures": 0,
+    "p50_s": 3.367,
+    "p95_s": 7.243,
+    "max_s": 7.588,
+    "target_p95_s": 15,
+    "ok": true
+  }
+]

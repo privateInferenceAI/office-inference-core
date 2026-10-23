@@ -3561,7 +3561,8 @@ client.
 
 
 The open C8 rows are alarms, rollback, SSM-only support, cost reporting, golden questions, fresh-deployment
-acceptance and load testing. Backup and the restore/RTO drill are now built and verified. The 20-concurrent load
-test failed its 15-second p95 target at 80.8 seconds; that is a capacity result, not a pass. The BIZ rows need
+acceptance. Backup, the restore/RTO drill and the 20-concurrent load test are now verified. The load test
+improved from p95 80.8 seconds to a worst p95 of 7.8 seconds across five runs after the event-loop and
+throttle-classification fixes. The BIZ rows need
 counsel, insurance, contracts, on-call staff, subprocessors and pricing. docs/current-deployment.md lists each
 with its blocker. Do not tell a client that paging exists; it does not.

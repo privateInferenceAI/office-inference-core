@@ -1306,7 +1306,8 @@ items:
     tier: [cloud, hosted]
     phase: C8
     verify: a documented concurrency test completes within its latency budget
-    status: open
+    status: verified
+    evidence: docs/reviews/ops-load/README.md
 
   # ---------------------------------------------------------------- commercial and legal
   - id: BIZ-LICENSE-001

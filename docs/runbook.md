@@ -5759,9 +5759,9 @@ BIZ-CONTRACT-001.
 
 ## Phase C8 — Operations, partly built
 
-Six C8 rows are verified: audit chain version 4, image scanning, drift, the incident tabletop, backup and the
-restore/RTO drill. The load test failed its latency target and stays open. The rest are open and need a decision
-or an external party; docs/current-deployment.md names the blocker for each.
+Seven C8 rows are verified: audit chain version 4, image scanning, drift, the incident tabletop, backup, the
+restore/RTO drill, and the 20-concurrent load test at a worst p95 of 7.8 seconds across five runs. The rest are open and need a decision or
+an external party; docs/current-deployment.md names the blocker for each.
 
 ### C8.1 Audit chain version 4
 
@@ -5814,7 +5814,6 @@ on the artifact manifest.
     OPS-COST-001       needs the report shape and Marketplace line access
     QLT-GOLDEN-001     needs a vertical and sixty client-approved questions
     QLT-ACCEPT-001     needs a fresh deployment
-    QLT-LOAD-001       needs a concurrency target and latency budget
     BIZ-*              counsel, insurance, contracts, on-call, subprocessors, pricing
 
 ## Future phases
