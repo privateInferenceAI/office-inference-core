@@ -1,0 +1,11 @@
+403|tool_call|turn-1|-|turn-1|-|-
+404|model_call|-|analyst|turn-1|-|-
+405|model_call|-|analyst|turn-1|child-1|child
+406|tool_call|search_documents|-|turn-1|child-1|child
+407|model_call|-|analyst|turn-1|child-1|child
+408|tool_call|turn-1|-|turn-1|-|-
+409|tool_call|turn-2|-|turn-2|-|-
+410|model_call|-|analyst|turn-2|-|-
+411|tool_call|turn-2|-|turn-2|-|-
+412|tool_call|finish|-|finish|-|-
+413|tool_call|finish|-|finish|-|-
