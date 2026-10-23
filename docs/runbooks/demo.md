@@ -47,14 +47,23 @@ defects are in that runbook; do not re-derive them.
 
    Expected: `declared: 2 group(s), 4 user(s)`, `1/1 manifests valid`, `1/1 manifests clean`.
 
-5. Create the network and build. Start the gateway before the API on a blank database:
+5. Create the network and build the API image first. The MCP gateway's Dockerfile is
+   `FROM oi-core/api:local`, and a single parallel build can try to pull that image from a registry
+   before it exists locally, which fails with `pull access denied`. Build the API, then everything:
 
        docker network create ai-net
+       docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env build api
        docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
          --profile tools build
-       docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env up -d postgres litellm
+
+   Start the gateway before the API on a blank database. Then start the eight services this
+   deployment uses, named explicitly. The MCP gateway is left out: the scenes do not touch the agent
+   runtime, and without a connector token it exits with `MCP_GATEWAY_TOKEN is required` and
+   restart-loops.
+
+       docker compose -f ... up -d postgres litellm
        # wait for /health/liveliness, then
-       docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env up -d
+       docker compose -f ... up -d postgres litellm embeddings parser vector api app ingestion
 
 6. Provision teams, then ingest the corpus and wait for the counts:
 
@@ -110,7 +119,7 @@ staff token and one with the executive token. Tokens are minted the same morning
 
 | # | Scene | At | Action | Expected |
 |---|---|---|---|---|
-| 1 | The deployment | 0:00 | `oi ps`; API health | Eight services, Postgres and parser healthy, health names the deployment and the analyst |
+| 1 | The deployment | 0:00 | `docker compose ps --status running`; API health | Eight running services, Postgres and parser healthy, health names the deployment and the analyst |
 | 2 | A policy answer | 0:45 | Staff asks "What is the mileage rate for reimbursement?" | 0.67 per mile, cited to the handbook and the travel policy, receipt with document count and seconds |
 | 3 | The cited page | 1:45 | Staff asks "By what date must the annual backflow preventer test be completed?" then opens the PDF source | 30 June; the inspection schedule opens at the page the answer used, access label company |
 | 4 | Across the boundary | 3:15 | Staff asks "What is Northwind's Chief Executive Officer's base salary?" | No 385,000; a disclosure under the answer that documents exist the role cannot read |
@@ -161,7 +170,7 @@ Run this thirty minutes before the clock starts. Save the output beside the evid
 
 | Check | Command | Expected |
 |---|---|---|
-| Health | `oi ps` | Eight services; Postgres and parser healthy |
+| Health | `docker compose ps --status running` | Eight running services; Postgres and parser healthy. The MCP gateway is stopped and is not part of this deployment |
 | API | `docker exec api python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8088/health').read().decode())"` | The deployment id and `analyst` |
 | App | `200` from `http://app:8080/` and a health document from `/api/health` | Both answer |
 | Chain | export and verify today | `chain intact` |
@@ -206,6 +215,9 @@ Keep under `docs/reviews/c9/`:
   build with local models is a different deployment and is not this demo.
 - No alarm publisher, backup timer, SES or SSO on the box. The pre-demo table says what is checked
   where.
+- No MCP gateway and no agent runtime. The compose file declares the gateway and this deployment
+  stops it on purpose, because the scenes do not use tools. Started without a connector token it
+  crash-loops with `MCP_GATEWAY_TOKEN is required`.
 - The four acceptance probes do not touch the app. The UI checks above are the only acceptance the
   screen gets, so run them.
 - The export is one UTC day. Without an anchor the verifier cannot prove the tail is complete; the
