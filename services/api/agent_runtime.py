@@ -235,10 +235,15 @@ class AgentPlan:
         irreversible = {str(name) for name in (context.definition.get("irreversible_tools") or [])}
         pending_call = next((call for call in calls if str(call.get("name") or "") in irreversible), None)
         if pending_call is not None:
-            # **Nothing in this turn runs before the decision.** The call that needs approval is held as a gate
-            # step; the model's other calls, if any, wait for the next turn so no side effect can happen while
-            # the person is deciding.
-            delta = self._cap(delta)
+            # **Nothing in this turn runs before the decision, and the held message names only the held call.**
+            # If the turn asked for several tools, including the assistant's other calls in the message would
+            # leave the next model call with tool calls that have no tool result; Bedrock rejects that with
+            # "Expected toolResult blocks". The other calls are dropped and the model can reissue them after
+            # the decision, which is the only safe order anyway.
+            gate_call = {"id": pending_call.get("id") or "", "type": "function",
+                         "function": {"name": str(pending_call.get("name") or ""),
+                                      "arguments": str(pending_call.get("arguments") or "{}")}}
+            delta = self._cap([{"role": "assistant", "content": content, "tool_calls": [gate_call]}])
             context.done = False
             return workflow.StepResult(output={
                 "delta": delta,
