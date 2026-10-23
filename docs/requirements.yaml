@@ -287,7 +287,8 @@ items:
     tier: [cloud, office, hosted]
     phase: C8
     verify: editing the approval, prompt hash or completion hash column breaks the chain and fails verify
-    status: open
+    status: verified
+    evidence: docs/reviews/aud-hash/README.md
     note: >-
       An audit of the manual against the migrations found that the row hash covers thirteen columns and
       not these four: approval, prompt_sha256, completion_sha256 and occurred_at. Editing one of them in
