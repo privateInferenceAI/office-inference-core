@@ -155,6 +155,18 @@ def test_a_runtime_that_returns_with_the_job_running_fails_it_typed():
         worker.stop()
 
 
+def test_running_jobs_finds_only_the_jobs_a_dead_process_left_running():
+    store = make_store()
+    stale = make_job(store, "research_brief", created_at=1.0)
+    jobs.transition(stale, jobs.RUNNING)
+    queued = make_job(store, "research_brief", created_at=2.0)
+    other = make_job(store, "draft", created_at=3.0)
+    jobs.transition(other, jobs.RUNNING)
+    found = store.running_jobs({"research_brief"})
+    assert [job.job_id for job in found] == [stale.job_id]
+    assert store.get(queued.job_id).state == jobs.QUEUED
+
+
 @pytest.mark.skipif(not os.environ.get("OI_TEST_DATABASE_URL"),
                     reason="needs OI_TEST_DATABASE_URL for the durable claim")
 def test_the_postgres_claim_takes_each_job_once():

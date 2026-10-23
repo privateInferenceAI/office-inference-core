@@ -315,6 +315,14 @@ class MemoryStore:
             transition(job, RUNNING)
         return wanted
 
+    def running_jobs(self, task_ids: set[str] | None = None) -> list[Job]:
+        """Jobs a crashed process left running, which a restarted worker must pick up."""
+        return sorted(
+            (job for job in self.jobs.values()
+             if job.state == RUNNING and (task_ids is None or job.task in task_ids)),
+            key=lambda job: job.created_at,
+        )
+
     def queue_position(self, job_id: str) -> Optional[int]:
         """This queued job's place in line, 1-based, or None when it is not queued."""
         job = self.get(job_id)
@@ -521,6 +529,20 @@ class PostgresStore:
                 """, (QUEUED, wanted, wanted, limit, RUNNING))
             ids = [row[0] for row in cur.fetchall()]
         return [j for j in (self.get(i) for i in ids) if j is not None]
+
+    def running_jobs(self, task_ids: set[str] | None = None) -> list[Job]:
+        """Jobs a crashed process left running, which a restarted worker must pick up."""
+        wanted = sorted(task_ids) if task_ids is not None else None
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                select job_id from jobs
+                 where state = %s
+                   and (%s::text[] is null or task = any(%s::text[]))
+                 order by created_at
+                """, (RUNNING, wanted, wanted))
+            ids = [row[0] for row in cur.fetchall()]
+        return [job for job in (self.get(job_id) for job_id in ids) if job is not None]
 
     def queue_position(self, job_id: str) -> Optional[int]:
         """This queued job's place in line, 1-based, or None when it is not queued."""
