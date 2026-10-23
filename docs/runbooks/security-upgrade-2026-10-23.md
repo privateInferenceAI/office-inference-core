@@ -1,7 +1,7 @@
 # Security upgrade window, 2026-10-23
 
 **Approved by:** Anthony, 2026-10-23. This document is the backup and rollback plan for the critical image findings
-in docs/reviews/ops-cve/. It is written before any image is changed.
+in docs/reviews/ops-cve/. The criticals were patched on 2026-10-23; the high findings remain.
 
 ## Current state
 

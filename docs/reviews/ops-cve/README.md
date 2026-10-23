@@ -27,7 +27,7 @@ The scan covered 13 deployment images. Summary:
 
 The full per-image numbers are in `summary.json`. Most of the API-image findings are in the Debian base, not
 in application code; the critical findings in litellm, parser and postgres are real and are not waived here.
-They are now visible and scheduled; triage and upgrade work belongs to the next security pass.
+They are now visible and scheduled. The critical findings were patched on 2026-10-23; the high findings remain. See upgrade-2026-10-23/.
 
 ## LiteLLM pin and version
 

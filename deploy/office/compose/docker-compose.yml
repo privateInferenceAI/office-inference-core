@@ -17,9 +17,13 @@ name: oi-core
 
 services:
   postgres:
-    # Stable infrastructure: version tag, because a patch release here is a tested upgrade
-    # path and alpine keeps the image small on a 30 GB disk.
-    image: postgres:16-alpine
+    # Stable infrastructure, with one local layer for gosu. The upstream postgres:16-alpine image still
+    # carries gosu built with Go 1.24.6, which is CVE-2025-68121. The local layer installs Alpine's current
+    # gosu, same binary path, same database version and entrypoint.
+    image: oi-core/postgres:local
+    build:
+      context: ../postgres
+      dockerfile: Dockerfile
     container_name: postgres
     restart: unless-stopped
     environment:
