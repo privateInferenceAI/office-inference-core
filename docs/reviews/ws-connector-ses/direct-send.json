@@ -1,0 +1,7 @@
+{
+  "sent": true,
+  "to": "anthony@officeinference.com",
+  "subject": "Office Inference SES connector test",
+  "message_id": "010001a166d7a380-465896f6-94e2-46b7-8ef9-b04297e2cc0b-000000",
+  "transport": "ses"
+}

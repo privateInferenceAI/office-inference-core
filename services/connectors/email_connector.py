@@ -27,13 +27,16 @@ class ConnectorError(Exception):
 
 
 class EmailConnector:
-    def __init__(self, *, host: str, port: int, sender: str, token: str,
+    def __init__(self, *, host: str = "", port: int = 0, sender: str, token: str,
                  allowed_recipients=(), username: str = "", password: str = "",
-                 use_tls: bool = False, timeout: int = 10, smtp_factory=None):
+                 use_tls: bool = False, timeout: int = 10, smtp_factory=None,
+                 ses_region: str = "", ses_client=None):
         if not token:
             raise ValueError("the connector refuses to start without a token")
-        if not host or not sender:
-            raise ValueError("the connector needs an SMTP host and a sender")
+        if not sender:
+            raise ValueError("the connector needs a sender")
+        if not ses_region and (not host or not port):
+            raise ValueError("the connector needs an SMTP host or an SES region")
         self.host, self.port, self.sender = host, int(port), sender
         self.token = token
         self.allowed = {entry.strip().lower() for entry in allowed_recipients if entry.strip()}
@@ -41,6 +44,8 @@ class EmailConnector:
         self.use_tls = use_tls
         self.timeout = timeout
         self._smtp_factory = smtp_factory or smtplib.SMTP
+        self.ses_region = ses_region
+        self._ses_client = ses_client
 
     def handle(self, method: str, path: str, headers: dict, body: bytes):
         try:
@@ -83,6 +88,8 @@ class EmailConnector:
 
     def send(self, to: str, subject: str, body: str) -> dict:
         to, subject, body = self._validated(to, subject, body)
+        if self.ses_region:
+            return self._send_ses(to, subject, body)
         message = EmailMessage()
         message["From"] = self.sender
         message["To"] = to
@@ -102,7 +109,25 @@ class EmailConnector:
             except Exception:  # noqa: BLE001 - the send result is what matters
                 pass
         return {"sent": True, "to": to, "subject": subject,
-                "message_id": message["Message-ID"]}
+                "message_id": message["Message-ID"], "transport": "smtp"}
+
+    def _ses_client_or_default(self):
+        if self._ses_client is None:
+            import boto3  # imported only when the SES transport is selected
+            self._ses_client = boto3.client("ses", region_name=self.ses_region)
+        return self._ses_client
+
+    def _send_ses(self, to: str, subject: str, body: str) -> dict:
+        client = self._ses_client_or_default()
+        try:
+            response = client.send_email(
+                Source=self.sender,
+                Destination={"ToAddresses": [to]},
+                Message={"Subject": {"Data": subject}, "Body": {"Text": {"Data": body}}})
+        except Exception as exc:  # noqa: BLE001
+            raise ConnectorError(f"SES send failed: {str(exc)[:200]}") from exc
+        return {"sent": True, "to": to, "subject": subject,
+                "message_id": response.get("MessageId", ""), "transport": "ses"}
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -160,7 +185,8 @@ def main(argv: list[str] | None = None) -> int:
         allowed_recipients=os.environ.get("CONNECTOR_ALLOWED_RECIPIENTS", "").split(","),
         username=os.environ.get("SMTP_USERNAME", ""),
         password=os.environ.get("SMTP_PASSWORD", ""),
-        use_tls=os.environ.get("SMTP_USE_TLS", "false").lower() == "true")
+        use_tls=os.environ.get("SMTP_USE_TLS", "false").lower() == "true",
+        ses_region=os.environ.get("SES_REGION", "").strip())
     serve(connector, args.host, args.port)
     return 0
 

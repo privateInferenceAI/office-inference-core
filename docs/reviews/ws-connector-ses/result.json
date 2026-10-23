@@ -1,0 +1,22 @@
+{
+  "job_id": "0bc496610eb543898359360591e62491",
+  "at_gate": "awaiting_approval",
+  "pending": {
+    "body": "{\"to\": \"anthony@officeinference.com\", \"subject\": \"Approved SES send\", \"body\": \"The connector approval worked.\"}",
+    "kind": "tool.call",
+    "reason": "the agent requested a tool that cannot be undone",
+    "target": "send_email",
+    "subject": "{\"to\": \"anthony@officeinference.com\", \"subject\": \"Approved SES send\", \"body\": \"The connector approval worked.\"}",
+    "summary": "Run the irreversible tool send_email",
+    "consequence": "The tool runs once after approval. If its arguments change before the decision, the approval is refused as drifted."
+  },
+  "final_state": "succeeded",
+  "steps": [
+    "turn-1",
+    "approval-1",
+    "act-1",
+    "turn-2",
+    "finish"
+  ],
+  "outcome_reason": null
+}

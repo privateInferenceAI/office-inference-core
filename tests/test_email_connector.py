@@ -63,6 +63,27 @@ def test_an_off_list_recipient_is_refused_before_smtp():
     assert fake.sent == []
 
 
+class FakeSES:
+    def __init__(self):
+        self.sent = []
+
+    def send_email(self, **kwargs):
+        self.sent.append(kwargs)
+        return {"MessageId": "ses-message-1"}
+
+
+def test_the_ses_transport_sends_without_smtp_credentials():
+    fake = FakeSES()
+    connector = email_connector.EmailConnector(
+        sender="agent@officeinference.com", token="secret",
+        allowed_recipients=("probe@example.com",), ses_region="us-east-1", ses_client=fake)
+    status, result = call(connector, {"to": "probe@example.com", "subject": "SES", "body": "hello"})
+    assert status == 200 and result["transport"] == "ses"
+    assert result["message_id"] == "ses-message-1"
+    assert fake.sent[0]["Source"] == "agent@officeinference.com"
+    assert fake.sent[0]["Destination"]["ToAddresses"] == ["probe@example.com"]
+
+
 def test_missing_fields_and_header_injection_are_refused():
     connector, fake = make_connector()
     assert call(connector, {"to": "probe@example.com", "subject": "", "body": "b"})[0] == 403
