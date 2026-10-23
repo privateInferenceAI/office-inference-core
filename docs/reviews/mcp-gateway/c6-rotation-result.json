@@ -1,0 +1,30 @@
+{
+  "old_credential": [
+    502,
+    {
+      "detail": "connector returned 401: {\"error\": \"unauthorised\"}",
+      "error": "connector"
+    }
+  ],
+  "rotated_credential": [
+    200,
+    {
+      "ok": true,
+      "result": {
+        "message_id": "010001a166f0ccf9-54f95350-96a7-4505-8c66-b694e95b5fa4-000000",
+        "sent": true,
+        "subject": "rotation probe",
+        "to": "anthony@officeinference.com",
+        "transport": "ses"
+      },
+      "tool": "send_email"
+    }
+  ],
+  "world_readable_file": [
+    502,
+    {
+      "detail": "credential file /app/rendered/connector.token is readable by another account",
+      "error": "connector"
+    }
+  ]
+}

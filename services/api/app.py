@@ -886,7 +886,9 @@ def _run_agent_job_locked(job):
         subject = str((parsed or {}).get("subject") or "")
         body = str((parsed or {}).get("body") or "")
         try:
-            envelope = mcp.call("send_email", {"to": to, "subject": subject, "body": body})
+            envelope = mcp.call("send_email", {"to": to, "subject": subject, "body": body},
+                                session_sha256=job.credential_sha256 or "",
+                                data_class=job.data_class or "internal")
             result = envelope.get("result") or envelope
         except mcp_client_module.MCPClientError as exc:
             result = {"sent": False, "error": str(exc), "to": to}

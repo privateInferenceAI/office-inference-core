@@ -231,7 +231,7 @@ def test_a_sellable_pack_pulls_in_core(tmp_path):
 
 
 def test_the_render_names_the_files_it_writes(tmp_path):
-    """Seven of them, and the manual says so.
+    """Eight of them, and the manual says so.
 
     `access.json` is the permission model the session tool and the retriever both read (SEC-ACL-002), and
     `assertion.key` is the signing key the API mints model-call assertions with and the gateway verifies them
@@ -242,7 +242,7 @@ def test_the_render_names_the_files_it_writes(tmp_path):
     assert render(DEV_CLOUD, out).returncode == 0
     written = sorted(p.name for p in out.iterdir())
     assert written == ["access.json", "agent_definitions.json", "assertion.key", "env",
-                       "litellm.yaml", "manifest.json", "services.txt"], written
+                       "litellm.yaml", "manifest.json", "mcp_tools.json", "services.txt"], written
 
 
 def test_a_deployment_without_the_agentic_pack_has_no_definitions(tmp_path):

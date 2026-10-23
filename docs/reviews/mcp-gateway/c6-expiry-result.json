@@ -1,0 +1,8 @@
+{
+  "expired_session": [
+    401,
+    {
+      "error": "invalid_session"
+    }
+  ]
+}
