@@ -10,7 +10,7 @@ describe how to build and operate the system; where they disagree with this page
 | C1 to C5 | Built and verified |
 | C6 | Built and verified. Agent runtime, full MCP gateway, client-tenant gateway |
 | C7 | Built and verified. Authenticated sessions, least-privilege support role, secret rotation, TLS, Object Lock |
-| C8 | Partly built. Audit hashes, image scanning, drift reporting, the incident tabletop, backup and the restore/RTO drill, the 20-concurrent load test, the signed release with a tested rollback, the medical golden set with its hard-fail gate, the ingest cycle lock, acceptance on a separate scratch deployment, the five alarms with a confirmed email subscription, and the cost report with provider lines are verified. SSM-only support and the business rows remain open. SSH is retained by owner decision. |
+| C8 | Partly built. Audit hashes, image scanning, drift reporting, the incident tabletop, backup and the restore/RTO drill, the 20-concurrent load test, the signed release with a tested rollback, the medical golden set with its hard-fail gate, the ingest cycle lock, acceptance on a separate scratch deployment, a blank Spot install with the four probes passing on a partial corpus, the five alarms with a confirmed email subscription, and the cost report with provider lines are verified. SSM-only support and the business rows remain open. SSH is retained by owner decision. |
 | C9 | Not started |
 
 The full suite is **1355 passed, 1 skipped** as of the last run on 2026-10-23.
@@ -122,6 +122,12 @@ the client tenant.
 |---|---|
 | OPS-SUPPORT-001 | SSH retained by owner decision. Build box: key ai-stack-key exists, SG22 is restricted to 47.164.45.109/32, SSM agent is online, no CloudTrail trail. Tenant: stopped, key exists, SG22 is open to 0.0.0.0/0, no SSM role or SSM registration, no CloudTrail. |
 | BIZ-* | Counsel, insurance, contracts, on-call staff, subprocessors and pricing decisions |
+
+9. **The blank Spot install passed the four probes on a partial corpus.** The install found three startup defects:
+   the manifest field is client.deployment_id, ingestion needs health conditions, and LiteLLM must start before the
+   API on a blank database. The fixes are in the compose file and the fresh-install runbook. The 80-document
+   baseline was not reproduced on the small Spot box; the probes ran over a 40-document subset. Evidence:
+   docs/reviews/fresh-install-2026-10-23/.
 
 ## Evidence
 

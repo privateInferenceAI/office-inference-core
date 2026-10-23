@@ -265,10 +265,14 @@ services:
     networks:
       - ai-net
     depends_on:
-      - postgres
-      - parser
-      - embeddings
-      - vector
+      postgres:
+        condition: service_healthy
+      parser:
+        condition: service_healthy
+      embeddings:
+        condition: service_healthy
+      vector:
+        condition: service_started
     # A shell loop rather than a scheduler, because the schedule is one interval and a scheduler would be
     # a second thing to configure and to monitor. The cycle is the command; the loop is when it runs.
     entrypoint: ["/bin/sh", "-c"]

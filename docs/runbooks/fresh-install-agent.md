@@ -70,7 +70,7 @@ The URL is valid for about 15 minutes. Download promptly with `curl -L -o <file>
 
 - `sudo mkdir -p /opt/oi-core && sudo chown ubuntu:ubuntu /opt/oi-core`; download and extract the code archive there; verify the sha256; confirm `test -f services/api/app.py`.
 - Create a fresh deployment manifest from the tracked accuracy manifest:
-  `cp manifests/dev-cloud-accuracy.yaml manifests/fresh-install-2026-10-22.yaml`, then change `deployment_id` to `oi-core-fresh-2026-10-22` and `client.name` to `Office Inference Fresh Install`. Keep the analyst on Claude Sonnet 4.6 with Haiku fallback exactly as the tracked manifest has it.
+  `cp manifests/dev-cloud-accuracy.yaml manifests/fresh-install-2026-10-22.yaml`, then change `client.deployment_id` to `oi-core-fresh-2026-10-23` and `client.name` to `Office Inference Fresh Install`. The field is under `client`, not top level; a top-level key does not reach rendered/env. Keep the analyst on Claude Sonnet 4.6 with Haiku fallback exactly as the tracked manifest has it.
 - Render: `python3 scripts/render_manifest.py --manifest manifests/fresh-install-2026-10-22.yaml --root /opt/oi-core`.
 - Set `OI_ANSWER_PROFILE=accuracy` in `rendered/env` and confirm it.
 - Validate the manifest: `python3 scripts/validate_manifests.py manifests/fresh-install-2026-10-22.yaml` and `python3 scripts/check_model_lifecycle.py manifests/fresh-install-2026-10-22.yaml`.
@@ -89,6 +89,10 @@ The URL is valid for about 15 minutes. Download promptly with `curl -L -o <file>
 ### 5. Ingest, and wait
 
 - The ingestion worker starts with the stack and discovers the corpus. Follow its log until the retryable set is empty and ingestion reports completion. This is CPU-bound and may take a while; poll every few minutes, do not restart it in a loop.
+
+**The compose dependencies now wait for postgres, parser and embeddings health.** Before that change the worker
+could start before Postgres accepted connections, fail the first cycle, and then sleep for the full interval. On
+2026-10-23 a restart after the dependencies were healthy was the smallest fix.
 - Verify counts through the deployment's postgres:
   - `select count(distinct doc_id), count(*) from chunk_index;` expected for corpus 2: 80 | 24296. If the counts differ, record the actual numbers and investigate before acceptance; do not adjust the baseline.
   - `select count(*) from ingest_manifest where failure_count >= 2;` record the value.
@@ -109,6 +113,15 @@ The URL is valid for about 15 minutes. Download promptly with `curl -L -o <file>
 - Write the two documents named in Deliverables. The runbook must be usable by a future agent with only this prompt: include asset preparation (how the corpus archive was built from the existing deployment, the S3 keys and checksums, how to generate presigned URLs), every command with expected output, acceptance criteria, timings, and failure modes. Include this prompt verbatim in a fenced block at the top.
 - Commit both documents on branch `docs/fresh-install-2026-10-22`, push, and open a PR to main. Keep the working tree limited to those two files plus the fresh manifest if you decide to commit it; do not commit rendered/env or any secret.
 - Stop the instance (do not terminate) after evidence is copied. Report: instance id, IP, state, install result, corpus counts, probe results, answer-check result, resolved model, fallback status, timings, evidence paths, and PR URL.
+
+## Findings from the 2026-10-23 run
+
+- The manifest field is client.deployment_id. A top-level deployment_id change did not reach rendered/env.
+- Ingestion raced Postgres on first start. The compose file now uses health conditions; one restart was needed on the old file.
+- LiteLLM must start before the API on a blank database. If the API migrates first, Prisma refuses to baseline the
+  schema; stop the API, reset the database, start LiteLLM alone, then start the API.
+- The client app needs a separate /opt/oic-ui archive. The four acceptance probes do not need it; a core-only
+  acceptance can skip the app service and still run interface, activity, access and stream.
 
 ## Rules
 

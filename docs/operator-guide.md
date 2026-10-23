@@ -1823,6 +1823,13 @@ The five alarms publish to the SNS topic oi-core-alarms. The anthony@officeinfer
 confirmed, and a test transition has been delivered. The metric publisher runs every five minutes; the audit
 check runs daily. Evidence: docs/reviews/ops-alarm/.
 
+## 13g. Fresh-install pitfalls
+
+Manifest deployment id lives under client.deployment_id. Ingestion now waits for Postgres, parser and embeddings
+health conditions. The client app needs a separate /opt/oic-ui archive, but the four acceptance probes do not.
+
+Start LiteLLM before the API on a blank database, or Prisma refuses to baseline the schema.
+
 ## 13h.1. Why there is an API at all, and why it has no port
 
 Every capability the system has is reachable through this one interface, and it has no user interface of its
