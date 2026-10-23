@@ -91,8 +91,10 @@ packs:
           with citations. The sandbox has no network and is destroyed when the task ends.
         mode: task
         role: analyst
-        tools: [search_documents, read_passages, workspace_write, workspace_read, workspace_list, workspace_run]
+        tools: [search_documents, read_passages, workspace_write, workspace_read, workspace_list, workspace_run,
+                web_fetch]
         workspace: true
+        web: true
         max_steps: 14
         max_seconds: 600
         max_tokens: 80000

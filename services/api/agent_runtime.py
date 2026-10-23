@@ -47,6 +47,8 @@ class RuntimeContext:
     # A child brief goes in, a structured JSON result comes out. The controller does not know how the child
     # runs; the deployment supplies a read-only child loop with its own budget.
     run_child: Optional[Callable[[str], str]] = None
+    # One approved https fetch, through the deployment's egress service. The sandbox has no network.
+    web_fetch: Optional[Callable[[str], str]] = None
     # A workspace tool name and its JSON arguments go in, a result string comes out. The deployment supplies the
     # client to the workspace service; the controller only routes the call and keeps the step.
     workspace_tool: Optional[Callable[[str, str], str]] = None
@@ -247,7 +249,9 @@ class AgentPlan:
             name = call.get("name") or ""
             arguments = call.get("arguments") or "{}"
             try:
-                if name.startswith("workspace_") and context.workspace_tool is not None:
+                if name == "web_fetch" and context.web_fetch is not None:
+                    result = context.web_fetch(arguments)
+                elif name.startswith("workspace_") and context.workspace_tool is not None:
                     result = context.workspace_tool(name, arguments)
                 elif name == "delegate_research":
                     if context.run_child is None:

@@ -67,6 +67,7 @@ import approvals as approvals_module  # noqa: E402
 import definitions as definitions_module  # noqa: E402
 import agent_worker as agent_worker_module  # noqa: E402
 import agent_runtime as agent_runtime_module  # noqa: E402
+import egress_client as egress_client_module  # noqa: E402
 import workspace_client as workspace_client_module  # noqa: E402
 import redaction  # noqa: E402
 import ingest  # noqa: E402
@@ -685,6 +686,16 @@ def _run_agent_job_locked(job):
             return
         workspace = workspace_client_module.WorkspaceClient(workspace_url, workspace_token)
 
+    egress = None
+    if definition.get("web"):
+        egress_url = (os.environ.get("OI_EGRESS_URL") or "").strip()
+        egress_token = (os.environ.get("OI_EGRESS_TOKEN") or "").strip()
+        if not egress_url or not egress_token:
+            _fail_agent_job(job, "egress_not_configured",
+                            "the definition needs the web but OI_EGRESS_URL or OI_EGRESS_TOKEN is unset")
+            return
+        egress = egress_client_module.EgressClient(egress_url, egress_token)
+
     # **The child's tools are a subset of the parent's.** A definition that lets a helper read something the
     # parent cannot is a permission hole, so the declaration is checked before any work starts.
     parent_tools = {str(name) for name in (definition.get("tools") or [])}
@@ -819,6 +830,26 @@ def _run_agent_job_locked(job):
             raise tool_loop.ToolAuditError(f"the workspace audit failed: {type(exc).__name__}") from exc
         return json.dumps(result, sort_keys=True)
 
+    def web_fetch_tool(arguments: str) -> str:
+        try:
+            parsed = json.loads(arguments or "{}")
+        except (ValueError, TypeError):
+            return json.dumps({"error": "web_fetch arguments must be a JSON object"})
+        url = str((parsed or {}).get("url") or "")
+        try:
+            result = egress.fetch(url)
+        except egress_client_module.EgressClientError as exc:
+            result = {"error": str(exc), "url": url}
+        # **An outbound fetch is the most reviewable thing a task can do.** The row names the URL, the status and
+        # the bytes, so the deployment can answer what left the building and what came back.
+        try:
+            audit("tool_call", session.subject, session.role, "ok",
+                  {"job_id": job.job_id, "task": job.task, "step": step_name(), "tool": "web_fetch",
+                   "url": url, "status": result.get("status"), "bytes": result.get("bytes")}, tool="web_fetch")
+        except Exception as exc:  # noqa: BLE001
+            raise tool_loop.ToolAuditError(f"the web fetch audit failed: {type(exc).__name__}") from exc
+        return json.dumps(result, sort_keys=True)
+
     toolbox = tool_loop.ToolBox(STATE["services"], session.permit(), session.role,
                                 audit=tool_audit, strict_audit=True)
     budget = budget_module.Budget(total=max(60.0, float(job.time_budget_s)), reserve=0.0)
@@ -832,6 +863,7 @@ def _run_agent_job_locked(job):
         on_context_trim=context_audit,
         run_child=run_child if child_specs else None,
         workspace_tool=workspace_tool if workspace is not None else None,
+        web_fetch=web_fetch_tool if egress is not None else None,
         max_steps=int(definition.get("max_steps") or 12),
         max_messages=int(definition.get("max_messages") or 24),
     )

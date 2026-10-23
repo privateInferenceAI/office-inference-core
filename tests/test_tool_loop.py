@@ -808,3 +808,6 @@ def test_the_delegate_tool_is_offered_only_to_a_definition_with_child_tools():
     with_workspace = {tool["function"]["name"]
                       for tool in tool_loop.agent_tools({"workspace": True})}
     assert {"workspace_write", "workspace_read", "workspace_list", "workspace_run"} <= with_workspace
+    assert "web_fetch" not in with_workspace
+    with_web = {tool["function"]["name"] for tool in tool_loop.agent_tools({"web": True})}
+    assert "web_fetch" in with_web

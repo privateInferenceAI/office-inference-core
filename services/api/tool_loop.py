@@ -176,6 +176,23 @@ WORKSPACE_TOOLS = [
     },
 ]
 
+# **Web access is one allowlisted fetch, not a browser.** The sandbox has no network; this tool asks the egress
+# service for one URL the deployment approved and returns the text to the model.
+WEB_FETCH_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "web_fetch",
+        "description": (
+            "Fetch one approved https URL through the deployment's egress service and return its text. URLs "
+            "off the allowlist are refused. Use it for a public page the task needs, not for searching."),
+        "parameters": {
+            "type": "object",
+            "properties": {"url": {"type": "string", "description": "the full https URL to fetch"}},
+            "required": ["url"],
+        },
+    },
+}
+
 _PROMPT_HEAD = (
     "You answer questions about a client's own documents.\n"
     "You have tools. search_documents searches the documents; read_passages opens a document around a "
@@ -1123,6 +1140,8 @@ def agent_tools(definition: dict) -> list:
         tools.append(DELEGATE_TOOL)
     if definition.get("workspace"):
         tools.extend(WORKSPACE_TOOLS)
+    if definition.get("web"):
+        tools.append(WEB_FETCH_TOOL)
     return tools
 
 
