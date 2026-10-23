@@ -24,7 +24,7 @@ It reads a client's documents (13a to 13f), has an assistant API and routing (13
 application (13i), approvals and workflows (13j to 13m), a durable agent runtime and MCP gateway in the
 client's tenant (26), TLS and signed session assertions (26), and an audit chain whose version 4 covers the
 approval, prompt and completion digests. Section 26 is the current topology and operation. Backup and the restore/RTO drill are built. Alarms, rollback,
-SSM-only support, cost reporting, the golden question set, fresh-deployment acceptance and the business rows are
+SSM-only support and the business rows are
 still open.
 
 Sections 1 to 25 are ordered by when they were written rather than by what a reader needs first, so
@@ -327,7 +327,7 @@ so rather than implying otherwise.
 application, the approval gate and workflows, the durable agent runtime and MCP gateway, and TLS with signed
 session assertions. C8 is partly built: audit hash coverage, scheduled image scanning, deployment-state drift
 reporting, an incident tabletop, and backup with a 48-second restore and 15-minute full drill are verified; alarms,
-rollback, SSM-only support, cost reporting, golden questions, fresh-deployment acceptance and the
+rollback, SSM-only support and the
 business rows are open. The authoritative list is
 docs/current-deployment.md. |
 
@@ -5770,7 +5770,7 @@ is explained.
 | C5 | Workflows and the first connector, with an approval gate | **Built.** Sections 13j to 13m |
 | C6 | The agent runtime and the MCP gateway | Built and verified. Section 26 |
 | C7 | Ingress, TLS, identity, least privilege, secret rotation and Object Lock | Built and verified. Section 26 |
-| C8 | Alarms, backups, restore and RTO, rollback, SSM-only support, cost reporting, golden questions, acceptance, load test | Partly built. Audit hashes, scanning, drift, incident, backup/RTO, load, signed release/rollback and the medical golden set are verified; alarms await the email confirmation |
+| C8 | Alarms, backups, restore and RTO, rollback, SSM-only support, cost reporting, golden questions, acceptance, load test | Partly built. Audit hashes, scanning, drift, incident, backup/RTO, load, signed release/rollback, medical golden, alarms, cost and acceptance are verified; SSM-only support is open by owner decision |
 | C9 | The demonstration | Not built |
 
 **Update, 2026-10-23.** The phase table above is the build plan, not the current state. C6 and C7 are built and
@@ -5969,8 +5969,7 @@ is the tenant gateway, not the 8093 host process.
 
 ### 26.8 What is still open
 
-The open C8 rows are alarms, rollback, SSM-only support, cost reporting, golden questions and fresh-deployment
-acceptance. The 20-concurrent load test now passes at a worst p95 of 7.8 seconds across five runs after the
+The open C8 row is SSM-only support, retained by owner decision. The rest of C8 is built. The 20-concurrent load test now passes at a worst p95 of 7.8 seconds across five runs after the
 after are in docs/reviews/ops-load/. The BIZ rows need counsel, insurance, contracts,
 on-call staff, subprocessors and pricing decisions. docs/current-deployment.md lists each with its blocker.
 
@@ -5983,3 +5982,14 @@ live chunk_index. The API answered two medical questions with citations to the p
 The hard-fail gate is scripts/check_medical_hard_fails.py. Its self-test catches fabricated numbers, wrong
 documents, cross-role leaks and unanswerable answers. Clinical review was waived by the owner for this test set.
 Evidence: docs/reviews/medical-golden/README.md.
+
+### 26.10 Cost report and alarms
+
+The cost report is scripts/cost_report.py. It reads Cost Explorer by service and prints the provider lines
+separately: Claude Haiku, Claude Sonnet, Cohere Rerank and the generic Amazon Bedrock line. The current report
+shows the Claude lines as non-zero. Evidence: docs/reviews/ops-cost/.
+
+The five alarms are oi-core-CoreHealthy, oi-core-IngestionHealthy, oi-core-BackupAge, oi-core-AuditChain and
+oi-core-Disk. They publish to the SNS topic oi-core-alarms and the anthony@officeinference.com subscription is
+confirmed. The five-minute metric publisher and daily audit check are systemd timers. Evidence:
+docs/reviews/ops-alarm/.

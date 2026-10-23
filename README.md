@@ -45,8 +45,7 @@ workflows and approvals, a durable agent runtime and the MCP gateway. The MCP ga
 run in a separate client tenant behind TLS. The audit record is hash-chained at version 4, exported, anchored
 and stored under Object Lock. The full suite is 1355 passed, 1 skipped.
 
-The open rows are alarms, rollback, SSM-only support, cost reporting, golden questions, fresh-deployment
-acceptance, and the business rows: contracts, insurance, legal review, on-call, subprocessors and pricing.
+The only open stack row is SSM-only support, retained by owner decision. The business rows remain: contracts, insurance, legal review, on-call, subprocessors and pricing.
 Backup/RTO and the 20-concurrent load test are verified. Each blocker is listed in docs/current-deployment.md.
 
 One caveat before you trust an email: the client-tenant connector sends through SES to the verified

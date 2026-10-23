@@ -1216,7 +1216,8 @@ items:
     tier: [cloud, hosted]
     phase: C8
     verify: each alarm is triggered deliberately once and produces a notification
-    status: open
+    status: verified
+    evidence: docs/reviews/ops-alarm/README.md
   - id: OPS-BACKUP-001
     title: Backups restore, proven by a drill
     tier: [cloud, hosted, office]
@@ -1263,7 +1264,8 @@ items:
     tier: [cloud, hosted]
     phase: C8
     verify: a deployment using Claude shows a non-zero cost in the report
-    status: open
+    status: verified
+    evidence: docs/reviews/ops-cost/README.md
   - id: OPS-INCIDENT-001
     title: There is an incident response runbook with notification clocks
     tier: [cloud, hosted, office]
