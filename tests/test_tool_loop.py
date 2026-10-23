@@ -792,3 +792,14 @@ def test_the_answer_path_swallows_an_audit_failure_but_the_strict_toolbox_does_n
                                audit=broken_audit, strict_audit=True)
     with pytest.raises(tool_loop.ToolAuditError):
         strict.execute("not_a_tool", "{}")
+
+
+def test_the_delegate_tool_is_offered_only_to_a_definition_with_child_tools():
+    """The answer path must never see the helper; only the runtime, and only when a pack declares it."""
+    answer_names = {tool["function"]["name"] for tool in tool_loop.active_tools()}
+    assert "delegate_research" not in answer_names
+    without_child = {tool["function"]["name"] for tool in tool_loop.agent_tools({})}
+    assert "delegate_research" not in without_child
+    with_child = {tool["function"]["name"]
+                  for tool in tool_loop.agent_tools({"child_tools": ["search_documents"]})}
+    assert "delegate_research" in with_child
