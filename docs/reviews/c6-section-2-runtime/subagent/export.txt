@@ -1,0 +1,4 @@
+exported 79 event(s) for 2026-10-23
+  /tmp/chain-subagent.json/audit-events.jsonl
+  /tmp/chain-subagent.json/manifest.json
+  last row hash 153e8aafbdee9e55c863304028ea3bc5d30673cf5304489294cc2f3b27055a3b

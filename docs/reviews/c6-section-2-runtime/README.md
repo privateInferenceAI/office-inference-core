@@ -66,6 +66,21 @@ Job `af8ab77097f945c196a59eb22c5e602e` stopped at the gate before its first tool
 read-only tool as irreversible to exercise the gate. The original definition was restored and the API
 restarted after the run. This proves the gate mechanics and the resume path, not the email connector.
 
+## Sub-agent live run
+
+Job `46d4cf57ac0e45a897b454c373821705` used the helper. The parent task asked it to use the research helper,
+and the model called `delegate_research`.
+
+- The job succeeded in three steps, `turn-1`, `turn-2` and `finish`, in 12.4 seconds.
+- The audit rows show two child model calls at 405 and 407 and one child tool call at 406, all with span
+  `child-1` and role `child`, under parent task and step `turn-1`.
+- The parent's own model rows are 404 and 410. The child's search result came back as a tool message, and the
+  parent answered in `turn-2`.
+- The chain export holds 79 events and verifies intact.
+
+The child used the same session permit and a subset of the parent's declared tools. It had no delegate tool, so
+it could not spawn another child.
+
 ## What this proves
 
 - A definition job is claimed by the dispatcher and runs without an inline request.
@@ -78,7 +93,8 @@ restarted after the run. This proves the gate mechanics and the resume path, not
 ## What this does not prove
 
 - A real irreversible connector. The gate mechanics are live-tested; the email connector is not.
-- Sub-agents and their budgets, child rules and spans. Not built yet.
+- Token budgets for the child. The child has a step cap and a wall-clock cap; the token ceiling is not enforced
+  yet.
 - Context summaries written to the chain when older results leave the prompt. Not built yet.
 - A kill and restart at an iteration boundary. Not run yet.
 - The workspace sandbox, web access, artifacts and workspace UI. That is the WS phase.
@@ -111,6 +127,15 @@ Export and verify the chain:
 - `export.txt`: the export summary and last row hash.
 - `jobs.json`: the two post-fix successful jobs as returned by the API.
 - `api.log`: the API startup log from the final deployment.
+- `SHA256SUMS`: hashes for the files above.
+
+## Files in subagent/
+
+- `job-after.json`: the successful parent job.
+- `audit-rows.txt`: the parent and child rows, with the `child-1` span and role.
+- `audit-events.jsonl`: the 79-event chain export.
+- `verify.txt`: the verifier's result.
+- `export.txt`: the export summary.
 - `SHA256SUMS`: hashes for the files above.
 
 ## Files in gate/
