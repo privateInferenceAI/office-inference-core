@@ -31,7 +31,6 @@ import time
 import subprocess
 import sys
 import uuid
-from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -524,6 +523,26 @@ def _session_for(request: Request, body: dict | None = None):
         return _resolve(token), None
     except session_module.SessionError as exc:
         return None, JSONResponse({"error": str(exc), "kind": "no_session"}, status_code=401)
+
+
+def _record_refused_approval(request: Request, body: dict, refusal: JSONResponse) -> None:
+    """Record a refused approval attempt, then let the refusal return.
+
+    **A refusal is an event, not a non-event.** SEC-APR-001 asks for the attempt to be recorded, and this route
+    used to return 401 or 403 before any audit call. The actor is `unauthenticated` because that is what the
+    system knows; a role named in the body is recorded as a claim, never as the actor's role.
+    """
+    claimed_role = str(body.get("role") or body.get("roles") or "")
+    try:
+        audit("access", "unauthenticated", "unknown", "denied", {
+            "stage": "approval_refused",
+            "endpoint": request.url.path,
+            "status": getattr(refusal, "status_code", 0),
+            "claimed_role": claimed_role,
+            "reason": "no session or a caller-supplied authority on the approval route",
+        })
+    except Exception:  # noqa: BLE001 - a refusal still has to reach the caller if the record cannot be written
+        pass
 
 
 def _tasks_this_deployment_declares() -> list[dict]:
@@ -1112,10 +1131,25 @@ async def decide_job(job_id: str, request: Request):
 
     session, refusal = _session_for(request, body)
     if refusal:
+        _record_refused_approval(request, body, refusal)
         return refusal
     job = _find_job(job_id, session)
     if job is None:
         return JSONResponse({"error": "no such job", "kind": "not_found"}, status_code=404)
+
+    # **A caller-supplied authority is refused here for the same reason it is on /ask and /jobs.** The
+    # approval route is the one place where a forged role would make the record name somebody who did not
+    # decide, so the guard is repeated rather than assumed to be covered by session resolution.
+    supplied = next((field for field in answer_module.AUTHORITY_FIELDS if body.get(field) is not None), None)
+    if supplied:
+        audit("access", session.subject, str(body.get(supplied)), "denied",
+              {"supplied_field": supplied, "session_role": session.role,
+               "refusal": "a request may not supply its own authority",
+               "endpoint": f"/jobs/{job_id}/approvals"})
+        return JSONResponse(
+            {"error": "Permission denied on this resource (or it might not exist). A role comes from an "
+                      "authenticated session and never from a request field.",
+             "kind": "refused_authority_claim"}, status_code=403)
 
     decision = str(body.get("decision") or "").strip()
     reason = str(body.get("reason") or "")
@@ -1128,7 +1162,14 @@ async def decide_job(job_id: str, request: Request):
 
     store = STATE["jobs"]
     try:
-        jobs_module.decide(job, store, decision, quoted)
+        job = approvals_module.decide_and_record(
+            store=store, job=job, decision=decision, action_digest_quoted=quoted,
+            session=session, reason=reason, note=note,
+            mint=lambda actor, role: assertion.mint_audit(
+                STATE["key"], actor, role, deployment_id=DEPLOYMENT_ID,
+                session_id=session.session_id),
+            key_path=KEY_PATH, deployment_id=DEPLOYMENT_ID, audit=audit,
+        )
     except jobs_module.ApprovalDrift as drifted:
         # **409 rather than 400, and the body carries both digests.** The client's request was well formed;
         # the world moved. A screen that gets this can re-render and ask again, and a screen that got a 400
@@ -1139,24 +1180,11 @@ async def decide_job(job_id: str, request: Request):
         return JSONResponse({"error": str(refused), "kind": "transition_refused",
                              "was": refused.was, "wanted": refused.wanted}, status_code=409)
 
-    # The record goes in `payload`, which `payload_sha256` covers, rather than in the `approval` column, which
-    # the hash chain does not. Migration 013 closed the identical gap for the redaction columns; see
-    # AUD-APPROVAL-001.
-    record = approvals_module.build_payload(
-        session, job, decision, reason, note, quoted,
-        signed_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
-    )
-    # **`outcome` is the outcome of the RECORDING, not the decision.** `audit_events.outcome` is constrained
-    # to ('ok','denied','error','pending') and this route passed the decision, which raised a CheckViolation
-    # *after* `jobs.decide()` had already committed the state change: a job that resumed with no record of
-    # who approved it, and a 500 to the client. The decision lives in `payload -> approval -> decision`,
-    # where `build_payload` already puts it and where `describe()` already reads it.
-    #
-    # Widening the enum to fit a caller is the direction not taken. `outcome` says whether the thing
-    # succeeded, and for a model call `denied` means the egress gate refused it. An approval that records
-    # successfully has outcome `ok` whatever was decided. A column that means two things depending on the
-    # event type is a column nobody can filter on, and `audit_feed` filters on this one.
-    audit("approval", session.subject, session.role, "ok", record, tool=job.task)
+    # **The decision and its record were one transaction.** `decide_and_record` wraps both in the engine's
+    # `PostgresUnit` on a durable store, so a failed chain write rolls the decision back with it. On a memory
+    # store the injected `audit` callback writes the same record and the store's own documentation says it is
+    # not durable. The alternative, `jobs.decide()` followed by `audit()`, was the gap this section closes:
+    # the state change committed before the record existed.
 
     # **The engine continues from the step after the gate.** An approve puts the job back in `running` and
     # nothing would move it further without this. A deny or a change request ends the job, so there is

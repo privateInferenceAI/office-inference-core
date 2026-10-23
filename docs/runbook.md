@@ -4799,6 +4799,37 @@ $ ~/venv/bin/python -m pytest tests/test_workflow_engine.py -q
 23 passed in 0.65s
 ```
 
+### The approval route, end to end
+
+The engine probe uses the store directly. The HTTP route is the surface a person uses, and it has its own probe:
+
+```
+cd /opt/oi-core
+bash scripts/probe.sh approval_probe.py
+```
+
+Expected: seven rights held. `GATED` and `LISTED` prove the invoice job stops and appears in the queue;
+`APPROVED` proves the decision resumes the plan and records one transactional and one external effect;
+`DENIED` proves nothing after the gate runs; `REFUSED` proves a missing session and a forged role are both
+refused and recorded; `HONEST` proves the record and the feed do not invent a person; `CHAIN` proves the
+export still verifies after the decisions.
+
+```
+ok   GATED     state='awaiting_approval', digest=sha256:5b480b869b4…, 0 step(s) after the gate
+ok   LISTED    [200] 1 waiting
+ok   APPROVED  [200] state='succeeded', post_entry rows=1, effect ledger rows=transactional 1 / external 1
+ok   DENIED    [200] state='failed', post-gate rows=0
+ok   REFUSED   no-session=401, forged-role=403, refusal rows=1, authority rows=1
+ok   HONEST    assurance='unverified', basis='session_token', summary='Approved at … under the viewer role. The person who decided was not identified…'
+ok   CHAIN     ok   …/audit-events.jsonl: 334 event(s), chain intact
+
+PASSED: 7 right(s) held against the documented approval route
+```
+
+The refusal counts grow with every run; that is the chain keeping them, not a duplicate. The first interface
+probe run after an API restart can fail its `STREAM` right with two frames and no done frame. The separate
+stream probe and a warm rerun both pass. Record both runs when it happens; do not call the first one a pass.
+
 **And the right can fail, which is the part worth checking.** A test that cannot fail proves nothing, and
 `ATOMIC` is the one this whole piece exists for, so it was mutated on purpose: `PostgresUnit.__enter__` was
 changed to skip the transaction, which is the smallest possible version of the mistake — every write still

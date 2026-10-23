@@ -15,8 +15,9 @@ stronger, and the failures it guards against are all plausible lines of code rat
 * No sentence may name a person while the basis is a session token. The route used to be able to, and
   `audit_feed` still does.
 
-**What is not tested here.** The HTTP route. This file tests the record and the machine underneath it, which
-is what the route is a thin wrapper over. The route is exercised by the probe against a live deployment.
+**What is not tested here.** The HTTP route and the durable transaction. They are in
+`tests/test_approval_http.py` and `tests/test_approval_durable.py`; the route is also exercised by
+`tests/fixtures/approval_probe.py` against a live deployment.
 """
 from __future__ import annotations
 
