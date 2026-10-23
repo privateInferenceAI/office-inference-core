@@ -6,6 +6,10 @@ exist for that session. Read it in full before the first command.
 Written 2026-10-10, from the merged design passes and two adversarial audits. Verified against the
 repository, the live AWS APIs, and the accounts.
 
+**Target update, 2026-10-22.** The cloud build's product is the Cloud Workspace. Read
+`docs/build-plan.md` and `docs/design/cloud-workspace.md` for the current target and `WS` phase. The office
+build is a separate product; its data-never-leaves rule does not apply to the cloud build.
+
 ---
 
 ## 0. How this work happens

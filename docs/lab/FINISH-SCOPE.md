@@ -7,7 +7,8 @@ register wins and this document is corrected.
 ## Where the reference is at the pin
 
 At the time this was written the register held **158 items: 86 verified, 64 open, 6 waived, 1 retired and 1
-experimental.** The open engineering work is concentrated in four phases:
+experimental.** The open engineering work is concentrated in five phases, including the cloud workspace phase
+`WS` added 2026-10-22. The office build is a separate product; its boundary does not apply to the cloud build.
 
 | Phase | Open items | What the phase is |
 |---|---|---|
@@ -15,6 +16,7 @@ experimental.** The open engineering work is concentrated in four phases:
 | C6 | 26 open plus one experimental decision | Agent runtime, MCP gateway, provider layer, tool and model audit |
 | C7 | 5 | Security: authenticated sessions, least-privilege role, Secrets Manager, TLS at the edge, Object Lock disclosure |
 | C8 | 13 | Operations and quality: hash coverage, alarms, backup restore drill, RTO, signed updates, CVE scanning, drift, SSM support, cost reporting, incident runbook, golden questions, acceptance test, load test |
+| WS | 10 | Cloud Workspace: sandbox, approved web egress, artifacts, UI, first connector, credentials, limits, audit, acceptance, profile gate |
 
 Everything earlier is verified: retrieval, the answer path with the tool loop and row query, the honesty gate, the
 fallback chain, workflows and intake, the audit chain, and the assistant API. The search work in flight at the time

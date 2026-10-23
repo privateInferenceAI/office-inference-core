@@ -4,6 +4,11 @@
 
 One core system, two builds, and every offering is a configuration of it.
 
+**Target update, 2026-10-22.** The cloud build's product is the Cloud Workspace: a workspace agent with a
+task-scoped sandbox, approved web egress, artifacts and connectors. The design is
+`docs/design/cloud-workspace.md`; the phase is `WS`. The office build is a separate product with its own
+boundary, and its "nothing leaves the building" rule does not apply to the cloud build.
+
 ## System versus substrate
 
 **The system** is identical everywhere: container images, service definitions, application code,
