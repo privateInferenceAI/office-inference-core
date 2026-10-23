@@ -52,6 +52,9 @@ class RuntimeContext:
     # A workspace tool name and its JSON arguments go in, a result string comes out. The deployment supplies the
     # client to the workspace service; the controller only routes the call and keeps the step.
     workspace_tool: Optional[Callable[[str, str], str]] = None
+    # An approved irreversible tool that is not a retrieval call. The runtime asks the deployment to run it,
+    # after the gate, and keeps the engine's effect row.
+    act_tool: Optional[Callable[[str, str], str]] = None
     max_steps: int = DEFAULT_MAX_STEPS
     max_messages: int = DEFAULT_MAX_MESSAGES
     messages: list = field(default_factory=list)
@@ -167,7 +170,10 @@ class AgentPlan:
             return workflow.StepResult(ok=False, failure_kind="no_pending_tool",
                                        failure_detail="the approved turn holds no tool call", retryable=False)
         try:
-            result = context.toolbox.execute(name, arguments)
+            if context.act_tool is not None and name == "send_email":
+                result = context.act_tool(name, arguments)
+            else:
+                result = context.toolbox.execute(name, arguments)
         except tool_loop.ToolAuditError as exc:
             return workflow.StepResult(ok=False, failure_kind="tool_audit",
                                        failure_detail=str(exc), retryable=False)

@@ -104,9 +104,11 @@ packs:
         mode: task
         role: analyst
         tools: [search_documents, read_passages, workspace_write, workspace_read, workspace_list, workspace_run,
-                web_fetch]
+                web_fetch, send_email]
         workspace: true
         web: true
+        connector: true
+        irreversible_tools: [send_email]
         max_steps: 14
         max_seconds: 600
         max_tokens: 80000

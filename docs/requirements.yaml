@@ -2537,7 +2537,8 @@ items:
       run a workspace task that writes a file, runs a command, fetches an allowed URL and calls one connector.
       The chain holds one row for each, each carries the task id and the step, and verify_chain passes. A call
       with no row, and a row with no call, both fail.
-    status: open
+    status: verified
+    evidence: docs/reviews/ws-connector/README.md
     note: >-
       The sandbox is a second place work happens, and the chain is the only reason it is auditable. The rows use
       the same writer and the same table as the model and tool rows; no second sink.
