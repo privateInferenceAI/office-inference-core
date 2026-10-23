@@ -628,7 +628,26 @@ example [1]. You cannot take actions, cannot delegate, and must return a short s
 you actually read. If the evidence does not contain the answer, say so plainly."""
 
 
+# **One runner per job, ever.** A pause that lands while a step is running does not stop the thread; the
+# engine returns when it next sees the paused state. A resume that started a second runner before the first
+# returned made turn-1 and turn-2 each run twice on the live box. The lock is per job, in this process, which is
+# the same scope the engine assumes: one worker process per deployment.
+_AGENT_LOCKS: dict[str, threading.Lock] = {}
+_AGENT_LOCKS_GUARD = threading.Lock()
+
+
+def _agent_lock(job_id: str) -> threading.Lock:
+    with _AGENT_LOCKS_GUARD:
+        return _AGENT_LOCKS.setdefault(job_id, threading.Lock())
+
+
 def _run_agent_job(job):
+    """Serialise the runtime for one job, then run it."""
+    with _agent_lock(job.job_id):
+        return _run_agent_job_locked(job)
+
+
+def _run_agent_job_locked(job):
     """One claimed agent job: resolve the session, build the real tools and gateway call, run the plan.
 
     **This is the seam between the controller and the deployment.** `agent_runtime` knows the plan and the
