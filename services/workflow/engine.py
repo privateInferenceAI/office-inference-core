@@ -271,10 +271,12 @@ class Runner:
             if len(live.steps) >= live.attempt_budget:
                 return self._fail_job(live, FAIL_ATTEMPTS, "the job used every attempt it was given")
 
-            index = self._position(live)
-            if index is None:
+            # **The plan decides the next step.** A static plan returns the first entry with no succeeded row;
+            # a dynamic plan builds the next iteration from the definition and the history. The engine no
+            # longer indexes a tuple, so a loop does not need a new engine.
+            spec = self.plan.next_spec(live)
+            if spec is None:
                 return self._finish(live)
-            spec = self.plan.steps[index]
 
             if spec.gate:
                 waiting = self._gate(live, spec)
@@ -291,18 +293,6 @@ class Runner:
             self._run_step(live, spec)
 
     # ---- position and prior outputs
-
-    def _position(self, job) -> Optional[int]:
-        """The first plan step with no succeeded row, or None when every step is done.
-
-        Read from the step rows rather than from a cursor column, so a resumed run cannot repeat work it
-        already recorded and the position cannot disagree with the history a client reads.
-        """
-        done = {step.name for step in job.steps if step.state == jobs.SUCCEEDED}
-        for index, spec in enumerate(self.plan.steps):
-            if spec.name not in done:
-                return index
-        return None
 
     def _prior_outputs(self, job_id: str) -> dict:
         """What the steps before this one produced, rebuilt from the event log.
@@ -474,7 +464,7 @@ class Runner:
 
     def _settle(self, job_id: str, spec: StepSpec, run: StepRun, result: StepResult, attempt: int):
         """Write what the attempt produced: the step row, the effects, the job state and the chain row."""
-        final = spec is self.plan.steps[-1]
+        final = self.plan.is_final(run.job, spec)
 
         def body(unit, fresh):
             step = self._step_row(fresh, spec.name, attempt)
