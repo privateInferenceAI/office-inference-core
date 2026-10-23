@@ -3,6 +3,10 @@
 Eleven phases. Each one ends with something you can see working, and each is small enough to finish
 in a sitting or two. You type; I write the command sheets and read the output you paste back.
 
+**Target update, 2026-10-22.** The cloud build adds the Cloud Workspace phase `WS` after C6: sandbox, approved web
+egress, artifacts, a first connector and the workspace UI. The current sequence is `docs/build-plan.md`; the design
+is `docs/design/cloud-workspace.md`. The office build is a separate product.
+
 The rule from the friend's build applies here: **a phase is not finished until its verification
 step passes.** Detail is written for the phase we are on, plus the next one. Later phases stay as
 outlines so they do not go stale.

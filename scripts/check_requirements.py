@@ -19,7 +19,9 @@ except ImportError:
     raise SystemExit(2)
 
 CLOUD_PHASES = {f"C{n}" for n in range(10)}
-OTHER_PHASES = {"OFFICE", "DEPLOY", "BIZ", "NEVER"}
+# `WS` is the cloud workspace phase added 2026-10-22. It is not a C-number because it is a product layer,
+# not the next step of the core sequence; the build plan places it after C6.
+OTHER_PHASES = {"OFFICE", "DEPLOY", "BIZ", "NEVER", "WS"}
 PHASES = CLOUD_PHASES | OTHER_PHASES
 # **The register uses two statuses the checker did not know.** C6 added `retired` for a capability that was
 # removed and is kept as history, and `experimental` for one that is built but not admitted to a deployment.
