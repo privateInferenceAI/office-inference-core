@@ -81,6 +81,8 @@ class WorkspaceService:
             return 404, {"error": "not found"}
         except workspace.SandboxTimeout as exc:
             return 504, {"error": "timeout", "detail": str(exc)}
+        except workspace.SandboxResource as exc:
+            return 507, {"error": "resource", "detail": str(exc)}
         except workspace.SandboxQuota as exc:
             return 413, {"error": "quota", "detail": str(exc)}
         except workspace.SandboxError as exc:

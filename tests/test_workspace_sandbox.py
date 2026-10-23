@@ -21,15 +21,16 @@ import workspace  # noqa: E402
 
 
 class FakeRunner:
-    def __init__(self, *, timeout=False):
+    def __init__(self, *, timeout=False, returncode=0):
         self.calls = []
         self.timeout = timeout
+        self.returncode = returncode
 
     def __call__(self, argv, timeout):
         self.calls.append((list(argv), timeout))
         if self.timeout:
             raise subprocess.TimeoutExpired(argv, timeout)
-        return subprocess.CompletedProcess(argv, 0, "ok", "")
+        return subprocess.CompletedProcess(argv, self.returncode, "ok", "")
 
 
 def make_sandbox(tmp_path, **kwargs):
@@ -89,6 +90,13 @@ def test_run_passes_the_wall_clock_budget_and_the_command_result_through(tmp_pat
     argv, timeout = runner.calls[-1]
     assert timeout == 7
     assert argv[-3:] == ["python3", "script.py"] or argv[-2:] == ["python3", "script.py"]
+
+
+def test_exit_137_is_a_typed_resource_kill(tmp_path):
+    runner = FakeRunner(returncode=137)
+    sandbox = make_sandbox(tmp_path, runner=runner)
+    with pytest.raises(workspace.SandboxResource):
+        sandbox.run("task-1", ["python3", "-c", "allocate"])
 
 
 def test_a_timeout_is_typed_and_kills_the_container(tmp_path):

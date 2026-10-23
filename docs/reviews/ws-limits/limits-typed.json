@@ -1,0 +1,22 @@
+{
+  "wall": {
+    "typed": true,
+    "cause": "timeout",
+    "detail": "the command exceeded 2 seconds"
+  },
+  "memory": {
+    "typed": true,
+    "cause": "resource",
+    "detail": "the task was killed by a resource limit, likely its memory ceiling"
+  },
+  "disk": {
+    "typed": true,
+    "cause": "quota",
+    "detail": "the task already uses 2097152 bytes"
+  },
+  "recovery": {
+    "returncode": 0,
+    "stdout": "recovered"
+  },
+  "leftover": []
+}

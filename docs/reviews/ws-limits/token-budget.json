@@ -1,0 +1,19 @@
+{
+  "job_id": "b266f088bb594052891f3e60fe483d18",
+  "state": "failed",
+  "outcome_reason": "token_budget",
+  "attempts": 1,
+  "steps": [
+    {
+      "step_id": "b0a2e606c3b245afb71ad6fd91ff7dd5",
+      "attempt": 1,
+      "name": "turn-1",
+      "state": "failed",
+      "failure": {
+        "kind": "token_budget",
+        "detail": "the model call failed",
+        "retryable": true
+      }
+    }
+  ]
+}
