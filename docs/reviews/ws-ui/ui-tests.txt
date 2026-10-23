@@ -1,0 +1,36 @@
+
+> oic-ui@0.0.0 test
+> vitest run
+
+
+ RUN  v4.1.11 /home/anthony/projects/oic-ui/app
+
+ ✓ tests/jobSentences.test.ts (37 tests) 61ms
+ ✓ tests/approvalSentences.test.ts (28 tests) 21ms
+ ✓ tests/AnswerView.test.tsx (33 tests) 127ms
+ ✓ tests/artifacts.test.tsx (1 test) 505ms
+     ✓ shows the stored path and size, then fetches the bytes with the session  498ms
+ ✓ tests/DocumentPanel.test.tsx (7 tests) 649ms
+     ✓ is a button a keyboard can reach, and it says what opening it does  449ms
+ ✓ tests/contract.test.ts (28 tests) 15ms
+stderr | tests/integration.test.ts
+
+[integration] SKIPPED: set OI_API_URL and OI_TOKEN to run against a deployment.
+  bash scripts/workbench.sh start
+  export OI_API_URL=http://127.0.0.1:18099
+  export OI_TOKEN=$(bash scripts/workbench.sh token | awk '$1=="token"{print $2}')
+
+
+ ↓ tests/integration.test.ts (12 tests | 12 skipped)
+ ✓ tests/review.test.tsx (16 tests) 1405ms
+     ✓ shows the recipient, the subject, the full body and the reason it was drafted  487ms
+ ✓ tests/live.test.tsx (12 tests) 2419ms
+     ✓ renders every recorded step, in sentences, before the connection exists  427ms
+     ✓ stops claiming progress within the window and says when it last reported  641ms
+     ✓ clears the stalled line when a real event arrives  694ms
+
+ Test Files  8 passed | 1 skipped (9)
+      Tests  162 passed | 12 skipped (174)
+   Start at  23:12:45
+   Duration  4.70s (transform 792ms, setup 1.20s, import 1.71s, tests 5.20s, environment 13.01s)
+
