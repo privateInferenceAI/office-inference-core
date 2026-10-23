@@ -1,0 +1,9 @@
+{
+  "bucket": "oi-core-audit-dev",
+  "account": "878451098165",
+  "ObjectLockEnabled": "Enabled",
+  "DefaultRetention": {
+    "Mode": "GOVERNANCE",
+    "Days": 90
+  }
+}
