@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import subprocess
 import sys
@@ -64,6 +65,8 @@ import documents as documents_module  # noqa: E402
 import workflow as workflow_module  # noqa: E402
 import approvals as approvals_module  # noqa: E402
 import definitions as definitions_module  # noqa: E402
+import agent_worker as agent_worker_module  # noqa: E402
+import agent_runtime as agent_runtime_module  # noqa: E402
 import redaction  # noqa: E402
 import ingest  # noqa: E402
 import retriever  # noqa: E402
@@ -341,10 +344,26 @@ async def lifespan(app: FastAPI):
     # appears halfway through the first job is a table that did not exist when the job was created.
     migrations = os.environ.get("OI_MIGRATIONS", "/app/db/migrations")
     STATE["jobs"] = jobs_module.open_store(migrations_dir=migrations)
+    # **The dispatcher starts only when there is something it can run.** A core-only deployment has no
+    # agentic definitions, so it must not hold the singleton lease or poll an empty queue. The definition
+    # list is the switch, not an environment flag that can disagree with the packs.
+    definition_ids = {entry["id"] for entry in (STATE.get("agent_definitions") or [])}
+    STATE["agent_worker"] = None
+    if definition_ids:
+        worker = agent_worker_module.AgentWorker(
+            STATE["jobs"], _run_agent_job, definition_ids,
+            concurrency=int(os.environ.get("OI_AGENT_CONCURRENCY", "1")),
+            poll_s=float(os.environ.get("OI_AGENT_POLL_S", "0.5")))
+        if worker.start():
+            STATE["agent_worker"] = worker
+        else:
+            print("agent dispatcher: singleton lease not held; this process is not a worker", flush=True)
     print(f"api ready: registry={registry_path} model_role_default={DEFAULT_MODEL_ROLE} "
           f"answers_with={model_for(os.environ.get('OI_DEFAULT_API_ROLE', 'viewer'))} "
           f"jobs={'durable' if getattr(STATE['jobs'], 'durable', False) else 'in-memory'}", flush=True)
     yield
+    if STATE.get("agent_worker") is not None:
+        STATE["agent_worker"].stop()
     STATE["jobs"].close()
     STATE["store"].close()
 
@@ -532,6 +551,77 @@ def _job_payload(job, store=None) -> dict:
     if position is not None:
         payload["queue_position"] = position
     return payload
+
+
+def _fail_agent_job(job, reason: str, detail: str) -> None:
+    """Terminate a job the runtime could not start, with the cause a client can read."""
+    fresh = STATE["jobs"].get(job.job_id)
+    if fresh is None or fresh.state in jobs_module.TERMINAL:
+        return
+    try:
+        jobs_module.transition(fresh, jobs_module.FAILED, reason=reason)
+        fresh.result = {"error": detail}
+        STATE["jobs"].put(fresh)
+        STATE["jobs"].append(job.job_id, "error", {"reason": reason, "detail": detail})
+    except Exception:  # noqa: BLE001 - the dispatcher's own guard will catch a failed job next
+        pass
+
+
+def _agent_verify(definition: dict):
+    """The definition's verification rule, expressed as a predicate over the model's answer.
+
+    **Verification is a rule, not a second model call.** The first rule is citations: an answer that cites
+    nothing has not shown its evidence. A definition with no rule gets no verification, which is an explicit
+    choice rather than a check that always passes.
+    """
+    rule = str(definition.get("verify") or "")
+    if rule == "citations_present":
+        def citations(answer: str, evidence: dict) -> str | None:
+            if not re.search(r"\[\d+\]", answer):
+                return "the answer cites no source"
+            return None
+        return citations
+    return None
+
+
+def _run_agent_job(job):
+    """One claimed agent job: resolve the session, build the real tools and gateway call, run the plan.
+
+    **This is the seam between the controller and the deployment.** `agent_runtime` knows the plan and the
+    step shape; this function is the only place that knows the gateway, the signing key, the tool box and the
+    session. The dispatcher calls it after the claim, so the job is already running.
+    """
+    definition = definitions_module.find(STATE.get("agent_definitions") or [], job.task)
+    if definition is None:
+        _fail_agent_job(job, "no_definition", f"no definition for task {job.task!r}")
+        return
+    try:
+        session = session_module.resolve_credential_hash(STATE["store"], job.credential_sha256)
+    except session_module.SessionError as exc:
+        _fail_agent_job(job, "no_session", str(exc))
+        return
+
+    model = model_for(definition.get("role") or session.role)
+
+    def tool_audit(event, actor, actor_role, outcome, payload, **extra):
+        audit(event, session.subject, session.role, outcome, payload, **extra)
+
+    toolbox = tool_loop.ToolBox(STATE["services"], session.permit(), session.role,
+                                audit=tool_audit, strict_audit=True)
+    budget = budget_module.Budget(total=max(60.0, float(job.time_budget_s)), reserve=0.0)
+    context = agent_runtime_module.RuntimeContext(
+        definition=definition,
+        call_model=lambda messages, tools: _tool_chat(session, model, messages, tools, budget),
+        toolbox=toolbox,
+        tools=tool_loop.active_tools(),
+        verify=_agent_verify(definition),
+        max_steps=int(definition.get("max_steps") or 12),
+        max_messages=int(definition.get("max_messages") or 24),
+    )
+    mint = lambda actor, role: assertion.mint_audit(STATE["key"], actor, role,
+                                                    deployment_id=DEPLOYMENT_ID)
+    agent_runtime_module.run(STATE["jobs"], job, context, mint=mint,
+                             deployment_id=DEPLOYMENT_ID, key_path=KEY_PATH)
 
 
 def _step_once(job, attempt):
