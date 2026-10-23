@@ -84,7 +84,8 @@ items:
     tier: [cloud, hosted]
     phase: C7
     verify: rotate one secret and confirm the service picks it up without a redeploy
-    status: open
+    status: verified
+    evidence: docs/reviews/sec-secret/README.md
   - id: SEC-TLS-001
     title: TLS terminates at the edge and nothing else listens publicly
     tier: [cloud, hosted]

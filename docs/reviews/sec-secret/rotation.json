@@ -1,0 +1,10 @@
+{
+  "secret_arn": "arn:aws:secretsmanager:us-east-1:426063972668:secret:oi-core/connector-token-GdnTVu",
+  "old_token_status": 401,
+  "new_token_status": 200,
+  "deploy": false,
+  "job_id": "4795a9935e1744a481410971e496e40b",
+  "final_state": "succeeded",
+  "audit_row": 1228,
+  "sent": true
+}
