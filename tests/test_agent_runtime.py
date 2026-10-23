@@ -233,6 +233,27 @@ def test_the_api_verification_rule_requires_a_citation(api_app):
     assert app_module._agent_verify({}) is None
 
 
+def test_dropping_older_context_is_reported_before_the_model_call():
+    """AG-CONTEXT-001: a model that answered without a dropped document must not look like one that never found it."""
+    ctx = context(FakeModel([{"content": "The answer is 42 [1].", "tool_calls": [], "error": None}]),
+                  FakeToolbox(), max_messages=4)
+    ctx.messages = [{"role": "system", "content": "system"},
+                    {"role": "user", "content": "task"}]
+    for index in range(6):
+        ctx.messages.append({"role": "assistant", "content": f"old {index}"})
+    reported = []
+    ctx.on_context_trim = reported.append
+    job, store = make_job(ctx)
+
+    result = agent_runtime.run(store, job, ctx)
+
+    assert result.job.state == jobs.SUCCEEDED
+    assert len(reported) == 1
+    assert reported[0]["dropped"] == 4
+    assert reported[0]["max_messages"] == 4
+    assert len(result.job.result["answer"]) > 0
+
+
 def test_a_long_turn_is_capped_in_the_live_prompt_not_in_the_record():
     ctx = context(FakeModel([]), FakeToolbox(), max_messages=2)
     plan = agent_runtime.AgentPlan(ctx)
