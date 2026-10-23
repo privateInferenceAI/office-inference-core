@@ -76,6 +76,7 @@ def environment():
         return
 
     original = (audit.DSN, audit.MIGRATIONS_DIR)
+    original_url = os.environ.get("DATABASE_URL")
     name = "oi_audit_chain_" + uuid.uuid4().hex[:10]
     audit.DSN = TEST_URL
     created = False
@@ -104,6 +105,10 @@ def environment():
                     cur.execute(f'drop database if exists "{name}"')
             except Exception as exc:  # noqa: BLE001 - report the leftover, do not fail the suite for it
                 print(f"warning: the scratch database {name} could not be dropped: {exc}", file=sys.stderr)
+        if original_url is None:
+            os.environ.pop("DATABASE_URL", None)
+        else:
+            os.environ["DATABASE_URL"] = original_url
 
 
 # --------------------------------------------------------------------------- the canonical form, no database

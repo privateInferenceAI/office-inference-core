@@ -62,12 +62,17 @@ def environment():
 
     The guard on TEST_URL is not decoration: this fixture is autouse, and without it a run with no test database
     would still clear the deployment's DATABASE_URL for every later test in the session.
+
+    **The previous value of DATABASE_URL is restored, not just overwritten.** That was the other half of the
+    same fault: a full-suite run left the scratch database's URL in the environment after this module, and the
+    retrieval tests that ran later tried to connect to a database that had already been dropped.
     """
     if not TEST_URL:
         yield
         return
 
     original = (audit.DSN, audit.MIGRATIONS_DIR)
+    original_url = os.environ.get("DATABASE_URL")
     name = "oi_audit_reattest_" + uuid.uuid4().hex[:10]
     audit.DSN = TEST_URL
     created = False
@@ -96,6 +101,12 @@ def environment():
                     cur.execute(f'drop database if exists "{name}"')
             except Exception as exc:  # noqa: BLE001 - report the leftover, do not fail the suite for it
                 print(f"warning: the scratch database {name} could not be dropped: {exc}", file=sys.stderr)
+        # **Put the environment back the way the rest of the suite expects it.** A fixture that changes a
+        # process-wide URL and does not restore it makes a later test fail for a reason in another file.
+        if original_url is None:
+            os.environ.pop("DATABASE_URL", None)
+        else:
+            os.environ["DATABASE_URL"] = original_url
 
 
 def seed_approval() -> tuple[int, str, dict]:

@@ -51,6 +51,7 @@ def store():
     key_file = Path("/tmp/oi-approval-test.key")
     if not key_file.exists() or len(key_file.read_text().strip()) < 32:
         key_file.write_text(secrets.token_hex(32))
+    original_url = os.environ.get("DATABASE_URL")
     os.environ["OI_ASSERTION_KEY"] = str(key_file)
     os.environ["DATABASE_URL"] = TEST_URL
     os.environ["OI_ASSERTION_NONCES"] = "/tmp/oi-approval-test-nonces.json"
@@ -58,6 +59,10 @@ def store():
     store.migrate(ROOT / "db" / "migrations")
     yield store
     store.close()
+    if original_url is None:
+        os.environ.pop("DATABASE_URL", None)
+    else:
+        os.environ["DATABASE_URL"] = original_url
 
 
 @pytest.fixture()

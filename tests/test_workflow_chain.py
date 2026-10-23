@@ -67,6 +67,7 @@ def store():
         import secrets
 
         key_file.write_text(secrets.token_hex(32))
+    original_url = os.environ.get("DATABASE_URL")
     os.environ["OI_ASSERTION_KEY"] = str(key_file)
     # **Forced, not defaulted.** `cmd_record` reads `DATABASE_URL` and opens its own connection, and the
     # equivalence test below writes one row through it. Leaving whatever the environment had would let this
@@ -77,6 +78,10 @@ def store():
     store.migrate(ROOT / "db" / "migrations")
     yield store
     store.close()
+    if original_url is None:
+        os.environ.pop("DATABASE_URL", None)
+    else:
+        os.environ["DATABASE_URL"] = original_url
 
 
 @pytest.fixture()
