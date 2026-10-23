@@ -124,7 +124,7 @@ the client tenant.
 | OPS-UPDATE-001 | A release signing source and rollback target |
 | OPS-SUPPORT-001 | Approval to remove SSH and cut the client box to SSM only |
 | OPS-COST-001 | Cost Explorer / Marketplace report access and a decision on the report shape |
-| QLT-GOLDEN-001 | A vertical and sixty client-approved golden questions |
+| QLT-GOLDEN-001 | A drafted 60-question medical set exists at docs/eval/medical-golden-questions.draft.yaml. Clinical review, loading and a hard-fail run are still required |
 | QLT-ACCEPT-001 | A fresh deployment to run acceptance against |
 | QLT-LOAD-001 | A concurrency target and latency budget |
 | BIZ-* | Counsel, insurance, contracts, on-call staff, subprocessors and pricing decisions |
