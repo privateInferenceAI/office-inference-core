@@ -2,17 +2,10 @@
 
 **Date:** 2026-10-23. **Status:** complete. Public API name: mcp.badj.ai.
 
-## Address
-
-- Elastic IP allocation: eipalloc-0da2730bda34519ff
-- Address: 34.225.62.245
-- Association: eipassoc-06186707a373a4e5b
-- Instance: i-0b6aa00095ae40e54, badj.ai account 426063972668
-- DNS: mcp.badj.ai A record at Porkbun
-
 ## Evidence
 
-- dig +short mcp.badj.ai A returns 34.225.62.245.
+- Elastic IP eipalloc-0da2730bda34519ff, address 34.225.62.245, associated with i-0b6aa00095ae40e54.
+- mcp.badj.ai A record at Porkbun resolves to 34.225.62.245.
 - scripts/check_client_endpoint.py https://mcp.badj.ai returns client-owned.
 - Let's Encrypt certificate obtained for mcp.badj.ai.
 - https://mcp.badj.ai/health returned status ok.
@@ -24,17 +17,13 @@
      "sent":true,"subject":"badj client endpoint","to":"awstest@officeinference.com","transport":"ses"},
      "tool":"send_email"}
 
-## Compatibility alias
+- API /ask after the switch returned a cited answer.
 
-mcp.officeinference.com still resolves and is still served by Caddy. It is an Office Inference domain, so the
-ownership check refuses it. It is not the API URL and is not used as ownership evidence.
+## Removed alias
 
-## Ownership
-
-badj.ai is a client-tenant domain and is not in the vendor suffix list. The tenant account remains badj.ai account
-426. The officeinference.com alias is vendor-owned.
+mcp.officeinference.com was deleted from DNS and removed from Caddy. It is not a public endpoint.
 
 ## Rollback
 
-Disassociate the Elastic IP, change Caddy and OI_MCP_URL back, restart Caddy and the API. The old 3.85.130.96
-address is released; the officeinference.com alias is available as a temporary fallback.
+Disassociate the Elastic IP, restore the previous Caddyfile and OI_MCP_URL, restart Caddy and the API. The old
+3.85.130.96 address is released; a rollback needs a separate DNS name if the endpoint is retired.
