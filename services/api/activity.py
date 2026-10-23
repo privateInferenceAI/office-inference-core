@@ -54,7 +54,8 @@ DEFAULT_LIMIT = 50
 # and five hundred of them is larger than a screen can use; a client that wants more pages.
 MAX_LIMIT_BYTES = 4 * 1024 * 1024
 
-EVENT_TYPES = ("model_call", "tool_call", "approval", "access", "config_change", "login")
+EVENT_TYPES = ("model_call", "tool_call", "approval", "access", "config_change", "login",
+               "context_trim", "resume")
 OUTCOMES = ("ok", "denied", "error", "pending")
 
 

@@ -418,7 +418,8 @@ class ActivityEvent(BaseModel):
 
     id: int
     at: str = Field(description="when it happened, ISO 8601")
-    type: Literal["model_call", "tool_call", "approval", "access", "config_change", "login"]
+    type: Literal["model_call", "tool_call", "approval", "access", "config_change", "login",
+                  "context_trim", "resume"]
     actor: str
     actor_role: Optional[str] = None
     data_class: str

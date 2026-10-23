@@ -361,6 +361,15 @@ async def lifespan(app: FastAPI):
             # does not hold up the API's startup or the dispatcher's first claim.
             recovered = STATE["jobs"].running_jobs(definition_ids)
             for stale in recovered:
+                # **A resume is a fact in the record, not only a new set of step rows.** The row names the
+                # job and the step the dead process left open, so an auditor can find the restart.
+                last_step = stale.steps[-1].name if stale.steps else ""
+                try:
+                    audit("resume", stale.subject, stale.actor_role, "ok",
+                          {"job_id": stale.job_id, "task": stale.task, "step": last_step,
+                           "reason": "process_restart"})
+                except Exception as exc:  # noqa: BLE001 - recovery is more important than this one row
+                    print(f"agent dispatcher: resume row failed for {stale.job_id}: {exc}", flush=True)
                 threading.Thread(target=_run_agent_job, args=(stale,),
                                  name=f"agent-recover-{stale.job_id}", daemon=True).start()
             if recovered:
