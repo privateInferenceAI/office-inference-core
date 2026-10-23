@@ -1562,9 +1562,13 @@ async def control_job(job_id: str, action: str, request: Request):
         elif action == "resume":
             jobs_module.resume(job, store)
             # A resumed multi-step job continues through the engine rather than the C4 one-step executor.
-            plan = workflow_module.plan_for(job.task)
-            if plan is not None:
-                _workflow_runner(store, plan).resume(job)
+            # An agent definition has no plan_for entry; its runtime reads the succeeded steps and continues.
+            if definitions_module.find(STATE.get("agent_definitions") or [], job.task) is not None:
+                _run_agent_job(job)
+            else:
+                plan = workflow_module.plan_for(job.task)
+                if plan is not None:
+                    _workflow_runner(store, plan).resume(job)
         elif action == "cancel":
             jobs_module.cancel(job, store)
         else:
