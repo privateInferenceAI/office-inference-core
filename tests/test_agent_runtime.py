@@ -73,6 +73,9 @@ def test_one_model_turn_is_one_engine_step_and_the_tool_runs_in_that_turn():
     assert result.job.result["answer"] == "The answer is 42 [1]."
     assert toolbox.calls == [("search_documents", '{"query": "answer"}')]
     assert len(model.calls) == 2
+    # The first call has to carry the job's input, not only the definition description. The live run found
+    # this missing: the model answered the description as if it were a greeting.
+    assert "What is the answer?" in model.calls[0][1]["content"]
     # The second turn sees the first turn's assistant/tool messages, rebuilt from the step rows.
     second = model.calls[1]
     assert any(message.get("role") == "tool" and "rows" in message.get("content", "")
@@ -125,6 +128,31 @@ def test_a_resumed_plan_reads_the_last_turn_outcome_from_the_record():
     plan = agent_runtime.AgentPlan(ctx, store=store)
     spec = plan.next_spec(job)
     assert spec.name == "finish"
+
+
+def test_each_model_call_is_reported_to_the_audit_hook():
+    model = FakeModel([
+        {"content": "The answer is 42 [1].", "tool_calls": [], "error": None},
+    ])
+    ctx = context(model, FakeToolbox())
+    reported = []
+    ctx.on_model_call = reported.append
+    job, store = make_job(ctx)
+    result = agent_runtime.run(store, job, ctx)
+    assert result.job.state == jobs.SUCCEEDED
+    assert len(reported) == 1 and reported[0]["content"].startswith("The answer")
+
+
+def test_a_model_audit_failure_fails_the_step_instead_of_losing_the_row():
+    model = FakeModel([{"content": "The answer is 42 [1].", "tool_calls": [], "error": None}])
+    ctx = context(model, FakeToolbox())
+    def broken(reply):
+        raise RuntimeError("the chain is full")
+    ctx.on_model_call = broken
+    job, store = make_job(ctx)
+    result = agent_runtime.run(store, job, ctx)
+    assert result.job.state == jobs.FAILED
+    assert result.job.outcome_reason == "model_audit"
 
 
 def test_the_api_verification_rule_requires_a_citation(api_app):

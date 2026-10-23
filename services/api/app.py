@@ -603,8 +603,24 @@ def _run_agent_job(job):
 
     model = model_for(definition.get("role") or session.role)
 
+    def step_name() -> str:
+        fresh = STATE["jobs"].get(job.job_id)
+        return fresh.steps[-1].name if fresh is not None and fresh.steps else ""
+
     def tool_audit(event, actor, actor_role, outcome, payload, **extra):
-        audit(event, session.subject, session.role, outcome, payload, **extra)
+        # **The row has to name the job and the step, not only the tool.** A tool row that cannot be tied
+        # back to the task is a row a client cannot use to answer "what did this job read?". The engine's
+        # own row names the step; this one is the tool's own record and needs the same address.
+        addressed = dict(payload or {}, job_id=job.job_id, task=job.task, step=step_name())
+        audit(event, session.subject, session.role, outcome, addressed, **extra)
+
+    def model_audit(reply):
+        # One row per model completion the runtime makes, not one per job. The answer path's per-answer row
+        # is not this row and does not replace it.
+        addressed = {"job_id": job.job_id, "task": job.task, "step": step_name(),
+                     "model": model, "content_chars": len((reply.get("content") or "")),
+                     "attribution": reply.get("attribution") or {}}
+        audit("model_call", session.subject, session.role, "ok", addressed, model=model)
 
     toolbox = tool_loop.ToolBox(STATE["services"], session.permit(), session.role,
                                 audit=tool_audit, strict_audit=True)
@@ -615,6 +631,7 @@ def _run_agent_job(job):
         toolbox=toolbox,
         tools=tool_loop.active_tools(),
         verify=_agent_verify(definition),
+        on_model_call=model_audit,
         max_steps=int(definition.get("max_steps") or 12),
         max_messages=int(definition.get("max_messages") or 24),
     )

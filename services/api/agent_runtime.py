@@ -25,8 +25,10 @@ import workflow
 DEFAULT_MAX_STEPS = 12
 DEFAULT_MAX_MESSAGES = 24
 SYSTEM_PROMPT = """You are a careful assistant working on a task. Use the tools when you need evidence.
-When you have enough, answer in prose and cite the evidence you used. If you cannot answer, say so plainly and
-say what is missing rather than guessing. Do not claim to have used a source you did not read."""
+When you have enough, answer in prose. Every claim taken from a tool result must carry the number the tool
+printed in square brackets, for example [1] or [2]. A file name alone is not a citation. If you cannot answer,
+say so plainly and say what is missing rather than guessing. Do not claim to have used a source you did not
+read."""
 
 
 @dataclass
@@ -38,6 +40,7 @@ class RuntimeContext:
     toolbox: object
     tools: list
     verify: Optional[Callable[[str, dict], Optional[str]]] = None
+    on_model_call: Optional[Callable[[dict], None]] = None
     max_steps: int = DEFAULT_MAX_STEPS
     max_messages: int = DEFAULT_MAX_MESSAGES
     messages: list = field(default_factory=list)
@@ -105,12 +108,21 @@ class AgentPlan:
     def _turn(self, run):
         context = self.context
         context.turns += 1
-        messages = self._messages(run.prior)
+        messages = self._messages(run.prior, run.input)
         reply = context.call_model(messages, context.tools)
         if reply.get("error"):
             return workflow.StepResult(
                 ok=False, failure_kind=str(reply["error"]), failure_detail="the model call failed",
                 retryable=True)
+        if context.on_model_call is not None:
+            try:
+                context.on_model_call(reply)
+            except Exception as exc:  # noqa: BLE001
+                # **A model call with no row is the same gap as a tool call with no row.** The runtime does
+                # not continue without its record; the answer path's tolerance is deliberately not inherited.
+                return workflow.StepResult(ok=False, failure_kind="model_audit",
+                                           failure_detail=f"the model audit failed: {type(exc).__name__}",
+                                           retryable=False)
         content = (reply.get("content") or "").strip()
         calls = reply.get("tool_calls") or []
         delta = []
@@ -157,7 +169,7 @@ class AgentPlan:
 
     def _finish(self, run):
         context = self.context
-        messages = self._messages(run.prior)
+        messages = self._messages(run.prior, run.input)
         assistant = next((message for message in reversed(messages)
                           if message.get("role") == "assistant" and message.get("content")), None)
         answer = (assistant or {}).get("content", "").strip()
@@ -175,10 +187,11 @@ class AgentPlan:
 
     # ---- messages
 
-    def _messages(self, prior: dict) -> list:
+    def _messages(self, prior: dict, task_input: str = "") -> list:
         messages = list(self.context.messages) or [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": self.context.definition.get("description") or ""},
+            {"role": "user", "content": (self.context.definition.get("description") or "")
+             + (f"\n\nTask:\n{task_input}" if task_input else "")},
         ]
         for name, output in prior.items():
             if not name.startswith("turn-") or not isinstance(output, dict):
