@@ -153,7 +153,9 @@
               "approval",
               "access",
               "config_change",
-              "login"
+              "login",
+              "context_trim",
+              "resume"
             ],
             "title": "Type",
             "type": "string"
@@ -1892,6 +1894,131 @@
           }
         },
         "summary": "Decide Job"
+      }
+    },
+    "/jobs/{job_id}/artifacts": {
+      "get": {
+        "description": "List a job's stored artifacts. The bytes are behind the download route; this is the catalogue.",
+        "operationId": "list_artifacts_jobs__job_id__artifacts_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "the artifacts the job stored, from its event log"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "no session"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "no such job"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Artifacts"
+      }
+    },
+    "/jobs/{job_id}/artifacts/{sha256}": {
+      "get": {
+        "description": "Download one artifact the job stored.\n\n**The API proxies the bytes.** The artifact store is on the workspace host, and the client app never gets the\nworkspace token or a direct path. The same session rule as the job applies: a reader who cannot see the job\ncannot fetch its files.",
+        "operationId": "download_artifact_jobs__job_id__artifacts__sha256__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sha256",
+            "required": true,
+            "schema": {
+              "title": "Sha256",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "the stored artifact bytes, as an attachment"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "no session"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "no such job, artifact or workspace"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Artifact"
       }
     },
     "/jobs/{job_id}/events": {
