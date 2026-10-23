@@ -3264,6 +3264,13 @@ $ oi --profile tools run --rm session refusals --session <token>
 A session with nothing against it exits non-zero and says so, because a clean session and a broken query look
 the same in an empty listing.
 
+**Two kinds of `access`/`denied` row, told apart by `actor_role`.** A forged-role refusal carries the role
+the request claimed, which the session never held. A retrieval boundary denial carries the role the session did
+hold, and its payload names `stage=retrieval`, `reason=boundary`, the permitted roots, the number of restricted
+passages that matched and the disclosure text. The second row exists because a denied search still answers from
+the permitted passages, so the model-call row records an ordinary success. Without the access row the record
+would show no boundary was crossed.
+
 | Column | What it holds for a refusal |
 |---|---|
 | `actor_role` | the role the request **claimed**, because that is the value you search by |
@@ -4294,6 +4301,7 @@ displayed a fixed sentence here would be decoration, and decoration is what this
 |---|---|
 | `citations` | a chip per source, with the document, its access label and the page. **The chip opens the document** at the page the answer used |
 | `redactions` | *"Something was removed before you saw it: 1 × SSN"* — only when a value was replaced |
+| `denied`, `disclosure` | *"Documents that answer this more directly exist and are not available to the … role"* shown under the answer when the client's denial mode permits it. The same denial is written to the record as an `access` row with `stage=retrieval` and `reason=boundary` |
 | `unsupported` | the sentences no retrieved passage backs, listed rather than dropped |
 | `notice` | what happened to the routing, when there is something to tell |
 | `kind: degraded` | the model did not answer, with the retrieved passages shown instead |

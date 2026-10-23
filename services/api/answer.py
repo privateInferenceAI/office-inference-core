@@ -217,6 +217,21 @@ def prepare(*, token: str, question: str, body: dict, ctx: Context, resolve, mod
                             "roots": sorted(permit.roots)}, "no_source")
 
     data_class = data_class_for(body, ctx.manifest)
+    # **The boundary the person crossed, in the record.** A denied search still answers from what the role
+    # may read, so the model-call row below is an ordinary successful call and says nothing about the
+    # passages it could not see. The disclosure is the client's policy on what the person is told; this row
+    # is not policy, and it carries the role, the count and the request id so a refusal can be found without
+    # the HTTP response. Only `denied` writes it: an empty result is the `no_source` refusal above, and a
+    # store bug that returns restricted text is a different fault.
+    if result.denied:
+        audit("access", session.subject, session.role, "denied",
+              {"stage": "retrieval", "reason": "boundary",
+               "roots": sorted(permit.roots),
+               "restricted_matched": result.restricted_matched,
+               "restricted_best_score": result.restricted_best_score,
+               "disclosure": (result.disclosure.message if result.disclosure else ""),
+               "endpoint": endpoint},
+              data_class=data_class, request_id=request_id)
     # **The boundary, in one place, so a job can consult it before the work exists.** `user_wants_stronger`
     # is a property of the request rather than of the boundary check, so it is applied here where the whole
     # request is known; the job path asks the same question with the task alone.

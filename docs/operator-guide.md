@@ -1885,12 +1885,13 @@ Five fields matter more than the rest, and two of them exist to stop a lie:
 
 **Checkpoint.** A 200 with six citations, `lane: frontier`, `escalated: false`, and an empty `notice`.
 
-## 13h.4. The three ways a request can be refused, and they are different
+## 13h.4. The ways a request can be refused, and they are different
 
 | What you did | What comes back | Why it is not the same as the others |
 |---|---|---|
 | No session, or a made-up token | 403 `refused_authority_claim` or a session error | there is nobody to answer |
 | Put `"role": "executive"` in the body | 403 `refused_authority_claim`, **and a row in the chain** | a role comes from an authenticated session and never from a request field. The refusal is recorded before the error returns, which is what makes it a control rather than a message |
+| Ask a question whose answer sits behind a permission the session lacks | 200, an answer from the passages it may read, `denied: true`, a disclosure, **and an `access`/`denied` row in the chain** | this is not an error. The answer is real and incomplete, and the row is the proof the boundary held. The app shows the disclosure when the policy allows it |
 | Ask something no permitted passage covers | 200, an answer that says so, `denied: true` | this is not a refusal. The system answered honestly about what it could see |
 
 Check the second one in the record rather than in the response, because that is the part that matters:

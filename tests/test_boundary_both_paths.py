@@ -193,3 +193,64 @@ def test_the_boundary_refusal_runs_rather_than_being_present():
     # And the row it wrote names the same id the refusal carries, which is what ties the two together.
     assert refused.value.payload.get("request_id") == "the-id"
     assert rows and rows[0][1].get("request_id") == "the-id", "the refusal's row does not carry the id"
+
+
+def test_a_retrieval_denial_is_written_to_the_chain(monkeypatch):
+    """**The boundary the demo has to show.** A denied search still answers from the passages the role may
+    read, so the model-call row is an ordinary success. Before this, the denial lived only in the HTTP
+    response: the person saw an answer that happened to omit the figure, and the record said nothing. The row
+    has to carry the reason, the role, the restricted count and the request id, because those are what turn
+    "the system says no" into something an auditor can find."""
+    import sys
+
+    for name in ("api", "retrieval", "ingestion", "session", "gateway", "egress"):
+        path = str(ROOT / "services" / name)
+        if path not in sys.path:
+            sys.path.insert(0, path)
+    import answer as answer_module  # noqa: PLC0415
+    import retriever as retriever_module  # noqa: PLC0415
+
+    class Session:
+        subject = "probe@example.com"
+        role = "viewer"
+        session_id = "an-identifier"
+
+        def permit(self):
+            return type("Permit", (), {"role": "viewer", "roots": {"company"}})()
+
+    result = retriever_module.Result(
+        question="q", role="viewer",
+        passages=[retriever_module.Passage(doc_id="company/x.md", acl="company", text="a permitted passage",
+                                           page_start=1, page_end=1, kind="prose", chunk_id="c1",
+                                           score=0.7)],
+        denied=True, withheld=0, restricted_matched=3, restricted_best_score=0.91,
+        disclosure=retriever_module.Disclosure(mode="counted", count=3,
+                                               message="At least 3 passage(s) that answer this more directly "
+                                                       "exist and are not available to the 'viewer' role."))
+    monkeypatch.setattr(answer_module.retriever, "search", lambda *args, **kwargs: result)
+
+    rows = []
+
+    def audit(*args, **kwargs):
+        rows.append((args, kwargs))
+
+    manifest = {"access": {"egress": {"frontier_classes": ["public", "internal"]}},
+                "models": {"analyst": {"local": "", "frontier": "bedrock/x"}},
+                "lanes": {"frontier": {"enabled": True, "provider": "bedrock"}}}
+    prepared = answer_module.prepare(
+        token="a-token", question="What is the chief executive's salary?", body={"data_class": "public"},
+        ctx=answer_module.Context(services=object(), manifest=manifest, passages=6),
+        resolve=lambda token: Session(), model_for=lambda role: "analyst",
+        role_lane=lambda role: "frontier", frontier_model_for=lambda role: "bedrock/x",
+        local_lane_available=lambda: False, audit=audit, endpoint="/ask", request_id="the-request")
+    assert prepared[0] is not None
+
+    access_rows = [row for row in rows if row[0] and row[0][0] == "access"]
+    assert access_rows, "the retrieval denial wrote no access row"
+    args, kwargs = access_rows[-1]
+    assert args[3] == "denied"
+    payload = args[4]
+    assert payload["reason"] == "boundary"
+    assert payload["restricted_matched"] == 3
+    assert "3 passage" in payload["disclosure"]
+    assert kwargs.get("request_id") == "the-request"

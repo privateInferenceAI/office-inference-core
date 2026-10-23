@@ -2056,6 +2056,8 @@ async def _tool_frames(session, permit, model: str, question: str, result, reque
                           "citations": [{"index": n + 1, "doc_id": p.doc_id, "acl": p.acl,
                                          "page_start": p.page_start, "page_end": p.page_end}
                                         for n, p in enumerate(result.passages)],
+                          "denied": bool(result.denied),
+                          "disclosure": (result.disclosure.message if result.disclosure else ""),
                           "tools": True})
 
     events: "queue.Queue[dict]" = queue.Queue()
@@ -2197,7 +2199,9 @@ async def _frames(session, permit, model: str, question: str, result, requested_
     yield frame("start", {"model": model, "role": session.role, "roots": sorted(permit.roots),
                           "citations": [{"index": n + 1, "doc_id": p.doc_id, "acl": p.acl,
                                          "page_start": p.page_start, "page_end": p.page_end}
-                                        for n, p in enumerate(result.passages)]})
+                                        for n, p in enumerate(result.passages)],
+                          "denied": bool(result.denied),
+                          "disclosure": (result.disclosure.message if result.disclosure else "")})
 
     # **The single-shot stream cannot take an answer back, so the gate runs before the model is called.** A
     # question about the company's own attribute that no retrieved passage states is refused here, deterministically,
