@@ -1,0 +1,14 @@
+791|tool_call|-|-|-|turn-1
+792|model_call|-|-|-|turn-1
+793|tool_call|-|-|-|turn-1
+794|tool_call|-|-|-|approval-1
+795|approval|-|-|-|-
+796|tool_call|-|-|-|approval-1
+797|tool_call|-|-|-|act-1
+798|tool_call|send_email|probe@example.com|true|act-1
+799|tool_call|-|-|-|act-1
+800|tool_call|-|-|-|turn-2
+801|model_call|-|-|-|turn-2
+802|tool_call|-|-|-|turn-2
+803|tool_call|-|-|-|finish
+804|tool_call|-|-|-|finish

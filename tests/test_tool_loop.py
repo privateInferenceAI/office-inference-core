@@ -811,3 +811,6 @@ def test_the_delegate_tool_is_offered_only_to_a_definition_with_child_tools():
     assert "web_fetch" not in with_workspace
     with_web = {tool["function"]["name"] for tool in tool_loop.agent_tools({"web": True})}
     assert "web_fetch" in with_web
+    assert "send_email" not in with_web
+    with_connector = {tool["function"]["name"] for tool in tool_loop.agent_tools({"connector": True})}
+    assert "send_email" in with_connector

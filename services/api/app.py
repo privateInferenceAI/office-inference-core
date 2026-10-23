@@ -67,6 +67,7 @@ import approvals as approvals_module  # noqa: E402
 import definitions as definitions_module  # noqa: E402
 import agent_worker as agent_worker_module  # noqa: E402
 import agent_runtime as agent_runtime_module  # noqa: E402
+import connector_client as connector_client_module  # noqa: E402
 import egress_client as egress_client_module  # noqa: E402
 import workspace_client as workspace_client_module  # noqa: E402
 import redaction  # noqa: E402
@@ -696,6 +697,16 @@ def _run_agent_job_locked(job):
             return
         egress = egress_client_module.EgressClient(egress_url, egress_token)
 
+    connector = None
+    if definition.get("connector"):
+        connector_url = (os.environ.get("OI_CONNECTOR_URL") or "").strip()
+        connector_token = (os.environ.get("OI_CONNECTOR_TOKEN") or "").strip()
+        if not connector_url or not connector_token:
+            _fail_agent_job(job, "connector_not_configured",
+                            "the definition needs a connector but OI_CONNECTOR_URL or OI_CONNECTOR_TOKEN is unset")
+            return
+        connector = connector_client_module.ConnectorClient(connector_url, connector_token)
+
     # **The child's tools are a subset of the parent's.** A definition that lets a helper read something the
     # parent cannot is a permission hole, so the declaration is checked before any work starts.
     parent_tools = {str(name) for name in (definition.get("tools") or [])}
@@ -866,6 +877,28 @@ def _run_agent_job_locked(job):
             raise tool_loop.ToolAuditError(f"the web fetch audit failed: {type(exc).__name__}") from exc
         return json.dumps(result, sort_keys=True)
 
+    def send_email_tool(name: str, arguments: str) -> str:
+        try:
+            parsed = json.loads(arguments or "{}")
+        except (ValueError, TypeError):
+            return json.dumps({"error": "send_email arguments must be a JSON object"})
+        to = str((parsed or {}).get("to") or "")
+        subject = str((parsed or {}).get("subject") or "")
+        body = str((parsed or {}).get("body") or "")
+        try:
+            result = connector.send_email(to, subject, body)
+        except connector_client_module.ConnectorClientError as exc:
+            result = {"sent": False, "error": str(exc), "to": to}
+        # **The one action with a real-world recipient.** The row names the recipient and the outcome, and it is
+        # written after the gate has been decided and the connector has answered.
+        try:
+            audit("tool_call", session.subject, session.role, "ok",
+                  {"job_id": job.job_id, "task": job.task, "step": step_name(), "tool": "send_email",
+                   "to": to, "sent": bool(result.get("sent"))}, tool="send_email")
+        except Exception as exc:  # noqa: BLE001
+            raise tool_loop.ToolAuditError(f"the connector audit failed: {type(exc).__name__}") from exc
+        return json.dumps(result, sort_keys=True)
+
     toolbox = tool_loop.ToolBox(STATE["services"], session.permit(), session.role,
                                 audit=tool_audit, strict_audit=True)
     budget = budget_module.Budget(total=max(60.0, float(job.time_budget_s)), reserve=0.0)
@@ -880,6 +913,7 @@ def _run_agent_job_locked(job):
         run_child=run_child if child_specs else None,
         workspace_tool=workspace_tool if workspace is not None else None,
         web_fetch=web_fetch_tool if egress is not None else None,
+        act_tool=send_email_tool if connector is not None else None,
         max_steps=int(definition.get("max_steps") or 12),
         max_messages=int(definition.get("max_messages") or 24),
     )

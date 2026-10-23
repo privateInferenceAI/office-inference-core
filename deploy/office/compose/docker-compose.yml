@@ -511,6 +511,9 @@ services:
       # **The one outbound path, when the deployment has one.** Empty means a web definition fails typed.
       OI_EGRESS_URL: ${OI_EGRESS_URL:-}
       OI_EGRESS_TOKEN: ${OI_EGRESS_TOKEN:-}
+      # **The connector, when the deployment has one.** The SMTP credential stays in the connector service.
+      OI_CONNECTOR_URL: ${OI_CONNECTOR_URL:-}
+      OI_CONNECTOR_TOKEN: ${OI_CONNECTOR_TOKEN:-}
     # The workspace service is on the host in the first build. The API reaches it through the Docker bridge
     # gateway; a deployment with a separate workspace host sets OI_WORKSPACE_URL to that host instead.
     extra_hosts:

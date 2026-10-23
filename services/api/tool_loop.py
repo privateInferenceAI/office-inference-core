@@ -193,6 +193,27 @@ WEB_FETCH_TOOL = {
     },
 }
 
+# **The first real business action.** It is offered only to a connector definition and it is declared
+# irreversible, so the runtime stops at the gate before this tool can run.
+SEND_EMAIL_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "send_email",
+        "description": (
+            "Send one email through the deployment's SMTP connector. The call is held for human approval "
+            "before it runs. Use it only for the recipient the task names."),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "to": {"type": "string", "description": "recipient address"},
+                "subject": {"type": "string", "description": "one-line subject"},
+                "body": {"type": "string", "description": "plain-text body"},
+            },
+            "required": ["to", "subject", "body"],
+        },
+    },
+}
+
 _PROMPT_HEAD = (
     "You answer questions about a client's own documents.\n"
     "You have tools. search_documents searches the documents; read_passages opens a document around a "
@@ -1142,6 +1163,8 @@ def agent_tools(definition: dict) -> list:
         tools.extend(WORKSPACE_TOOLS)
     if definition.get("web"):
         tools.append(WEB_FETCH_TOOL)
+    if definition.get("connector"):
+        tools.append(SEND_EMAIL_TOOL)
     return tools
 
 

@@ -1,0 +1,30 @@
+{
+  "job_id": "68f5a0fa70134821b30c40292afe676c",
+  "at_gate": "awaiting_approval",
+  "steps_at_gate": [
+    "turn-1",
+    "turn-2",
+    "turn-3",
+    "turn-4",
+    "approval-4"
+  ],
+  "final_state": "succeeded",
+  "outcome_reason": null,
+  "steps": [
+    "turn-1",
+    "turn-2",
+    "turn-3",
+    "turn-4",
+    "approval-4",
+    "act-4",
+    "turn-5",
+    "finish"
+  ],
+  "artifacts": [
+    {
+      "path": "page.txt",
+      "bytes": 14,
+      "sha256": "162b81548a8db0ab220f7137405fb003019c266883d4181869662ad7eafdbc4d"
+    }
+  ]
+}
