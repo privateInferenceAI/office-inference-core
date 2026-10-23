@@ -3572,8 +3572,8 @@ has not been re-exercised since the tenant was stopped; the code is deployed on 
 
 
 The open C8 rows are alarms, rollback, SSM-only support, cost reporting, golden questions, fresh-deployment
-acceptance and business rows. Backup/RTO, the 20-concurrent load test, the signed release/rollback and the
-medical golden set are verified. The load test improved from p95 80.8 seconds to a worst p95 of 7.8 seconds
+acceptance and business rows. Backup/RTO, the 20-concurrent load test, the signed release/rollback, the
+medical golden set and the scratch-deployment acceptance are verified. The load test improved from p95 80.8 seconds to a worst p95 of 7.8 seconds
 across five runs. The ingest cycle lock closes RET-INGEST-002. The BIZ rows need
 counsel, insurance, contracts, on-call staff, subprocessors and pricing. docs/current-deployment.md lists each
 with its blocker. Do not tell a client that paging exists; it does not.

@@ -1,0 +1,25 @@
+ Container oi-core-session-run-92bb62f1d9ac Creating 
+ Container oi-core-session-run-92bb62f1d9ac Created 
+THE PERMISSION MODEL THIS DEPLOYMENT IS ENFORCING
+  registry   /app/rendered/access.json
+  declared   yes
+  roles   1: viewer=[]
+  groups  2: exec=['company', 'executive'], staff=['company']
+  users   2: probe-exec@officeinference.com[exec], probe-staff@officeinference.com[staff]
+
+ok   ACCESS    as 'viewer' over roots ['company'], the executive question returned acls=['company']
+          if it were absent: the executive passage would be in the answer and a model would read it
+ok   SCOPED    200 chunk(s) are labelled executive; the inside session reached 5 document(s), 1 of them beyond the other session's reach, and the outside answer overlapped those by 0; arms run: dense,lexical
+          if it were absent: the boundary would be an empty index rather than a filter, or the inside session would be unable to reach content the outside one is kept from
+skip FORGED    every declared role stays inside the groups that grant it, so no role
+          exists for this subject to claim beyond its grant. That is the rule working,
+          and it is why there is nothing here to refuse.
+ok   REFUSED   a request supplying role='executive' while holding 'viewer' was refused
+          if it were absent: a role would be honoured because a caller typed it, which is the whole of SEC-ACL-002
+ok   RECORDED  the chain holds 1 refusal(s) for this session: 2026-10-23 14:57:35.753205+00:00 access/denied actor_role='executive' payload.session_role='viewer'
+          if it were absent: the 403 would go out and the record would be missing, leaving an access decision with no evidence of what was attempted
+
+PASSED: 4 right(s) held against the live stack
+
+Read the refusal out of the chain yourself rather than trusting this line:
+  oi --profile tools run --rm audit list --type access | head
