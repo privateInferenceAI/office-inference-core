@@ -16,6 +16,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import secrets
 import sys
 import threading
@@ -33,13 +34,17 @@ class WorkspaceService:
     """The request handler, with no HTTP server in it so the API can be tested directly."""
 
     def __init__(self, sandbox, token: str, *, max_body: int = MAX_BODY,
-                 max_output: int = MAX_OUTPUT):
+                 max_output: int = MAX_OUTPUT, artifact_root: str | Path | None = None,
+                 max_artifact_bytes: int = 2 * 1024 * 1024):
         if not token:
             raise ValueError("the workspace service refuses to start without a token")
         self.sandbox = sandbox
         self.token = token
         self.max_body = max_body
         self.max_output = max_output
+        self.artifact_root = Path(artifact_root or (Path(sandbox.root).parent / "artifacts")).resolve()
+        self.artifact_root.mkdir(parents=True, exist_ok=True)
+        self.max_artifact_bytes = max_artifact_bytes
 
     def handle(self, method: str, path: str, headers: dict, body: bytes):
         try:
@@ -69,6 +74,10 @@ class WorkspaceService:
                 return self._list(payload)
             if path == "/cleanup":
                 return self._cleanup(payload)
+            if path == "/artifacts":
+                return self._artifacts(payload)
+            if path == "/artifact":
+                return self._artifact(payload)
             return 404, {"error": "not found"}
         except workspace.SandboxTimeout as exc:
             return 504, {"error": "timeout", "detail": str(exc)}
@@ -177,6 +186,32 @@ class WorkspaceService:
         task_id = self._task(payload)
         self.sandbox.cleanup(task_id)
         return 200, {"cleaned": True, "task_id": task_id}
+
+    def _artifacts(self, payload: dict):
+        """Copy the task's files to the artifact store before the task directory is removed."""
+        task_id = self._task(payload)
+        destination = self.artifact_root / task_id
+        records = self.sandbox.collect_artifacts(task_id, destination)
+        return 200, {"task_id": task_id, "artifacts": records}
+
+    def _artifact(self, payload: dict):
+        """Read one stored artifact by its content hash."""
+        task_id = str(payload.get("task_id") or "")
+        self.sandbox.task_dir(task_id)  # validate without creating a directory after cleanup
+        sha = str(payload.get("sha256") or "")
+        if not re.fullmatch(r"[0-9a-f]{64}", sha):
+            return 400, {"error": "sha256 must be 64 lowercase hex characters"}
+        target = (self.artifact_root / task_id / sha).resolve()
+        base = (self.artifact_root / task_id).resolve()
+        if base not in target.parents:
+            return 400, {"error": "artifact escaped its task directory"}
+        if not target.is_file() or target.is_symlink():
+            return 404, {"error": "no such artifact"}
+        data = target.read_bytes()
+        if len(data) > self.max_artifact_bytes:
+            return 413, {"error": "artifact too large for one download"}
+        return 200, {"task_id": task_id, "sha256": sha, "bytes": len(data),
+                     "content": base64.b64encode(data).decode()}
 
 
 class _Handler(BaseHTTPRequestHandler):

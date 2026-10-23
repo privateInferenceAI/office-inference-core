@@ -56,3 +56,10 @@ class WorkspaceClient:
 
     def cleanup(self, task_id: str) -> dict:
         return self._call("/cleanup", {"task_id": task_id})
+
+    def artifacts(self, task_id: str) -> dict:
+        return self._call("/artifacts", {"task_id": task_id})
+
+    def artifact(self, task_id: str, sha256: str) -> bytes:
+        result = self._call("/artifact", {"task_id": task_id, "sha256": sha256})
+        return base64.b64decode(result.get("content") or "")

@@ -36,7 +36,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sse_starlette.sse import EventSourceResponse
 
 # This service's own directory, because the code is imported as modules rather than run as a package. Without
@@ -846,6 +846,23 @@ def _run_agent_job_locked(job):
         if workspace is not None:
             final = STATE["jobs"].get(job.job_id)
             if final is not None and final.state in jobs_module.TERMINAL:
+                # **Artifacts leave the sandbox before the sandbox leaves.** The task directory is removed in
+                # cleanup, so the content-addressed copy is taken first and named on the job and the chain.
+                try:
+                    records = workspace.artifacts(job.job_id).get("artifacts") or []
+                except Exception:  # noqa: BLE001 - cleanup still has to happen
+                    records = []
+                if records:
+                    # **The list lives in the job's own event log.** The jobs table has no result column, and a
+                    # list a client cannot read back is not an artifact record. The row is append-only like the
+                    # rest of the job's history.
+                    STATE["jobs"].append(job.job_id, "artifacts", {"records": records})
+                    try:
+                        audit("tool_call", job.subject, job.actor_role, "ok",
+                              {"job_id": job.job_id, "task": job.task, "tool": "workspace_artifacts",
+                               "count": len(records)}, tool="workspace_artifacts")
+                    except Exception:  # noqa: BLE001 - the artifact copy is the product output
+                        pass
                 try:
                     workspace.cleanup(job.job_id)
                 except Exception:  # noqa: BLE001 - the record already says the job ended
@@ -1249,6 +1266,57 @@ async def get_job(job_id: str, request: Request):
     if job is None:
         return JSONResponse({"error": "no such job", "kind": "not_found"}, status_code=404)
     return JSONResponse(_job_payload(job), status_code=200)
+
+
+@app.get("/jobs/{job_id}/artifacts", responses={
+    200: {"description": "the artifacts the job stored, from its event log"},
+    401: {"model": contract.Refusal, "description": "no session"},
+    404: {"model": contract.Refusal, "description": "no such job"},
+})
+async def list_artifacts(job_id: str, request: Request):
+    """List a job's stored artifacts. The bytes are behind the download route; this is the catalogue."""
+    session, refusal = _session_for(request)
+    if refusal:
+        return refusal
+    job = _find_job(job_id, session)
+    if job is None:
+        return JSONResponse({"error": "no such job", "kind": "not_found"}, status_code=404)
+    records = []
+    for event in STATE["jobs"].events_since(job_id, since=0):
+        if event["event"] == "artifacts":
+            records.extend((event.get("data") or {}).get("records") or [])
+    return JSONResponse({"job_id": job_id, "artifacts": records}, status_code=200)
+
+
+@app.get("/jobs/{job_id}/artifacts/{sha256}", responses={
+    200: {"description": "the stored artifact bytes, as an attachment"},
+    401: {"model": contract.Refusal, "description": "no session"},
+    404: {"model": contract.Refusal, "description": "no such job, artifact or workspace"},
+})
+async def download_artifact(job_id: str, sha256: str, request: Request):
+    """Download one artifact the job stored.
+
+    **The API proxies the bytes.** The artifact store is on the workspace host, and the client app never gets the
+    workspace token or a direct path. The same session rule as the job applies: a reader who cannot see the job
+    cannot fetch its files.
+    """
+    session, refusal = _session_for(request)
+    if refusal:
+        return refusal
+    job = _find_job(job_id, session)
+    if job is None:
+        return JSONResponse({"error": "no such job", "kind": "not_found"}, status_code=404)
+    url = (os.environ.get("OI_WORKSPACE_URL") or "").strip()
+    token = (os.environ.get("OI_WORKSPACE_TOKEN") or "").strip()
+    if not url or not token:
+        return JSONResponse({"error": "this deployment has no workspace store", "kind": "not_found"},
+                            status_code=404)
+    try:
+        data = workspace_client_module.WorkspaceClient(url, token).artifact(job_id, sha256)
+    except workspace_client_module.WorkspaceClientError:
+        return JSONResponse({"error": "no such artifact", "kind": "not_found"}, status_code=404)
+    return Response(content=data, media_type="application/octet-stream",
+                    headers={"Content-Disposition": f'attachment; filename="{sha256}"'})
 
 
 @app.get("/jobs/{job_id}/events", responses={

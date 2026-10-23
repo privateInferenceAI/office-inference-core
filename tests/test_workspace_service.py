@@ -101,3 +101,25 @@ def test_a_body_over_the_cap_is_refused_before_it_is_parsed(tmp_path):
 def test_an_unknown_route_is_a_404(tmp_path):
     service, _, _ = make_service(tmp_path)
     assert call(service, "/delete_everything", {"task_id": "t1"})[0] == 404
+
+
+def test_artifacts_are_collected_before_cleanup_and_downloadable_afterward(tmp_path):
+    service, sandbox, _ = make_service(tmp_path)
+    content = base64.b64encode(b"artifact body").decode()
+    assert call(service, "/write", {"task_id": "t1", "path": "out/report.txt", "content": content})[0] == 200
+    status, collected = call(service, "/artifacts", {"task_id": "t1"})
+    assert status == 200
+    record = collected["artifacts"][0]
+    assert record["path"] == "out/report.txt" and record["bytes"] == 13
+
+    assert call(service, "/cleanup", {"task_id": "t1"})[0] == 200
+    assert not sandbox.task_dir("t1").exists()
+
+    status, artifact = call(service, "/artifact", {"task_id": "t1", "sha256": record["sha256"]})
+    assert status == 200
+    assert base64.b64decode(artifact["content"]) == b"artifact body"
+
+
+def test_an_artifact_path_must_be_a_content_hash(tmp_path):
+    service, _, _ = make_service(tmp_path)
+    assert call(service, "/artifact", {"task_id": "t1", "sha256": "../../etc/passwd"})[0] == 400
