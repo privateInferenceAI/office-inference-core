@@ -1,9 +1,9 @@
 # MCP gateway and connector in the client tenant
 
-**Date:** 2026-10-23. **Status:** MCP-OWNED-001 was verified on the client-domain endpoint. The current public
-name is `mcp.officeinference.com`, an Office Inference domain, so `scripts/check_client_endpoint.py` refuses the
-current name. The tenant account is still badj.ai; the ownership claim now applies to the account and to the
-earlier client-domain endpoint, not to the Office alias.
+**Date:** 2026-10-23. **Status:** MCP-OWNED-001 is verified. The public API name is `mcp.badj.ai`, which
+resolves to the tenant Elastic IP and passes `scripts/check_client_endpoint.py` as client-owned. The earlier
+`mcp.officeinference.com` name is still served as a convenience alias, but it is a vendor domain and is not used
+as the API URL or as ownership evidence.
 
 ## What moved
 
@@ -31,7 +31,7 @@ The connector was later switched to SES and sent through the verified awstest@of
 
 ## Endpoint check
 
-scripts/check_client_endpoint.py http://3.85.130.96:8080 reports client-owned. The same check refuses https://mcp.officeinference.com.
+At the time, scripts/check_client_endpoint.py http://3.85.130.96:8080 reported client-owned; the same check refused https://mcp.officeinference.com. After the DNS cutover, https://mcp.badj.ai reports client-owned; see endpoint-check-badj.json.
 
 ## What this proves and what it does not
 

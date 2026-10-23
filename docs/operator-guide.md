@@ -101,7 +101,7 @@ Tenant services, which are not on the build box:
 | caddy | TLS termination and the only public listener | The gateway is unreachable from the API |
 | mailpit | SMTP capture fallback | The connector falls back to capture instead of SES |
 
-The tenant address is https://mcp.officeinference.com. Its security group allows 22, 80 and 443; the gateway is on
+The tenant address is https://mcp.badj.ai. Its security group allows 22, 80 and 443; the gateway is on
 loopback 8080. Do not expose 8080.
 
 Tools, which run only when called:
@@ -3498,8 +3498,8 @@ operator to re-run. A false accusation costs an afternoon; a false acquittal cos
 
 ## 17a. Check the tenant
 
-    curl -sS https://mcp.officeinference.com/health
-    curl -sS -I http://mcp.officeinference.com/health
+    curl -sS https://mcp.badj.ai/health
+    curl -sS -I http://mcp.badj.ai/health
 
 The first line returns ok. The second returns 308 and a Location header for HTTPS. Ports 3000, 4000, 5432, 8025,
 8080, 8088, 8090 and 8094 are closed externally; 22, 80 and 443 are open.

@@ -20,7 +20,7 @@ The full suite is **1355 passed, 1 skipped** as of the last run on 2026-10-23.
 | Piece | Account | Host | Exposure |
 |---|---|---|---|
 | API, Postgres, LiteLLM, ingestion, retrieval, audit tool | 878451098165, Office Inference | Build box `i-02aba2feef08f8e7b`, 52.204.204.133 | No public port. The API is reached from inside the box or its containers |
-| MCP gateway | 426063972668, badj.ai client tenant | `i-0b6aa00095ae40e54`, `34.225.62.245` | HTTPS only through Caddy at `https://mcp.officeinference.com`. Gateway listens on loopback, 8080 |
+| MCP gateway | 426063972668, badj.ai client tenant | `i-0b6aa00095ae40e54`, `34.225.62.245` | HTTPS only through Caddy at `https://mcp.badj.ai`. Gateway listens on loopback, 8080 |
 | Email connector | 426063972668 | Same tenant, systemd `client-connector`, port 8094 | Loopback only |
 | Email delivery | 426063972668 | Same tenant, SES identity awstest@officeinference.com | Sends through SES; the account is still in the sandbox |
 | Mailpit fallback | 426063972668 | Same tenant, port 1025 | Capture only; retained as a fallback |
@@ -29,7 +29,7 @@ The full suite is **1355 passed, 1 skipped** as of the last run on 2026-10-23.
 | Audit bucket | 878451098165 | S3 `oi-core-audit-dev` | Object Lock, GOVERNANCE, 90 days |
 
 The gateway and connector are in the client tenant. The API calls the gateway at
-`OI_MCP_URL=https://mcp.officeinference.com`. The tenant has no database route back to account 878: the API
+`OI_MCP_URL=https://mcp.badj.ai`. The tenant has no database route back to account 878: the API
 mints a short-lived HMAC session assertion and the gateway verifies it. The gateway still refuses a
 caller-supplied role.
 
@@ -44,7 +44,7 @@ claim the docs should make. Refusals that run on the build box are still recorde
 ## Network and TLS
 
 - Security group ingress on the tenant: 22, 80, 443.
-- Caddy obtains a Let's Encrypt certificate for `mcp.officeinference.com`, which resolves to the tenant address.
+- Caddy obtains a Let's Encrypt certificate for `mcp.badj.ai`, which resolves to the tenant address.
 - Plain HTTP returns 308 to HTTPS.
 - Ports 3000, 4000, 5432, 8025, 8080, 8088, 8090 and 8094 are closed externally.
 
@@ -66,7 +66,7 @@ Editing any of those three columns fails verification. The export now carries pr
 
 ```bash
 # Tenant health, from anywhere that can reach the public name
-curl -s https://mcp.officeinference.com/health
+curl -s https://mcp.badj.ai/health
 
 # API health, from the build box
 ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@52.204.204.133 'docker exec api python -c "import urllib.request; print(urllib.request.urlopen(\"http://127.0.0.1:8088/health\").read().decode())"'
@@ -94,10 +94,10 @@ the client tenant.
 1. **Mail is delivered through SES only to the verified address.** awstest@officeinference.com is verified in
    the badj account; the account is in the SES sandbox. Arbitrary client recipients need SES production access.
    Mailpit is a fallback capture service.
-2. **The Elastic IP 34.225.62.245 is associated.** The public name is mcp.officeinference.com, resolved through
-   Namecheap. That name is on Office Inference's domain, so scripts/check_client_endpoint.py refuses it as a vendor
-   domain. The tenant account is still badj.ai; the ownership evidence applies to the earlier client-domain
-   endpoint, not to this Office alias.
+2. **The Elastic IP 34.225.62.245 is associated.** The public API name is mcp.badj.ai, an A record at Porkbun.
+   Caddy has a certificate for it and scripts/check_client_endpoint.py reports it as client-owned. The earlier
+   mcp.officeinference.com name is still served by Caddy as a convenience alias, but it is a vendor domain and is
+   not the API URL or the ownership evidence.
 3. **The DeepSeek key comes from Secrets Manager.** The secret is deepseek-oi-key in account 878. The old key was
    replaced and the LiteLLM environment restarted. Revoke the old key at the provider when you are satisfied with
    the comparison.
