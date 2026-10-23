@@ -340,10 +340,30 @@ class AgentPlan:
             if message.get("role") == "user":
                 head.append(message)
                 break
-        keep = max(0, limit - len(head))
-        tail = messages[-keep:] if keep else []
-        drop_count = max(0, len(messages) - len(head) - len(tail))
-        dropped = messages[len(head):len(head) + drop_count]
+        # **Drop whole message groups, never half of one.** A tool result without the assistant call that
+        # requested it is a malformed prompt: the provider rejects it, and the model that caused the trim then
+        # loses the run. A group starts at an assistant message and carries the tool results that follow it.
+        body = messages[len(head):]
+        groups: list[list[dict]] = []
+        current: list[dict] = []
+        for message in body:
+            if message.get("role") == "assistant" and current:
+                groups.append(current)
+                current = []
+            current.append(message)
+        if current:
+            groups.append(current)
+        kept: list[list[dict]] = []
+        total = len(head)
+        for group in reversed(groups):
+            if total + len(group) > limit and kept:
+                break
+            kept.insert(0, group)
+            total += len(group)
+        kept_count = sum(len(group) for group in kept)
+        drop_count = len(body) - kept_count
+        dropped = body[:drop_count]
+        tail = [message for group in kept for message in group]
         return head + tail, {
             "reason": "message_cap",
             "dropped": len(dropped),
