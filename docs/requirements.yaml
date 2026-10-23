@@ -77,7 +77,8 @@ items:
     tier: [cloud, hosted]
     phase: C7
     verify: assume the role and attempt to read an object in the documents bucket; access denied
-    status: open
+    status: verified
+    evidence: docs/reviews/sec-least/README.md
   - id: SEC-SECRET-001
     title: Secrets live in Secrets Manager with a rotation procedure
     tier: [cloud, hosted]

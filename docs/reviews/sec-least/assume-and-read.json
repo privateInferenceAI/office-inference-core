@@ -1,0 +1,8 @@
+{
+  "role": "arn:aws:iam::426063972668:role/office-inference-support",
+  "trusted_principal": "arn:aws:iam::878451098165:role/DSHAgentRole",
+  "assumed": true,
+  "object": "s3://disk-ingest-documents-878451098165/ingest/C/BadjAI/documents/ApplicationInfo.pdf",
+  "result": "AccessDenied",
+  "reason": "no identity-based policy allows s3:GetObject"
+}
