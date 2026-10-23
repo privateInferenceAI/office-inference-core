@@ -293,6 +293,16 @@ def check(manifest: dict, packs: set[str], path: Path) -> list[str]:
     if not used:
         problems.append("packs must list at least one sellable pack")
 
+    # **One runtime, and the manifest can say so only by declaring one.** A second runtime means a second
+    # policy, a second audit path and two places for a bug to hide; the field is here so a copied manifest
+    # that adds one is refused rather than deployed.
+    agentic = manifest.get("agentic") or {}
+    runtime_count = agentic.get("runtime_count", 1)
+    if runtime_count != 1:
+        problems.append(
+            f"agentic.runtime_count is {runtime_count!r}; this product runs exactly one agent runtime per "
+            f"deployment. A second runtime is a second policy and a second audit path")
+
     # The catalog's `requires` edges were documentation until now. Resolve them, because a pack list
     # that never reaches core renders a stack with no gateway, no database and no audit sink, and the
     # manifests here rely on core being implied rather than listed.

@@ -18,6 +18,12 @@
       "additionalProperties": false,
       "description": "The tasks this deployment can be asked to do. **This is what the client app's Do screen is built from**, and it lives in the manifest rather than in the API's source because the app is a function of the deployment: a client with no agentic pack has no tasks, and therefore no Do screen, which is the honest outcome rather than a menu of things that cannot run. A deployment that declares none behaves exactly as it did before this block existed.",
       "properties": {
+        "runtime_count": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1,
+          "description": "How many agent runtimes this deployment declares. **The product runs exactly one.** A second runtime means a second policy, a second audit path and two places for a bug to hide, so the validator refuses any value other than one; the field exists so a copied manifest cannot quietly add one."
+        },
         "tasks": {
           "type": "array",
           "default": [],

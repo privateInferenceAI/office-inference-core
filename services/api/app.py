@@ -63,6 +63,7 @@ import honesty  # noqa: E402
 import documents as documents_module  # noqa: E402
 import workflow as workflow_module  # noqa: E402
 import approvals as approvals_module  # noqa: E402
+import definitions as definitions_module  # noqa: E402
 import redaction  # noqa: E402
 import ingest  # noqa: E402
 import retriever  # noqa: E402
@@ -325,6 +326,11 @@ async def lifespan(app: FastAPI):
     manifest_path = os.environ.get("OI_MANIFEST", "/app/rendered/manifest.json")
     mp = Path(manifest_path)
     STATE["manifest"] = json.loads(mp.read_text()) if mp.exists() else {}
+    # **The agent definitions are the pack's, not the manifest's.** The renderer resolves them into the same
+    # rendered directory; a deployment with no agentic pack reads an empty list and refuses the task by name.
+    definitions_path = os.environ.get("OI_AGENT_DEFINITIONS",
+                                      "/app/rendered/agent_definitions.json")
+    STATE["agent_definitions"] = definitions_module.load(definitions_path)
     STATE["services"] = ingest.Services()
     STATE["store"] = session_module.open_store()
     # What the shared answer pipeline needs, gathered once. `answer.py` takes this rather than reading the
@@ -509,19 +515,9 @@ def _tasks_this_deployment_declares() -> list[dict]:
     rather than a menu of things that cannot run.
     """
     declared = (((STATE.get("manifest") or {}).get("agentic") or {}).get("tasks")) or []
-    out = []
-    for entry in declared:
-        if isinstance(entry, str):
-            # A bare list of ids is accepted, because that is what the routing trigger used to hold. It
-            # carries no label, and a client falls back to the id rather than inventing one.
-            out.append({"id": entry, "label": entry, "description": "", "tier": "",
-                        "touches": [], "needs_approval": False})
-        elif isinstance(entry, dict) and entry.get("id"):
-            out.append({"id": entry["id"], "label": entry.get("label") or entry["id"],
-                        "description": entry.get("description", ""), "tier": entry.get("tier", ""),
-                        "touches": entry.get("touches") or [],
-                        "needs_approval": bool(entry.get("needs_approval"))})
-    return out
+    # **The pack's definitions are tasks the runtime can actually run.** They are merged here rather than in
+    # the app, so the Do screen, the refusal list and the job route all read one answer.
+    return definitions_module.merge_tasks(declared, STATE.get("agent_definitions") or [])
 
 
 def _step_once(job, attempt):
@@ -790,6 +786,11 @@ async def create_job(request: Request):
                             status_code=400)
 
     declared = {t["id"] for t in _tasks_this_deployment_declares()}
+    definition = definitions_module.find(STATE.get("agent_definitions") or [], task)
+    if definition and definition.get("mode", "task") != "task":
+        return JSONResponse(
+            {"error": f"'{task}' is a {definition.get('mode')!r} definition; /jobs only starts task definitions.",
+             "kind": "unsupported_definition_mode"}, status_code=400)
     if task not in declared:
         # **The refusal names the task and lists what is declared.** A caller is not left guessing, and the
         # row exists so an operator can see what was asked for.
@@ -823,7 +824,13 @@ async def create_job(request: Request):
     # there is one and the C4 defaults stand when there is not. A six-step invoice run under a five-attempt
     # budget fails on its sixth step for a reason that has nothing to do with the work.
     plan = workflow_module.plan_for(task)
-    budgets = workflow_module.budgets_for(task) if plan else {}
+    if definition:
+        # **A definition supplies the job's budget.** Every loop iteration is one engine step, so max_steps is
+        # the attempt budget; max_seconds is the wall-clock budget. The runtime enforces the token and child
+        # limits inside those steps.
+        budgets = definitions_module.budgets(definition)
+    else:
+        budgets = workflow_module.budgets_for(task) if plan else {}
     job = jobs_module.new_job(
         deployment_id=DEPLOYMENT_ID, subject=session.subject, actor_role=session.role,
         roots=session.permit().roots,
@@ -832,6 +839,12 @@ async def create_job(request: Request):
         credential_sha256=session.credential_sha256, task=task, input=text, data_class=data_class,
         **budgets)
     store = STATE["jobs"]
+    if definition:
+        # **A definition job is queued, not run inline.** The dispatcher claims it; the C4 single-step path
+        # above is not the runtime. Until the dispatcher is started this row stays queued, which is honest:
+        # the deployment has the definition and not the loop to run it.
+        store.put(job)
+        return JSONResponse((store.get(job.job_id) or job).to_dict(include_result=True), status_code=200)
     _run_or_resume(job, store)
     # **Re-read before answering, because both executors advance the job in the store and not in this
     # object.** The C4 path mutates the instance it is given; the engine reloads the row before each step, so

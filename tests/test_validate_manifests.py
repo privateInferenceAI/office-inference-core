@@ -88,6 +88,14 @@ def test_an_unknown_pack_is_refused(packs):
     assert mentions(found, "unknown pack ids"), found
 
 
+def test_a_second_agent_runtime_is_refused(packs):
+    manifest = load(STANDARD)
+    manifest["agentic"] = {"runtime_count": 2}
+    found = problems(manifest, packs)
+    assert mentions(found, "runtime_count"), found
+    assert mentions(found, "exactly one"), found
+
+
 def test_a_required_model_role_missing_is_refused(packs):
     manifest = load(STANDARD)
     del manifest["models"]["reader"]
