@@ -43,7 +43,7 @@ C1 to C7 are built and verified. C8 is partly built.
 The system runs from a manifest: Postgres, LiteLLM, ingestion, retrieval, the assistant API, the client app,
 workflows and approvals, a durable agent runtime and the MCP gateway. The MCP gateway and the email connector
 run in a separate client tenant behind TLS. The audit record is hash-chained at version 4, exported, anchored
-and stored under Object Lock. The full suite is 1353 passed, 1 skipped.
+and stored under Object Lock. The full suite is 1355 passed, 1 skipped.
 
 The open rows are alarms, backup and restore, RTO, rollback, SSM-only support, cost reporting, golden
 questions, fresh-deployment acceptance, load testing, and the business rows: contracts, insurance, legal
