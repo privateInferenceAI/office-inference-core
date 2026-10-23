@@ -1235,7 +1235,8 @@ items:
     tier: [cloud, office]
     phase: C8
     verify: installing a previous release after a deliberate failure restores service
-    status: open
+    status: verified
+    evidence: docs/reviews/release-signing/README.md
   - id: OPS-CVE-001
     title: Image and dependency vulnerability scanning runs on a schedule
     tier: [cloud, office, hosted]

@@ -10,7 +10,7 @@ describe how to build and operate the system; where they disagree with this page
 | C1 to C5 | Built and verified |
 | C6 | Built and verified. Agent runtime, full MCP gateway, client-tenant gateway |
 | C7 | Built and verified. Authenticated sessions, least-privilege support role, secret rotation, TLS, Object Lock |
-| C8 | Partly built. Audit hashes, image scanning, drift reporting, the incident tabletop, backup and the restore/RTO drill, and the 20-concurrent load test are verified. Alarming, rollback, SSM-only support, cost reporting, golden questions, acceptance on a fresh deployment and the business rows are open |
+| C8 | Partly built. Audit hashes, image scanning, drift reporting, the incident tabletop, backup and the restore/RTO drill, the 20-concurrent load test, and the signed release with a tested rollback are verified. Five alarms are built and awaiting the email subscription confirmation. SSM-only support, cost reporting, golden questions, acceptance on a fresh deployment and the business rows are open |
 | C9 | Not started |
 
 The full suite is **1355 passed, 1 skipped** as of the last run on 2026-10-23.
@@ -110,9 +110,9 @@ the client tenant.
 6. **The 20-concurrent load test now passes.** The fix moves the blocking retrieval, model loop and audit write
    into the thread pool. Five repeated runs improved from p95 80.8 seconds to a worst p95 of 7.8 seconds, with
    zero failures and a 9.8-second maximum. The before and after are in docs/reviews/ops-load/.
-7. **The tenant gateway does not write refusals to the Office chain.** It has no audit database route. Build-box
-   refusals are recorded; tenant-gateway refusals return to the API only. This is a recorded gap, not a claim
-   to paper over.
+7. **Tenant refusals are now recorded by the API.** The tenant gateway still has no database route, but when it
+   returns a 403 the API writes a denied tool_call row with the refusal reason. The live tenant path has not been
+   re-exercised since the tenant was stopped; the code and chain behavior are on the dev box.
 8. **An unrelated Midnight indexer, step0-hello-indexer, runs on the tenant on 8088.** It is not part of this
    deployment.
 
@@ -120,8 +120,7 @@ the client tenant.
 
 | Row | What it needs |
 |---|---|
-| OPS-ALARM-001 | A notification destination and a confirmed subscription |
-| OPS-UPDATE-001 | A release signing source and rollback target |
+| OPS-ALARM-001 | Five alarms and the SNS topic are built; the anthony@officeinference.com subscription is awaiting confirmation |
 | OPS-SUPPORT-001 | Approval to remove SSH and cut the client box to SSM only |
 | OPS-COST-001 | Cost Explorer / Marketplace report access and a decision on the report shape |
 | QLT-GOLDEN-001 | A drafted 60-question medical set exists at docs/eval/medical-golden-questions.draft.yaml. Clinical review, loading and a hard-fail run are still required |
