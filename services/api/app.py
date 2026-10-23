@@ -465,6 +465,14 @@ async def ask(request: Request):
             frontier_model_for=frontier_model_for, local_lane_available=local_lane_available,
             audit=audit, endpoint="/ask", request_id=request_id)
     except answer_module.Refused as refused:
+        if refused.status == 401:
+            # **The no-session attempt is an event too.** The prepared pipeline refuses before a row exists,
+            # so the one case a security review looks for was the one with no record.
+            try:
+                audit("access", "unauthenticated", "unknown", "denied",
+                      {"stage": "session", "endpoint": "/ask", "refusal": "no_session"})
+            except Exception as exc:  # noqa: BLE001
+                print(f"no-session audit failed: {exc!r}", flush=True)
         return JSONResponse({**refused.payload, "request_id": request_id}, status_code=refused.status)
 
     request_budget = budget_module.Budget.for_lane(decision.lane, started=asked_at)
@@ -544,6 +552,13 @@ def _session_for(request: Request, body: dict | None = None):
     try:
         return _resolve(token), None
     except session_module.SessionError as exc:
+        # **The refusal is an event.** A request with no live session is exactly the one an operator needs to
+        # see, and it used to be the one route that returned without writing anything.
+        try:
+            audit("access", "unauthenticated", "unknown", "denied",
+                  {"stage": "session", "endpoint": request.url.path, "refusal": "no_session"})
+        except Exception as audit_exc:  # noqa: BLE001 - the refusal still has to reach the caller
+            print(f"session refusal audit failed: {audit_exc!r}", flush=True)
         return None, JSONResponse({"error": str(exc), "kind": "no_session"}, status_code=401)
 
 

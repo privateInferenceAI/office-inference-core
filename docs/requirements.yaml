@@ -44,7 +44,8 @@ items:
     tier: [cloud, hosted]
     phase: C7
     verify: with no token and with a forged role header, the API refuses; both attempts appear in audit_events
-    status: open
+    status: verified
+    evidence: docs/reviews/sec-auth/README.md
   - id: SEC-AUTH-002
     title: The audit CLI refuses a hand-typed actor outside an explicit development mode
     tier: [cloud, office]

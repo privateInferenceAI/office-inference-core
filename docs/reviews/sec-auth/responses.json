@@ -1,0 +1,10 @@
+{
+  "no_token": {
+    "status": 401,
+    "kind": "no_session"
+  },
+  "forged_role": {
+    "status": 403,
+    "kind": "refused_authority_claim"
+  }
+}
