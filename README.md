@@ -16,6 +16,9 @@ turned on) applied to a **profile** (where things run).
 
 | Path | What lives there |
 |---|---|
+| docs/current-deployment.md | **Start here for the current state.** Phase status, topology, endpoints, audit chain version, open rows and blockers |
+| docs/runbook.md | The build log and the phase C6 to C8 commands |
+| docs/operator-guide.md | The walkthrough: the order to run the stages, and what the checkpoints mean |
 | `docs/manual.md` | **Start here to run it.** The operating manual: how the system works, every command with an example, and how to add a role |
 | `docs/handoff.md` | **Start here to continue it.** Where the build stands, how we work, the next phase, and the traps |
 | `docs/architecture.md` | The layered model: system versus substrate, profiles, and lanes |
@@ -35,6 +38,16 @@ turned on) applied to a **profile** (where things run).
 
 ## Status
 
-Scaffolding. No service is implemented yet. The inventory, the manifest schema, and the pack
-catalog are the contracts the rest gets built against, so they are written first and are worth
-arguing about before any code lands.
+C1 to C7 are built and verified. C8 is partly built.
+
+The system runs from a manifest: Postgres, LiteLLM, ingestion, retrieval, the assistant API, the client app,
+workflows and approvals, a durable agent runtime and the MCP gateway. The MCP gateway and the email connector
+run in a separate client tenant behind TLS. The audit record is hash-chained at version 4, exported, anchored
+and stored under Object Lock. The full suite is 1353 passed, 1 skipped.
+
+The open rows are alarms, backup and restore, RTO, rollback, SSM-only support, cost reporting, golden
+questions, fresh-deployment acceptance, load testing, and the business rows: contracts, insurance, legal
+review, on-call, subprocessors and pricing. Each blocker is listed in docs/current-deployment.md.
+
+One caveat before you trust an email: the client-tenant connector points at Mailpit, which captures mail
+instead of delivering it. A production connector uses the client's SMTP or SES identity.

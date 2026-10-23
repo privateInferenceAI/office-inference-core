@@ -16,8 +16,10 @@ Everything else is already written down, and this file points at it rather than 
 
 ## Where it stands
 
-**C0 and C1 are complete. C2 is next and has not started.** The register reads 14 verified, 46 open,
-6 waived.
+**C0 to C7 are complete. C8 is partly built.** The register no longer matches this 2026-10-22 sentence; the
+current state is docs/current-deployment.md. C6 and C7 are verified, and C8 has four verified rows: audit chain
+version 4, scheduled image scanning, deployment-state drift reporting, and the incident tabletop. The remaining
+C8 rows and the BIZ rows are open. This file is historical.
 
 What exists and runs in the client's account: one EC2 instance, Postgres and the LiteLLM gateway,
 four roles on Bedrock, per-role keys with hard ceilings and model permissions, an append-only

@@ -9,6 +9,27 @@ task-scoped sandbox, approved web egress, artifacts and connectors. The design i
 `docs/design/cloud-workspace.md`; the phase is `WS`. The office build is a separate product with its own
 boundary, and its "nothing leaves the building" rule does not apply to the cloud build.
 
+## Current implementation, 2026-10-23
+
+The architecture above is the target shape. The current deployment implements part of it:
+
+- Phases C1 to C7 are built and verified. C8 is partly built. The phase table is in docs/current-deployment.md.
+- The build box in Office Inference account 878 runs the API, Postgres, LiteLLM, ingestion, retrieval and the
+  audit tool. It publishes no port.
+- The MCP gateway and the email connector run in badj.ai client tenant account 426, behind Caddy at
+  https://3-85-130-96.sslip.io. The gateway listens on loopback. The API signs a short-lived session assertion
+  because the tenant has no database route back to account 878.
+- TLS is real at the tenant edge. It is still absent from the build box, which is reached from inside or over
+  SSH.
+- Secrets: the connector token is in Secrets Manager and rotates without a redeploy. The rendered env still
+  holds other generated secrets and is copied by hand, not in Secrets Manager.
+- Identity is still a development session token. A people-facing sign-in remains the unresolved item in the
+  list below.
+- Audit chain version 4 covers approval, prompt and completion digests. The audit bucket has Object Lock in
+  GOVERNANCE mode for 90 days.
+- Backup, restore, alarms, rollback, cost reporting, golden questions, fresh-deployment acceptance and load
+  testing are not built.
+
 ## System versus substrate
 
 **The system** is identical everywhere: container images, service definitions, application code,

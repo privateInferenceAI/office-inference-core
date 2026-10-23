@@ -11,6 +11,11 @@ The rule from the friend's build applies here: **a phase is not finished until i
 step passes.** Detail is written for the phase we are on, plus the next one. Later phases stay as
 outlines so they do not go stale.
 
+**Current status, 2026-10-23.** This page is the original eleven-phase plan. The actual sequence now uses the
+C-phases in docs/build-plan.md and docs/current-deployment.md. C0 to C7 are built and verified. C8 is partly
+built. WS (Cloud Workspace) was completed inside C6. The phase list below is kept as the design history; read
+the current-deployment page for the state.
+
 ## The phases
 
 | # | Phase | Ends with | Needs a GPU |

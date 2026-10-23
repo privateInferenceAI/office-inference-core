@@ -6,6 +6,10 @@ this project and is comfortable in a terminal.
 Everything here has been run. Where a command's output matters, the manual shows what you should see.
 Where something is not built yet, it says so rather than leaving you to discover it.
 
+**Current state.** The authoritative snapshot for this deployment, including the client-tenant gateway, TLS,
+the audit chain version and the open rows, is `docs/current-deployment.md`. Where this manual and that page
+disagree, the current-deployment page is newer.
+
 **About the examples.** Every command output in this manual is real, taken from a development deployment.
 They were captured at different moments in that deployment's life — most of C1's in the days around
 2026-10-11, the C2 pages re-captured on 2026-10-13 after a review found five of them quoting a state
@@ -14,13 +18,14 @@ agree between sections, and one section may show a state that a later purge remo
 wording, not the arithmetic. On your deployment the numbers will be your own, which is the point of a hash
 chain.
 
-**Status when this was written:** phases C1 to C5 complete. The system runs, answers through a
-gateway, records what it did, ships that record off the machine, and can prove the record was not
-altered. It reads a client's documents: ingestion, hybrid retrieval, citation verification, access
-control, egress redaction and retention are sections 13a to 13f, and the assistant API and its routing are
-13g and 13h. It has a client application (13i), an approval gate whose record is honest about the identity
-it cannot verify (13j), two screens built on that record (13k), an email intake connector (13l), and a
-workflow engine that writes the state change and its chain row in one transaction (13m).
+**Status when this was written:** phases C1 to C7 complete, C8 partly built. The system runs, answers through
+a gateway, records what it did, ships that record off the machine, and can prove the record was not altered.
+It reads a client's documents (13a to 13f), has an assistant API and routing (13g and 13h), a client
+application (13i), approvals and workflows (13j to 13m), a durable agent runtime and MCP gateway in the
+client's tenant (26), TLS and signed session assertions (26), and an audit chain whose version 4 covers the
+approval, prompt and completion digests. Section 26 is the current topology and operation. Alarms, backup and
+restore, rollback, SSM-only support, cost reporting, the golden question set, fresh-deployment acceptance, load
+testing and the business rows are still open.
 
 Sections 1 to 25 are ordered by when they were written rather than by what a reader needs first, so
 the appendix pages (13a to 13m) sit between section 20 and the troubleshooting part rather than beside the
@@ -34,6 +39,7 @@ audit section they are numbered next to. The contents below lists them where the
 1. What this is
 2. The problem it solves
 3. What runs where
+3a. Current topology, added 2026-10-23
 4. The two paths: a request, and its record
 5. The manifest is the contract
 6. What exists today, and what does not
@@ -90,7 +96,8 @@ of 13 because they are operations like the rest of it.
 22. Every command in one table
 23. What lives where on the machine
 24. Glossary
-25. Not built yet
+25. Phase status
+26. Current deployment: the client tenant, TLS and the C6 to C8 additions
 
 ---
 
@@ -184,6 +191,31 @@ The machine itself listens on one port, 22, for SSH, and the security group allo
 address. That is the whole inbound surface: no gateway port, no database port, no dashboard. The state
 to aim for is that the only way in is SSH or a Systems Manager session, and the only thing listening is
 the door you came through.
+
+## 3a. Current topology, added 2026-10-23
+
+The table in section 3 describes the build box. The current deployment has a second side, and it is the side
+that answers the C6 and C7 rows.
+
+| Piece | Where | Exposure |
+|---|---|---|
+| API, Postgres, LiteLLM, ingestion, retrieval, audit tool | Office Inference account 878, build box | No public port |
+| MCP gateway | badj.ai client tenant account 426, instance i-0b6aa00095ae40e54 | Loopback 8080, reached through Caddy |
+| Email connector | Same tenant, systemd client-connector | Loopback 8094 |
+| Mailpit | Same tenant | Loopback 1025 |
+| Caddy | Same tenant | Public 80 and 443 |
+
+The public name is https://3-85-130-96.sslip.io. Caddy holds a Let's Encrypt certificate for it and redirects
+HTTP to HTTPS. The tenant security group allows 22, 80 and 443; ports 3000, 4000, 5432, 8025, 8080, 8088,
+8090 and 8094 are closed externally.
+
+The API calls the tenant gateway through OI_MCP_URL. The tenant has no route back to the Office database, so
+the API mints a short-lived HMAC session assertion and the gateway verifies it. The gateway still refuses any
+request that supplies its own role.
+
+The connector's SMTP target is Mailpit. It captures mail; it does not deliver it. A production connector must
+use the client's SMTP server or a verified SES identity. See docs/current-deployment.md for the current
+snapshot and the open rows.
 
 ## 4. The two paths: a request, and its record
 
@@ -288,7 +320,14 @@ so rather than implying otherwise.
 | An append-only audit record with a hash chain | Alarms that page someone, and a restore drill. C8 |
 | Daily export, hourly anchor, shipped to a bucket with Object Lock | Loading the sixty golden questions that judge answer quality. C8 |
 | Evidence that survives a deleted-tail check | Voice, agents, workflows. C5, C6 |
-| CI that tests, validates manifests, and catches deprecated models | |
+| CI that tests, validates manifests, and catches deprecated models |
+
+**Update, 2026-10-23.** The right-hand column is historical. C4, C5, C6 and C7 are now built: the client
+application, the approval gate and workflows, the durable agent runtime and MCP gateway, and TLS with signed
+session assertions. C8 is partly built: audit hash coverage, scheduled image scanning, deployment-state drift
+reporting and an incident tabletop are verified; alarms, backup and restore, rollback, SSM-only support, cost
+reporting, golden questions, fresh-deployment acceptance and load testing are open. The authoritative list is
+docs/current-deployment.md. |
 
 ---
 
@@ -4505,8 +4544,9 @@ docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/e
 
 The command refuses a wrong row hash, an `--original-assurance` that disagrees with the row, and an
 `--attested-by` that is not the signer. It has no update path. `audit_events.approval` is covered by chain
-version 3, which stores `sha256(canonical_json(approval))`; editing the approval alone and re-exporting makes
-`audit verify` fail.
+version 4, which covers the approval digest and the prompt and completion digests. Version 3 stored
+`sha256(canonical_json(approval))`; version 4 adds `prompt_sha256` and `completion_sha256`. Editing any of the
+three and re-exporting makes `audit verify` fail.
 
 ### What to actually send it
 
@@ -5478,7 +5518,7 @@ the manual also asks you to type.
 | Command | What it does |
 |---|---|
 | `python3 scripts/validate_manifests.py [manifest…]` | Checks manifests and the pack catalog, including residency and budget rules |
-| `python3 scripts/render_manifest.py --manifest <file>` | Writes six: `rendered/env`, `rendered/litellm.yaml`, `rendered/services.txt`, `rendered/manifest.json`, `rendered/access.json`, `rendered/assertion.key` |
+| `python3 scripts/render_manifest.py --manifest <file>` | Writes eight: `rendered/env`, `rendered/litellm.yaml`, `rendered/services.txt`, `rendered/manifest.json`, `rendered/access.json`, `rendered/assertion.key`, `rendered/agent_definitions.json`, `rendered/mcp_tools.json` |
 | `python3 scripts/check_requirements.py` | Reports the register: verified, open, waived, by phase |
 | `python3 scripts/check_model_lifecycle.py [manifest…]` | Fails if a manifest names a deprecated, past-EOL, or unknown model |
 | `python3 -m venv ~/venv && ~/venv/bin/pip install -r requirements-dev.txt` | Once, on a machine that will run the tests. The box has no pytest otherwise, and Ubuntu 24.04 refuses a bare `pip install` under PEP 668 |
@@ -5705,7 +5745,7 @@ is explained.
 
 **Watermark.** The newest purge's cutoff. Backfill will not re-create events older than it.
 
-## 25. Not built yet
+## 25. Phase status
 
 | Phase | What it adds | State |
 |---|---|---|
@@ -5714,16 +5754,25 @@ is explained.
 | C3 | The assistant API: sessions, roles from tokens, streaming, retries, a degraded mode when the provider throttles, and routing that keeps a one-way data boundary | **Built.** Sections 13g and 13h |
 | C4 | The client application: Ask, Do, Review, Activity | **Built.** Section 13i |
 | C5 | Workflows and the first connector, with an approval gate | **Built.** Sections 13j to 13m |
-| C6 | The agent runtime and the MCP gateway | Not built |
-| C7 | Ingress, TLS, identity, and the Terraform that creates a client's account | Not built |
-| C8 | Alarms, backups, a restore drill, the sixty golden questions, vulnerability scanning, drift reporting | Not built |
+| C6 | The agent runtime and the MCP gateway | Built and verified. Section 26 |
+| C7 | Ingress, TLS, identity, least privilege, secret rotation and Object Lock | Built and verified. Section 26 |
+| C8 | Alarms, backups, restore and RTO, rollback, SSM-only support, cost reporting, golden questions, acceptance, load test | Partly built. Audit hashes, scanning, drift and the incident tabletop are verified |
 | C9 | The demonstration | Not built |
+
+**Update, 2026-10-23.** The phase table above is the build plan, not the current state. C6 and C7 are built and
+verified. C8 has four verified rows: prompt and completion hashes in chain version 4, scheduled image scanning,
+deployment-state drift reporting, and an incident-response tabletop. The remaining C8 rows and the BIZ rows are
+listed with their blockers in docs/current-deployment.md. There is still no alarm set, no restore drill, no
+rollback, no SSM-only cutover, no cost report, no golden question set, no fresh-deployment acceptance run and no
+load test. TLS now exists on the client tenant, so the paragraph below about no ingress and no TLS is
+historical for the build box only.
 
 **What exists today, said plainly.** The data-class gate refuses a request whose content may not reach a
 remote model. **What does not exist, and this is the honest gap.** There is no sign-in: a session is a token
 minted by a development command, so the record can say which role acted and cannot say which person did.
-There is no ingress and no TLS, so the API publishes no port and every client reaches it from inside the
-deployment's network. There is no backup, no restore drill and no alarm set. **Everything else on the list
+On the build box there is no ingress and no TLS, so the API publishes no port. The client tenant does have
+TLS through Caddy, and the MCP gateway is reachable only through it. A people-facing sign-in still does not
+exist. There is no backup, no restore drill and no alarm set. **Everything else on the list
 above is built**, and each phase's page says what it could not prove when it was written: the client
 application is 13i, the approval gate and its record are 13j and 13k, the email intake connector is 13l, and
 the workflow engine is 13m.
@@ -5808,3 +5857,77 @@ led to the current mode are in `docs/reviews/experiment-three-configs-2026-10-19
 35.0, the tool loop 40.2 to 41.2, five runs each, and the Phase A peak of 44, 44, 42 was the top of a
 distribution rather than a configuration that beat the final one. Read the range and the mean; a single run is
 never enough to compare configurations.
+
+## 26. Current deployment: the client tenant, TLS and the C6 to C8 additions
+
+This section is the operation of the deployment as it stands on 2026-10-23. The authoritative snapshot is
+docs/current-deployment.md; this is the manual's version of it.
+
+### 26.1 Where the pieces run
+
+The build box stays in account 878 and keeps the API, Postgres, LiteLLM, retrieval and the audit tool. It
+publishes no port.
+
+The client tenant is account 426, instance i-0b6aa00095ae40e54. It runs the MCP gateway, the email connector,
+Caddy and Mailpit. Caddy is the only public listener, on 80 and 443. The gateway is on loopback 8080, the
+connector on 8094 and Mailpit on 1025.
+
+The public name is https://3-85-130-96.sslip.io. Caddy gets a Let's Encrypt certificate for it, which is why
+no DNS change was needed: the name resolves to the tenant address. HTTP returns 308 to HTTPS.
+
+The API calls OI_MCP_URL, which points at the tenant gateway. There is no database route from the tenant back
+to account 878, so the API signs a short-lived HMAC assertion containing the session subject, role and expiry.
+The gateway verifies the signature and expiry and still refuses a caller-supplied role. The signing secret is
+OI_MCP_SESSION_SECRET on both sides.
+
+### 26.2 What the MCP gateway enforces
+
+The gateway reads the tool registry rendered from the manifest's mcp.tools block. It refuses a tool that is not
+declared, a session that is absent, expired or forged, a request that supplies its own role, a role the tool
+does not allow, a data class the tool does not accept, and a call that fails the egress gate. Each refusal is
+written to the audit chain. The connector credential is a mode-600 file read on each call, so rotation needs no
+redeploy.
+
+The egress gate is the existing access.egress.frontier_classes policy. With the lane off, a regulated job is
+refused before it exists and the connector sees no call. With the lane on, the call is allowed only after the
+gate, and the audit row records the data class, the egress verdict and the redaction summary.
+
+### 26.3 Audit chain version 4
+
+Chain version 4 covers the approval digest, the prompt digest and the completion digest. Migration
+027_the_prompt_and_completion_are_in_the_chain.sql added it without rewriting older rows. Older rows keep their
+versions and keep verifying. Editing approval_sha256, prompt_sha256 or completion_sha256 makes the verifier fail
+with "row_hash does not match the row contents".
+
+### 26.4 Operating commands
+
+    # tenant health
+    curl -s https://3-85-130-96.sslip.io/health
+
+    # rotate the connector token, no redeploy
+    ssh ubuntu@3.85.130.96 'cd /home/ubuntu/client && sudo AWS_DEFAULT_REGION=us-east-1 python3 rotate_connector_secret.py       --secret-id oi-core/connector-token       --token-file /home/ubuntu/client/connector.token       --env-file /home/ubuntu/client/connector.env --service client-connector'
+
+    # deployment state and drift
+    python3 scripts/deployment_state.py --compose /opt/oi-core/deploy/office/compose/docker-compose.yml       --manifest /opt/oi-core/rendered/manifest.json --compare expected-state.json
+
+    # image scan
+    bash scripts/scan_images.sh /var/log/oi-image-scan
+
+    # endpoint ownership check
+    python3 scripts/check_client_endpoint.py https://3-85-130-96.sslip.io
+
+The job path is unchanged: POST /jobs, approve at POST /jobs/<id>/approvals, read GET /jobs/<id>. The act step
+sends through the tenant gateway.
+
+### 26.5 Caveats
+
+Mailpit captures mail instead of delivering it. The tenant address is the instance's current public IP, so an
+Elastic IP is needed before calling it production. The DeepSeek key is in the rendered env for the provider
+comparison and should be rotated. The image scan has current critical findings in litellm, parser and postgres;
+they are recorded, not waived.
+
+### 26.6 What is still open
+
+The open C8 rows are alarms, backup and restore, RTO, rollback, SSM-only support, cost reporting, golden
+questions, fresh-deployment acceptance and load testing. The BIZ rows need counsel, insurance, contracts,
+on-call staff, subprocessors and pricing decisions. docs/current-deployment.md lists each with its blocker.

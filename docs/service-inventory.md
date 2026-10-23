@@ -21,6 +21,22 @@ These are on in every build. The *Core* pack is implicit and not sold separately
 | `audit-sink` | either | Append-only record of every model call and action | Postgres table plus signed daily export | Postgres plus S3 Object Lock |
 | `observability` | either | Health, metrics, alerts | Loki and Uptime Kuma, or files plus email | CloudWatch |
 
+## Implemented now, 2026-10-23
+
+Ask the deployment, not this catalogue. The catalogue says what each service is for; this table says where the
+current build puts it.
+
+| Service | Current location | Notes |
+|---|---|---|
+| gateway, database, audit-sink, ingestion, parser, vector, embeddings, api, app | Build box, Office Inference account 878 | No public port |
+| mcp-gateway | Client tenant, badj.ai account 426 | Loopback 8080 behind Caddy; signed session assertion |
+| connectors | Client tenant, account 426 | Email connector as a systemd unit, currently pointed at Mailpit |
+| ingress | Client tenant, account 426 | Caddy, ports 80 and 443, Let's Encrypt certificate |
+| secrets | AWS Secrets Manager plus the mode-600 rendered env on the build box | Connector token rotates; other rendered secrets do not yet |
+| drift-reporter | Build box script scripts/deployment_state.py | Compares manifest hash and image pins |
+| image scanning | Build box systemd timer oi-image-scan.timer | Weekly Trivy scan |
+| backup, updater, remote-support | Not built | Open C8 rows |
+
 ## Document pipeline
 
 | Service | Location | Purpose | Pack |

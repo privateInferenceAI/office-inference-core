@@ -4,6 +4,11 @@
 `docs/reviews/fresh-install-2026-10-22/README.md`. This document is the repeatable version: a second agent
 starts from the prompt at the top and finishes with a verified deployment and the same evidence set.
 
+**Current note, 2026-10-23.** This procedure was written before C6 and C7. It still installs the C1 to C5 stack
+and runs the acceptance probes, but it does not install the client-tenant MCP gateway, TLS or the C7 security
+rows. For the current topology, read docs/current-deployment.md first, then use Phase C6 and C7 in
+docs/runbook.md as the additions.
+
 **What a pass looks like.** A new instance is running the pinned code archive; the corpus-2 documents are in
 Postgres and Qdrant with counts matching the baseline; Sonnet 4.6 answers through the API with
 `resolved_model=bedrock/us.anthropic.claude-sonnet-4-6` and `fallback_used=false`; the four acceptance probes
