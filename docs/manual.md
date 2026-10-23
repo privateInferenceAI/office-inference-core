@@ -4409,6 +4409,7 @@ words.
 identity: {
   assurance: "unverified",
   basis: "session_token",
+  session_id: "sess_01J...",
   claimed_subject: "probe-staff@officeinference.com",
   claimed_role: "viewer"
 }
@@ -4473,6 +4474,39 @@ permanently, plus one appended statement about which account held the session. T
 credential and the workstation is often shared, so a later statement by a named person is a new claim rather
 than evidence about the original act. The C7 work makes that boundary visible and dated. It does not make old
 approvals verified, and nothing should promise otherwise.
+
+### The decision and its record are one write
+
+The state change, the job events and the chain row go through the workflow engine's `PostgresUnit` and commit
+together. If the chain write fails, the decision rolls back and the job is still waiting. Before Section 1 the
+route called `jobs.decide()` and then the audit tool on a second connection, so a failed write left a decided
+job with no record of who decided it. That gap is closed, and the live probe fails if it comes back.
+
+### A refused attempt is recorded
+
+A request with no session gets 401. A request that supplies its own role gets 403. Both write an `access` row
+with `stage: approval_refused` before the response returns, because a control whose refusals are not in the
+chain is a control nobody can audit. The actor on that row is `unauthenticated`; a role named in the body is
+recorded as a claim, never as the actor's role.
+
+### Re-attesting an old approval
+
+An old approval keeps its assurance forever. What can be appended is a statement about which account held the
+session, under a new event that points at the original by id and row hash:
+
+```
+docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env --profile tools \
+  run -T --rm audit reattest --supersedes-event-id 246 --supersedes-row-hash <that row's row_hash> \
+  --original-assurance unverified --new-assurance provider_verified \
+  --basis "C7 identity provider established" --resolved-subject "cognito|us-east-1|<sub>" \
+  --reason "why this statement is being appended now" \
+  --limits "what this statement does not establish" --assertion "<a signed statement>"
+```
+
+The command refuses a wrong row hash, an `--original-assurance` that disagrees with the row, and an
+`--attested-by` that is not the signer. It has no update path. `audit_events.approval` is covered by chain
+version 3, which stores `sha256(canonical_json(approval))`; editing the approval alone and re-exporting makes
+`audit verify` fail.
 
 ### What to actually send it
 

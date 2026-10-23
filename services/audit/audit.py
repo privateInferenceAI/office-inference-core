@@ -9,6 +9,7 @@ Subcommands:
 
     migrate      apply db/migrations/*.sql in order, recording what was applied
     record       append one event
+    reattest     append a statement about an earlier event, without touching it
     list         show recent events
     backfill     copy the gateway's model calls into the audit record (idempotent)
     export       write a day's events as JSONL plus a manifest a third party can verify
@@ -109,6 +110,26 @@ def redaction_summary(redactions) -> str:
     return ",".join(f"{key}={redactions[key]}" for key in sorted(redactions))
 
 
+def approval_digest(approval) -> str | None:
+    """The digest the chain covers when a row carries an approval, or None when it carries none.
+
+    **Why a digest and not the JSON itself.** `audit_events.approval` is jsonb, and the chain is computed in two
+    languages: the trigger writes each row's hash in Postgres, and `cmd_verify` recomputes it in Python. A jsonb
+    value rendered as text has a space after every colon and comma and a key order the caller did not choose;
+    `canonical_json` sorts keys and separates without spaces. Matching those textually would mean reproducing
+    one language's serialiser inside the other, and the day either changed, every row would fail at once.
+    sha256 over the canonical form is the one thing both produce exactly from the same value, so chain version 3
+    covers this digest and verification compares the column to the stored JSON.
+
+    Postgres never computes it. The writer does, and the trigger refuses an approval that arrived without one:
+    a digest computed from jsonb::text would be a different byte string from the one this verifier hashes, which
+    is a wrong digest rather than a missing one and fails years later with no explanation.
+    """
+    if approval is None:
+        return None
+    return sha256_hex(canonical_json(approval))
+
+
 def row_canonical(row: dict) -> str:
     """The canonical string a row's hash was computed from, for that row's chain version.
 
@@ -117,7 +138,13 @@ def row_canonical(row: dict) -> str:
     The version is read PER ROW rather than assumed, and that is the whole reason this function takes a
     parameter. Recomputing every row with the newest formula would fail every row written before the formula
     changed, and a verifier that reports untouched history as tampering is one whose real findings nobody
-    reads. Version 1 is the original thirteen fields; version 2 adds the redaction summary.
+    reads. Version 1 is the original thirteen fields; version 2 adds the redaction summary; version 3 adds the
+    approval digest.
+
+    **A null and an empty approval digest are the same field here, deliberately.** The database writes
+    `coalesce(approval_sha256, '')`, because `concat_ws` skips a null argument and with it the separator, which
+    would drop the field entirely rather than write it empty. This side appends the empty string for null so the
+    two agree. A row with no approval therefore ends in a trailing '|', on both sides.
     """
     version = row.get("chain_version") or 1
     base = "|".join([
@@ -129,18 +156,21 @@ def row_canonical(row: dict) -> str:
     if version < 2:
         return base
     allowed = row.get("egress_allowed")
-    return "|".join([
+    version_two = "|".join([
         base,
         str(row.get("redaction_count") or 0),
         redaction_summary(row.get("redactions")),
         str(row.get("unverified_card_shapes") or 0),
         "" if allowed is None else ("true" if allowed else "false"),
     ])
+    if version < 3:
+        return version_two
+    return version_two + "|" + (row.get("approval_sha256") or "")
 
 
 # The newest chain version this verifier understands. A row claiming a higher one cannot be checked, and saying
 # so is better than computing a hash from the wrong formula and calling the mismatch tampering.
-KNOWN_CHAIN_VERSION = 2
+KNOWN_CHAIN_VERSION = 3
 
 
 # --------------------------------------------------------------------------- migrate
@@ -203,48 +233,57 @@ def insert_event(cur, *, event_type, actor, actor_role, deployment_id, data_clas
     not compute the chain. A second implementation of the chain would be a second answer to what the record
     means, which is what `cmd_record`'s own comment forbids.
 
-    `approval` is accepted because the CLI has a flag for it, and **C5 does not use it.** That column is a
-    jsonb field with an approval event type and it is not among the eighteen fields the canonical function
-    takes, so a value written there can be edited by hand while every chain check passes. It is the defect
-    migration 013 closed for the redaction columns and it is recorded as AUD-APPROVAL-001. The approval
-    record belongs in `stored_payload`, which `payload_sha256` covers.
+    **`approval` is covered by the chain as of migration 025, and the digest is computed HERE.** That column was
+    a jsonb field with an approval event type and it was not among the fields the canonical function took, so a
+    value written there could be edited by hand while every chain check passed. That is AUD-APPROVAL-001, the
+    same defect migration 013 closed for the redaction columns. Version 3 covers
+    `sha256(canonical_json(approval))` rather than the JSON, because the trigger would have to hash
+    `jsonb::text` and the Python verifier hashes `canonical_json`; see `approval_digest`.
+
+    The concentration is the point: the trigger **refuses** a row whose approval arrived without a digest, so a
+    caller cannot skip it, and this function computes it so a caller never supplies it.
     """
+    approval_sha256 = approval_digest(approval)
     cur.execute("""
         insert into audit_events
           (event_type, actor, actor_role, deployment_id, data_class, outcome,
-           tool, model, request_id, approval, payload_sha256, payload,
+           tool, model, request_id, approval, approval_sha256, payload_sha256, payload,
            prompt_sha256, completion_sha256,
            redaction_count, redactions, unverified_card_shapes, egress_allowed)
-        values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         returning id, ts_iso, row_hash""",
         (event_type, actor, actor_role, deployment_id, data_class,
          outcome, tool, model, request_id,
-         Jsonb(approval) if approval is not None else None, payload_sha256,
+         Jsonb(approval) if approval is not None else None, approval_sha256, payload_sha256,
          Jsonb(stored_payload) if stored_payload is not None else None,
          prompt_sha256, completion_sha256,
          redaction_count, Jsonb(redactions) if redactions is not None else None,
          unverified_card_shapes, egress_allowed))
     row = cur.fetchone()
     return {"id": row[0], "ts_iso": row[1], "row_hash": row[2],
-            "payload_sha256": payload_sha256,
+            "payload_sha256": payload_sha256, "approval_sha256": approval_sha256,
             "prompt_sha256": prompt_sha256, "completion_sha256": completion_sha256,
             "redaction_count": redaction_count, "redactions": redactions,
             "egress_allowed": egress_allowed}
 
 
-def cmd_record(args) -> int:
-    # An actor is an identity, not a word someone types, and there are exactly two ways to have one.
-    #
-    # **A signed statement, which is what a deployment does.** The assistant API resolves a session and
-    # mints a statement naming the actor it found; this verifies the signature against the same key and
-    # takes the actor from inside it. The actor is therefore not something the caller typed, and a caller
-    # cannot name somebody else.
-    #
-    # **--dev, which is the developer with no client data.** It stays because a person at a terminal has no
-    # session to resolve, and it says out loud what it is.
-    #
-    # The guard comes first either way, before anything touches the database, so a refusal cannot leave a
-    # half-written event behind.
+def authenticate_actor(args, command: str = "record") -> None:
+    """Resolve the actor, or refuse before anything touches the database.
+
+    An actor is an identity, not a word someone types, and there are exactly two ways to have one.
+
+    **A signed statement, which is what a deployment does.** The assistant API resolves a session and mints a
+    statement naming the actor it found; this verifies the signature against the same key and takes the actor
+    from inside it. The actor is therefore not something the caller typed, and a caller cannot name somebody
+    else.
+
+    **--dev, which is the developer with no client data.** It stays because a person at a terminal has no session
+    to resolve, and it says out loud what it is.
+
+    The guard comes first either way, so a refusal cannot leave a half-written event behind. `reattest` uses the
+    same function: a statement about who held a session is worth exactly as much as the identity that made it,
+    and no more.
+    """
     if getattr(args, "assertion", None):
         try:
             verifier = _verifier()
@@ -257,13 +296,17 @@ def cmd_record(args) -> int:
         if payload.get("deployment_id"):
             args.deployment_id = payload["deployment_id"]
     elif not getattr(args, "dev", False):
-        die("record refuses a hand-typed actor outside development mode. A deployment records through "
+        die(f"{command} refuses a hand-typed actor outside development mode. A deployment records through "
             "the assistant API, which signs a statement naming the actor it resolved from a session. Pass "
             "--dev when you are the developer and the box holds no client data, or --assertion with a "
             "statement the API minted.")
     if getattr(args, "dev", False):
         print("warning: --dev is set, so this event's actor is whatever was typed rather than an "
               "authenticated identity", file=sys.stderr)
+
+
+def cmd_record(args) -> int:
+    authenticate_actor(args)
 
     payload = None
     if args.payload:
@@ -325,6 +368,102 @@ def cmd_record(args) -> int:
             unverified_card_shapes=args.unverified_card_shapes, egress_allowed=egress_allowed,
             approval=approval)
     print(json.dumps({**written, "content_mode": mode}, indent=2))
+    return 0
+
+
+# --------------------------------------------------------------------------- reattest
+
+#: The four assurance values an approval record may carry, in the order `services/api/approvals.py` defines them.
+#: Copied rather than imported because the audit tool is shipped in its own image and must not depend on the API's
+#: package layout. `tests/test_audit_reattestation.py` compares the two tuples, so the copy cannot drift.
+ASSURANCE_VALUES = ("unverified", "provider_verified", "proofed", "re_attested")
+
+#: What a re-attestation can honestly claim about itself. It is not a level on the same scale as the other three:
+#: it marks a statement appended later, and it never raises what the original row says.
+DEFAULT_REATTESTATION_ASSURANCE = "re_attested"
+
+
+def cmd_reattest(args) -> int:
+    """Append a statement about an earlier event, and never touch that event.
+
+    **APR-UPGRADE-001, including the limit it records.** A C5-era approval cannot be upgraded: the session token
+    was a bearer credential, the workstation is often shared, and a later statement by a named person is a new
+    claim rather than evidence about the original act. So this appends a row that says what is known now and what
+    it does not establish, and the original keeps its own assurance forever. Nothing here updates a row; the
+    append-only trigger would refuse it if it tried.
+
+    **The link carries the id AND the row hash.** An id alone can be re-pointed by anyone who can insert, because
+    ids are sequential and guessable. Checking the hash against the row as it stands now makes the reference
+    itself tamper-evident: an attacker who re-points the link has to produce the row it names, which means
+    rewriting the chain.
+
+    **`limits` is required rather than optional.** A re-attestation that overstates what it establishes is the
+    same defect as the original sentence one layer up, and the field forces the author to write down what the
+    event does not prove. It is also the field an auditor reads first.
+
+    **The statement is stored whatever the content mode.** It is metadata about the record rather than client
+    content, exactly like the redaction summary, and the default mode would otherwise append a row that says
+    nothing. It is also the only copy: the payload is where the statement lives.
+    """
+    authenticate_actor(args, "reattest")
+
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute("""
+            select event_type, row_hash, payload -> 'approval' -> 'identity' ->> 'assurance'
+            from audit_events where id = %s""", (args.supersedes_event_id,))
+        found = cur.fetchone()
+        if found is None:
+            die(f"no event with id {args.supersedes_event_id}, so there is nothing to re-attest")
+        superseded_type, row_hash, stated_assurance = found
+
+        if row_hash != args.supersedes_row_hash:
+            die(f"event {args.supersedes_event_id} hashes to {row_hash}, and --supersedes-row-hash says "
+                f"{args.supersedes_row_hash}. A re-attestation names the id and the row hash together so the "
+                "link cannot be re-pointed at a different row, and refusing a mismatch is the point of the "
+                "second field.")
+
+        # The original's assurance is read from the row rather than taken on trust. A statement that misstates
+        # what the earlier record claimed is worse than no statement, because it would be believed.
+        original_assurance = args.original_assurance or stated_assurance or "unverified"
+        if stated_assurance and args.original_assurance and stated_assurance != args.original_assurance:
+            die(f"event {args.supersedes_event_id} records its assurance as {stated_assurance} and "
+                f"--original-assurance says {args.original_assurance}. The re-attestation has to state what the "
+                "earlier record said, not what it would be convenient for it to have said.")
+
+        attested_by = args.attested_by or args.actor
+        if attested_by != args.actor:
+            die(f"--attested-by is {attested_by} and the authenticated actor is {args.actor}. A statement about "
+                "who held a session is worth exactly the identity that signed it, so this command records the "
+                "signer and refuses to attribute the claim to somebody else.")
+
+        payload = {
+            "kind": "reattestation",
+            "supersedes_event_id": args.supersedes_event_id,
+            "supersedes_row_hash": args.supersedes_row_hash,
+            "original_assurance": original_assurance,
+            "new_assurance": args.new_assurance,
+            "basis": args.basis,
+            "resolved_subject": args.resolved_subject,
+            "attested_by": attested_by,
+            "reason": args.reason,
+            "limits": args.limits,
+        }
+        payload_sha = sha256_hex(canonical_json(payload))
+
+        written = insert_event(
+            cur, event_type="reattestation", actor=args.actor,
+            actor_role=getattr(args, "actor_role", None),
+            deployment_id=args.deployment_id, data_class=args.data_class, outcome=args.outcome,
+            stored_payload=payload, payload_sha256=payload_sha)
+
+    print(json.dumps({
+        "id": written["id"],
+        "row_hash": written["row_hash"],
+        "supersedes_event_id": args.supersedes_event_id,
+        "supersedes_event_type": superseded_type,
+        "supersedes_row_hash": args.supersedes_row_hash,
+        "payload_sha256": payload_sha,
+    }, indent=2))
     return 0
 
 
@@ -577,8 +716,8 @@ def cmd_export(args) -> int:
     with connect() as conn, conn.cursor() as cur:
         cur.execute("""
             select id, occurred_at, ts_iso, event_type, actor, actor_role, deployment_id,
-                   data_class, outcome, tool, model, request_id, approval, payload_sha256,
-                   payload_bytes, payload, prev_hash, row_hash, chain_version,
+                   data_class, outcome, tool, model, request_id, approval, approval_sha256,
+                   payload_sha256, payload_bytes, payload, prev_hash, row_hash, chain_version,
                    redaction_count, redactions, unverified_card_shapes, egress_allowed
             from audit_events
             where occurred_at >= %s and occurred_at < %s + interval '1 day'
@@ -703,6 +842,19 @@ def cmd_verify(args) -> int:
         payload = row.get("payload")
         if payload is not None and sha256_hex(canonical_json(payload)) != row.get("payload_sha256"):
             problems.append(f"line {index}: the stored payload does not match payload_sha256")
+
+        # The approval column is covered the same way, and it was NOT until chain version 3: a row could carry
+        # an approval, have it rewritten, and still verify, which is AUD-APPROVAL-001. The digest is inside the
+        # canonical string, so editing it fails the row hash as well; editing the JSON alone leaves the row
+        # hash valid and fails here. Both directions are checked rather than one.
+        approval = row.get("approval")
+        if approval is not None:
+            if row.get("approval_sha256") is None:
+                problems.append(
+                    f"line {index}: the row carries an approval and no approval_sha256, so the approval was "
+                    f"never covered by the chain and cannot be checked")
+            elif sha256_hex(canonical_json(approval)) != row["approval_sha256"]:
+                problems.append(f"line {index}: the stored approval does not match approval_sha256")
         previous_hash = row["row_hash"]
 
     # This file's own window, as the FILE states it. Both checks below need it: the anchor check to place
@@ -872,7 +1024,13 @@ def cmd_verify(args) -> int:
     return 0
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """The command line, in one function so the tests can parse one without running it.
+
+    `main` used to build and consume the parser together, which left no way to assert that a flag exists short of
+    invoking the whole tool. A flag is part of the record's interface: a re-attestation is only complete because
+    every one of its fields can be supplied, so the interface is worth a test.
+    """
     parser = argparse.ArgumentParser(description="Audit sink CLI")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -881,7 +1039,11 @@ def main() -> int:
     record = sub.add_parser("record")
     record.add_argument("--type", required=True,
                         choices=["model_call", "tool_call", "approval", "access",
-                                 "config_change", "login"])
+                                 "config_change", "login",
+                                 # Recorded by `reattest`, but accepted here too so a caller that has already
+                                 # built a statement can write one through the generic path. The generic path
+                                 # does not check the superseded row; `reattest` is the command that does.
+                                 "reattestation"])
     # Not required at the parser, because a signed statement names the actor and this command line does not.
     # The guard in cmd_record refuses the case where neither is present, and it refuses before the database is
     # touched, which is where that check belongs.
@@ -923,6 +1085,42 @@ def main() -> int:
                         help="keep the payload itself, not just its hash. A policy decision.")
     record.set_defaults(func=cmd_record)
 
+    reattest = sub.add_parser("reattest", help="append a statement about an earlier event, without touching it")
+    reattest.add_argument("--supersedes-event-id", type=int, required=True,
+                          help="the id of the event being re-attested")
+    reattest.add_argument("--supersedes-row-hash", required=True,
+                          help="that event's row_hash, checked against the row as it is now. The id alone could "
+                               "be re-pointed; the hash is what makes the reference tamper-evident")
+    reattest.add_argument("--original-assurance", choices=ASSURANCE_VALUES,
+                          help="what the earlier record said about identity. Defaults to what the row itself "
+                               "records, and a value that disagrees with the row is refused")
+    reattest.add_argument("--new-assurance", choices=ASSURANCE_VALUES,
+                          default=DEFAULT_REATTESTATION_ASSURANCE,
+                          help="what this statement is made under. It does not change the original row's "
+                               "assurance, which is the point of section 5.4")
+    reattest.add_argument("--basis", required=True,
+                          help="how the identity was established, as the design's 'basis' field records it")
+    reattest.add_argument("--resolved-subject", required=True,
+                          help="the account the session is now known to have belonged to")
+    reattest.add_argument("--attested-by",
+                          help="the person making this statement. Defaults to the authenticated actor, and any "
+                               "other value is refused: the claim is worth the signer and nothing more")
+    reattest.add_argument("--reason", required=True, help="why this statement is being appended now")
+    reattest.add_argument("--limits", required=True,
+                          help="what this statement does NOT establish. Required, because a re-attestation that "
+                               "overstates itself is the same defect one layer up")
+    reattest.add_argument("--assertion", help="a statement the assistant API minted, naming the actor")
+    reattest.add_argument("--assertion-key", help="where the signing key is, for a test or a different layout")
+    reattest.add_argument("--dev", action="store_true",
+                          help="accept a hand-typed actor. Development only, as for record")
+    reattest.add_argument("--actor", help="the actor, for a development re-attestation")
+    reattest.add_argument("--actor-role")
+    reattest.add_argument("--deployment-id", default=DEPLOYMENT_ID)
+    reattest.add_argument("--data-class", default="internal",
+                          choices=["public", "internal", "confidential", "regulated"])
+    reattest.add_argument("--outcome", default="ok", choices=["ok", "denied", "error", "pending"])
+    reattest.set_defaults(func=cmd_reattest)
+
     purge = sub.add_parser("purge", help="delete events past their retention window, leaving a tombstone")
     purge.add_argument("--before", required=True, metavar="DATE",
                        help="remove events that occurred before this ISO date")
@@ -960,7 +1158,11 @@ def main() -> int:
                              "which is the path mounted back to the host)")
     anchor.set_defaults(func=cmd_anchor)
 
-    args = parser.parse_args()
+    return parser
+
+
+def main() -> int:
+    args = build_parser().parse_args()
     return args.func(args)
 
 
