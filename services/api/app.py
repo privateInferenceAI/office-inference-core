@@ -885,19 +885,35 @@ def _run_agent_job_locked(job):
         to = str((parsed or {}).get("to") or "")
         subject = str((parsed or {}).get("subject") or "")
         body = str((parsed or {}).get("body") or "")
-        try:
-            envelope = mcp.call("send_email", {"to": to, "subject": subject, "body": body},
-                                session_sha256=job.credential_sha256 or "",
-                                data_class=job.data_class or "internal")
-            result = envelope.get("result") or envelope
-        except mcp_client_module.MCPClientError as exc:
-            result = {"sent": False, "error": str(exc), "to": to}
-        # **The one action with a real-world recipient.** The row names the recipient and the outcome, and it is
-        # written after the gate has been decided and the connector has answered.
+        data_class = job.data_class or "internal"
+        manifest_egress = (((STATE.get("manifest") or {}).get("access") or {}).get("egress") or {})
+        frontier_classes = list(manifest_egress.get("frontier_classes") or [])
+        if not frontier_classes:
+            frontier_classes = [part.strip() for part in
+                                (os.environ.get("FRONTIER_CLASSES") or "").split(",") if part.strip()]
+        permitted, why = routing.gate(data_class, frontier_classes)
+        redaction_record = {"redaction_count": 0}
+        if not permitted:
+            result = {"sent": False, "error": "egress_not_permitted", "detail": why, "to": to}
+        else:
+            if (os.environ.get("EGRESS_REDACTION") or "on").lower() != "off":
+                body, redacted = redaction.redact(body)
+                redaction_record = redacted.as_record()
+            try:
+                envelope = mcp.call("send_email", {"to": to, "subject": subject, "body": body},
+                                    session_sha256=job.credential_sha256 or "",
+                                    data_class=data_class, egress_approved=True)
+                result = envelope.get("result") or envelope
+            except mcp_client_module.MCPClientError as exc:
+                result = {"sent": False, "error": str(exc), "to": to}
+        # **The one action with a real-world recipient.** The row names the recipient, the outcome, the data
+        # class that left and the redaction summary; a regulated send that never passed the gate says so.
         try:
             audit("tool_call", session.subject, session.role, "ok",
                   {"job_id": job.job_id, "task": job.task, "step": step_name(), "tool": "send_email",
-                   "to": to, "sent": bool(result.get("sent"))}, tool="send_email")
+                   "to": to, "sent": bool(result.get("sent")), "data_class": data_class,
+                   "egress_allowed": permitted, "egress_reason": why,
+                   **redaction_record}, tool="send_email")
         except Exception as exc:  # noqa: BLE001
             raise tool_loop.ToolAuditError(f"the connector audit failed: {type(exc).__name__}") from exc
         return json.dumps(result, sort_keys=True)

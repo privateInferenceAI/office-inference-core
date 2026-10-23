@@ -1,0 +1,29 @@
+{
+  "job_id": "b36f84f12f7d428fa205c844afe319e0",
+  "at_gate": "awaiting_approval",
+  "final_state": "succeeded",
+  "steps": [
+    "turn-1",
+    "approval-1",
+    "act-1",
+    "turn-2",
+    "finish"
+  ],
+  "audit_row": {
+    "id": 1148,
+    "payload": {
+      "to": "anthony@officeinference.com",
+      "sent": true,
+      "step": "act-1",
+      "task": "workspace_brief",
+      "tool": "send_email",
+      "job_id": "b36f84f12f7d428fa205c844afe319e0",
+      "data_class": "regulated",
+      "redactions": {},
+      "egress_reason": "the deployment permits regulated on a remote lane",
+      "egress_allowed": true,
+      "redaction_count": 0,
+      "unverified_card_shapes": 0
+    }
+  }
+}

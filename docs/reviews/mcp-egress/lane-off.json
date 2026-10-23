@@ -1,0 +1,9 @@
+{
+  "status": 403,
+  "body": {
+    "error": "Permission denied on this resource (or it might not exist). This request needs a lane this deployment does not permit and has no local model to answer with.",
+    "kind": "no_permitted_lane",
+    "reason": "the deployment permits ['public', 'internal'] on a remote lane, and this request is regulated",
+    "notice": "This question cannot be answered, because its content may not be sent to the model that would answer it."
+  }
+}

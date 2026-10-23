@@ -1,0 +1,10 @@
+{
+  "attempts": 3,
+  "final_state": "failed",
+  "steps": [
+    "turn-1",
+    "finish"
+  ],
+  "outcome_reason": "verification",
+  "note": "never reached act; egress gate not exercised"
+}

@@ -1,0 +1,15 @@
+{
+  "job_id": "986850ab86df427aa210409df3494c18",
+  "final_state": "succeeded",
+  "audit_row": {
+    "id": 1133,
+    "payload": {
+      "sent": false,
+      "data_class": "regulated",
+      "egress_allowed": false,
+      "egress_reason": "the deployment permits ['public', 'internal'] on a remote lane, and this request is regulated",
+      "redaction_count": 0
+    }
+  },
+  "note": "tool gate read env, not the manifest"
+}
