@@ -1,39 +1,44 @@
 # Client-tenant DNS and Elastic IP cutover
 
-**Date:** 2026-10-23. **Status:** Elastic IP allocated, not associated. DNS record pending.
+**Date:** 2026-10-23. **Status:** completed on mcp.officeinference.com.
 
-## Allocated address
+## Allocated and associated address
 
 - Allocation: eipalloc-0da2730bda34519ff
 - Public IP: 34.225.62.245
+- Association: eipassoc-06186707a373a4e5b
+- Tenant instance: i-0b6aa00095ae40e54
 - Account: badj.ai, 426063972668
 
-The address is allocated but deliberately not associated yet. Associating it releases the tenant's current
-public address, so the Caddy hostname, certificate and OI_MCP_URL must change in the same maintenance step.
+The Elastic IP is associated. The previous address 3.85.130.96 was released.
 
-## Stable name
+## Name
 
-The preferred name is mcp.badj.ai. The badj.ai DNS is hosted at Porkbun; the Route53 hosted zone in account 426
-is not authoritative for public resolution. Add this record at Porkbun:
+The public name is mcp.officeinference.com, added at Namecheap as an A record to 34.225.62.245. Caddy obtained a
+Let's Encrypt certificate for it, HTTP redirects to HTTPS, and the API uses OI_MCP_URL=https://mcp.officeinference.com.
 
-    mcp.badj.ai.  A  34.225.62.245
+mcp.badj.ai was the original proposal but its public DNS at Porkbun did not resolve to the Elastic IP. It is not
+used.
 
-If a named record is not available, use the IP-derived name 34-225-62-245.sslip.io. It is stable as long as the
-Elastic IP stays associated, but it is not a client-controlled name.
+## Ownership tradeoff
 
-## Cutover steps, once the record exists
+The hostname is on Office Inference's domain, not the client's. The MCP-OWNED evidence in
+docs/reviews/mcp-owned/ was gathered when the endpoint was the client-domain sslip name. The current name is an
+Office Inference alias, and scripts/check_client_endpoint.py refuses it for that reason. The tenant account is
+still badj.ai, but the domain check does not pass.
 
-1. Confirm mcp.badj.ai resolves to 34.225.62.245.
-2. Associate eipalloc-0da2730bda34519ff with tenant instance i-0b6aa00095ae40e54.
-3. Change Caddyfile to mcp.badj.ai and restart Caddy. Wait for the certificate.
-4. Update OI_MCP_URL in the build box rendered env to https://mcp.badj.ai.
-5. Restart the API and run the SES-through-gateway test.
-6. Update docs/current-deployment.md and the tenant table.
+For a true client-owned endpoint, add a client-domain A record to 34.225.62.245 and change the Caddyfile and
+OI_MCP_URL. For this development deployment, the Office alias is accepted.
 
-Rollback: disassociate the Elastic IP, restore the previous Caddyfile and OI_MCP_URL, restart Caddy and API. The
-old DNS name returns after the old address is restored.
+## Rollback
 
-## What only the account owner can do
+Disassociate the Elastic IP, restore the previous Caddyfile and OI_MCP_URL, restart Caddy and API. The tenant has
+no old address to return to once the EIP is associated, so rollback must use another address or the EIP again.
 
-Add the Porkbun A record, or provide Porkbun API credentials. The allocation and association can be done with the
-existing AWS access.
+## Evidence
+
+- HTTPS health: ok
+- HTTP: 308 to HTTPS
+- Let's Encrypt certificate obtained for mcp.officeinference.com
+- Gateway SES send after cutover: message id 010001a168d26007-bb5a825f-ca4d-4db6-a715-e71d9ec82e74-000000,
+  sent true, transport ses

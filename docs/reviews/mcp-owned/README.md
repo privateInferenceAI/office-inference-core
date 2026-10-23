@@ -1,6 +1,9 @@
 # MCP gateway and connector in the client tenant
 
-**Date:** 2026-10-23. **Status:** MCP-OWNED-001 is verified.
+**Date:** 2026-10-23. **Status:** MCP-OWNED-001 was verified on the client-domain endpoint. The current public
+name is `mcp.officeinference.com`, an Office Inference domain, so `scripts/check_client_endpoint.py` refuses the
+current name. The tenant account is still badj.ai; the ownership claim now applies to the account and to the
+earlier client-domain endpoint, not to the Office alias.
 
 ## What moved
 

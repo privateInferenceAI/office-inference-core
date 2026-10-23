@@ -27,7 +27,7 @@ incident tabletop. The rest of C8 and the business rows are open.
 The authoritative current snapshot is docs/current-deployment.md. Section Phase C6 to C8 below has the commands.
 
 The build box is in Office Inference account 878. The client tenant is badj.ai account 426, instance
-i-0b6aa00095ae40e54, public name https://3-85-130-96.sslip.io. The tenant runs the MCP gateway, the email
+i-0b6aa00095ae40e54, public name https://mcp.officeinference.com. The tenant runs the MCP gateway, the email
 connector, Caddy and Mailpit. The connector sends through SES as awstest@officeinference.com to that verified
 address. Mailpit remains a capture fallback.
 
@@ -42,7 +42,7 @@ address. Mailpit remains a capture fallback.
 | SSH allowed from | 47.164.45.109 only (security group `sg-09d9bfffbd28014c9`) |
 | Instance role | `oi-core-dev-instance`: `AmazonSSMManagedInstanceCore` for keyless access, plus `oi-core-dev-bedrock-invoke`, which allows exactly the four models the dev manifest names |
 | Inference | Bedrock, us-east-1. No model runs on this box |
-| Client tenant | badj.ai account 426063972668, instance i-0b6aa00095ae40e54, public name https://3-85-130-96.sslip.io |
+| Client tenant | badj.ai account 426063972668, instance i-0b6aa00095ae40e54, public name https://mcp.officeinference.com |
 | Tenant services | MCP gateway loopback 8080, connector systemd port 8094, Caddy 80 and 443, Mailpit 1025 fallback, SES identity awstest@officeinference.com |
 | Region | us-east-1 |
 | State | Build box: stopped when not in use. Client tenant: running while it serves the gateway |
@@ -5682,10 +5682,10 @@ listens on loopback 8080, the connector is the systemd unit client-connector on 
 capture fallback.
 
     # tenant health
-    curl -s https://3-85-130-96.sslip.io/health
+    curl -s https://mcp.officeinference.com/health
 
     # restart-safe checks
-    ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@3.85.130.96 'systemctl is-active client-connector; docker ps --format "{{.Names}} {{.Status}}"'
+    ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@34.225.62.245 'systemctl is-active client-connector; docker ps --format "{{.Names}} {{.Status}}"'
 
 The connector sends through SES to the verified awstest@officeinference.com identity. The badj SES account is
 still in the sandbox, so arbitrary recipients need production access. Mailpit remains a capture fallback.
@@ -5735,20 +5735,20 @@ and policy were then deleted, and AssumeRole returned AccessDenied. Access is re
 
 The connector token is in Secrets Manager in account 426. Rotation does not rebuild an image:
 
-    ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@3.85.130.96 'cd /home/ubuntu/client && sudo AWS_DEFAULT_REGION=us-east-1 python3 rotate_connector_secret.py       --secret-id oi-core/connector-token       --token-file /home/ubuntu/client/connector.token       --env-file /home/ubuntu/client/connector.env --service client-connector'
+    ssh -i ~/ai-stack/ai-stack-key.pem ubuntu@34.225.62.245 'cd /home/ubuntu/client && sudo AWS_DEFAULT_REGION=us-east-1 python3 rotate_connector_secret.py       --secret-id oi-core/connector-token       --token-file /home/ubuntu/client/connector.token       --env-file /home/ubuntu/client/connector.env --service client-connector'
 
 The gateway reads the new file on the next call. The connector restarts through systemd. Old token 401, new token
 200, and job 4795a9935e1744a481410971e496e40b sent true on row 1228.
 
 ### C7.4 TLS
 
-Caddy terminates TLS for https://3-85-130-96.sslip.io. The gateway listens on loopback only. Security group
+Caddy terminates TLS for https://mcp.officeinference.com. The gateway listens on loopback only. Security group
 ingress is 22, 80 and 443; port 8080 is closed externally. HTTP returns 308 to HTTPS. Job
 57309daac87244d9acea35f4f65dbffb went through the HTTPS gateway; its final state was failed verification, but
 act row 1242 records sent true.
 
-    curl -sS https://3-85-130-96.sslip.io/health
-    curl -sS -I http://3-85-130-96.sslip.io/health
+    curl -sS https://mcp.officeinference.com/health
+    curl -sS -I http://mcp.officeinference.com/health
 
 ### C7.5 Object Lock and the contract
 
