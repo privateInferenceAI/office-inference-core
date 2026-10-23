@@ -1,0 +1,13 @@
+time="2026-10-23T16:45:59Z" level=warning msg="The \"OI_MCP_TOKEN\" variable is not set. Defaulting to a blank string."
+ Container oi-core-session-run-dd0ecad7a9c7 Creating 
+ Container oi-core-session-run-dd0ecad7a9c7 Created 
+ok   END-TO-END  3 frame(s), 12 citation(s), answer starts 'The mileage rate for reimbursement is 0.67 USD per mile. [3]'
+            if it were absent: a stream that lost the answer or its citations is not the same capability
+ok   TTFT        first token at 800ms of 1514ms total, 13 frame(s)
+            if it were absent: a response that arrives whole has a first token at the total time, which is not streaming
+ok   INCREMENTAL 13 frame(s) at 10 distinct arrival times, spread 1.51s, X-Accel-Buffering='no'
+            if it were absent: one frame containing the whole answer means something upstream is buffering
+ok   REDACTED    canary in any frame: no; the stream reported redactions {'phone': 2}
+            if it were absent: a value that reaches the browser mid-stream cannot be recalled, so the control has to be before the frame rather than after the answer
+
+PASSED: 4 right(s) held against the streaming service

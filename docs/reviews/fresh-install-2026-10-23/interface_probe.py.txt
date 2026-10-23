@@ -1,0 +1,13 @@
+time="2026-10-23T16:46:32Z" level=warning msg="The \"OI_MCP_TOKEN\" variable is not set. Defaulting to a blank string."
+ Container oi-core-session-run-0b973962f67f Creating 
+ Container oi-core-session-run-0b973962f67f Created 
+ok   ANSWER     [200] 12 citation(s), lane='frontier'
+ok   NO-JUDGE   escalated=False trigger='' notice=False
+ok   TRIGGERS   task 'draft' -> 'agentic_task', stronger -> 'user_requested_stronger'
+ok   FACTS      6 row(s), asked true and false both present, every row names a lane
+ok   LANE-AGREE answer lane='frontier', row lane='frontier', egress_allowed=True for request 333dec5e17f3
+ok   TOLD       notice=True kind=None
+ok   STREAM     3 frame(s), first delta at 1203ms, total 1074ms
+ok   DEGRADED   the last recorded degradation carries reason, attempts, threshold, partial_output, lane, data_class, taxonomy_version, remaining_ms
+
+PASSED: 8 right(s) held against the documented interface

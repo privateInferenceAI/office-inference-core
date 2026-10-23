@@ -5993,3 +5993,15 @@ The five alarms are oi-core-CoreHealthy, oi-core-IngestionHealthy, oi-core-Backu
 oi-core-Disk. They publish to the SNS topic oi-core-alarms and the anthony@officeinference.com subscription is
 confirmed. The five-minute metric publisher and daily audit check are systemd timers. Evidence:
 docs/reviews/ops-alarm/.
+
+### 26.11 Fresh-install pitfalls found on 2026-10-23
+
+- The manifest deployment id is under client.deployment_id, not at the top level. A top-level change did not
+  reach rendered/env, and the API and audit rows reported the old deployment id.
+- Ingestion must wait for Postgres, parser and embeddings health. The compose file now uses health conditions;
+  an older file started the worker before Postgres accepted connections and the first cycle slept for the full
+  interval after failing.
+- LiteLLM must start before the API on a blank database; otherwise Prisma refuses to baseline the schema.
+  Reset the database and start LiteLLM alone, then start the API.
+- The client app needs a separate /opt/oic-ui archive. The four acceptance probes do not need it, so a core-only
+  acceptance can skip the app service.

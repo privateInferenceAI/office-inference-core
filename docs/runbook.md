@@ -5832,6 +5832,13 @@ docs/reviews/ops-cost/.
 The five alarms publish to SNS oi-core-alarms. The anthony@officeinference.com subscription is confirmed. The
 metrics publisher runs every five minutes and the audit check daily. Evidence: docs/reviews/ops-alarm/.
 
+### C8.8 Fresh-install findings
+
+- Manifest deployment id is client.deployment_id.
+- Ingestion now waits on postgres, parser and embeddings health conditions.
+- The client app needs /opt/oic-ui; the four probes do not.
+- If an older compose file races the database, restart ingestion once after Postgres is healthy.
+
 ## Future phases
 
 ### Phase 9 — Office appliance  *(outline)*
