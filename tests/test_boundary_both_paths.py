@@ -254,3 +254,19 @@ def test_a_retrieval_denial_is_written_to_the_chain(monkeypatch):
     assert payload["restricted_matched"] == 3
     assert "3 passage" in payload["disclosure"]
     assert kwargs.get("request_id") == "the-request"
+
+
+def test_the_stream_writes_its_own_boundary_row():
+    """**The path the demo actually uses.** The stream handler resolves the session and retrieves for itself,
+    before the response opens, so the row the shared pipeline writes for `/ask` and jobs was missing from it.
+    A streamed denial answered honestly, showed the disclosure, and left no trace: found during the C9 timed
+    run, where the Activity filter showed an older timeout row and no boundary row for the question just
+    asked. Asserted against the source because the behaviour needs a deployment; the shape is the fix."""
+    source = API.read_text()
+    start = source.index("async def ask_stream(")
+    end = source.index("async def _tool_frames", start)
+    block = source[start:end]
+    assert "result.denied" in block, "the stream never reads the retrieval denial"
+    assert 'reason": "boundary' in block, "the stream does not write the boundary row"
+    assert "restricted_matched" in block, "the row does not carry the count"
+    assert 'endpoint": "/ask/stream"' in block, "the row does not say which path wrote it"

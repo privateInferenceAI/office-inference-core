@@ -2016,6 +2016,23 @@ async def ask_stream(request: Request):
         return JSONResponse({"answer": "No document you may read answers this question.", "citations": [],
                              "kind": "no_source"}, status_code=200)
 
+    # **The stream has its own retrieval, so it needs its own record of the boundary.** The shared pipeline
+    # in `answer.prepare` writes this row for `/ask` and for jobs. This handler resolves and retrieves here
+    # because the stream must be able to refuse with a status code before the first frame, and the row was
+    # missing from the copy: a streamed denial answered honestly, showed the disclosure, and left no trace in
+    # the record. Found during the C9 timed run, where the Activity filter showed an older timeout row and no
+    # boundary row for the question just asked. The duplication is the hazard this codebase keeps finding; a
+    # follow-up should make this handler call the shared pipeline rather than grow a second copy of it.
+    if result.denied:
+        audit("access", session.subject, session.role, "denied",
+              {"stage": "retrieval", "reason": "boundary",
+               "roots": sorted(permit.roots),
+               "restricted_matched": result.restricted_matched,
+               "restricted_best_score": result.restricted_best_score,
+               "disclosure": (result.disclosure.message if result.disclosure else ""),
+               "endpoint": "/ask/stream"},
+              data_class=stream_data_class)
+
     headers = {
         "Incremental": "?1",
         "X-Accel-Buffering": "no",
