@@ -121,12 +121,14 @@ staff token and one with the executive token. Tokens are minted the same morning
 |---|---|---|---|---|
 | 1 | The deployment | 0:00 | `docker compose ps --status running`; API health | Eight running services, Postgres and parser healthy, health names the deployment and the analyst |
 | 2 | A policy answer | 0:45 | Staff asks "What is the mileage rate for reimbursement?" | 0.67 per mile, cited to the handbook and the travel policy, receipt with document count and seconds |
-| 3 | The cited page | 1:45 | Staff asks "What limitation does GAO identify in the primary federal procurement database's information about the origin of defense goods?" then opens the p.2 source | "Limited information about the countries of origin"; the GAO report opens with the Highlights passage on page 2 marked as cited |
+| 3 | The cited page | 1:45 | Staff asks "According to the 2025 inspection schedule, by what date must the annual backflow preventer test be completed?" then opens the source showing p.1 | "Before 30 June"; the inspection schedule opens with the cited row marked |
 | 4 | Across the boundary | 3:15 | Staff asks "What is Northwind's Chief Executive Officer's base salary?" | No 385,000; a disclosure under the answer that documents exist the role cannot read |
-| 5 | The denial in the record | 4:30 | Staff Activity, outcome denied, open the row; then `audit list --type access` | One access row, outcome denied, reason boundary, roots company, restricted count, disclosure, request id; the CLI shows the same row |
-| 6 | The same question, permitted | 5:45 | Executive tab asks the same question with **Ask without streaming**, then Activity as executive | 385,000 with the executive compensation citation in about 10 seconds; the scope line names the people the page covers; the staff denial and the executive answer both appear |
+| 5 | The denial in the record | 4:30 | Staff Activity, outcome denied, open the row; then `audit list --type access` | One access row, outcome denied, reason boundary, roots company, restricted count, disclosure, endpoint `/ask/stream`; the CLI shows the same row |
+| 6 | The same question, permitted | 5:45 | Executive tab asks the same question, then Activity as executive | 385,000 with the executive compensation citation in about 8 to 10 seconds; the scope line names the people the page covers; the staff denial and the executive answer both appear |
 | 7 | Export and hand over | 7:00 | `audit backfill`, `audit export`, `audit verify`, `sha256sum`, copy the directory to the laptop | Exported N events, verification ok with the no-anchor completeness note, the file and its manifest on the laptop |
 | 8 | Tamper and fail | 8:45 | Copy the export to `/tmp/tamper`, change one actor with `sed`, verify the copy | FAIL with two independent reasons: the row hash and the file hash against the manifest. Close on what the exported file proves and what it does not |
+
+**One Ask action, and progress on screen.** The accuracy answer profile runs the tool-assisted loop, so the screen shows a sentence while it searches and reads, then the answer. A simple question answers in two to five seconds and the salary question in eight to ten. There is no transport choice and no second button.
 
 **Scene 5, the commands.** The row is the point of the demo, so it is read twice, once as a person
 and once as an operator:
@@ -226,14 +228,16 @@ Keep under `docs/reviews/c9/`:
   build with local models is a different deployment and is not this demo.
 - No alarm publisher, backup timer, SES or SSO on the box. The pre-demo table says what is checked
   where.
-- No MCP gateway and no agent runtime. The compose file declares the gateway and this deployment
-  stops it on purpose, because the scenes do not use tools. Started without a connector token it
-  crash-loops with `MCP_GATEWAY_TOKEN is required`.
-- **The Ask screen's streamed path is single-shot; the JSON button runs the tool-assisted path.** On this
-deployment the two paths can answer differently: the CEO salary question missed the row on the stream and
-found it through the JSON button in about ten seconds. The accuracy profile's measurements are on the
-tool-assisted path, so the executive scene uses **Ask without streaming**. Aligning the stream with it is
-a product gap for after C9, recorded in the rehearsal evidence.
+- No MCP gateway and no agent runtime. The scenes use the retrieval tools inside the API, not the
+  agent runtime. The compose file declares the gateway and this deployment stops it on purpose; started
+  without a connector token it crash-loops with `MCP_GATEWAY_TOKEN is required`.
+- **The tool-assisted path can produce a garbled answer on a long public report.** On 2026-10-24 the GAO
+question lost a phrase in the middle of its answer while the same question answered cleanly before the path
+change. Scene 3 uses the inspection schedule instead. Recorded as a bug; do not use the GAO question until it
+is fixed.
+- **The Ask screen has one action.** The accuracy profile runs the tool loop, so every answer shows progress
+first. A simple question answers in two to five seconds; the salary question takes eight to ten. The boxes
+allow for it, and the presenter should not fill the pause with an apology.
 - The four acceptance probes do not touch the app. The UI checks above are the only acceptance the
   screen gets, so run them.
 - The export is one UTC day. Without an anchor the verifier cannot prove the tail is complete; the
