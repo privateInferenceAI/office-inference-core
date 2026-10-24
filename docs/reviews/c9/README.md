@@ -131,3 +131,27 @@ It proves a clean deployment can be built from a commit, accepted, and driven th
 scenes with every expected output, with the artifacts preserved. It does not prove the primary model
 answers as expected on demo day, or that a person can deliver it in twelve minutes. Both are checks
 for the next run.
+
+## Changes after this rehearsal, 2026-10-24
+
+This rehearsal is the historical record. A human walkthrough the next day produced a defect list, and three
+of the fixes were deployed to the same box. The eight-scene script changed with them, so the next timed run
+reads `docs/runbooks/demo.md`, not the table above.
+
+- **The answer profile chooses the retrieval path.** Before, `/ask` always ran the tool-assisted loop and
+  `/ask/stream` ran it only when the caller asked, so one deployment answered the same question two ways. Both
+  endpoints read `OI_ANSWER_PROFILE` now. Evidence: office-inference-core#329.
+- **The Ask screen has one action and shows the loop's progress.** The second button is gone; progress is one
+  sentence per step or named tool. Evidence: oic-ui#6.
+- **The app's proxy was buffering the whole event stream before forwarding it.** The screen had never actually
+  streamed a frame, which is why the progress work needed a proxy fix as well. Event streams are forwarded as
+  they arrive now. Evidence: oic-ui#7.
+- **The streamed denial writes its own boundary row.** Verified on the deployed build: row 402, 2026-10-24
+  14:11 ET, endpoint `/ask/stream`, reason boundary, `restricted_matched` 50.
+- **Scene 3 changed to the inspection schedule backflow question.** The tool-assisted path produced a garbled
+  answer on the GAO question, losing a phrase mid-sentence. Recorded as a bug.
+
+Deployed builds: code `oi-core-ask-7122c65.tar.gz` (sha256 `cadcc56a...`), UI `oic-ui-ask-f4a9d56.tar.gz`
+(`0a8db9e9...`) then `oic-ui-proxy-b04ca0a.tar.gz` (`8cbad082...`). A functional rerun of scenes 2 through 6
+passed on these builds: 2.4s, 2.8s, 10.0s and 8.4s for scenes 2, 3, 4 and 6, with row 402 and 385,000 as
+expected. The timed human narration is still owed.

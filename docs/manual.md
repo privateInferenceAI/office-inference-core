@@ -4357,9 +4357,11 @@ passages with a typed reason, at HTTP 200. Retrieval already did the expensive p
 to their own material, so the screen shows it. A client that rendered only the `answer` field would show a blank
 where those passages were, which is why the shape is handled explicitly.
 
-**Asking without streaming** uses the JSON endpoint. Both are kept because they are different code on the
-server, and a screen that only ever streams hides a JSON-path defect behind a streaming one. That is not
-hypothetical: C3 shipped a redaction on one path and a data boundary on the other.
+**One action, and the deployment chooses the answer path.** The screen sends the question and renders what
+arrives. The accuracy profile runs the tool-assisted loop, so the screen shows progress sentences while the
+model searches and reads; the economy profile streams single-shot. The JSON endpoint remains for scripts and
+integrations. The transport is not a choice a person is asked to make, and a client that sends nothing gets
+the answer quality its deployment declared.
 
 ### Do
 
@@ -6035,12 +6037,14 @@ The demo deployment is `oi-core-demo-2026-10-23`, built on a dedicated On-Demand
 `manifests/demo-cloud.yaml` and the second corpus. It is not the build box and not a client deployment. The
 runbook is docs/runbooks/demo.md and the rehearsal evidence is docs/reviews/c9/.
 
-Every scene produced its expected output: a cited mileage answer, the GAO source page opened at the cited
+Every scene produced its expected output: a cited mileage answer, the inspection schedule opened at the cited
 part, a staff denial with the disclosure shown, the boundary row read out of the record, the executive answer
 of 385,000, a 306-event export that verified clean, and a one-row tamper that failed on both the row hash and
-the file hash. One product gap was found by running it: the streamed Ask path is single-shot while the JSON
-path runs the tool-assisted retrieval, and the CEO salary question can miss the row on the stream. Scene 6
-therefore uses **Ask without streaming**, and aligning the two paths is recorded as work after C9.
+the file hash. Running it found two things that changed the product: the boundary row was written on the JSON
+path only, so a streamed denial left no trace (fixed on both paths), and the Ask screen offered a transport
+choice because the stream ran the weaker single-shot path (the answer profile now chooses, the screen shows
+progress, and the second button is gone). The tool path also produced one garbled answer, on the GAO question,
+which is why scene 3 uses the inspection schedule instead; that is recorded as a bug to fix.
 
 The run used the fallback model. The account's daily Sonnet allotment was exhausted at acceptance time and
 LiteLLM fell back to Haiku 4.5, which the audit rows record. A timed rehearsal on the primary model is still
