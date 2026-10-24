@@ -1910,10 +1910,16 @@ finished answer**, because a value can reach the client in a token before anythi
 response. So the streamer holds back a window of text, redacts it, and emits only what is settled.
 
     event: start     the model, the role, the roots, and the citations retrieval found
-    event: delta     a piece of the answer, already redacted
+    event: progress  while the tool loop runs: a step, or a named tool and its evidence count
+    event: sources   the evidence the tools actually returned, which replaces the seeds from start
+    event: delta     a piece of the answer, already redacted. One delta on the tool path
     event: degraded  when the model cannot answer at all, before any delta
     event: error     if something fails mid-stream. Terminal, because the status code is spent
     event: done      deltas, ttft_ms, model_first_ms, retrieval_ms, total_ms, redactions
+
+The accuracy answer profile runs the tool loop on both endpoints, so a stream from an accuracy deployment
+carries progress and sources. The economy profile is single-shot. An explicit tools value in the request
+overrides the profile; a client that sends nothing gets what its deployment declared.
 
 **`degraded` is the one a client forgets to handle**, and forgetting it renders an empty answer where the
 system meant to hand over the retrieved passages.
