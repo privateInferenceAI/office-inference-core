@@ -3888,6 +3888,12 @@ non-streamed path does not have: a value can reach the browser in a token before
 look at the finished answer. So the streamed path redacts **before each frame is emitted**, and that is why it
 is its own endpoint rather than a flag on the first one.
 
+**The answer profile decides which retrieval path runs, on both endpoints.** The accuracy profile runs the
+tool-assisted loop: the model can search the documents, read passages and query rows before it answers, and the
+stream carries progress and sources events while it does. The economy profile keeps the single-shot path. A
+request may override the profile with an explicit `tools` value; that is what the probes use. The transport is
+not the choice, which is why a client that sends nothing gets the answer quality its deployment declared.
+
 ### What a client receives
 
     event: start    data: {"citations": [...], "model": "analyst", "role": "viewer", "roots": ["company"]}
@@ -3898,8 +3904,10 @@ is its own endpoint rather than a flag on the first one.
 
 | Event | When | What it carries |
 |---|---|---|
-| `start` | before the model is called | the model, the role, the roots, and the citations retrieval found |
-| `delta` | as tokens arrive | a piece of the answer, **already redacted** |
+| `start` | before the model is called | the model, the role, the roots, and the citations retrieval found. On the tool path these are the seed passages, and `sources` replaces them |
+| `progress` | while the tool loop runs | `{"type": "step", "step": n}` or `{"type": "tool", "tool": "search_documents", "evidence": n}`. A client that ignores it still gets the answer, it just waits in silence |
+| `sources` | when the tool loop ends | the evidence the tools actually returned. **This is the citation list the answer used**, not the seeds from `start` |
+| `delta` | as tokens arrive | a piece of the answer, **already redacted**. On the tool path the finished answer arrives as one delta after the loop |
 | `error` | if something fails mid-stream | `kind` and a short detail. A terminal event, because the status code is spent |
 | `degraded` | when the model cannot answer at all, before any delta | the retrieved passages, a typed
  reason, and the attempts made. **A client that branches only on the events above will render this as

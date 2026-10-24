@@ -489,12 +489,20 @@ async def ask(request: Request):
     # every successful call (`attribution_from`), so a failover names itself in the answer and in the audit
     # row instead of being credited to the primary. Empty until a call succeeds.
     attribution: dict = {}
-    try:
-        loop = await run_in_threadpool(
-            _generate_with_tools, session, permit, model, question_text, result, request_budget)
-    except Exception as exc:  # noqa: BLE001 - the single-shot path is the fallback, not a failure response
-        print(f"tool-loop unavailable, using the single-shot path: {type(exc).__name__}", flush=True)
-        loop = {"answer": None, "reason": "tool_loop_error", "evidence": []}
+    # **The profile chooses the answer path, not the handler.** Before this the JSON path always ran the
+    # tool-assisted loop and the stream only when the client asked, so the same deployment answered the same
+    # question two ways depending on the endpoint. The accuracy profile is the configuration that scored 37 of
+    # 37, so it runs the loop; the economy profile keeps the single-shot path. `/ask` and `/ask/stream` now
+    # share one rule.
+    if answer_profile.current().tools:
+        try:
+            loop = await run_in_threadpool(
+                _generate_with_tools, session, permit, model, question_text, result, request_budget)
+        except Exception as exc:  # noqa: BLE001 - the single-shot path is the fallback, not a failure response
+            print(f"tool-loop unavailable, using the single-shot path: {type(exc).__name__}", flush=True)
+            loop = {"answer": None, "reason": "tool_loop_error", "evidence": []}
+    else:
+        loop = {"answer": None, "reason": "tools_disabled_by_profile", "evidence": []}
     if loop.get("answer") is not None:
         generated, generation = loop["answer"], None
         attribution = dict(loop.get("attribution") or {})
@@ -2041,7 +2049,7 @@ async def ask_stream(request: Request):
     requested_at = time.monotonic()
     return EventSourceResponse(
         _frames(session, permit, model, question, result, requested_at, stream_decision.lane,
-                use_tools=bool(body.get("tools"))),
+                use_tools=answer_profile.tools_enabled(body.get("tools"))),
         headers=headers,
         ping=int(os.environ.get("OI_STREAM_PING_SECONDS", "15")),
     )
@@ -2181,10 +2189,10 @@ async def _frames(session, permit, model: str, question: str, result, requested_
                    lane: str = "frontier", use_tools: bool = False):
     """The events, in the order a client should read them.
 
-    **Two streaming behaviours, and the client chooses.** Without `tools: true` in the request this is the
-    single-shot stream it has always been. With it, and when the deployment enables the loop, the frames carry
-    progress events while the model searches and reads, then the answer. Existing clients are untouched, which is
-    why this is opt-in rather than a change to the event order.
+    **Two streaming behaviours, and the deployment's profile chooses.** The accuracy profile runs the tool loop,
+    so the frames carry progress events while the model searches and reads, then the answer. The economy profile
+    keeps the single-shot stream. An explicit `tools` value in the request overrides the profile, which is what
+    the probes use; a client that sends nothing gets the answer quality its deployment declared.
     """
     if use_tools:
         async for event in _tool_frames(session, permit, model, question, result, requested_at, lane):
