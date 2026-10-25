@@ -87,6 +87,7 @@ import routing  # noqa: E402
 import streaming  # noqa: E402
 import tool_loop  # noqa: E402
 import answer_profile  # noqa: E402
+import answer_params  # noqa: E402
 
 # **What a client is promised, declared rather than described.** These are attached with
 # `responses={...}` so they reach `/openapi.json`, which is the artifact the client app is built from.
@@ -1639,7 +1640,7 @@ def _generate(session, permit, model: str, question: str, passages: list, budget
         # **Zero, because this is an extraction task and the measured failures were variance.** Four identical
         # runs of the same questions scored 32, 26, 31 and 29; a sampled answer to a question whose value is in
         # the passage has nothing to gain from variety.
-        "temperature": 0,
+        **answer_params.temperature_param(),
     }
 
     errors: list = []
@@ -1729,7 +1730,7 @@ def _tool_chat(session, model: str, messages: list, tools, request_budget):
         "model": model,
         "messages": messages,
         "max_tokens": int(os.environ.get("OI_MAX_TOKENS", "700")),
-        "temperature": 0,
+        **answer_params.temperature_param(),
     }
     # A synthesis turn has no tools. Some providers reject an empty tools list, so omit both fields rather
     # than sending an empty array.
@@ -2255,7 +2256,7 @@ async def _frames(session, permit, model: str, question: str, result, requested_
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": int(os.environ.get("OI_MAX_TOKENS", "700")),
-        "temperature": 0,
+        **answer_params.temperature_param(),
         "stream": True,
     }
     def _request():
