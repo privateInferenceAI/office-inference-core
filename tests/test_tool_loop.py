@@ -457,42 +457,6 @@ def test_the_exact_excerpt_is_centred_on_the_match():
     assert excerpt.startswith("...") and excerpt.endswith("...")
 
 
-def test_exact_evidence_is_seeded_before_the_model_answers(monkeypatch):
-    """The one exact search that remains: at seed time, not after a refusal."""
-    toolbox = make_toolbox()
-    toolbox.exact_phrase_for_question = lambda question: "visitor badge"
-    calls = []
-
-    def fake_exact(phrase, doc_id="", limit=6):
-        calls.append(phrase)
-        number = toolbox.add(FakePassage("c2", "visitor badges are valid for 24 hours maximum"))
-        return "Passages containing " + phrase + ": [" + str(number) + "] company/manual.md p3: " + \
-               "visitor badges are valid for 24 hours maximum"
-
-    toolbox.search_exact = fake_exact
-    replies = iter([answer_reply("Visitor badges are valid for 24 hours [1].")])
-    seen = []
-
-    def model(messages, tools):
-        seen.append(messages)
-        return next(replies)
-
-    result = tool_loop.run_loop(model, toolbox, "How long is a visitor badge valid?")
-    assert calls == ["visitor badge"]
-    assert "24 hours" in result["answer"]
-    assert "Exact search for" in seen[0][1]["content"]
-
-def test_the_phrase_picker_prefers_the_rarest_plausible_phrase():
-    toolbox = make_toolbox()
-    counts = {
-        "Current Termination Date": 12,
-        "Credit Agreement": 4,
-    }
-    toolbox._exact_count = lambda phrase, doc_id="": counts.get(phrase, 500)
-    phrase = toolbox.exact_phrase_for_question("Under the Credit Agreement, what is the Current "
-                                              "Termination Date?")
-    assert phrase == "Credit Agreement"
-
 def test_exact_search_rejects_a_short_phrase():
     toolbox = make_toolbox()
     payload = json.loads(toolbox.search_exact("x"))
@@ -526,22 +490,6 @@ def test_exact_search_points_at_the_row_query_when_the_phrase_is_too_broad():
     assert "does not identify a heading" in payload["note"]
     assert "query_rows" in payload["note"]
 
-
-
-def test_the_fallback_ignores_questions_without_an_exact_phrase_cue():
-    toolbox = make_toolbox()
-    toolbox._exact_count = lambda phrase, doc_id="": 2
-    question = ("In the census table that reports male median earnings of 33,270 dollars, what is the "
-                "overall median earnings figure for workers 16 years and over?")
-    assert toolbox.exact_phrase_for_question(question) == ""
-
-
-def test_the_fallback_recognises_a_hyphenated_cue():
-    toolbox = make_toolbox()
-    toolbox._exact_count = lambda phrase, doc_id="": 3
-    phrase = toolbox.exact_phrase_for_question("How many full-time equivalent employees did Apple "
-                                               "report as of September 28, 2024?")
-    assert phrase
 
 
 def test_a_capped_loop_answers_from_the_evidence_it_gathered():

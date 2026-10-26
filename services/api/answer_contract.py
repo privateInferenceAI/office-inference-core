@@ -98,5 +98,114 @@ def corrective_message(reason: str) -> str:
         return ("Your previous reply stated a figure that does not appear in the passages. Answer again using "
                 "only figures that appear verbatim in the passages, and if the answer is not there, say "
                 "exactly: I could not find that in the available documents.")
+    if reason == "numeric_grounding":
+        return ("Your previous reply used a figure that is not printed in the evidence and is not a difference "
+                "or sum of two printed figures. Use the figures exactly as printed; do not rescale or round "
+                "them, and show the arithmetic.")
+    if reason == "numeric_row":
+        return ("Your previous reply used a figure from a row whose label does not answer the question. If the "
+                "question asks for a total, use the row labelled Total; otherwise use the row whose label "
+                "names the item asked for, and name that row and its period in the answer.")
+    if reason == "numeric_arithmetic":
+        return ("Your previous reply's arithmetic is not the difference or sum of two printed figures. Use two "
+                "figures exactly as printed and show the subtraction or addition.")
     return ("Your previous reply was empty. Answer the question from the passages, or say exactly: I could not "
             "find that in the available documents.")
+
+
+# ---------------------------------------------------------------- numeric answer contract
+# Applied to every answer, not to a question. A numeric answer must be grounded in printed figures,
+# must come from a row whose label answers the question, and any new figure must be a difference or
+# sum of printed figures.
+
+_MATERIAL = re.compile(r"\d[\d,]*(?:\.\d+)?")
+_STOPWORDS = frozenset({
+    "what", "which", "their", "there", "these", "those", "using", "figures", "reported", "report",
+    "according", "thousand", "thousands", "million", "millions", "billion", "billions", "much",
+    "higher", "lower", "difference", "than", "compared", "does", "did", "was", "were", "have", "has",
+    "with", "from", "that", "this", "into", "over", "under", "between", "value", "values", "number",
+    "three", "six", "nine", "twelve", "months", "month", "ended", "year", "years", "quarter",
+    "june", "march", "september", "december", "2024", "2025", "2026", "2027",
+})
+
+
+def material_numbers(answer: str) -> list[str]:
+    """Figures a reader would check: four or more digits, years excluded."""
+    numbers = []
+    for token in _MATERIAL.findall(CITATION.sub(" ", answer or "")):
+        digits = _digits(token)
+        if len(digits) < 4:
+            continue
+        if len(digits) == 4 and 1900 <= int(digits) <= 2100:
+            continue
+        numbers.append(token)
+    return numbers
+
+
+def _question_terms(question: str) -> set[str]:
+    words = re.findall(r"[A-Za-z]+", question or "")
+    return {word.lower() for word in words if len(word) > 3 and word.lower() not in _STOPWORDS}
+
+
+def _table_rows(passage_texts: list[str]) -> list[tuple[str, str]]:
+    rows = []
+    for text in passage_texts:
+        for line in (text or "").splitlines():
+            if " | " in line:
+                label = line.split(" | ", 1)[0].strip()
+                rows.append((label, line))
+    return rows
+
+
+def _evidence_figures(passage_texts: list[str]) -> set[str]:
+    figures: set[str] = set()
+    for text in passage_texts:
+        for token in _MATERIAL.findall(text or ""):
+            digits = _digits(token)
+            if len(digits) >= 4:
+                figures.add(digits)
+    return figures
+
+
+def _is_pair_result(digits: str, figures: set[str]) -> bool:
+    values = [int(value) for value in figures if len(value) <= 12]
+    for index, first in enumerate(values):
+        for second in values[index + 1:]:
+            if abs(first - second) == int(digits) or first + second == int(digits):
+                return True
+    return False
+
+
+def numeric_violation(answer: str, question: str, passage_texts: list[str]) -> str | None:
+    """The reason a numeric answer is not grounded, or None when it passes.
+
+    When the answer cites evidence numbers, only those passages are used. That is the difference between
+    "the figure appears somewhere in the context" and "the figure appears in the passage the answer cites".
+    """
+    numbers = material_numbers(answer)
+    if not numbers:
+        return None
+    cited = [int(number) for number in re.findall(r"\[(\d+)\]", answer or "")]
+    texts = passage_texts
+    if cited:
+        texts = [passage_texts[index - 1] for index in cited if 1 <= index <= len(passage_texts)]
+        if not texts:
+            texts = passage_texts
+    figures = _evidence_figures(texts)
+    rows = _table_rows(texts)
+    terms = _question_terms(question)
+    asks_total = "total" in (question or "").lower()
+    for token in numbers:
+        digits = _digits(token)
+        if digits in figures:
+            containing = [label for label, line in rows if digits in _digits(line)]
+            if containing:
+                labels = " ".join(containing).lower()
+                if asks_total and "total" not in labels:
+                    return "numeric_row"
+                if terms and not any(term in labels for term in terms):
+                    return "numeric_row"
+            continue
+        if not _is_pair_result(digits, figures):
+            return "numeric_grounding"
+    return None

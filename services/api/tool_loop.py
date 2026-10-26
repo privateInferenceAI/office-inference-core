@@ -753,13 +753,109 @@ class ToolBox:
         return self.table_prefix_cache[key]
 
 
+    # -------------------------------------------------- deterministic table expansion
+    # When two different tables appear on the same page in one search result, both are plausible and the
+    # answer cannot tell them apart from snippets. This fetches each table's chunks in row order and
+    # renders the whole table once. It is deterministic: no model decision, no extra tool call.
+    TABLE_EXPANSION_MAX_CHARS = 16000
+    TABLE_EXPANSION_LIMIT = 400
+
+    def _table_points(self, table_id: str) -> list:
+        import urllib.request
+
+        try:
+            body = {"filter": {"must": [
+                {"key": "table_id", "match": {"value": table_id}},
+                {"key": "acl", "match": {"any": sorted(self.roots)}},
+            ]}, "limit": self.TABLE_EXPANSION_LIMIT, "with_payload": True, "with_vector": False}
+            url = (f"{self.services.vector_url}/collections/{self.services.collection}"
+                   "/points/scroll")
+            request = urllib.request.Request(
+                url, data=json.dumps(body).encode(), method="POST",
+                headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(request, timeout=3) as response:
+                points = (json.loads(response.read()).get("result") or {}).get("points") or []
+        except Exception:  # noqa: BLE001 - an expansion that cannot be fetched leaves the snippets in place
+            return []
+        payloads = [point.get("payload") or {} for point in points]
+        payloads.sort(key=lambda payload: (payload.get("row_start") or 0, payload.get("ordinal") or 0))
+        return payloads
+
+    def _full_table(self, table_id: str):
+        points = self._table_points(table_id)
+        if not points:
+            return None
+        header = ""
+        lines: list = []
+        for index, payload in enumerate(points):
+            text = payload.get("text") or ""
+            if not text:
+                continue
+            chunk_lines = text.split("\n")
+            if index == 0:
+                header = chunk_lines[0].strip() if chunk_lines else ""
+                lines.extend(chunk_lines)
+                continue
+            if header and chunk_lines and chunk_lines[0].strip() == header:
+                chunk_lines = chunk_lines[1:]
+            lines.extend(chunk_lines)
+        body = "\n".join(line for line in lines if line.strip()).strip()
+        if not body:
+            return None
+        if len(body) > self.TABLE_EXPANSION_MAX_CHARS:
+            body = body[: self.TABLE_EXPANSION_MAX_CHARS].rstrip() + "\n... table truncated ..."
+        first, last = points[0], points[-1]
+        return {
+            "text": body,
+            "table_id": table_id,
+            "doc_id": first.get("doc_id") or "",
+            "acl": first.get("acl") or "",
+            "page_start": int(first.get("page_start") or 1),
+            "page_end": int(last.get("page_end") or first.get("page_start") or 1),
+        }
+
+    def _with_table_expansions(self, passages):
+        """Replace snippets from multi-table pages with one full-table passage per table."""
+        import retriever
+
+        pages: dict = {}
+        for passage in passages:
+            if (getattr(passage, "kind", "") or "") != "table":
+                continue
+            table_id = getattr(passage, "table_id", None)
+            if not table_id:
+                continue
+            key = (passage.doc_id, passage.page_start)
+            pages.setdefault(key, [])
+            if table_id not in pages[key]:
+                pages[key].append(table_id)
+        replaced: set = set()
+        expanded: list = []
+        for table_ids in pages.values():
+            if len(table_ids) < 2:
+                continue
+            for table_id in table_ids:
+                table = self._full_table(table_id)
+                if not table:
+                    continue
+                expanded.append(retriever.Passage(
+                    doc_id=table["doc_id"], acl=table["acl"], text=table["text"],
+                    page_start=table["page_start"], page_end=table["page_end"],
+                    kind="table", chunk_id=f"{table_id}#expanded", table_id=table_id))
+                replaced.add(table_id)
+        if not expanded:
+            return list(passages)
+        kept = [passage for passage in passages
+                if not (getattr(passage, "table_id", None) in replaced)]
+        return expanded + kept
+
     # ------------------------------------------------------------------ tools
     def search_documents(self, query: str) -> str:
         import retriever
 
         result = retriever.search(self.services, query, role=self.role, limit=self.search_limit,
                                   permit=self.permit)
-        rendered = self.render(result.passages, focus=query)
+        rendered = self.render(self._with_table_expansions(result.passages), focus=query)
         return ("Search results for " + json.dumps(query) + ":\n" + rendered) if rendered \
             else "No results for " + json.dumps(query) + "."
 
@@ -798,69 +894,6 @@ class ToolBox:
             return json.dumps({"error": "the phrase was indexed but the passages could not be read"})
         header = "Passages containing " + json.dumps(cleaned) + ":" + chr(10)
         return header + chr(10).join(rendered)
-
-    def exact_phrase_for_question(self, question: str) -> str:
-        # The rarest literal phrase from the question, used only when the loop is about to refuse.
-        # **Only run when the question contains an exact-phrase cue.** Measured: firing this on
-        # numeric-anchor table questions (N03, N06, N07) cost 1.4 points on the live suite because the
-        # injected evidence displaced the row-query path. Cues are a capitalised multiword term, a
-        # hyphenated term, or a quoted phrase; all three measured needle questions carry one and the
-        # numeric-anchor questions carry none.
-        import re
-        stripper = chr(46) + chr(95) + chr(40) + chr(41) + chr(91) + chr(93) + chr(59) + chr(58) + chr(39) + chr(34)
-        tokens = [token.strip(stripper) for token in question.replace("?", " ").replace(",", " ").split()]
-        tokens = [token for token in tokens if token]
-        stop = {"the", "a", "an", "of", "for", "and", "or", "to", "in", "on", "at", "by", "with",
-                "what", "which", "who", "how", "many", "much", "is", "are", "was", "were", "did",
-                "does", "do", "its", "their", "our", "your", "this", "that", "these", "those", "under"}
-        has_hyphen = any("-" in token and len(token) > 4 for token in tokens)
-        has_quote = chr(34) in question or chr(8220) in question or chr(8221) in question
-        capitalised = []
-        has_caps_run = False
-        for token in tokens:
-            clean = token.lower().strip(".")
-            if token[0].isupper() and clean not in stop:
-                capitalised.append(token)
-            elif capitalised:
-                if len(capitalised) >= 2:
-                    has_caps_run = True
-                capitalised = []
-        if len(capitalised) >= 2:
-            has_caps_run = True
-        if not (has_hyphen or has_quote or has_caps_run):
-            return ""
-        from_words = []
-        capitalised = []
-        for token in tokens:
-            clean = token.lower().strip(".")
-            if token[0].isupper() and clean not in stop:
-                capitalised.append(token)
-            elif capitalised:
-                if len(capitalised) >= 2:
-                    from_words.append(" ".join(capitalised))
-                capitalised = []
-        if len(capitalised) >= 2:
-            from_words.append(" ".join(capitalised))
-        words = [token.lower() for token in tokens if len(token) >= 3 and token.lower() not in stop]
-        for size in (3, 2):
-            for offset in range(0, max(1, len(words) - size + 1)):
-                phrase = " ".join(words[offset:offset + size])
-                if len(phrase) >= 6:
-                    from_words.append(phrase)
-        seen = set()
-        best = ""
-        best_count = None
-        for phrase in from_words[:EXACT_AUTO_CANDIDATES]:
-            if phrase in seen:
-                continue
-            seen.add(phrase)
-            count = self._exact_count(phrase)
-            if count < 1 or count > EXACT_AUTO_MAX_MATCHES:
-                continue
-            if best_count is None or count < best_count:
-                best = phrase
-                best_count = count
-        return best
 
     def _exact_count(self, phrase: str, doc_id: str = "") -> int:
         # How many chunks state the phrase, so an over-broad phrase can be answered with a note.
@@ -1183,25 +1216,11 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
     import answer_contract
 
     stats = {"steps": 0, "tool_calls": 0, "corrections": 0, "synthesis": 0}
-    # **The exact phrase goes in before the model answers, not only after a refusal.** A question
-    # with a cue phrase that matches a small number of chunks has its carrying passages searched
-    # exactly and placed in the seed. Measured on PUB_L01: with twelve seed passages the model
-    # answered a refusal on the first step, and the later refusal-retry never ran because the loop
-    # had already produced an answer. One bounded search at seed time is the difference between a
-    # needle that is reachable and one that is not.
-    exact_preface = ""
-    phrase = toolbox.exact_phrase_for_question(question)
-    if phrase:
-        found = toolbox.search_exact(phrase, "", EXACT_FALLBACK_RESULTS)
-        if not found.startswith('"error"'):
-            exact_preface = ("Exact search for " + json.dumps(phrase) + ":" + chr(10)
-                            + found + chr(10) + chr(10))
     seeded = toolbox.render(list(seed_passages))
     messages = [
         {"role": "system", "content": system_prompt()},
         {"role": "user", "content": (
             f"Question: {question}\n\n"
-            + exact_preface
             + (f"Evidence already retrieved, numbered:\n{seeded}\n\n" if seeded else "")
             + "Search if this is not enough, then answer.")},
     ]
@@ -1225,7 +1244,8 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
         calls = reply.get("tool_calls") or []
         if not calls:
             content = (reply.get("content") or "").strip()
-            failure = answer_contract.violation(content, toolbox.texts())
+            failure = (answer_contract.violation(content, toolbox.texts())
+                       or answer_contract.numeric_violation(content, question, toolbox.texts()))
             if failure and stats["steps"] < max_steps:
                 stats["corrections"] += 1
                 messages.append({"role": "assistant", "content": content})
@@ -1276,7 +1296,8 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
         # question regressed from 5 of 5 to 0 of 5. Refusals fall through to the old behaviour; only a
         # synthesis that actually answers is accepted.
         if (content and _REFUSAL_PHRASE not in content.lower()
-                and answer_contract.violation(content, toolbox.texts()) is None):
+                and answer_contract.violation(content, toolbox.texts()) is None
+                and answer_contract.numeric_violation(content, question, toolbox.texts()) is None):
             return {"answer": content, "reason": None, "evidence": toolbox.evidence,
                     "attribution": attribution, **stats}
     return {"answer": None, "reason": limit_error or "tool_step_limit",
