@@ -257,3 +257,24 @@ def test_a_shape_change_is_told_apart_from_a_content_change():
     # A field that was there with a value and is now gone is a shape change; a field that moved is not.
     both = contract.compare(sample(extra_field=1, pooling="cls"), sample(pooling="mean"))
     assert not contract.only_schema_differences(both)
+
+
+def test_a_bundle_serving_deployment_can_declare_the_chunker_version_in_its_vectors(monkeypatch):
+    """The vector store can hold a bundle's chunks while the ingestion worker is on a newer chunker.
+
+    The stored vectors describe the bundle's chunker, so the read contract has to name that version or every
+    retrieval is refused. The override is deployment configuration, not a change to the ingestion chunker.
+    """
+    services = types.SimpleNamespace(embed_url="http://embeddings:80", dimension=1024,
+                                     normalise_embeddings=True, query_prefix="", passage_prefix="")
+    info = {"model_id": "BAAI/bge-m3", "model_sha": None, "model_dtype": "float32",
+            "model_type": {"embedding": {"pooling": "cls"}}, "max_input_length": 8192,
+            "auto_truncate": False}
+    monkeypatch.setenv("OI_SERVING_CHUNKER_VERSION", "chunker-canonical-v1")
+    live = contract.live_contract(services, info=info, dimension=1024)
+    assert live["chunker_version"] == "chunker-canonical-v1"
+
+    monkeypatch.delenv("OI_SERVING_CHUNKER_VERSION", raising=False)
+    live = contract.live_contract(services, info=info, dimension=1024)
+    import chunker
+    assert live["chunker_version"] == chunker.CHUNKER_VERSION
