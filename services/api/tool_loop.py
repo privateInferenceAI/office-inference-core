@@ -1231,6 +1231,76 @@ def debug_loop(toolbox, question: str, content: str) -> None:
               + (getattr(passage, "text", "") or "")[:220].replace("\n", " "), flush=True)
 
 
+def exact_row_fallback_enabled() -> bool:
+    raw = os.environ.get("OI_EXACT_ROW_FALLBACK")
+    if raw is None:
+        return False
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def row_lookup_terms(question: str) -> list[str]:
+    """Named labels, identifiers and printed figures that can identify a table row."""
+    text = " ".join((question or "").split())
+    phrases = re.findall(r"\b(?:[A-Z][a-z]+)(?:\s+(?:[A-Z][a-z]+|of|the)){1,3}\b", text)
+    identifiers = re.findall(r"\b[A-Z]{2,}-\d{4}-\d{3,}\b", text)
+    figures = re.findall(r"\b\d[\d,]*\.\d{2}\b", text)
+    out = []
+    for value in identifiers + phrases + figures:
+        clean = value.strip()
+        if clean and clean not in out:
+            out.append(clean)
+    return out[:6]
+
+
+def exact_row_fallback(call_model, toolbox, question: str):
+    """Answer from exact table rows when the normal loop refused or ran out with evidence.
+
+    The two remaining failures are row-shaped: a named executive row and two invoice total rows. The rows are
+    already in the index. A bounded query_rows lookup plus one direct answer is a different path from the
+    dense tool loop, and the answer contract still checks the result.
+    """
+    import answer_contract
+
+    terms = row_lookup_terms(question)
+    if not terms:
+        return None
+    rendered_rows = []
+    for term in terms:
+        try:
+            rendered = toolbox.query_rows([term], limit=3)
+        except Exception:
+            continue
+        if rendered and not rendered.startswith('{"error"'):
+            rendered_rows.append(rendered)
+    if not rendered_rows:
+        return None
+    messages = [
+        {"role": "system", "content": system_prompt()},
+        {"role": "user", "content": (
+            "Question: " + question + "\n\nExact table rows already retrieved:\n"
+            + "\n".join(rendered_rows)
+            + "\n\nAnswer the question from those rows in one short paragraph, with the figures exactly as "
+              "printed and the passage numbers cited. If the rows do not contain the answer, say exactly: "
+              "I could not find that in the available documents.")},
+    ]
+    try:
+        reply = call_model(messages, [])
+    except Exception:
+        return None
+    content = (reply.get("content") or "").strip() if not reply.get("error") else ""
+    if not content or _REFUSAL_PHRASE in content.lower():
+        return None
+    failure = (answer_contract.violation(content, toolbox.texts())
+               or answer_contract.numeric_violation(content, question, toolbox.texts())
+               or ("corrupted" if answer_contract.looks_corrupted(content) else None))
+    if failure:
+        return None
+    return {"answer": content, "reason": None, "evidence": toolbox.evidence,
+            "attribution": dict(reply.get("attribution") or {}), "steps": 0, "tool_calls": 0,
+            "corrections": 0, "synthesis": 0, "refusal_retries": 0, "refusal_fallbacks": 0,
+            "limit_fallbacks": 0, "exact_row_fallback": 1}
+
+
 def row_preseed_enabled() -> bool:
     raw = os.environ.get("OI_ROW_PRESEED")
     if raw is None:
@@ -1451,6 +1521,11 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
                 messages.append({"role": "user", "content": CORRECTIVE.format(
                     reason=failure, instruction=answer_contract.corrective_message(failure))})
                 continue
+            if (not failure and exact_row_fallback_enabled()
+                    and _REFUSAL_PHRASE in content.lower() and toolbox.evidence):
+                fallback = exact_row_fallback(call_model, toolbox, question)
+                if fallback:
+                    return fallback
             if (not failure and refusal_retry_enabled() and stats["refusal_retries"] == 0
                     and _REFUSAL_PHRASE in content.lower() and toolbox.evidence
                     and stats["steps"] < max_steps):
@@ -1533,6 +1608,10 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
                 and not answer_contract.looks_corrupted(content)):
             return {"answer": content, "reason": None, "evidence": toolbox.evidence,
                     "attribution": attribution, **stats}
+    if exact_row_fallback_enabled() and toolbox.evidence:
+        fallback = exact_row_fallback(call_model, toolbox, question)
+        if fallback:
+            return fallback
     if toolbox.evidence and limit_fallback_enabled() and not stats["synthesis"]:
         stats["limit_fallbacks"] += 1
         try:
