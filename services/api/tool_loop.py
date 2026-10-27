@@ -1207,6 +1207,19 @@ def presearch_identifiers_enabled() -> bool:
     return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
+def identifier_single_shot_enabled() -> bool:
+    """Whether a question that names document identifiers answers from the exact evidence without tools.
+
+    The cross-document invoice question has both totals already in the exact-identifier evidence. Letting the
+    tool loop search again adds nothing and has ended in a refusal. The single call is bounded by the same
+    deadline and answer contract as the loop.
+    """
+    raw = os.environ.get("OI_IDENTIFIER_SINGLE_SHOT")
+    if raw is None:
+        return False
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
 def read_passages_enabled() -> bool:
     """Whether the answer path offers the document-reading tool.
 
@@ -1290,6 +1303,17 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
             + "Search if this is not enough, then answer.")},
     ]
     limit_error = ""
+    if (identifier_single_shot_enabled() and presearch_identifiers_enabled()
+            and quoted_identifiers(question)):
+        reply = call_model(messages, [])
+        content = (reply.get("content") or "").strip() if not reply.get("error") else ""
+        if content:
+            failure = (answer_contract.violation(content, toolbox.texts())
+                       or answer_contract.numeric_violation(content, question, toolbox.texts())
+                       or ("corrupted" if answer_contract.looks_corrupted(content) else None))
+            if not failure:
+                return {"answer": content, "reason": None, "evidence": toolbox.evidence,
+                        "attribution": dict(reply.get("attribution") or {}), **stats}
     # **What the gateway says answered, per call, so the answer can name the model that ran.** The reply
     # that produces the answer carries it; a failover means this is a different model group from the
     # manifest's primary, and the caller reports both facts.
