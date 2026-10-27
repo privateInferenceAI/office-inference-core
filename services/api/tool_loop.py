@@ -867,7 +867,7 @@ class ToolBox:
         return expanded + kept
 
     # ------------------------------------------------------------------ tools
-    def complete_small_documents(self, passages):
+    def complete_small_documents(self, passages, question: str = ""):
         """Replace the snippets of a small document with the whole original document.
 
         The model does not see a document; it sees selected chunks. When the matched document is small, the
@@ -890,6 +890,20 @@ class ToolBox:
         if not dsn:
             return list(passages)
         import psycopg2
+        identifiers = [value.lower().replace("inv-", "invoice-") for value in quoted_identifiers(question)]
+        phrases = [value.lower() for value in question_row_phrases(question)]
+        selected: set[str] = set()
+        for passage in passages:
+            doc_id = getattr(passage, "doc_id", "") or ""
+            lowered_doc = doc_id.lower()
+            if any(identifier in lowered_doc for identifier in identifiers):
+                selected.add(doc_id)
+                continue
+            passage_text = (getattr(passage, "text", "") or "").lower()
+            if any(phrase in passage_text for phrase in phrases):
+                selected.add(doc_id)
+        if not selected:
+            return list(passages)
         seen: set[str] = set()
         used = 0
         result = []
@@ -904,7 +918,7 @@ class ToolBox:
                     if doc_id in seen:
                         continue
                     seen.add(doc_id)
-                    if used >= budget:
+                    if doc_id not in selected or used >= budget:
                         result.append(passage)
                         continue
                     cursor.execute(
@@ -1550,7 +1564,7 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
             identifier_evidence = "\n".join(found)
         except Exception:  # noqa: BLE001 - the pre-search is an improvement, not a new failure path
             identifier_evidence = ""
-    seeds = toolbox.complete_small_documents(seeds)
+    seeds = toolbox.complete_small_documents(seeds, question=question)
     seeded = ((identifier_evidence + "\n\n") if identifier_evidence else "") + toolbox.render(seeds)
     messages = [
         {"role": "system", "content": system_prompt()},
