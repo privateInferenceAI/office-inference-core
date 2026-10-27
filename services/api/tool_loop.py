@@ -705,12 +705,16 @@ class ToolBox:
             number = self.add(passage)
             if not number:
                 continue
-            text = " ".join((getattr(passage, "text", "") or "").split())
+            raw_text = (getattr(passage, "text", "") or "")
+            if getattr(passage, "full_text", False):
+                rendered_text = raw_text
+            else:
+                rendered_text = centred_snippet(" ".join(raw_text.split()), focus, SNIPPET_CHARS)
             prefix = self._table_prefix(passage)
             lines.append(f"[{number}] {passage.doc_id} p{passage.page_start} "
                          f"kind={passage.kind}: "
                          + ((prefix + " ") if prefix else "")
-                         + centred_snippet(text, focus, SNIPPET_CHARS))
+                         + rendered_text)
         return "\n".join(lines)
 
     def _table_sibling_rows(self, table_id: str, row_index: int):
@@ -868,99 +872,65 @@ class ToolBox:
 
     # ------------------------------------------------------------------ tools
     def complete_small_documents(self, passages, question: str = ""):
-        """Replace snippets of a referenced small document with its ordered chunks.
+        """Append the complete original text of small retrieved documents.
 
-        The model sees passages, not files. Completing a small document in place gives it every row without
-        losing the chunk ids, page metadata or citation targets. Large documents get a page window around the
-        matched page instead of the whole document. Only documents the question actually references are
-        completed, so an unrelated small document cannot crowd out a numeric answer.
+        The seed chunks stay in the evidence list, so their citation numbers do not move. The full document
+        is appended as a new evidence entry and rendered without the snippet cut. This is the actual
+        whole-document experiment: no replacement, no truncation, no renumbering.
         """
         if not _document_completion_enabled():
             return list(passages)
-        dsn = getattr(self.services, "database_url", "")
-        if not dsn:
+        root_value = (os.environ.get("OI_DOCUMENTS_ROOT") or "").strip()
+        if not root_value:
             return list(passages)
+        root = Path(root_value).resolve()
         try:
             max_chunks = int(os.environ.get("OI_DOCUMENT_MAX_CHUNKS", "25"))
             max_chars = int(os.environ.get("OI_DOCUMENT_MAX_CHARS", "40000"))
             budget = int(os.environ.get("OI_DOCUMENT_CONTEXT_CHARS", "60000"))
         except ValueError:
             max_chunks, max_chars, budget = 25, 40000, 60000
-        import psycopg2
-        import retriever
-        identifiers = [value.lower().replace("inv-", "invoice-") for value in quoted_identifiers(question)]
-        phrases = [value.lower() for value in question_row_phrases(question)]
-        selected: dict[str, set[int]] = {}
-        for passage in passages:
-            doc_id = getattr(passage, "doc_id", "") or ""
-            if not doc_id:
-                continue
-            lowered_doc = doc_id.lower()
-            if any(identifier in lowered_doc for identifier in identifiers):
-                selected.setdefault(doc_id, set()).add(int(getattr(passage, "page_start", 1) or 1))
-                continue
-            passage_text = (getattr(passage, "text", "") or "").lower()
-            if any(phrase in passage_text for phrase in phrases):
-                selected.setdefault(doc_id, set()).add(int(getattr(passage, "page_start", 1) or 1))
-        if not selected:
+        dsn = getattr(self.services, "database_url", "")
+        if not dsn:
             return list(passages)
+        import psycopg2
+        seen: set[str] = set()
+        completed: list = []
+        used = 0
         try:
             connection = psycopg2.connect(dsn)
         except Exception:
             return list(passages)
-        result = []
-        used = 0
-        completed: set[str] = set()
         try:
             with connection, connection.cursor() as cursor:
                 for passage in passages:
                     doc_id = getattr(passage, "doc_id", "") or ""
-                    if doc_id not in selected or doc_id in completed:
-                        result.append(passage)
+                    if not doc_id or doc_id in seen:
                         continue
-                    completed.add(doc_id)
+                    seen.add(doc_id)
                     cursor.execute(
                         "select count(*), coalesce(sum(length(text)), 0) from chunk_index "
                         "where doc_id = %s and acl = any(%s)", (doc_id, sorted(self.roots)))
                     count, chars = cursor.fetchone()
-                    remaining = budget - used
-                    if not count or remaining <= 0:
-                        result.append(passage)
+                    if not count or int(count) > max_chunks or int(chars) > max_chars:
                         continue
-                    if int(count) <= max_chunks and int(chars) <= max_chars:
-                        cursor.execute(
-                            "select chunk_id, doc_id, acl, text, page_start, page_end, kind from chunk_index "
-                            "where doc_id = %s and acl = any(%s) order by page_start, chunk_id",
-                            (doc_id, sorted(self.roots)))
-                        rows = cursor.fetchall()
-                    else:
-                        pages = selected[doc_id]
-                        low = max(1, min(pages) - 1)
-                        high = max(pages) + 1
-                        cursor.execute(
-                            "select chunk_id, doc_id, acl, text, page_start, page_end, kind from chunk_index "
-                            "where doc_id = %s and acl = any(%s) and page_end >= %s and page_start <= %s "
-                            "order by page_start, chunk_id limit %s",
-                            (doc_id, sorted(self.roots), low, high, max_chunks))
-                        rows = cursor.fetchall()
-                    expanded = []
-                    for row in rows or []:
-                        chunk_id, row_doc, acl, text, page_start, page_end, kind = row
-                        if not text:
-                            continue
-                        if used + len(text) > budget:
-                            break
-                        expanded.append(retriever.Passage(
-                            doc_id=row_doc, acl=acl, text=text, page_start=page_start,
-                            page_end=page_end, kind=kind, chunk_id=chunk_id))
-                        used += len(text)
-                    if expanded:
-                        result.extend(expanded)
-                    else:
-                        result.append(passage)
+                    try:
+                        path = (root / doc_id).resolve()
+                        path.relative_to(root)
+                        full_text = path.read_text(encoding="utf-8")
+                    except Exception:
+                        continue
+                    if not full_text or used + len(full_text) > budget:
+                        continue
+                    completed.append(types.SimpleNamespace(
+                        doc_id=doc_id, acl=getattr(passage, "acl", ""), text=full_text,
+                        page_start=1, page_end=max(1, int(getattr(passage, "page_end", 1) or 1)),
+                        kind="document", chunk_id="document:" + doc_id,
+                        table_id=None, row_index=None, full_text=True))
+                    used += len(full_text)
         finally:
             connection.close()
-        return result
+        return list(passages) + completed
 
     def search_documents(self, query: str) -> str:
         import retriever
