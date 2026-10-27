@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import types
 
 import answer_profile
 import re
@@ -865,6 +866,74 @@ class ToolBox:
         return expanded + kept
 
     # ------------------------------------------------------------------ tools
+    def complete_small_documents(self, passages):
+        """Replace the snippets of a small document with the whole original document.
+
+        The model does not see a document; it sees selected chunks. When the matched document is small, the
+        cheapest fix is to hand it the whole file rather than hope the row is inside a snippet. This is
+        deliberately capped and fails closed: a large or binary document keeps its retrieved passages.
+        """
+        if not _document_completion_enabled():
+            return list(passages)
+        root_value = (os.environ.get("OI_DOCUMENTS_ROOT") or "").strip()
+        if not root_value:
+            return list(passages)
+        root = Path(root_value).resolve()
+        try:
+            max_chunks = int(os.environ.get("OI_DOCUMENT_MAX_CHUNKS", "25"))
+            max_chars = int(os.environ.get("OI_DOCUMENT_MAX_CHARS", "40000"))
+            budget = int(os.environ.get("OI_DOCUMENT_CONTEXT_CHARS", "60000"))
+        except ValueError:
+            max_chunks, max_chars, budget = 25, 40000, 60000
+        dsn = getattr(self.services, "database_url", "")
+        if not dsn:
+            return list(passages)
+        import psycopg2
+        seen: set[str] = set()
+        used = 0
+        result = []
+        try:
+            connection = psycopg2.connect(dsn)
+        except Exception:
+            return list(passages)
+        try:
+            with connection, connection.cursor() as cursor:
+                for passage in passages:
+                    doc_id = getattr(passage, "doc_id", "") or ""
+                    if doc_id in seen:
+                        continue
+                    seen.add(doc_id)
+                    if used >= budget:
+                        result.append(passage)
+                        continue
+                    cursor.execute(
+                        "select count(*), coalesce(sum(length(text)), 0) from chunk_index "
+                        "where doc_id = %s and acl = any(%s)", (doc_id, sorted(self.roots)))
+                    count, chars = cursor.fetchone()
+                    if not count or int(count) > max_chunks or int(chars) > max_chars:
+                        result.append(passage)
+                        continue
+                    try:
+                        path = (root / doc_id).resolve()
+                        path.relative_to(root)
+                        text = path.read_text(encoding="utf-8")
+                    except Exception:
+                        result.append(passage)
+                        continue
+                    if not text or len(text) > max_chars:
+                        result.append(passage)
+                        continue
+                    full = types.SimpleNamespace(
+                        doc_id=doc_id, acl=getattr(passage, "acl", ""), text=text,
+                        page_start=1, page_end=max(1, int(getattr(passage, "page_end", 1) or 1)),
+                        kind="document", chunk_id="document:" + doc_id,
+                        table_id=None, row_index=None)
+                    result.append(full)
+                    used += len(text)
+        finally:
+            connection.close()
+        return result
+
     def search_documents(self, query: str) -> str:
         import retriever
 
@@ -1231,6 +1300,13 @@ def debug_loop(toolbox, question: str, content: str) -> None:
               + (getattr(passage, "text", "") or "")[:220].replace("\n", " "), flush=True)
 
 
+def _document_completion_enabled() -> bool:
+    raw = os.environ.get("OI_DOCUMENT_COMPLETION")
+    if raw is None:
+        return False
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
 def exact_row_fallback_enabled() -> bool:
     raw = os.environ.get("OI_EXACT_ROW_FALLBACK")
     if raw is None:
@@ -1473,6 +1549,7 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
             identifier_evidence = "\n".join(found)
         except Exception:  # noqa: BLE001 - the pre-search is an improvement, not a new failure path
             identifier_evidence = ""
+    seeds = toolbox.complete_small_documents(seeds)
     seeded = ((identifier_evidence + "\n\n") if identifier_evidence else "") + toolbox.render(seeds)
     messages = [
         {"role": "system", "content": system_prompt()},
