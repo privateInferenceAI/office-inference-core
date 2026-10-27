@@ -1231,6 +1231,30 @@ def debug_loop(toolbox, question: str, content: str) -> None:
               + (getattr(passage, "text", "") or "")[:220].replace("\n", " "), flush=True)
 
 
+def row_preseed_enabled() -> bool:
+    raw = os.environ.get("OI_ROW_PRESEED")
+    if raw is None:
+        return False
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def question_row_phrases(question: str) -> list[str]:
+    """Capitalized multiword labels and quoted identifiers worth a deterministic row lookup.
+
+    The CEO salary and invoice questions name a title or an identifier. A row lookup for that label is more
+    precise than dense retrieval and gives the model the exact row before it speaks.
+    """
+    text = " ".join((question or "").split())
+    phrases = re.findall(r"\b(?:[A-Z][a-z]+)(?:\s+(?:[A-Z][a-z]+|of|the)){1,3}\b", text)
+    identifiers = re.findall(r"\b[A-Z]{2,}-\d{4}-\d{3,}\b", text)
+    out = []
+    for value in identifiers + phrases:
+        clean = value.strip()
+        if clean and clean not in out:
+            out.append(clean)
+    return out[:3]
+
+
 def limit_fallback_enabled() -> bool:
     """Whether the loop gets one final no-tools answer from the evidence it collected before falling back.
 
@@ -1344,6 +1368,17 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
     stats = {"steps": 0, "tool_calls": 0, "corrections": 0, "synthesis": 0, "refusal_retries": 0, "refusal_fallbacks": 0, "limit_fallbacks": 0}
     seeds = list(seed_passages)
     identifier_evidence = ""
+    if row_preseed_enabled():
+        try:
+            row_evidence = []
+            for phrase in question_row_phrases(question):
+                rendered = toolbox.query_rows([phrase], limit=3)
+                if rendered and not rendered.startswith('{"error"'):
+                    row_evidence.append(rendered)
+            if row_evidence:
+                identifier_evidence = "\n".join(row_evidence)
+        except Exception:  # noqa: BLE001 - the pre-seed is an improvement, not a failure path
+            pass
     if presearch_identifiers_enabled() and quoted_identifiers(question):
         # **Exact text lookup, not dense search.** The question names the identifiers. A vector query for
         # "INV-2025-002" is not guaranteed to rank the invoice that contains it, and a refusal follows. The
