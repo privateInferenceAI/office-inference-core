@@ -250,6 +250,10 @@ _CROSS_DOC_RULE = (
     "8. If the question names or quotes two or more documents, invoice numbers or identifiers, search for each "
     "one separately before answering.\n"
 )
+_REFUSAL_RULE = (
+    "9. Do not refuse until you have searched at least twice with the question's key terms or confirmed that "
+    "the evidence lacks the answer. One pass over the first results is not enough.\n"
+)
 
 _HONESTY_RULE = (
     "7. If the question asks about a specific event, period, meeting or document that the evidence never "
@@ -271,7 +275,7 @@ def system_prompt() -> str:
     """
     tools = ("; query_rows returns the exact table rows that contain the values or labels you give it, "
              "which is how a figure is confirmed before it is answered")
-    return (_PROMPT_HEAD.format(tools=tools) + _PROMPT_RULES + _TABLE_RULE + _ECHO_RULE + _CROSS_DOC_RULE + _HONESTY_RULE
+    return (_PROMPT_HEAD.format(tools=tools) + _PROMPT_RULES + _TABLE_RULE + _ECHO_RULE + _CROSS_DOC_RULE + _REFUSAL_RULE + _HONESTY_RULE
             + _PROMPT_TAIL)
 
 
