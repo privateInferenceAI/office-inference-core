@@ -251,6 +251,12 @@ _CROSS_DOC_RULE = (
     "one separately before answering.\n"
 )
 
+_REFUSAL_RETRY_INSTRUCTION = (
+    "The evidence you have already read may contain the answer. Search again with different words if needed, "
+    "and answer from the evidence. Refuse only if the evidence truly does not contain it. Do not guess."
+)
+
+
 _HONESTY_RULE = (
     "7. If the question asks about a specific event, period, meeting or document that the evidence never "
     "states, refuse even when the evidence contains related facts. Do not infer that a related figure answers "
@@ -1207,6 +1213,20 @@ def presearch_identifiers_enabled() -> bool:
     return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
+def refusal_retry_enabled() -> bool:
+    """Whether a refusal may be retried once when the toolbox already holds evidence.
+
+    The measured Kimi candidate refused on CEO salary and cross-document invoice questions even when retrieval
+    had hit the right documents. The refusal is accepted by the contract, so the loop stops. One bounded retry
+    with an explicit reminder that the evidence may contain the answer is the smallest change that tests
+    whether the model simply stopped too early. It is off by default.
+    """
+    raw = os.environ.get("OI_RETRY_REFUSALS")
+    if raw is None:
+        return False
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
 def identifier_single_shot_enabled() -> bool:
     """Whether a question that names document identifiers answers from the exact evidence without tools.
 
@@ -1276,7 +1296,7 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
     """
     import answer_contract
 
-    stats = {"steps": 0, "tool_calls": 0, "corrections": 0, "synthesis": 0}
+    stats = {"steps": 0, "tool_calls": 0, "corrections": 0, "synthesis": 0, "refusal_retries": 0}
     seeds = list(seed_passages)
     identifier_evidence = ""
     if presearch_identifiers_enabled() and quoted_identifiers(question):
@@ -1341,6 +1361,13 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
                 messages.append({"role": "assistant", "content": content})
                 messages.append({"role": "user", "content": CORRECTIVE.format(
                     reason=failure, instruction=answer_contract.corrective_message(failure))})
+                continue
+            if (not failure and refusal_retry_enabled() and stats["refusal_retries"] == 0
+                    and _REFUSAL_PHRASE in content.lower() and toolbox.evidence
+                    and stats["steps"] < max_steps):
+                stats["refusal_retries"] += 1
+                messages.append({"role": "assistant", "content": content})
+                messages.append({"role": "user", "content": _REFUSAL_RETRY_INSTRUCTION})
                 continue
             return {"answer": content, "reason": None, "evidence": toolbox.evidence,
                     "attribution": attribution, **stats}
