@@ -787,3 +787,16 @@ def test_quoted_identifiers_are_found_in_order():
     question = ("Invoice INV-2025-001 totals 13,512.00 USD and invoice INV-2025-002 totals 11,297.94 USD.")
     assert tool_loop.quoted_identifiers(question) == ["INV-2025-001", "INV-2025-002"]
     assert tool_loop.quoted_identifiers("no identifiers here") == []
+
+
+def test_the_loop_limits_can_be_raised_by_a_deployment(monkeypatch):
+    monkeypatch.delenv("OI_TOOL_MAX_STEPS", raising=False)
+    monkeypatch.delenv("OI_TOOL_MAX_CALLS", raising=False)
+    assert tool_loop.limits() == (6, 10)
+
+    monkeypatch.setenv("OI_TOOL_MAX_STEPS", "8")
+    monkeypatch.setenv("OI_TOOL_MAX_CALLS", "12")
+    assert tool_loop.limits() == (8, 12)
+
+    monkeypatch.setenv("OI_TOOL_MAX_STEPS", "not-a-number")
+    assert tool_loop.limits()[0] == 6

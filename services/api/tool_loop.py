@@ -1352,8 +1352,8 @@ def agent_tools(definition: dict) -> list:
 
 
 def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
-             max_steps: int = 6, max_tool_calls: int = 10, deadline: float | None = None,
-             on_event=None) -> dict:
+             max_steps: int | None = None, max_tool_calls: int | None = None,
+             deadline: float | None = None, on_event=None) -> dict:
     """Run the model until it answers, bounded by steps, tool calls and a deadline.
 
     `call_model(messages, tools)` returns a dict: `{"content", "tool_calls", "error"}`. `tool_calls` is a list
@@ -1365,6 +1365,10 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
     """
     import answer_contract
 
+    if max_steps is None:
+        max_steps = limits()[0]
+    if max_tool_calls is None:
+        max_tool_calls = limits()[1]
     stats = {"steps": 0, "tool_calls": 0, "corrections": 0, "synthesis": 0, "refusal_retries": 0, "refusal_fallbacks": 0, "limit_fallbacks": 0}
     seeds = list(seed_passages)
     identifier_evidence = ""
@@ -1546,5 +1550,18 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
 
 
 def limits() -> tuple[int, int]:
-    """Steps and tool calls per answer. Measured, not tuned per deployment."""
-    return 6, 10
+    """Steps and tool calls per answer.
+
+    The product default is the measured 6 and 10. A bundle-serving deployment can raise the step cap for table
+    questions where a recoverable tool error consumes a step and the loop otherwise falls back with the right
+    row already in the evidence.
+    """
+    def _limit(name: str, default: int) -> int:
+        raw = os.environ.get(name)
+        if raw is None:
+            return default
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            return default
+    return _limit("OI_TOOL_MAX_STEPS", 6), _limit("OI_TOOL_MAX_CALLS", 10)
