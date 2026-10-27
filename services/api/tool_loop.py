@@ -1439,6 +1439,10 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
                 break
             stats["tool_calls"] += 1
             result = toolbox.execute(call.get("name") or "", call.get("arguments") or "{}")
+            if debug_loop_enabled():
+                print("[loop-debug] tool=" + (call.get("name") or "") + " args="
+                      + (call.get("arguments") or "")[:240].replace("\n", " "), flush=True)
+                print("[loop-debug] result=" + str(result)[:320].replace("\n", " "), flush=True)
             if on_event is not None:
                 on_event({"type": "tool", "tool": call.get("name") or "",
                           "evidence": len(toolbox.evidence)})
