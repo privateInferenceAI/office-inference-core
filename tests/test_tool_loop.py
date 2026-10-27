@@ -762,3 +762,22 @@ def test_the_delegate_tool_is_offered_only_to_a_definition_with_child_tools():
     assert "send_email" not in with_web
     with_connector = {tool["function"]["name"] for tool in tool_loop.agent_tools({"connector": True})}
     assert "send_email" in with_connector
+
+
+def test_read_passages_can_be_disabled_for_a_bundle_serving_deployment(monkeypatch):
+    """The accepted lab configuration did not offer read_passages.
+
+    The product branch added the tool for the agent runtime. A canonical deployment needs a way to serve the
+    measured answer path without silently using a different tool list.
+    """
+    names = lambda: [(tool.get("function") or {}).get("name") for tool in tool_loop.active_tools()]
+    monkeypatch.delenv("OI_TOOL_READ_PASSAGES", raising=False)
+    assert "read_passages" in names()
+
+    monkeypatch.setenv("OI_TOOL_READ_PASSAGES", "0")
+    assert "read_passages" not in names()
+    assert "query_rows" in names()
+    assert tool_loop.read_passages_enabled() is False
+
+    monkeypatch.setenv("OI_TOOL_READ_PASSAGES", "1")
+    assert "read_passages" in names()

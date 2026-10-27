@@ -23,6 +23,7 @@ missing filter hides.
 from __future__ import annotations
 
 import json
+import os
 
 import answer_profile
 import re
@@ -1147,6 +1148,8 @@ class ToolBox:
             if name == "search_documents":
                 out = self.search_documents(str(args.get("query") or ""))
             elif name == "read_passages":
+                if not read_passages_enabled():
+                    return json.dumps({"error": "read_passages is disabled on this deployment"})
                 out = self.read_passages(str(args.get("doc_id") or ""), args.get("page_start"),
                                          args.get("page_end"), str(args.get("chunk_id") or ""))
             elif name == "query_rows":
@@ -1176,9 +1179,26 @@ class ToolBox:
         return out
 
 
+def read_passages_enabled() -> bool:
+    """Whether the answer path offers the document-reading tool.
+
+    The lab configuration that produced the accepted measurement did not offer this tool. The product branch
+    added it for the newer agent runtime. A deployment can turn it off so the canonical answer path is
+    comparable to the measured configuration; the default stays on.
+    """
+    raw = os.environ.get("OI_TOOL_READ_PASSAGES")
+    if raw is None:
+        return True
+    return raw.strip().lower() not in ("0", "false", "no", "off")
+
+
 def active_tools() -> list:
     """The tools the answer path offers. One path, so one list."""
-    return list(TOOLS)
+    tools = list(TOOLS)
+    if not read_passages_enabled():
+        tools = [tool for tool in tools
+                 if (tool.get("function") or {}).get("name") != "read_passages"]
+    return tools
 
 
 def agent_tools(definition: dict) -> list:
