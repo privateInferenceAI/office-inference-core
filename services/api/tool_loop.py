@@ -242,6 +242,10 @@ _TABLE_RULE = (
     "6. A figure copied from a table row is a valid answer. Check every passage before concluding the answer is "
     "absent.\n"
 )
+_ECHO_RULE = (
+    "7. When the question quotes a figure, a date, a row label or a phrase, repeat that exact value in the "
+    "answer so the reader can see the match.\n"
+)
 
 _HONESTY_RULE = (
     "7. If the question asks about a specific event, period, meeting or document that the evidence never "
@@ -263,7 +267,7 @@ def system_prompt() -> str:
     """
     tools = ("; query_rows returns the exact table rows that contain the values or labels you give it, "
              "which is how a figure is confirmed before it is answered")
-    return (_PROMPT_HEAD.format(tools=tools) + _PROMPT_RULES + _TABLE_RULE + _HONESTY_RULE
+    return (_PROMPT_HEAD.format(tools=tools) + _PROMPT_RULES + _TABLE_RULE + _ECHO_RULE + _HONESTY_RULE
             + _PROMPT_TAIL)
 
 
@@ -1265,7 +1269,8 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
         if not calls:
             content = (reply.get("content") or "").strip()
             failure = (answer_contract.violation(content, toolbox.texts())
-                       or answer_contract.numeric_violation(content, question, toolbox.texts()))
+                       or answer_contract.numeric_violation(content, question, toolbox.texts())
+                       or ("corrupted" if answer_contract.looks_corrupted(content) else None))
             if failure and stats["steps"] < max_steps:
                 stats["corrections"] += 1
                 messages.append({"role": "assistant", "content": content})
@@ -1317,7 +1322,8 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
         # synthesis that actually answers is accepted.
         if (content and _REFUSAL_PHRASE not in content.lower()
                 and answer_contract.violation(content, toolbox.texts()) is None
-                and answer_contract.numeric_violation(content, question, toolbox.texts()) is None):
+                and answer_contract.numeric_violation(content, question, toolbox.texts()) is None
+                and not answer_contract.looks_corrupted(content)):
             return {"answer": content, "reason": None, "evidence": toolbox.evidence,
                     "attribution": attribution, **stats}
     return {"answer": None, "reason": limit_error or "tool_step_limit",
