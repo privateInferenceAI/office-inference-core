@@ -1213,6 +1213,24 @@ def presearch_identifiers_enabled() -> bool:
     return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
+def debug_loop_enabled() -> bool:
+    raw = os.environ.get("OI_DEBUG_LOOP")
+    return bool(raw) and raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def debug_loop(toolbox, question: str, content: str) -> None:
+    if not debug_loop_enabled():
+        return
+    print("[loop-debug] question=" + question[:160].replace("\n", " "), flush=True)
+    print("[loop-debug] answer=" + (content or "")[:160].replace("\n", " "), flush=True)
+    print("[loop-debug] evidence=" + str(len(toolbox.evidence)), flush=True)
+    for passage in toolbox.evidence[-6:]:
+        print("[loop-debug] doc=" + str(getattr(passage, "doc_id", "")) + " p"
+              + str(getattr(passage, "page_start", "")) + " kind="
+              + str(getattr(passage, "kind", "")) + " text="
+              + (getattr(passage, "text", "") or "")[:220].replace("\n", " "), flush=True)
+
+
 def refusal_fallback_enabled() -> bool:
     """Whether a refusal gets one direct answer from the evidence already in the conversation.
 
@@ -1403,6 +1421,7 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
                         return {"answer": retry_content, "reason": None,
                                 "evidence": toolbox.evidence,
                                 "attribution": dict(fallback.get("attribution") or attribution), **stats}
+            debug_loop(toolbox, question, content)
             return {"answer": content, "reason": None, "evidence": toolbox.evidence,
                     "attribution": attribution, **stats}
 
