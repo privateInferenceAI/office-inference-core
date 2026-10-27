@@ -1369,6 +1369,11 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
         max_steps = limits()[0]
     if max_tool_calls is None:
         max_tool_calls = limits()[1]
+    # Identifier questions are the cross-document lookup questions. The measured 6-step configuration handled
+    # them better than the looser loop; the extra steps help the salary table question and hurt this one.
+    if quoted_identifiers(question):
+        max_steps = min(max_steps, 6)
+        max_tool_calls = min(max_tool_calls, 10)
     stats = {"steps": 0, "tool_calls": 0, "corrections": 0, "synthesis": 0, "refusal_retries": 0, "refusal_fallbacks": 0, "limit_fallbacks": 0}
     seeds = list(seed_passages)
     identifier_evidence = ""
