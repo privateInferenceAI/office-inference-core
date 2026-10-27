@@ -1213,6 +1213,19 @@ def presearch_identifiers_enabled() -> bool:
     return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
+def refusal_fallback_enabled() -> bool:
+    """Whether a refusal gets one direct answer from the evidence already in the conversation.
+
+    The candidate refused on two questions after retrieval had already found the right documents. A tool
+    retry was not consistently better. The smaller experiment is one no-tools answer over the same
+    conversation: the evidence is already there, and the model is asked to answer from it directly.
+    """
+    raw = os.environ.get("OI_REFUSAL_FALLBACK")
+    if raw is None:
+        return False
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
 def refusal_retry_enabled() -> bool:
     """Whether a refusal may be retried once when the toolbox already holds evidence.
 
@@ -1296,7 +1309,7 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
     """
     import answer_contract
 
-    stats = {"steps": 0, "tool_calls": 0, "corrections": 0, "synthesis": 0, "refusal_retries": 0}
+    stats = {"steps": 0, "tool_calls": 0, "corrections": 0, "synthesis": 0, "refusal_retries": 0, "refusal_fallbacks": 0}
     seeds = list(seed_passages)
     identifier_evidence = ""
     if presearch_identifiers_enabled() and quoted_identifiers(question):
@@ -1369,6 +1382,27 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
                 messages.append({"role": "assistant", "content": content})
                 messages.append({"role": "user", "content": _REFUSAL_RETRY_INSTRUCTION})
                 continue
+            if (not failure and refusal_fallback_enabled() and stats["refusal_fallbacks"] == 0
+                    and _REFUSAL_PHRASE in content.lower() and toolbox.evidence):
+                stats["refusal_fallbacks"] += 1
+                fallback = call_model(messages + [
+                    {"role": "assistant", "content": content},
+                    {"role": "user", "content": (
+                        "The evidence above may contain the answer. Answer directly from that evidence in one "
+                        "short paragraph, with the figures exactly as printed. Do not refuse unless the "
+                        "evidence truly does not contain it.")},
+                ], [])
+                retry_content = (fallback.get("content") or "").strip() if not fallback.get("error") else ""
+                if retry_content:
+                    retry_failure = (answer_contract.violation(retry_content, toolbox.texts())
+                                     or answer_contract.numeric_violation(
+                                         retry_content, question, toolbox.texts())
+                                     or ("corrupted" if answer_contract.looks_corrupted(retry_content)
+                                         else None))
+                    if not retry_failure and _REFUSAL_PHRASE not in retry_content.lower():
+                        return {"answer": retry_content, "reason": None,
+                                "evidence": toolbox.evidence,
+                                "attribution": dict(fallback.get("attribution") or attribution), **stats}
             return {"answer": content, "reason": None, "evidence": toolbox.evidence,
                     "attribution": attribution, **stats}
 
