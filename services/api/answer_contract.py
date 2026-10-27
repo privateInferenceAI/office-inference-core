@@ -109,6 +109,10 @@ def corrective_message(reason: str) -> str:
     if reason == "numeric_arithmetic":
         return ("Your previous reply's arithmetic is not the difference or sum of two printed figures. Use two "
                 "figures exactly as printed and show the subtraction or addition.")
+    if reason == "corrupted":
+        return ("Your previous reply was corrupted or not in English. Answer again in English using only the "
+                "evidence. Do not mix scripts or invent words. If the evidence does not contain the answer, "
+                "say exactly: I could not find that in the available documents.")
     return ("Your previous reply was empty. Answer the question from the passages, or say exactly: I could not "
             "find that in the available documents.")
 
@@ -209,3 +213,32 @@ def numeric_violation(answer: str, question: str, passage_texts: list[str]) -> s
         if not _is_pair_result(digits, figures):
             return "numeric_grounding"
     return None
+
+
+# ---------------------------------------------------------------- corrupted-output guard
+# Kimi K3 intermittently returns fluent-looking text in the wrong script for a small number of table and
+# refusal questions. The answer is not a wrong figure: it is unreadable output. A product cannot ship that.
+# The detector is deliberately narrow and English-corpus specific, because the corpus is English and a
+# legitimate answer should not contain a run of non-Latin script.
+_NON_LATIN = re.compile(
+    "[" 
+    "\u0080-\u024F"  # Latin-1 supplement and extended
+    "\u0370-\u03FF"  # Greek
+    "\u0400-\u052F"  # Cyrillic
+    "\u0590-\u06FF"  # Hebrew and Arabic
+    "\u0900-\u097F"  # Devanagari
+    "\u3040-\u30FF"  # Japanese
+    "\u4E00-\u9FFF"  # CJK
+    "\uAC00-\uD7AF"  # Hangul
+    "]"
+)
+
+
+def looks_corrupted(answer: str) -> bool:
+    """Whether an answer contains a run of text in the wrong script for an English corpus."""
+    text = answer or ""
+    letters = [character for character in text if character.isalpha()]
+    if not letters:
+        return False
+    non_latin = len(_NON_LATIN.findall(text))
+    return non_latin >= 8 and non_latin / len(letters) >= 0.05
