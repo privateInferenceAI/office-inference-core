@@ -868,83 +868,96 @@ class ToolBox:
 
     # ------------------------------------------------------------------ tools
     def complete_small_documents(self, passages, question: str = ""):
-        """Replace the snippets of a small document with the whole original document.
+        """Replace snippets of a referenced small document with its ordered chunks.
 
-        The model does not see a document; it sees selected chunks. When the matched document is small, the
-        cheapest fix is to hand it the whole file rather than hope the row is inside a snippet. This is
-        deliberately capped and fails closed: a large or binary document keeps its retrieved passages.
+        The model sees passages, not files. Completing a small document in place gives it every row without
+        losing the chunk ids, page metadata or citation targets. Large documents get a page window around the
+        matched page instead of the whole document. Only documents the question actually references are
+        completed, so an unrelated small document cannot crowd out a numeric answer.
         """
         if not _document_completion_enabled():
             return list(passages)
-        root_value = (os.environ.get("OI_DOCUMENTS_ROOT") or "").strip()
-        if not root_value:
+        dsn = getattr(self.services, "database_url", "")
+        if not dsn:
             return list(passages)
-        root = Path(root_value).resolve()
         try:
             max_chunks = int(os.environ.get("OI_DOCUMENT_MAX_CHUNKS", "25"))
             max_chars = int(os.environ.get("OI_DOCUMENT_MAX_CHARS", "40000"))
             budget = int(os.environ.get("OI_DOCUMENT_CONTEXT_CHARS", "60000"))
         except ValueError:
             max_chunks, max_chars, budget = 25, 40000, 60000
-        dsn = getattr(self.services, "database_url", "")
-        if not dsn:
-            return list(passages)
         import psycopg2
+        import retriever
         identifiers = [value.lower().replace("inv-", "invoice-") for value in quoted_identifiers(question)]
         phrases = [value.lower() for value in question_row_phrases(question)]
-        selected: set[str] = set()
+        selected: dict[str, set[int]] = {}
         for passage in passages:
             doc_id = getattr(passage, "doc_id", "") or ""
+            if not doc_id:
+                continue
             lowered_doc = doc_id.lower()
             if any(identifier in lowered_doc for identifier in identifiers):
-                selected.add(doc_id)
+                selected.setdefault(doc_id, set()).add(int(getattr(passage, "page_start", 1) or 1))
                 continue
             passage_text = (getattr(passage, "text", "") or "").lower()
             if any(phrase in passage_text for phrase in phrases):
-                selected.add(doc_id)
+                selected.setdefault(doc_id, set()).add(int(getattr(passage, "page_start", 1) or 1))
         if not selected:
             return list(passages)
-        seen: set[str] = set()
-        used = 0
-        result = []
         try:
             connection = psycopg2.connect(dsn)
         except Exception:
             return list(passages)
+        result = []
+        used = 0
+        completed: set[str] = set()
         try:
             with connection, connection.cursor() as cursor:
                 for passage in passages:
                     doc_id = getattr(passage, "doc_id", "") or ""
-                    if doc_id in seen:
-                        continue
-                    seen.add(doc_id)
-                    if doc_id not in selected or used >= budget:
+                    if doc_id not in selected or doc_id in completed:
                         result.append(passage)
                         continue
+                    completed.add(doc_id)
                     cursor.execute(
                         "select count(*), coalesce(sum(length(text)), 0) from chunk_index "
                         "where doc_id = %s and acl = any(%s)", (doc_id, sorted(self.roots)))
                     count, chars = cursor.fetchone()
-                    if not count or int(count) > max_chunks or int(chars) > max_chars:
+                    remaining = budget - used
+                    if not count or remaining <= 0:
                         result.append(passage)
                         continue
-                    try:
-                        path = (root / doc_id).resolve()
-                        path.relative_to(root)
-                        text = path.read_text(encoding="utf-8")
-                    except Exception:
+                    if int(count) <= max_chunks and int(chars) <= max_chars:
+                        cursor.execute(
+                            "select chunk_id, doc_id, acl, text, page_start, page_end, kind from chunk_index "
+                            "where doc_id = %s and acl = any(%s) order by page_start, chunk_id",
+                            (doc_id, sorted(self.roots)))
+                        rows = cursor.fetchall()
+                    else:
+                        pages = selected[doc_id]
+                        low = max(1, min(pages) - 1)
+                        high = max(pages) + 1
+                        cursor.execute(
+                            "select chunk_id, doc_id, acl, text, page_start, page_end, kind from chunk_index "
+                            "where doc_id = %s and acl = any(%s) and page_end >= %s and page_start <= %s "
+                            "order by page_start, chunk_id limit %s",
+                            (doc_id, sorted(self.roots), low, high, max_chunks))
+                        rows = cursor.fetchall()
+                    expanded = []
+                    for row in rows or []:
+                        chunk_id, row_doc, acl, text, page_start, page_end, kind = row
+                        if not text:
+                            continue
+                        if used + len(text) > budget:
+                            break
+                        expanded.append(retriever.Passage(
+                            doc_id=row_doc, acl=acl, text=text, page_start=page_start,
+                            page_end=page_end, kind=kind, chunk_id=chunk_id))
+                        used += len(text)
+                    if expanded:
+                        result.extend(expanded)
+                    else:
                         result.append(passage)
-                        continue
-                    if not text or len(text) > max_chars:
-                        result.append(passage)
-                        continue
-                    full = types.SimpleNamespace(
-                        doc_id=doc_id, acl=getattr(passage, "acl", ""), text=text,
-                        page_start=1, page_end=max(1, int(getattr(passage, "page_end", 1) or 1)),
-                        kind="document", chunk_id="document:" + doc_id,
-                        table_id=None, row_index=None)
-                    result.append(full)
-                    used += len(text)
         finally:
             connection.close()
         return result
