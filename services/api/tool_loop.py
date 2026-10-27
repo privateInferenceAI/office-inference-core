@@ -1187,6 +1187,26 @@ class ToolBox:
         return out
 
 
+IDENTIFIER_QUERIES = re.compile(r"\b[A-Z]{2,}-\d{4}-\d{3,}\b")
+
+
+def quoted_identifiers(question: str) -> list[str]:
+    """Document identifiers the question quotes, in stable order.
+
+    The cross-document question names two invoice numbers. The model sometimes searched only one of them and
+    then refused. Resolving each identifier deterministically before the model speaks removes that failure
+    without adding a tool decision.
+    """
+    return sorted(set(IDENTIFIER_QUERIES.findall(question or "")))
+
+
+def presearch_identifiers_enabled() -> bool:
+    raw = os.environ.get("OI_PRESEARCH_IDENTIFIERS")
+    if raw is None:
+        return False
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
 def read_passages_enabled() -> bool:
     """Whether the answer path offers the document-reading tool.
 
@@ -1244,7 +1264,22 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
     import answer_contract
 
     stats = {"steps": 0, "tool_calls": 0, "corrections": 0, "synthesis": 0}
-    seeded = toolbox.render(list(seed_passages))
+    seeds = list(seed_passages)
+    if presearch_identifiers_enabled() and quoted_identifiers(question):
+        try:
+            import retriever
+            seen = {getattr(passage, "chunk_id", "") for passage in seeds}
+            for identifier in quoted_identifiers(question):
+                found = retriever.search(toolbox.services, identifier, role=toolbox.role,
+                                         limit=3, permit=toolbox.permit)
+                for passage in found.passages:
+                    key = getattr(passage, "chunk_id", "")
+                    if key and key not in seen:
+                        seeds.append(passage)
+                        seen.add(key)
+        except Exception:  # noqa: BLE001 - the pre-search is an improvement, not a new failure path
+            pass
+    seeded = toolbox.render(seeds)
     messages = [
         {"role": "system", "content": system_prompt()},
         {"role": "user", "content": (

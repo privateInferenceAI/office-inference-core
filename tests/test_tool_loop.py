@@ -781,3 +781,9 @@ def test_read_passages_can_be_disabled_for_a_bundle_serving_deployment(monkeypat
 
     monkeypatch.setenv("OI_TOOL_READ_PASSAGES", "1")
     assert "read_passages" in names()
+
+
+def test_quoted_identifiers_are_found_in_order():
+    question = ("Invoice INV-2025-001 totals 13,512.00 USD and invoice INV-2025-002 totals 11,297.94 USD.")
+    assert tool_loop.quoted_identifiers(question) == ["INV-2025-001", "INV-2025-002"]
+    assert tool_loop.quoted_identifiers("no identifiers here") == []
