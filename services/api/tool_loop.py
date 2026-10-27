@@ -1231,6 +1231,20 @@ def debug_loop(toolbox, question: str, content: str) -> None:
               + (getattr(passage, "text", "") or "")[:220].replace("\n", " "), flush=True)
 
 
+def limit_fallback_enabled() -> bool:
+    """Whether the loop gets one final no-tools answer from the evidence it collected before falling back.
+
+    Some table questions spend their steps on recoverable tool errors and hit a cap with usable evidence in the
+    toolbox. Falling back to the single-shot path there loses everything the loop read. One direct answer from
+    the evidence is the smallest change that tests whether the loop's failure was procedural rather than a
+    missing fact.
+    """
+    raw = os.environ.get("OI_LIMIT_FALLBACK")
+    if raw is None:
+        return False
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
 def refusal_fallback_enabled() -> bool:
     """Whether a refusal gets one direct answer from the evidence already in the conversation.
 
@@ -1327,7 +1341,7 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
     """
     import answer_contract
 
-    stats = {"steps": 0, "tool_calls": 0, "corrections": 0, "synthesis": 0, "refusal_retries": 0, "refusal_fallbacks": 0}
+    stats = {"steps": 0, "tool_calls": 0, "corrections": 0, "synthesis": 0, "refusal_retries": 0, "refusal_fallbacks": 0, "limit_fallbacks": 0}
     seeds = list(seed_passages)
     identifier_evidence = ""
     if presearch_identifiers_enabled() and quoted_identifiers(question):
@@ -1475,6 +1489,23 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
                 and not answer_contract.looks_corrupted(content)):
             return {"answer": content, "reason": None, "evidence": toolbox.evidence,
                     "attribution": attribution, **stats}
+    if toolbox.evidence and limit_fallback_enabled() and not stats["synthesis"]:
+        stats["limit_fallbacks"] += 1
+        try:
+            reply = call_model(messages + [{"role": "user", "content": (
+                "Answer the question from the evidence above in one short paragraph. Use the figures exactly as "
+                "printed and cite the passage numbers. Do not search again. If the evidence truly does not "
+                "contain the answer, say exactly: I could not find that in the available documents.")}], [])
+        except Exception:
+            reply = {"error": "limit_fallback_failed"}
+        content = (reply.get("content") or "").strip() if not reply.get("error") else ""
+        if content:
+            failure = (answer_contract.violation(content, toolbox.texts())
+                       or answer_contract.numeric_violation(content, question, toolbox.texts())
+                       or ("corrupted" if answer_contract.looks_corrupted(content) else None))
+            if not failure and _REFUSAL_PHRASE not in content.lower():
+                return {"answer": content, "reason": None, "evidence": toolbox.evidence,
+                        "attribution": dict(reply.get("attribution") or {}), **stats}
     return {"answer": None, "reason": limit_error or "tool_step_limit",
             "evidence": toolbox.evidence, **stats}
 
