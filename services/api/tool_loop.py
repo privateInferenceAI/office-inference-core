@@ -1265,21 +1265,23 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
 
     stats = {"steps": 0, "tool_calls": 0, "corrections": 0, "synthesis": 0}
     seeds = list(seed_passages)
+    identifier_evidence = ""
     if presearch_identifiers_enabled() and quoted_identifiers(question):
+        # **Exact text lookup, not dense search.** The question names the identifiers. A vector query for
+        # "INV-2025-002" is not guaranteed to rank the invoice that contains it, and a refusal follows. The
+        # exact lookup is a bounded SQL match over the permitted roots and is the same one the phrase tool
+        # uses. It adds the passages to the evidence namespace and returns rendered excerpts the model can
+        # cite directly.
         try:
-            import retriever
-            seen = {getattr(passage, "chunk_id", "") for passage in seeds}
+            found = []
             for identifier in quoted_identifiers(question):
-                found = retriever.search(toolbox.services, identifier, role=toolbox.role,
-                                         limit=3, permit=toolbox.permit)
-                for passage in found.passages:
-                    key = getattr(passage, "chunk_id", "")
-                    if key and key not in seen:
-                        seeds.append(passage)
-                        seen.add(key)
+                rendered = toolbox.search_exact(identifier, limit=3)
+                if rendered and not rendered.startswith('{"error"'):
+                    found.append(rendered)
+            identifier_evidence = "\n".join(found)
         except Exception:  # noqa: BLE001 - the pre-search is an improvement, not a new failure path
-            pass
-    seeded = toolbox.render(seeds)
+            identifier_evidence = ""
+    seeded = ((identifier_evidence + "\n\n") if identifier_evidence else "") + toolbox.render(seeds)
     messages = [
         {"role": "system", "content": system_prompt()},
         {"role": "user", "content": (
