@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import urllib.request
 from dataclasses import dataclass
 
@@ -118,7 +119,11 @@ def live_contract(services, info: dict | None = None, dimension: int | None = No
         # Measured, not read off the object. A process that has not embedded anything yet has never measured it,
         # and reading an unmeasured field is what made the reader's contract differ from the writer's.
         "dimension": dimension or getattr(services, "dimension", None),
-        "chunker_version": chunker.CHUNKER_VERSION,
+        # A deployment that serves a validated bundle has the bundle's chunker version in the stored vectors,
+        # not the live ingestion worker's version. The override is set only on that deployment; when it is
+        # absent the current ingestion chunker remains the source of truth.
+        "chunker_version": (os.environ.get("OI_SERVING_CHUNKER_VERSION") or "").strip()
+        or chunker.CHUNKER_VERSION,
     }
 
 

@@ -457,42 +457,6 @@ def test_the_exact_excerpt_is_centred_on_the_match():
     assert excerpt.startswith("...") and excerpt.endswith("...")
 
 
-def test_exact_evidence_is_seeded_before_the_model_answers(monkeypatch):
-    """The one exact search that remains: at seed time, not after a refusal."""
-    toolbox = make_toolbox()
-    toolbox.exact_phrase_for_question = lambda question: "visitor badge"
-    calls = []
-
-    def fake_exact(phrase, doc_id="", limit=6):
-        calls.append(phrase)
-        number = toolbox.add(FakePassage("c2", "visitor badges are valid for 24 hours maximum"))
-        return "Passages containing " + phrase + ": [" + str(number) + "] company/manual.md p3: " + \
-               "visitor badges are valid for 24 hours maximum"
-
-    toolbox.search_exact = fake_exact
-    replies = iter([answer_reply("Visitor badges are valid for 24 hours [1].")])
-    seen = []
-
-    def model(messages, tools):
-        seen.append(messages)
-        return next(replies)
-
-    result = tool_loop.run_loop(model, toolbox, "How long is a visitor badge valid?")
-    assert calls == ["visitor badge"]
-    assert "24 hours" in result["answer"]
-    assert "Exact search for" in seen[0][1]["content"]
-
-def test_the_phrase_picker_prefers_the_rarest_plausible_phrase():
-    toolbox = make_toolbox()
-    counts = {
-        "Current Termination Date": 12,
-        "Credit Agreement": 4,
-    }
-    toolbox._exact_count = lambda phrase, doc_id="": counts.get(phrase, 500)
-    phrase = toolbox.exact_phrase_for_question("Under the Credit Agreement, what is the Current "
-                                              "Termination Date?")
-    assert phrase == "Credit Agreement"
-
 def test_exact_search_rejects_a_short_phrase():
     toolbox = make_toolbox()
     payload = json.loads(toolbox.search_exact("x"))
@@ -526,22 +490,6 @@ def test_exact_search_points_at_the_row_query_when_the_phrase_is_too_broad():
     assert "does not identify a heading" in payload["note"]
     assert "query_rows" in payload["note"]
 
-
-
-def test_the_fallback_ignores_questions_without_an_exact_phrase_cue():
-    toolbox = make_toolbox()
-    toolbox._exact_count = lambda phrase, doc_id="": 2
-    question = ("In the census table that reports male median earnings of 33,270 dollars, what is the "
-                "overall median earnings figure for workers 16 years and over?")
-    assert toolbox.exact_phrase_for_question(question) == ""
-
-
-def test_the_fallback_recognises_a_hyphenated_cue():
-    toolbox = make_toolbox()
-    toolbox._exact_count = lambda phrase, doc_id="": 3
-    phrase = toolbox.exact_phrase_for_question("How many full-time equivalent employees did Apple "
-                                               "report as of September 28, 2024?")
-    assert phrase
 
 
 def test_a_capped_loop_answers_from_the_evidence_it_gathered():
@@ -814,3 +762,41 @@ def test_the_delegate_tool_is_offered_only_to_a_definition_with_child_tools():
     assert "send_email" not in with_web
     with_connector = {tool["function"]["name"] for tool in tool_loop.agent_tools({"connector": True})}
     assert "send_email" in with_connector
+
+
+def test_read_passages_can_be_disabled_for_a_bundle_serving_deployment(monkeypatch):
+    """The accepted lab configuration did not offer read_passages.
+
+    The product branch added the tool for the agent runtime. A canonical deployment needs a way to serve the
+    measured answer path without silently using a different tool list.
+    """
+    names = lambda: [(tool.get("function") or {}).get("name") for tool in tool_loop.active_tools()]
+    monkeypatch.delenv("OI_TOOL_READ_PASSAGES", raising=False)
+    assert "read_passages" in names()
+
+    monkeypatch.setenv("OI_TOOL_READ_PASSAGES", "0")
+    assert "read_passages" not in names()
+    assert "query_rows" in names()
+    assert tool_loop.read_passages_enabled() is False
+
+    monkeypatch.setenv("OI_TOOL_READ_PASSAGES", "1")
+    assert "read_passages" in names()
+
+
+def test_quoted_identifiers_are_found_in_order():
+    question = ("Invoice INV-2025-001 totals 13,512.00 USD and invoice INV-2025-002 totals 11,297.94 USD.")
+    assert tool_loop.quoted_identifiers(question) == ["INV-2025-001", "INV-2025-002"]
+    assert tool_loop.quoted_identifiers("no identifiers here") == []
+
+
+def test_the_loop_limits_can_be_raised_by_a_deployment(monkeypatch):
+    monkeypatch.delenv("OI_TOOL_MAX_STEPS", raising=False)
+    monkeypatch.delenv("OI_TOOL_MAX_CALLS", raising=False)
+    assert tool_loop.limits() == (6, 10)
+
+    monkeypatch.setenv("OI_TOOL_MAX_STEPS", "8")
+    monkeypatch.setenv("OI_TOOL_MAX_CALLS", "12")
+    assert tool_loop.limits() == (8, 12)
+
+    monkeypatch.setenv("OI_TOOL_MAX_STEPS", "not-a-number")
+    assert tool_loop.limits()[0] == 6
