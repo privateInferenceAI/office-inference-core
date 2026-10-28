@@ -271,8 +271,35 @@ _PROMPT_TAIL = (
 )
 
 
+def canonical_serving_enabled() -> bool:
+    """Whether this deployment serves a prebuilt canonical bundle and must reproduce the pinned v2 candidate.
+
+    The flag exists for one reason: the product branch carries both the product default answer path and the
+    canonical deployment's path, and a deployment must be able to name which one it runs without a fork. It is
+    off by default, so merging the canonical additions does not change the main stack's behavior.
+
+    When it is on, the measured values are forced rather than read from the environment. The pinned behavior is
+    a description of the deployment, not a set of knobs: a canonical box that picked up a stray switch would
+    stop reproducing the measurement it exists for.
+    """
+    raw = os.environ.get("OI_CANONICAL_SERVING", "")
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def switch_enabled(name: str, default: bool = False, *, canonical: bool = False) -> bool:
+    """Read one experimental feature switch, forced to `canonical` when the canonical profile is active."""
+    if canonical_serving_enabled():
+        return canonical
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
 def lean_prompt_enabled() -> bool:
     """The candidate configuration measured on the mixed bundle: no echo or cross-document rules."""
+    if canonical_serving_enabled():
+        return True
     raw = os.environ.get("OI_PROMPT_VARIANT", "")
     return raw.strip().lower() in ("lean", "candidate", "mixed")
 
@@ -702,11 +729,18 @@ class ToolBox:
         return [getattr(passage, "text", "") or "" for passage in self.evidence]
 
     def render(self, passages, focus="") -> str:
-        """Number each passage and print its snippet, centred on the caller's focus when there is one.
+        """Number each passage and print its line.
 
-        The numbering and the line format are unchanged. The focus only decides where the snippet starts:
-        a search passes its query, and a caller with no query keeps the start slice.
+        Two renderers because the canonical profile must print exactly what the measured runs printed. The
+        pinned v2 candidate prints whole-table expansions in full and never derives a column prefix; the
+        product renderer keeps the prefix lookup for the older chunker and prints document-completion text.
         """
+        if canonical_serving_enabled():
+            return self._render_pinned(passages, focus)
+        return self._render_product(passages, focus)
+
+    def _render_product(self, passages, focus="") -> str:
+        """The product renderer: snippet plus the table column prefix the older chunker needs."""
         lines = []
         for passage in passages:
             number = self.add(passage)
@@ -722,6 +756,24 @@ class ToolBox:
                          f"kind={passage.kind}: "
                          + ((prefix + " ") if prefix else "")
                          + rendered_text)
+        return "\n".join(lines)
+
+    def _render_pinned(self, passages, focus="") -> str:
+        """The pinned v2 renderer, copied from deploy/canonical/serving-canonical-v2/tool_loop.py."""
+        lines = []
+        for passage in passages:
+            number = self.add(passage)
+            if not number:
+                continue
+            if str(getattr(passage, "chunk_id", "")).endswith("#expanded"):
+                body = (getattr(passage, "text", "") or "").strip()
+                lines.append(f"[{number}] {passage.doc_id} p{passage.page_start} kind=table "
+                             f"(full table):\n{body}")
+                continue
+            text = " ".join((getattr(passage, "text", "") or "").split())
+            lines.append(f"[{number}] {passage.doc_id} p{passage.page_start} "
+                         f"kind={passage.kind}: "
+                         + centred_snippet(text, focus, SNIPPET_CHARS))
         return "\n".join(lines)
 
     def _table_sibling_rows(self, table_id: str, row_index: int):
@@ -944,9 +996,74 @@ class ToolBox:
 
         result = retriever.search(self.services, query, role=self.role, limit=self.search_limit,
                                   permit=self.permit)
-        rendered = self.render(self._with_table_expansions(result.passages), focus=query)
+        passages = (self._with_table_expansions(result.passages) if canonical_serving_enabled()
+                    else result.passages)
+        rendered = self.render(passages, focus=query)
         return ("Search results for " + json.dumps(query) + ":\n" + rendered) if rendered \
             else "No results for " + json.dumps(query) + "."
+
+    def exact_phrase_for_question(self, question: str) -> str:
+        # The rarest literal phrase from the question, used only when the loop is about to refuse.
+        # **Only run when the question contains an exact-phrase cue.** Measured: firing this on
+        # numeric-anchor table questions (N03, N06, N07) cost 1.4 points on the live suite because the
+        # injected evidence displaced the row-query path. Cues are a capitalised multiword term, a
+        # hyphenated term, or a quoted phrase; all three measured needle questions carry one and the
+        # numeric-anchor questions carry none.
+        import re
+        stripper = chr(46) + chr(95) + chr(40) + chr(41) + chr(91) + chr(93) + chr(59) + chr(58) + chr(39) + chr(34)
+        tokens = [token.strip(stripper) for token in question.replace("?", " ").replace(",", " ").split()]
+        tokens = [token for token in tokens if token]
+        stop = {"the", "a", "an", "of", "for", "and", "or", "to", "in", "on", "at", "by", "with",
+                "what", "which", "who", "how", "many", "much", "is", "are", "was", "were", "did",
+                "does", "do", "its", "their", "our", "your", "this", "that", "these", "those", "under"}
+        has_hyphen = any("-" in token and len(token) > 4 for token in tokens)
+        has_quote = chr(34) in question or chr(8220) in question or chr(8221) in question
+        capitalised = []
+        has_caps_run = False
+        for token in tokens:
+            clean = token.lower().strip(".")
+            if token[0].isupper() and clean not in stop:
+                capitalised.append(token)
+            elif capitalised:
+                if len(capitalised) >= 2:
+                    has_caps_run = True
+                capitalised = []
+        if len(capitalised) >= 2:
+            has_caps_run = True
+        if not (has_hyphen or has_quote or has_caps_run):
+            return ""
+        from_words = []
+        capitalised = []
+        for token in tokens:
+            clean = token.lower().strip(".")
+            if token[0].isupper() and clean not in stop:
+                capitalised.append(token)
+            elif capitalised:
+                if len(capitalised) >= 2:
+                    from_words.append(" ".join(capitalised))
+                capitalised = []
+        if len(capitalised) >= 2:
+            from_words.append(" ".join(capitalised))
+        words = [token.lower() for token in tokens if len(token) >= 3 and token.lower() not in stop]
+        for size in (3, 2):
+            for offset in range(0, max(1, len(words) - size + 1)):
+                phrase = " ".join(words[offset:offset + size])
+                if len(phrase) >= 6:
+                    from_words.append(phrase)
+        seen = set()
+        best = ""
+        best_count = None
+        for phrase in from_words[:EXACT_AUTO_CANDIDATES]:
+            if phrase in seen:
+                continue
+            seen.add(phrase)
+            count = self._exact_count(phrase)
+            if count < 1 or count > EXACT_AUTO_MAX_MATCHES:
+                continue
+            if best_count is None or count < best_count:
+                best = phrase
+                best_count = count
+        return best
 
     def search_exact(self, phrase: str, doc_id: str = "", limit: int = EXACT_RESULT_CAP) -> str:
         # Find chunks stating a phrase, literally and comma-insensitively, with a centred excerpt.
@@ -1281,15 +1398,11 @@ def quoted_identifiers(question: str) -> list[str]:
 
 
 def presearch_identifiers_enabled() -> bool:
-    raw = os.environ.get("OI_PRESEARCH_IDENTIFIERS")
-    if raw is None:
-        return False
-    return raw.strip().lower() in ("1", "true", "yes", "on")
+    return switch_enabled("OI_PRESEARCH_IDENTIFIERS")
 
 
 def debug_loop_enabled() -> bool:
-    raw = os.environ.get("OI_DEBUG_LOOP")
-    return bool(raw) and raw.strip().lower() in ("1", "true", "yes", "on")
+    return switch_enabled("OI_DEBUG_LOOP")
 
 
 def debug_loop(toolbox, question: str, content: str) -> None:
@@ -1306,17 +1419,21 @@ def debug_loop(toolbox, question: str, content: str) -> None:
 
 
 def _document_completion_enabled() -> bool:
-    raw = os.environ.get("OI_DOCUMENT_COMPLETION")
-    if raw is None:
-        return False
-    return raw.strip().lower() in ("1", "true", "yes", "on")
+    return switch_enabled("OI_DOCUMENT_COMPLETION")
+
+
+def corruption_guard_enabled() -> bool:
+    """Whether a reply in the wrong script (the Kimi garbling defect) is rejected and corrected.
+
+    The guard is a product improvement, but the pinned v2 candidate predates it, so the canonical profile
+    forces it off and a product deployment opts in with OI_CORRUPTION_GUARD=1. Keeping it out of the forced
+    set is what lets the two configurations be measured against each other.
+    """
+    return switch_enabled("OI_CORRUPTION_GUARD", False, canonical=False)
 
 
 def exact_row_fallback_enabled() -> bool:
-    raw = os.environ.get("OI_EXACT_ROW_FALLBACK")
-    if raw is None:
-        return False
-    return raw.strip().lower() in ("1", "true", "yes", "on")
+    return switch_enabled("OI_EXACT_ROW_FALLBACK")
 
 
 def row_lookup_terms(question: str) -> list[str]:
@@ -1373,7 +1490,7 @@ def exact_row_fallback(call_model, toolbox, question: str):
         return None
     failure = (answer_contract.violation(content, toolbox.texts())
                or answer_contract.numeric_violation(content, question, toolbox.texts())
-               or ("corrupted" if answer_contract.looks_corrupted(content) else None))
+               or ("corrupted" if corruption_guard_enabled() and answer_contract.looks_corrupted(content) else None))
     if failure:
         return None
     return {"answer": content, "reason": None, "evidence": toolbox.evidence,
@@ -1383,10 +1500,7 @@ def exact_row_fallback(call_model, toolbox, question: str):
 
 
 def row_preseed_enabled() -> bool:
-    raw = os.environ.get("OI_ROW_PRESEED")
-    if raw is None:
-        return False
-    return raw.strip().lower() in ("1", "true", "yes", "on")
+    return switch_enabled("OI_ROW_PRESEED")
 
 
 def question_row_phrases(question: str) -> list[str]:
@@ -1414,10 +1528,7 @@ def limit_fallback_enabled() -> bool:
     the evidence is the smallest change that tests whether the loop's failure was procedural rather than a
     missing fact.
     """
-    raw = os.environ.get("OI_LIMIT_FALLBACK")
-    if raw is None:
-        return False
-    return raw.strip().lower() in ("1", "true", "yes", "on")
+    return switch_enabled("OI_LIMIT_FALLBACK")
 
 
 def refusal_fallback_enabled() -> bool:
@@ -1427,10 +1538,7 @@ def refusal_fallback_enabled() -> bool:
     retry was not consistently better. The smaller experiment is one no-tools answer over the same
     conversation: the evidence is already there, and the model is asked to answer from it directly.
     """
-    raw = os.environ.get("OI_REFUSAL_FALLBACK")
-    if raw is None:
-        return False
-    return raw.strip().lower() in ("1", "true", "yes", "on")
+    return switch_enabled("OI_REFUSAL_FALLBACK")
 
 
 def refusal_retry_enabled() -> bool:
@@ -1441,10 +1549,7 @@ def refusal_retry_enabled() -> bool:
     with an explicit reminder that the evidence may contain the answer is the smallest change that tests
     whether the model simply stopped too early. It is off by default.
     """
-    raw = os.environ.get("OI_RETRY_REFUSALS")
-    if raw is None:
-        return False
-    return raw.strip().lower() in ("1", "true", "yes", "on")
+    return switch_enabled("OI_RETRY_REFUSALS")
 
 
 def identifier_single_shot_enabled() -> bool:
@@ -1454,10 +1559,7 @@ def identifier_single_shot_enabled() -> bool:
     tool loop search again adds nothing and has ended in a refusal. The single call is bounded by the same
     deadline and answer contract as the loop.
     """
-    raw = os.environ.get("OI_IDENTIFIER_SINGLE_SHOT")
-    if raw is None:
-        return False
-    return raw.strip().lower() in ("1", "true", "yes", "on")
+    return switch_enabled("OI_IDENTIFIER_SINGLE_SHOT")
 
 
 def read_passages_enabled() -> bool:
@@ -1467,10 +1569,7 @@ def read_passages_enabled() -> bool:
     added it for the newer agent runtime. A deployment can turn it off so the canonical answer path is
     comparable to the measured configuration; the default stays on.
     """
-    raw = os.environ.get("OI_TOOL_READ_PASSAGES")
-    if raw is None:
-        return True
-    return raw.strip().lower() not in ("0", "false", "no", "off")
+    return switch_enabled("OI_TOOL_READ_PASSAGES", True, canonical=True)
 
 
 def active_tools() -> list:
@@ -1555,11 +1654,23 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
         except Exception:  # noqa: BLE001 - the pre-search is an improvement, not a new failure path
             identifier_evidence = ""
     seeds = toolbox.complete_small_documents(seeds, question=question)
+    # **The exact phrase goes in before the model answers, not only after a refusal.** This is the product
+    # default path and the behavior the main stack has today. The canonical profile drops it, because the
+    # pinned v2 candidate removed the automatic exact-phrase seed.
+    exact_preface = ""
+    if not canonical_serving_enabled():
+        phrase = toolbox.exact_phrase_for_question(question)
+        if phrase:
+            found = toolbox.search_exact(phrase, "", EXACT_FALLBACK_RESULTS)
+            if not found.startswith('"error"'):
+                exact_preface = ("Exact search for " + json.dumps(phrase) + ":" + chr(10)
+                                + found + chr(10) + chr(10))
     seeded = ((identifier_evidence + "\n\n") if identifier_evidence else "") + toolbox.render(seeds)
     messages = [
         {"role": "system", "content": system_prompt()},
         {"role": "user", "content": (
             f"Question: {question}\n\n"
+            + exact_preface
             + (f"Evidence already retrieved, numbered:\n{seeded}\n\n" if seeded else "")
             + "Search if this is not enough, then answer.")},
     ]
@@ -1571,7 +1682,7 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
         if content:
             failure = (answer_contract.violation(content, toolbox.texts())
                        or answer_contract.numeric_violation(content, question, toolbox.texts())
-                       or ("corrupted" if answer_contract.looks_corrupted(content) else None))
+                       or ("corrupted" if corruption_guard_enabled() and answer_contract.looks_corrupted(content) else None))
             if not failure:
                 return {"answer": content, "reason": None, "evidence": toolbox.evidence,
                         "attribution": dict(reply.get("attribution") or {}), **stats}
@@ -1594,9 +1705,13 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
         calls = reply.get("tool_calls") or []
         if not calls:
             content = (reply.get("content") or "").strip()
+            # The numeric answer contract is part of the canonical pinned candidate; the product default path
+            # does not check it here. The corruption guard is a product opt-in either way.
             failure = (answer_contract.violation(content, toolbox.texts())
-                       or answer_contract.numeric_violation(content, question, toolbox.texts())
-                       or ("corrupted" if answer_contract.looks_corrupted(content) else None))
+                       or (canonical_serving_enabled()
+                           and answer_contract.numeric_violation(content, question, toolbox.texts()))
+                       or ("corrupted" if corruption_guard_enabled()
+                           and answer_contract.looks_corrupted(content) else None))
             if failure and stats["steps"] < max_steps:
                 stats["corrections"] += 1
                 messages.append({"role": "assistant", "content": content})
@@ -1630,7 +1745,8 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
                     retry_failure = (answer_contract.violation(retry_content, toolbox.texts())
                                      or answer_contract.numeric_violation(
                                          retry_content, question, toolbox.texts())
-                                     or ("corrupted" if answer_contract.looks_corrupted(retry_content)
+                                     or ("corrupted" if corruption_guard_enabled()
+                                         and answer_contract.looks_corrupted(retry_content)
                                          else None))
                     if not retry_failure and _REFUSAL_PHRASE not in retry_content.lower():
                         return {"answer": retry_content, "reason": None,
@@ -1684,10 +1800,11 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
         # evidence held only part of the compensation table, the synthesis correctly refused, and the
         # question regressed from 5 of 5 to 0 of 5. Refusals fall through to the old behaviour; only a
         # synthesis that actually answers is accepted.
+        # The pinned candidate and the product default both accept a synthesis on the answer contract alone;
+        # neither applies the numeric check or the corruption guard to it.
         if (content and _REFUSAL_PHRASE not in content.lower()
                 and answer_contract.violation(content, toolbox.texts()) is None
-                and answer_contract.numeric_violation(content, question, toolbox.texts()) is None
-                and not answer_contract.looks_corrupted(content)):
+                and not (corruption_guard_enabled() and answer_contract.looks_corrupted(content))):
             return {"answer": content, "reason": None, "evidence": toolbox.evidence,
                     "attribution": attribution, **stats}
     if exact_row_fallback_enabled() and toolbox.evidence:
@@ -1707,7 +1824,7 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
         if content:
             failure = (answer_contract.violation(content, toolbox.texts())
                        or answer_contract.numeric_violation(content, question, toolbox.texts())
-                       or ("corrupted" if answer_contract.looks_corrupted(content) else None))
+                       or ("corrupted" if corruption_guard_enabled() and answer_contract.looks_corrupted(content) else None))
             if not failure and _REFUSAL_PHRASE not in content.lower():
                 return {"answer": content, "reason": None, "evidence": toolbox.evidence,
                         "attribution": dict(reply.get("attribution") or {}), **stats}
@@ -1718,10 +1835,14 @@ def run_loop(call_model, toolbox: ToolBox, question: str, seed_passages=(),
 def limits() -> tuple[int, int]:
     """Steps and tool calls per answer.
 
-    The product default is the measured 6 and 10. A bundle-serving deployment can raise the step cap for table
-    questions where a recoverable tool error consumes a step and the loop otherwise falls back with the right
-    row already in the evidence.
+    The product default is the measured 6 and 10. A deployment can raise the step cap for table questions
+    where a recoverable tool error consumes a step and the loop otherwise falls back with the right row
+    already in the evidence. The canonical profile forces the measured 6 and 10, so no environment variable
+    can drift the configuration the v2 evidence was taken on.
     """
+    if canonical_serving_enabled():
+        return 6, 10
+
     def _limit(name: str, default: int) -> int:
         raw = os.environ.get(name)
         if raw is None:

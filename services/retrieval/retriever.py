@@ -312,12 +312,25 @@ def superseded_replacement(services: ingest.Services, doc_id: str) -> str | None
         return None
 
 
+def canonical_serving_enabled() -> bool:
+    """Whether the canonical serving profile is active, matching the flag in services/api/tool_loop.py.
+
+    The retriever cannot import the API module without a cycle, so the one-line read is repeated here rather
+    than shared. It is one definition of the flag; both read the same variable.
+    """
+    raw = os.environ.get("OI_CANONICAL_SERVING", "")
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
 def lexical_arm_enabled() -> bool:
     """Whether the lexical arm runs.
 
     The best mixed-bundle section results were measured with the dense arm only. The product default keeps the
-    lexical arm; a bundle-serving deployment can disable it without editing the retriever.
+    lexical arm; a bundle-serving deployment can disable it without editing the retriever. The canonical
+    profile forces it off, because the pinned retriever removed the arm rather than switching it.
     """
+    if canonical_serving_enabled():
+        return False
     raw = os.environ.get("OI_LEXICAL_ARM", "1")
     return raw.strip().lower() not in ("0", "false", "no", "off")
 
