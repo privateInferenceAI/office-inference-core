@@ -312,6 +312,16 @@ def superseded_replacement(services: ingest.Services, doc_id: str) -> str | None
         return None
 
 
+def lexical_arm_enabled() -> bool:
+    """Whether the lexical arm runs.
+
+    The best mixed-bundle section results were measured with the dense arm only. The product default keeps the
+    lexical arm; a bundle-serving deployment can disable it without editing the retriever.
+    """
+    raw = os.environ.get("OI_LEXICAL_ARM", "1")
+    return raw.strip().lower() not in ("0", "false", "no", "off")
+
+
 def lexical_search(services: ingest.Services, question: str, roots: frozenset[str],
                    limit: int = ARM_DEPTH) -> list[str]:
     """Chunk ids from the lexical arm, best first, restricted to the roots the role may see.
@@ -631,12 +641,15 @@ def search(services: ingest.Services, question: str, role: str, limit: int = 10,
     result.arms["dense"] = len(dense)
 
     # The lexical arm, filtered by the same roots inside its own query.
-    lexical = lexical_search(services, question, roots)
-    result.arms["lexical"] = len(lexical)
-
-    # Fusion decides the order; the payloads come from whichever arm has them. A chunk only the lexical arm
-    # returned needs its payload fetched, because a citation needs the text and the page.
-    fused = reciprocal_rank_fusion([dense, lexical])
+    if lexical_arm_enabled():
+        lexical = lexical_search(services, question, roots)
+        result.arms["lexical"] = len(lexical)
+        # Fusion decides the order; the payloads come from whichever arm has them. A chunk only the lexical
+        # arm returned needs its payload fetched, because a citation needs the text and the page.
+        fused = reciprocal_rank_fusion([dense, lexical])
+    else:
+        result.arms["lexical"] = 0
+        fused = [(chunk_id, 0.0) for chunk_id in dense]
 
     # The reranker reads the question against the candidate texts, so it needs the texts. They are fetched here
     # rather than after a limit is applied, because the passages it must see are the ones the fusion put in its

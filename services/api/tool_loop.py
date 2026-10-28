@@ -271,6 +271,12 @@ _PROMPT_TAIL = (
 )
 
 
+def lean_prompt_enabled() -> bool:
+    """The candidate configuration measured on the mixed bundle: no echo or cross-document rules."""
+    raw = os.environ.get("OI_PROMPT_VARIANT", "")
+    return raw.strip().lower() in ("lean", "candidate", "mixed")
+
+
 def system_prompt() -> str:
     """The instruction for the one answer path.
 
@@ -279,8 +285,9 @@ def system_prompt() -> str:
     """
     tools = ("; query_rows returns the exact table rows that contain the values or labels you give it, "
              "which is how a figure is confirmed before it is answered")
-    return (_PROMPT_HEAD.format(tools=tools) + _PROMPT_RULES + _TABLE_RULE + _ECHO_RULE + _CROSS_DOC_RULE + _HONESTY_RULE
-            + _PROMPT_TAIL)
+    optional_rules = "" if lean_prompt_enabled() else _ECHO_RULE + _CROSS_DOC_RULE
+    return (_PROMPT_HEAD.format(tools=tools) + _PROMPT_RULES + _TABLE_RULE + optional_rules
+            + _HONESTY_RULE + _PROMPT_TAIL)
 
 
 # The one message a capped loop is allowed to act on: answer from the evidence already gathered, with no
