@@ -36,6 +36,12 @@ PROFILE_PREFIXES = ("us.", "eu.", "apac.", "global.")
 
 def model_id(frontier: str) -> str:
     identifier = frontier.split("/", 1)[1] if frontier.startswith("bedrock/") else frontier
+    # **A litellm route can name the Bedrock Converse API explicitly.** `bedrock/converse/<model>` selects
+    # the API, not a different model: the lifecycle belongs to the model underneath, so the route segment is
+    # removed before the geographic profile prefix. Without this the canonical deployment's Kimi route is
+    # reported as an unknown model even though its entry is in the table.
+    if identifier.startswith("converse/"):
+        identifier = identifier.split("/", 1)[1]
     for prefix in PROFILE_PREFIXES:
         if identifier.startswith(prefix):
             return identifier[len(prefix):]

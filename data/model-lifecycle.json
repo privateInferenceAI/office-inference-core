@@ -77,6 +77,13 @@
       "eol_date": null,
       "replacement": "anthropic.claude-opus-5",
       "note": "Added 2026-10-21 as the escalation tier above Sonnet 4.6. bedrock:GetFoundationModel reported ACTIVE and a signed us. inference-profile Converse request answered for this account. Not part of the 2026-10-11 table refresh."
+    },
+    "moonshotai.kimi-k3": {
+      "provider": "Moonshot AI",
+      "status": "ACTIVE",
+      "eol_date": null,
+      "replacement": "amazon.nova-pro-v1:0",
+      "note": "Added 2026-10-28 for the canonical serving deployment, which routes the analyst to bedrock/converse/us.moonshotai.kimi-k3 on Bedrock. The model answered the canonical 38-role suite through this account on 2026-10-27 and 2026-10-28. Not part of the 2026-10-11 table refresh; the Bedrock lifecycle read was not repeated at add time because the model was verified by use, and the check records the decision deliberately."
     }
   }
 }

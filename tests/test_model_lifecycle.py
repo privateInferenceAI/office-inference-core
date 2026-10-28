@@ -56,6 +56,16 @@ def test_a_model_past_its_end_of_life_fails_the_check(check):
     assert any("nova-lite" in p for p in problems), "the replacement should be named: " + str(problems)
 
 
+def test_the_converse_route_prefix_is_not_part_of_the_model_identity(check):
+    """litellm names the Bedrock Converse API as a route: `bedrock/converse/us.moonshotai.kimi-k3`. The
+    lifecycle belongs to the model, not the route, so the prefix resolves to the same table entry instead
+    of being reported as an unknown model."""
+    table = {"models": {"moonshotai.kimi-k3": {"status": "ACTIVE", "eol_date": None,
+                                              "replacement": "amazon.nova-pro-v1:0"}}}
+    assert check.model_id("bedrock/converse/us.moonshotai.kimi-k3") == "moonshotai.kimi-k3"
+    assert check.check(manifest_naming("bedrock/converse/us.moonshotai.kimi-k3"), table, TODAY) == []
+
+
 def test_a_model_that_is_not_active_fails_even_without_a_date(check):
     table = {"models": {"amazon.nova-micro-v1:0": {"status": "LEGACY", "eol_date": None,
                                                   "replacement": "amazon.nova-lite-v1:0"}}}
