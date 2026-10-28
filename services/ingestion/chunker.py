@@ -93,7 +93,7 @@ DATASET_TEXT_MIN_BYTES = 3 * 1024 * 1024
 # decision is made on the file's bytes and a chunker change does not touch them: without that column a
 # corpus chunked under v4 would be skipped forever after this bump, and the new text would never reach a
 # single document.
-CHUNKER_VERSION = "chunker-canonical-v1"
+CHUNKER_VERSION = "chunker-v5"
 
 _WORD = re.compile(r"\S+")
 
