@@ -1,0 +1,5 @@
+# Publish the product UI on loopback only. The demo is reached through an SSH tunnel.
+services:
+  app:
+    ports:
+      - "127.0.0.1:8080:8080"

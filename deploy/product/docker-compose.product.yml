@@ -1,0 +1,85 @@
+# Product deployment overlay: the full stack, document chat plus agentic desk and workspace.
+#
+# Used with the product compose file and the product render:
+#   docker compose -p oi-product \
+#     -f /opt/oi-product/deploy/office/compose/docker-compose.yml \
+#     -f /opt/oi-product/deploy/product/docker-compose.product.yml \
+#     -f /opt/oi-product/app-ports-override.yml \
+#     --env-file /opt/oi-product/rendered/env ...
+#
+# It keeps the parser (document-chat) and disables the long-running ingestion worker, because the
+# canonical v2 bundle is imported by the one-shot importer instead. It also passes the serving and
+# integration settings the base compose does not forward from rendered/env.
+
+services:
+  api:
+    environment:
+      # Serving contract for the canonical v2 collection.
+      OI_SERVING_CHUNKER_VERSION: ${OI_SERVING_CHUNKER_VERSION:-}
+      COLLECTION: ${COLLECTION:-documents}
+      OI_TEMPERATURE: ${OI_TEMPERATURE-0}
+      OI_MAX_TOKENS: ${OI_MAX_TOKENS:-2000}
+      OI_TOTAL_SECONDS: ${OI_TOTAL_SECONDS:-180}
+      OI_FIRST_TOKEN_SECONDS: ${OI_FIRST_TOKEN_SECONDS:-60}
+      OI_STALL_SECONDS: ${OI_STALL_SECONDS:-60}
+      OI_TOOL_LOOP_SECONDS: ${OI_TOOL_LOOP_SECONDS:-120}
+      OI_TOOL_READ_PASSAGES: ${OI_TOOL_READ_PASSAGES:-1}
+      OI_TOOL_MAX_STEPS: ${OI_TOOL_MAX_STEPS:-6}
+      OI_TOOL_MAX_CALLS: ${OI_TOOL_MAX_CALLS:-10}
+      OI_LEXICAL_ARM: ${OI_LEXICAL_ARM:-0}
+      OI_PROMPT_VARIANT: ${OI_PROMPT_VARIANT:-lean}
+      OI_CANONICAL_SERVING: ${OI_CANONICAL_SERVING:-0}
+      ACCESS_DENIAL_MODE: ${ACCESS_DENIAL_MODE:-denied}
+      OI_DOCUMENTS_ROOT: ${OI_DOCUMENTS_ROOT:-/documents}
+      # The product integration points. The API reaches the workspace service on the workspace host,
+      # the egress proxy and the connector on this box through the Docker bridge gateway, and the
+      # MCP gateway by service name.
+      OI_WORKSPACE_URL: ${OI_WORKSPACE_URL:-}
+      OI_WORKSPACE_TOKEN: ${OI_WORKSPACE_TOKEN:-}
+      OI_EGRESS_URL: ${OI_EGRESS_URL:-}
+      OI_EGRESS_TOKEN: ${OI_EGRESS_TOKEN:-}
+      OI_MCP_URL: ${OI_MCP_URL:-}
+      OI_MCP_TOKEN: ${OI_MCP_TOKEN:-}
+      OI_MCP_SESSION_SECRET: ${OI_MCP_SESSION_SECRET:-}
+    volumes:
+      - ${OI_ROOT}/documents:/documents:ro
+
+  # The document-chat parser stays on. This is the product deployment.
+  parser:
+    restart: unless-stopped
+
+  # The canonical v2 bundle is imported once; the native worker would reconcile against an empty
+  # manifest and is deliberately not part of this deployment.
+  ingestion:
+    profiles: ["ingestion-disabled"]
+
+  # LiteLLM uses Prisma and refuses a database whose schema it did not create. Give the gateway its
+  # own database so each migration system owns its schema.
+  litellm:
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/litellm
+
+  importer:
+    build:
+      context: ${OI_ROOT}/services/ingestion
+      dockerfile: Dockerfile
+    image: oi-core/ingestion:local
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      EMBED_URL: http://embeddings:80
+      VECTOR_URL: http://vector:6333
+      COLLECTION: documents
+    volumes:
+      - ${OI_ROOT}/bundles:/bundles:ro
+      - ${OI_ROOT}/documents:/documents:ro
+    networks:
+      - ai-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      embeddings:
+        condition: service_healthy
+      vector:
+        condition: service_started
+    entrypoint: ["python3", "/app/bundle_import.py"]
