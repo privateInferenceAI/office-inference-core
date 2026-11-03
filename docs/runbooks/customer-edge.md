@@ -15,18 +15,17 @@ operator path (SSH tunnel and a minted development session), and the runbook lab
 2. **Security group ingress.** On `sg-05485a648e8baa4b8`, allow inbound 80 and 443 from the internet to the
    product box. Port 80 is used by the Let's Encrypt HTTP challenge and then redirects to 443. The SSH rule
    stays as it is.
-3. **Cognito resources.** Run the provisioning script on the product box:
+3. **Cognito resources: already created on 2026-11-03.** The pool `us-east-1_F21GZAkHU`, app client
+   `oi-product-app`, hosted domain `oi-officeinference.auth.us-east-1.amazoncognito.com` and owner account
+   exist, and the OIDC and edge keys are in `rendered/env` mode 600. Verify them rather than re-running
+   provisioning:
 
    ```bash
-   python3 /opt/oi-product/scripts/cognito-provision.py            # prints the plan, changes nothing
-   python3 /opt/oi-product/scripts/cognito-provision.py --apply    # creates the pool, client, domain, owner
+   grep -E '^(OI_OIDC_|OI_EDGE_|OI_OAUTH2_)' /opt/oi-product/rendered/env | cut -d= -f1
    ```
 
-   It creates: user pool `oi-office-inference`, app client `oi-product-app` with a generated secret, hosted
-   domain `oi-office-inference`, and the owner user `anthony@officeinference.com`. It writes the OIDC and edge
-   keys to `rendered/env` (mode 600) and prints the owner's temporary password once. Cost is Cognito's free
-   tier for this use.
-
+   `cognito-provision.py` refuses when the OIDC keys already exist. Run it only for a new deployment, with
+   `--apply`, after reviewing its dry-run output and its printed owner temporary password.
 4. **The app image with the provider login.** The UI change is merged in `oic-ui` (PR #8). Rebuild the app image
    from the updated source and recreate the app container before applying the edge:
 
