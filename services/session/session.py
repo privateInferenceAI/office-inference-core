@@ -377,6 +377,41 @@ def service_session(*, subject: str, role: str, roots, session_id: str, deployme
     )
 
 
+def establish_provider(registry: access.Registry, store, subject: str, role: str, *,
+                       ttl_hours: int = 8, deployment_id: str = "", actor_name: str = "") -> Session:
+    """Establish a session for an identity the deployment's edge already authenticated.
+
+    **The seam between the proxy and the application.** The edge (Caddy and the OIDC proxy) verifies the
+    provider login and passes an authenticated subject to the API over an internal connection. This function
+    turns that subject into a session with `source="provider"`, so every row written under it says how the
+    identity was established rather than pretending a development token was involved.
+
+    The permission is resolved from the rendered access registry, not from anything the edge sent. The edge
+    proves who the person is; the registry decides what they may read. A subject the registry does not declare
+    is refused here, before a row is written, exactly as the development path refuses.
+    """
+    if ttl_hours < 1:
+        raise SessionError(f"a session must live at least an hour, got {ttl_hours}")
+    if ttl_hours > MAX_TTL_HOURS:
+        raise SessionError(f"a session may live at most {MAX_TTL_HOURS} hours, got {ttl_hours}")
+    permit = access.resolve(registry, subject, role)
+    credential = secrets.token_urlsafe(32)
+    session = Session(
+        session_id=secrets.token_urlsafe(32),
+        subject=subject,
+        actor_name=actor_name or (registry.users[subject].display() if subject in registry.users else ""),
+        role=role,
+        roots=permit.roots,
+        groups=permit.groups,
+        deployment_id=deployment_id or "unknown",
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=ttl_hours),
+        source="provider",
+        credential_sha256=credential_hash(credential),
+    )
+    store.put(session)
+    return replace(session, credential=credential)
+
+
 def resolve_credential_hash(store, credential_sha256: str) -> Session:
     """The session a stored hash belongs to, or a refusal.
 

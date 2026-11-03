@@ -24,6 +24,7 @@ triggers (that is `4.5`). Naming them here is how a reader knows the absence is 
 """
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import re
@@ -425,6 +426,99 @@ async def health():
 def _resolve(request_token: str):
     """The session behind a token, or a refusal."""
     return session_module.resolve_token(STATE["store"], request_token)
+
+
+@app.post("/sessions/provider", responses={
+    200: {"description": "a provider session token and the access it resolves to"},
+    400: {"model": contract.Refusal, "description": "the edge did not name an identity"},
+    401: {"model": contract.Refusal, "description": "the request did not come from the deployment edge"},
+    403: {"model": contract.Refusal, "description": "the identity is not a user this deployment declares"},
+    503: {"model": contract.Refusal, "description": "this deployment has no provider edge configured"},
+})
+async def provider_session(request: Request):
+    """Exchange an edge-authenticated identity for a session.
+
+    **The edge is the only caller.** Caddy terminates TLS and runs the OIDC login; only when that login
+    succeeds does it add the provider identity headers and the shared edge secret. The API must never trust a
+    header a browser can set, so the secret is compared in constant time and the headers are stripped and set
+    by the edge configuration, not passed through from the client. The API itself stays unpublished.
+
+    **The edge proves the person; the registry decides the access.** The subject from the edge is matched
+    case-insensitively against the rendered users. A provider identity the deployment does not declare is
+    refused, and the permission is resolved from the registry's groups and role, never from a header.
+    """
+    request_id = uuid.uuid4().hex
+    configured = os.environ.get("OI_EDGE_SECRET", "")
+    if not configured:
+        return JSONResponse({"error": "this deployment has no provider edge configured",
+                             "kind": "not_configured"}, status_code=503)
+    supplied = request.headers.get("X-OI-Edge-Secret", "")
+    if not hmac.compare_digest(configured, supplied):
+        try:
+            audit("access", "unauthenticated", "unknown", "denied",
+                  {"stage": "provider_session", "reason": "edge_secret", "endpoint": "/sessions/provider"},
+                  request_id=request_id)
+        except Exception as exc:  # noqa: BLE001 - the refusal still has to reach the caller
+            print(f"provider refusal audit failed: {exc!r}", flush=True)
+        return JSONResponse({"error": "this request did not come from the deployment edge",
+                             "kind": "not_the_edge"}, status_code=401)
+
+    email = (request.headers.get("X-OI-Provider-Email", "") or "").strip().lower()
+    provider_subject = (request.headers.get("X-OI-Provider-Subject", "") or "").strip()
+    if not email:
+        return JSONResponse({"error": "the edge did not name an identity", "kind": "no_identity"},
+                            status_code=400)
+
+    registry = STATE.get("registry") or access_module.Registry.builtin()
+    subject = next((candidate for candidate in registry.users if candidate.lower() == email), None)
+    if subject is None:
+        try:
+            audit("access", email, "unknown", "denied",
+                  {"stage": "provider_session", "reason": "unknown_subject", "email": email,
+                   "provider_subject": provider_subject, "endpoint": "/sessions/provider"},
+                  request_id=request_id)
+        except Exception:  # noqa: BLE001
+            pass
+        return JSONResponse({"error": "this identity is not a user of this deployment", "kind": "unknown_identity"},
+                            status_code=403)
+
+    role = os.environ.get("OI_PROVIDER_ROLE", "viewer")
+    try:
+        ttl_hours = int(os.environ.get("OI_PROVIDER_SESSION_TTL_HOURS", "8"))
+    except ValueError:
+        ttl_hours = 8
+    try:
+        session = session_module.establish_provider(
+            registry, STATE["store"], subject, role, ttl_hours=ttl_hours,
+            deployment_id=DEPLOYMENT_ID)
+    except (session_module.SessionError, access_module.AccessError) as refused:
+        try:
+            audit("access", subject, role, "denied",
+                  {"stage": "provider_session", "reason": str(refused)[:300], "email": email,
+                   "endpoint": "/sessions/provider"}, request_id=request_id)
+        except Exception:  # noqa: BLE001
+            pass
+        return JSONResponse({"error": str(refused), "kind": "session_refused"}, status_code=403)
+
+    try:
+        audit("access", subject, session.role, "ok",
+              {"stage": "provider_session", "source": "provider", "email": email,
+               "provider_subject": provider_subject, "session_id": session.session_id,
+               "roots": sorted(session.roots), "groups": list(session.groups),
+               "endpoint": "/sessions/provider"}, request_id=request_id)
+    except Exception:  # noqa: BLE001 - the session exists; a failed audit must be visible, not swallowed
+        print("provider session audit failed", flush=True)
+    return JSONResponse({
+        "token": session.credential,
+        "session_id": session.session_id,
+        "subject": session.subject,
+        "actor_name": session.actor_name,
+        "role": session.role,
+        "roots": sorted(session.roots),
+        "groups": list(session.groups),
+        "source": "provider",
+        "expires_at": session.expires_at.isoformat(),
+    }, status_code=200)
 
 
 @app.post("/ask", responses={

@@ -99,7 +99,8 @@ def test_a_known_assurance_survives_the_round_trip():
 def test_only_one_assurance_value_is_reachable_in_this_build():
     """**The shortness of this set is the point.** C7 raises it, and that should be a code change somebody
     reviews rather than a string somebody writes into a row."""
-    assert approvals.REACHABLE_ASSURANCE == frozenset({approvals.ASSURANCE_UNVERIFIED})
+    assert approvals.REACHABLE_ASSURANCE == frozenset({approvals.ASSURANCE_UNVERIFIED,
+                                                        approvals.ASSURANCE_PROVIDER_VERIFIED})
 
 
 def test_the_record_marks_the_identity_unverified_and_says_why():
