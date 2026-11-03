@@ -56,8 +56,10 @@ changes it.
    docker restart api
    ```
 
-3. Have the person sign in at `https://app.officeinference.com` with the temporary password and choose a new
-   one. Confirm the deploy still shows the expected deployment id and that Ask returns a cited answer.
+3. Have the person sign in at `https://app.officeinference.com` with the temporary password. Cognito shows the
+   change-password page; the person chooses their own password and lands in the app. Verified on 2026-11-03
+   with a temporary staff account (`docs/reviews/pilot-user-rehearsal-20261103/`). Confirm the deployment id
+   is visible and Ask returns a cited answer.
 
 4. Check the boundary. A `staff` person asking an executive-only question must be denied with a disclosure. An
    `exec` person may see executive content. Record the question and the result.
