@@ -1,7 +1,7 @@
 # Step 2 scope: n8n as the client-owned automation layer
 
 **Status:** scope for review. Implements decision 0011. No runtime change has been made yet.
-**Estimate:** about two working days for the baseline, plus one day if the optional chain bridge is included.
+**Estimate:** about two and a half working days for the baseline (the per-workflow registry and provisioning validation add half a day), plus one day if the optional chain bridge is included.
 
 ## Goal
 
@@ -55,21 +55,31 @@ Integration points:
   obsolete basic-auth environment variables must not be carried over. The acceptance check includes a real
   login through the tunnel.
 
-### W2. Signed webhook and service principal (about half a day)
+### W2. Signed webhook and per-workflow principals (about one day)
 
 - New API route `POST /integrations/n8n/jobs`. Validates the HMAC signature with
   `OI_N8N_WEBHOOK_SECRET`, rejects a missing or wrong signature with 401, and does not create a job on
   failure.
-- A service principal, not a user session: rendered config defines `OI_N8N_PRINCIPAL`
-  (for example `automation@<deployment>`), `OI_N8N_ROLE` (`viewer`) and `OI_N8N_ROOTS` (default `[company]`).
-  The webhook maps to that principal, so no long-lived user token sits in n8n.
-- Request body: `{"task": "<declared task>", "input": "<text>", "request_id": "<optional>"}`. The task must
-  be one the deployment declares. Response: the job as JSON, including its id.
-- Result retrieval is the existing `GET /jobs/{id}` with the same signed mechanism or a short-lived token
-  issued by the webhook response. Decide at implementation between a second signed read path and a
-  short-lived token; the second is simpler for an n8n HTTP node.
-- Tests: signature valid, signature missing, signature wrong, undeclared task, successful creation and
-  completion, and the audit rows the job leaves behind.
+- **Per-workflow integration registry.** The prepare script writes `rendered/n8n_integrations.json` with one
+  entry per template: an integration id, a per-integration HMAC secret, the declared task, role and roots, and
+  the `owner_subject` who requested the automation. The file is mode 600 because it carries the secrets.
+- **Provisioning validation.** For each entry, provisioning checks the owner exists in the rendered access
+  registry and that the declared roots are a subset of the owner's roots. A workflow cannot be provisioned
+  with more document access than its owner has. This is the per-workflow privilege bound.
+- **Webhook shape.** `POST /integrations/n8n/jobs/{integration_id}`. The API loads the integration registry at
+  startup, verifies the HMAC over the raw body with that integration's secret, checks the task is declared,
+  and creates the job with the integration's role and roots. Missing or wrong signature is refused with 401
+  and creates no job.
+- **Identity in the record.** Jobs and audit rows carry the automation principal
+  (`automation+<integration_id>@<deployment>`) as the actor, and the payload carries `owner_subject` and the
+  integration id. The UI shows who requested the automation, not only the machine identity.
+- Request body: `{"input": "<text>", "request_id": "<optional>"}`; the task comes from the integration entry.
+  Response: the job as JSON, including its id.
+- Result retrieval is the existing `GET /jobs/{id}` with a short-lived token issued by the webhook response,
+  which is simpler for an n8n HTTP node than a second signed read path.
+- Tests: signature valid, missing, wrong; undeclared task; owner with insufficient roots refused at
+  provisioning; successful creation and completion; the automation actor, owner and roots visible in the
+  audit rows; output access limited to the declared roots.
 
 ### W3. Templates and demo flow (about half a day)
 
@@ -95,7 +105,8 @@ Integration points:
   2. An n8n HTTP node reaches LiteLLM and a spend row appears.
   3. Signed webhook creates a governed job; the chain shows the job, its model call and its tool rows; the
      n8n flow receives the result.
-  4. A wrong signature is refused, and no job is created.
+  4. A wrong signature is refused, and no job is created. Provisioning refuses a workflow whose
+     declared roots exceed its owner's roots.
   5. A deployment without the `workflow-automation` pack does not start n8n.
   6. The two templates import and run against the pinned version.
 - New rows in `docs/requirements.yaml`: `N8N-DEPLOY-001`, `N8N-GATEWAY-001`, `N8N-JOB-001`,
@@ -125,15 +136,21 @@ data class. This is a mirror, not a transaction guarantee, and it is presented a
 3. **Version drift.** n8n releases frequently and sometimes changes environment variables or node behaviour.
    Pin the digest, test both templates on every bump, keep the upgrade cadence explicit.
 4. **Backup coupling.** The database dump and the encryption key must travel together.
-5. **Service principal scope.** Default company roots, no executive documents, unless the client explicitly
-   asks and the manifest records it.
-6. **Webhook secret rotation.** A rotation procedure is needed; the secret is in the rendered env and in
-   n8n's credential store.
+5. **Per-workflow scope bound to the owner.** If the owner's role changes or they leave, their automation
+   keeps the scope it was provisioned with until an operator reviews it. The runbook needs an explicit review
+   step on role change and offboarding, and a rotation procedure for the integration secrets.
+6. **Webhook secret rotation.** Each integration has its own secret in the rendered file and in an n8n
+   credential; rotation has to update both, and the runbook needs the procedure.
 
-## Decisions needed before implementation
+## Decisions taken, 2026-11-03
 
-1. Service principal scope: company-only by default. Confirm.
-2. Exposure: loopback plus tunnel for step 2. Confirm.
-3. Templates: scheduled governed report and invoice-intake trigger. Confirm or replace.
-4. Chain bridge: later, not step 2. Confirm.
-5. n8n runs on the product box for now, not a separate host. Confirm.
+1. **Per-workflow principals, bounded by the requesting person's privileges.** Each template gets its own
+   integration identity and declared scope. At provisioning, the scope is validated against the owner's
+   current roots: a workflow cannot be given more document access than the person who owns it has. Company
+   documents only unless the owner holds the executive root. The job records both the automation identity and
+   the owner. Live per-person mapping (a n8n user's current session driving the job) needs C7 identity and is
+   deferred.
+2. **Exposure: loopback plus the SSH tunnel** for step 2. Public ingress and TLS arrive with C7.
+3. **Both templates** are in scope: the scheduled governed report and the invoice-intake trigger.
+4. **Chain bridge deferred** and documented as an add-on, revisited when a client needs it.
+5. **n8n runs on the product box** for step 2, not a separate host.
