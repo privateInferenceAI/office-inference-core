@@ -1,0 +1,5 @@
+create status: 200 job: a34155474a5444aabf896598d042efe4 state: awaiting_approval
+steps: [('read_message', 'succeeded'), ('extract_fields', 'succeeded'), ('draft_action', 'succeeded'), ('approval', 'running')]
+pending summary: Post USD 4,250.00 to accounts payable for Acme
+digest present: True
+RESULT: PASS

@@ -1,0 +1,12 @@
+=== reviewer identity on an automation gate decision ===
+ id  | event_type |                        actor                        | decision |               job                
+-----+------------+-----------------------------------------------------+----------+----------------------------------
+ 607 | approval   | automation+invoice_trigger@oi-core-product-20261103 | deny     | 8fb000849a4c4b32bd44dcaddfb4af74
+(1 row)
+
+=== deny remaining gates ===
+deny 55e7bd1d5caf47f9bfedce48be1c9278 http 200 state failed
+deny 4942a4a586114075b321ada1a752da9f http 200 state failed
+deny 648388b9c1e14032b4912396d35bf2f2 http 200 state failed
+deny aa5289229ae04238a209a0094258ace3 http 200 state failed
+remaining gates: 0

@@ -1,0 +1,16 @@
+Q1: status=200 chars=355 citations=12 expected_terms=True denied=False -> PASS
+  Q: What is the mileage reimbursement rate for personal vehicles?
+  A: The mileage reimbursement rate for personal vehicles is 0.67 USD per mile [1]. The travel and expense policy notes this is the 2025 standard rate and that mileage covers fuel, wear and insurance, so fuel cannot be claime
+Q2: status=200 chars=342 citations=12 expected_terms=True denied=False -> PASS
+  Q: What is the receipt threshold for expense reimbursement?
+  A: The receipt threshold for expense reimbursement is 25 USD — a receipt is required for every expense of 25 USD or more, while below that amount the expense still needs a description and a date [1]. The employee handbook c
+Q3: status=200 chars=392 citations=12 expected_terms=True denied=False -> PASS
+  Q: How long are accounts payable invoices retained?
+  A: Accounts payable invoices are retained for **7 years** — the retention schedule lists "Accounts payable invoices and purchase orders" (vendor invoices, purchase orders, receiving records), owned by Finance, with a retent
+Q4: status=200 chars=526 citations=12 expected_terms=True denied=False -> PASS
+  Q: What insurance must a vendor carry to be onboarded?
+  A: To be onboarded, a vendor must carry commercial general liability insurance of at least 1,000,000 USD per occurrence and 2,000,000 USD aggregate — with life-safety and roofing vendors required to show 2,000,000 USD per o
+Q5: status=200 chars=234 citations=12 expected_terms=True denied=False -> PASS
+  Q: Cross-document: what is the personal vehicle mileage rate, and how long are expense reports retained?
+  A: Personal vehicle mileage is reimbursed at 0.67 USD per mile for approved business travel [3], and expense reports (including submitted reports, receipts and approvals, owned by Finance) are retained for 7 years and then 
+RESULT: PASS
