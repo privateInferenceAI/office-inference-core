@@ -54,6 +54,23 @@ Screenshots: `owner-after-login.png` and `owner-answer.png`. Evidence: `browser-
 - The edge, API and app are running. The backup timer is active. The C9 demo box was not touched and no AWS
   instance was deleted or changed.
 
+## Post-launch fixes, 2026-11-03
+
+Two defects were found while closing the Phase E email checks and fixed on the live deployment.
+
+- **The gateway did not record connector refusals.** A non-allowlisted recipient was refused by the connector,
+  but the gateway returned an error without an audit row, so the chain could not show a send blocked at the last
+  boundary. Fixed in product PR #367; the live gateway image was rebuilt. A refusal now records
+  `denied`/`refusal=connector` with the refused recipient. Verified: audit event 1321.
+- **The oauth2-proxy healthcheck could never run.** The pinned image is distroless, so the `CMD-SHELL` healthcheck
+  with wget reported unhealthy forever while the login worked. Replaced with `healthcheck: disable: true` and the
+  reason in the compose file; edge health is checked from outside. Fixed in PR #369.
+
+After both changes the owner acceptance was re-run against the real hostname: seven of seven checks passed.
+Five smoke probes pass, and no gates remain open. Record for the email path:
+`docs/reviews/email-path-verification-20261103/`. Record for the pilot account path:
+`docs/reviews/pilot-user-rehearsal-20261103/`.
+
 ## Local resolver note
 
 Public DNS resolves the hostname, but the operator workstation's local resolver still answered NXDOMAIN during
