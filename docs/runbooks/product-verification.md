@@ -93,18 +93,23 @@ trusting the final line.
 
 | Step | Mode | Do this | Expect |
 |---|---|---|---|
-| C1 | ADMIN ONLY | Fresh backup and checksum verification | dumps for `oicore`, `litellm`, `n8n`; `rendered.tar.gz`; `data/n8n`; checksums pass |
+| C1 | ADMIN ONLY | Fresh backup and checksum verification | dumps for `oicore`, `litellm`, `n8n`; `rendered.tar.gz`; `documents.tar.gz`; `data/n8n`; checksums pass |
 | C2 | ADMIN ONLY | Restore the three dumps into scratch databases | restore finishes without errors |
 | C3 | ADMIN ONLY | Compare row counts in eleven tables between live and restored | all counts equal |
 | C4 | ADMIN ONLY | Start a scratch API against the restored database, mint a session, ask the known question | cited answer, same facts as live |
 | C5 | ADMIN ONLY | Export and verify the audit chain from the restored database | chain intact, event count matches |
-| C6 | ADMIN ONLY | Restore `data/n8n` to a scratch path and run the n8n CLI against the restored database | both templates present; config with encryption key present, mode 600 |
+| C6 | ADMIN ONLY | Restore `data/n8n` and `documents` to scratch paths; run the n8n CLI against the restored database; compare the documents file count and content hash | both templates present; config mode 600; documents identical |
 | C7 | ADMIN ONLY | Record the measured restore duration | numbers recorded in the review record |
 | C8 | ADMIN ONLY | Cleanup | no scratch databases or containers; production healthy |
 
-The 2026-11-03 drill passed all eleven checks in 24 seconds. Record:
-`docs/reviews/restore-drill-20261103/README.md`. Its limits are stated there and matter: same-host restore, no
-off-box copy, no scheduled backup yet, and no Qdrant rebuild measurement.
+The 2026-11-03 drill passed all twelve checks in 27 seconds. Record:
+`docs/reviews/restore-drill-20261103/README.md`. Its limits are stated there and matter: it restores from the
+local backup, and restoring from the S3 copy has not been tested. Qdrant is rebuilt from documents rather than
+restored, and the rebuild time is not measured.
+
+Backups run daily at 03:00 Eastern through `oi-product-backup.timer` and are copied to
+`s3://oi-core-backups-878451098165/backups/product-oi-core-product-20261103/`. Local retention is seven days,
+remote retention is thirty. See `docs/reviews/product-backup-20261103/README.md`.
 
 ## Phase D: customer access path
 

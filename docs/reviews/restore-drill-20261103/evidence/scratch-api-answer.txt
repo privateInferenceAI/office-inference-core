@@ -1,4 +1,4 @@
 scratch API status: 200 denied: False
-answer: The travel and expense policy reimburses personal vehicle mileage at 0.67 USD per mile [3]. The policy notes this covers fuel, wear and insurance, and that mileage and fuel cannot both be claimed for the same trip [3].
+answer: The mileage reimbursement rate in the travel and expense policy is **0.67 USD per mile**: "Personal vehicle mileage is reimbursed at 0.67 USD per mile" [3]. The policy adds that mileage covers fuel, wear and insurance, and that fuel cannot be claimed separately for the same trip [3].
 citations: 12
 RESULT: PASS

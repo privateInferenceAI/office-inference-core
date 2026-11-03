@@ -1229,8 +1229,10 @@ items:
       The product deployment had its own drill on 2026-11-03: eleven checks passed, the three databases and the
       n8n data directory restored into scratch copies, a scratch API answered the known question with citations,
       and the audit chain verified. Total 24 seconds. Evidence: docs/reviews/restore-drill-20261103/README.md.
-      That drill is same-host and the backup is on the same box, so off-box copy and scheduled backups remain
-      onboarding items before real company data.
+      A daily timer now runs at 03:00 Eastern and copies the backup to s3://oi-core-backups-878451098165 under a
+      deployment-specific prefix; the drill's second run passed twelve checks in 27 seconds with the documents
+      archive restored. Evidence: docs/reviews/product-backup-20261103/README.md. The off-box copy has not been
+      restored from S3 yet, and the bucket is in the same account and writable by the product box role.
   - id: OPS-RTO-001
     title: Recovery objectives are measured, not asserted
     tier: [cloud, hosted, office]
@@ -1239,9 +1241,9 @@ items:
     status: verified
     evidence: docs/reviews/ops-backup/README.md
     note: >-
-      Product deployment drill measured 24 seconds for backup, restore of three databases, verification and
-      cleanup, with database restore alone at about 10 seconds. The practical RPO is currently the time since the
-      last manual backup because no timer exists; that is an onboarding blocker, not a number to quote yet.
+      Product deployment drill measured 27 seconds for backup, restore of three databases and documents,
+      verification and cleanup, with database restore alone at about 10 seconds. RPO is 24 hours through the daily
+      backup timer; restoring from the off-box S3 copy has not been drilled, so that RPO is not yet proven end to end.
   - id: OPS-UPDATE-001
     title: Releases are signed and a bad one rolls back
     tier: [cloud, office]

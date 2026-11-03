@@ -11,7 +11,7 @@ if the box and its data are lost, does a backup produce a working system, and ho
 | Release branch head | the merge of PR #345 |
 | Postgres | 16, in the deployment's `postgres` container |
 | Databases | `oicore` 37 MB, `litellm` 13 MB, `n8n` 18 MB |
-| Backup | fresh backup at the start of the drill, 4.4 MB, checksums verified before restore |
+| Backup | fresh backup at the start of the drill, 25 MB (21 MB of it documents), checksums verified before restore |
 | Script | `scripts/restore-drill.sh` in `oi-canonical-stack` |
 
 ## Procedure
@@ -33,19 +33,20 @@ The script does the following, in order, and stops nothing in production:
 
 ## Results
 
-All eleven checks passed. Total elapsed: 24 seconds.
+All twelve checks passed. Total elapsed: 27 seconds.
 
 | Step | Time | Result |
 |---|---|---|
-| backup | 3.4s | 4.4 MB, checksums verified |
+| backup | 4.6s | 25 MB, checksums verified |
 | create scratch databases | 0.4s | |
-| restore three databases | 9.6s | |
+| restore three databases | 9.8s | |
 | compare counts | 1.1s | eleven tables equal |
 | known answer | 0.05s | contains 0.67 |
 | audit chain on restored database | 0.5s | 933 events, chain intact |
+| documents archive | 0.5s | 80 files, identical content hash |
 | n8n data directory | 0.01s | 7 files, config mode 600 with encryption key |
 | n8n workflows on restored database | 2.9s | five workflows, both templates present |
-| scratch API against restored database | 5.2s | status 200, cited answer, 12 citations |
+| scratch API against restored database | 5.8s | status 200, cited answer, 12 citations |
 | cleanup | 0.4s | zero scratch databases, no scratch container, production healthy |
 
 Counts matched exactly: `jobs` 64, `job_events` 642, `job_steps` 237, `audit_events` 933, `sessions` 50,
@@ -60,25 +61,25 @@ not only a row count.
 ## Measured recovery numbers
 
 - Restore of the three databases: about 10 seconds.
-- Full drill including backup, checks, scratch API and cleanup: 24 seconds.
-- RPO: the time since the last backup. Backups are currently run on demand; there is no timer yet, so the
-  practical RPO for business data is "since the last manual backup". Scheduled backups are still a C8 item and
-  become important before real company documents go in.
+- Full drill including backup, checks, scratch API and cleanup: 27 seconds.
+- RPO: 24 hours. Backups run daily at 03:00 Eastern through `oi-product-backup.timer`, with a persistent
+  timer, and are copied to `s3://oi-core-backups-878451098165/backups/product-oi-core-product-20261103/`.
+  See `docs/reviews/product-backup-20261103/README.md`.
 
 ## What this drill does not prove
 
-- It restores into the same Postgres instance and the same host. A host loss, a disk loss or a corrupted
-  Postgres install also loses the scratch path. The backup directory is on the same box, so "the box is gone"
-  is not covered until the backup is copied to durable off-box storage.
+- This drill restores from the local backup directory on the box. An off-box copy now exists and is
+  uploaded daily, but restoring from the S3 copy has not been tested. A host loss is covered by the upload
+  only after that second drill.
 - The vector store is not restored. It is derived from the documents and can be re-imported; the drill does not
   measure a Qdrant rebuild time.
 - The audit bucket and its Object Lock are not part of this drill.
 - Restore time is measured on an idle box with a synthetic corpus. It is a floor, not a promise.
-- No scheduled backup and no off-box copy exist yet. Both belong in the onboarding checklist before the first
-  real document is ingested.
+- The bucket is in the same account and writable by the product box role. That protects against host or
+  disk loss, not account compromise, and it is not a client-owned backup target.
 
 ## Evidence
 
 `evidence/` holds the script output: timings, counts, the known answer, chain verification, n8n workflow list,
-the scratch API answer, and cleanup confirmation. Run the drill again with
+the documents hash, the scratch API answer, and cleanup confirmation. Run the drill again with
 `bash scripts/restore-drill.sh` on the product box; evidence lands in `eval-out/restore-drill-<timestamp>/`.
