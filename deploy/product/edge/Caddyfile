@@ -1,0 +1,47 @@
+# The customer edge for the product deployment. Decision 0012.
+#
+# One hostname, TLS from Let's Encrypt by HTTP challenge, a Cognito login through oauth2-proxy, then the app.
+# The login endpoints are handled by the proxy itself. Everything else requires a session, and Caddy passes
+# the authenticated identity to the app only after stripping any client-supplied copies of the headers the API
+# trusts.
+{
+	email {$OI_EDGE_EMAIL:admin@officeinference.com}
+	admin off
+}
+
+{$OI_EDGE_HOSTNAME} {
+	encode zstd gzip
+
+	log {
+		output stdout
+		format console
+	}
+
+	# The OAuth flow and the auth check belong to the proxy. They must not be behind the auth check itself.
+	@auth path /oauth2/*
+	handle @auth {
+		reverse_proxy oauth2-proxy:4180
+	}
+
+	handle {
+		forward_auth oauth2-proxy:4180 {
+			uri /oauth2/auth
+			# The proxy returns these after a successful login. copy_headers puts them on the request the app
+			# and API receive.
+			copy_headers X-Auth-Request-Email X-Auth-Request-User
+		}
+
+		reverse_proxy app:8080 {
+			# **The trust boundary.** A browser can send any header it likes, so remove the ones the API
+			# trusts and then set them from the values the proxy just established. The edge secret is only
+			# known to Caddy and the API; the API refuses the exchange without it.
+			header_up -X-OI-Edge-Secret
+			header_up -X-OI-Provider-Email
+			header_up -X-OI-Provider-Subject
+			header_up X-OI-Edge-Secret {$OI_EDGE_SECRET}
+			header_up X-OI-Provider-Email {http.request.header.X-Auth-Request-Email}
+			header_up X-OI-Provider-Subject {http.request.header.X-Auth-Request-User}
+			header_up X-Forwarded-Proto https
+		}
+	}
+}
