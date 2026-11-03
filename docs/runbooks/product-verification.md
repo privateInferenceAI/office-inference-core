@@ -103,13 +103,14 @@ trusting the final line.
 | C8 | ADMIN ONLY | Cleanup | no scratch databases or containers; production healthy |
 
 The 2026-11-03 drill passed all twelve checks in 27 seconds. Record:
-`docs/reviews/restore-drill-20261103/README.md`. Its limits are stated there and matter: it restores from the
-local backup, and restoring from the S3 copy has not been tested. Qdrant is rebuilt from documents rather than
-restored, and the rebuild time is not measured.
+`docs/reviews/restore-drill-20261103/README.md`. A second run restored from the copy in S3, not the local
+directory: eleven checks in 21 seconds, counts compared against the backup manifest. Qdrant is still rebuilt
+from documents rather than restored, and the rebuild time is not measured.
 
 Backups run daily at 03:00 Eastern through `oi-product-backup.timer` and are copied to
 `s3://oi-core-backups-878451098165/backups/product-oi-core-product-20261103/`. Local retention is seven days,
-remote retention is thirty. See `docs/reviews/product-backup-20261103/README.md`.
+remote retention is thirty. The manifest carries the row counts so an off-box restore can be checked. See
+`docs/reviews/product-backup-20261103/README.md`.
 
 ## Phase D: customer access path
 

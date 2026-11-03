@@ -66,6 +66,25 @@ not only a row count.
   timer, and are copied to `s3://oi-core-backups-878451098165/backups/product-oi-core-product-20261103/`.
   See `docs/reviews/product-backup-20261103/README.md`.
 
+## Off-box restore, 2026-11-03
+
+The local drill proved the archive; it did not prove the copy in the bucket. The off-box restore closes that.
+
+- The fresh backup was made with row counts in its manifest. The same counts are now part of every backup.
+- The nine objects were downloaded from
+  `s3://oi-core-backups-878451098165/backups/product-oi-core-product-20261103/20261103T225539Z/` to a scratch
+  directory on the box, checksums verified.
+- The drill ran with `RESTORE_DRILL_EXISTING=1` so it did not create a new local backup. It restored the three
+  databases, compared eleven table counts against the manifest rather than the live database, verified the
+  chain, restored the documents and n8n data, ran the n8n CLI and a scratch API, and cleaned up.
+- Result: 11 checks passed in 21 seconds. The counts matched the manifest exactly: 80 jobs, 811 job events, 300
+  steps, 1,182 audit events, 68 sessions, 10,576 chunks, 245 spend rows, 5 workflows, 1 user.
+- The first attempt failed for the right reason: it compared the restored copy with the live database, which
+  had moved on since the backup. The count snapshot in the manifest is the fix.
+- Downloaded copies were removed from the box after the drill. Evidence is in
+  `evidence/offbox-summary.txt`, `offbox-counts.txt`, `offbox-timings.txt`, `offbox-chain-verify.txt` and
+  `offbox-scratch-api-answer.txt`.
+
 ## What this drill does not prove
 
 - This drill restores from the local backup directory on the box. An off-box copy now exists and is

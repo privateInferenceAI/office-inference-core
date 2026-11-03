@@ -49,6 +49,14 @@ mileage answer. See `docs/reviews/restore-drill-20261103/`.
 - Backup contents include secrets: `rendered/` and the n8n data. The bucket is encrypted and public access is
   blocked, but the backup is only as safe as the instance role that can write and delete it.
 
+## Off-box restore, 2026-11-03
+
+The bucket copy was restored and tested, not only uploaded. The backup manifest now records eleven table counts
+so an off-box restore has expectations of its own; comparing a restored copy with the live database is wrong,
+because the live one has moved on. The restore drill downloaded the nine objects, verified checksums, and
+passed 11 checks in 21 seconds with the counts matching the manifest. The downloaded copies were removed from
+the box afterwards. Full numbers are in `docs/reviews/restore-drill-20261103/README.md`.
+
 ## Findings and gaps
 
 1. **The product box still uses the development instance role.** `oi-core-dev-instance` carries the release
