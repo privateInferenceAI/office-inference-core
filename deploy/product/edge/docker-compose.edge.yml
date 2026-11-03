@@ -1,0 +1,80 @@
+# Customer edge for the product deployment
+#
+# This is the pilot shape in decision 0012: Caddy terminates TLS, an OIDC proxy authenticates the browser with
+# Cognito, and only an authenticated request reaches the app. The API session exchange trusts two headers only
+# when they arrive with the shared edge secret, and Caddy strips any client-supplied copies before setting them.
+#
+# Apply on top of the base and product compose files:
+#   docker compose -p oi-product \
+#     -f deploy/office/compose/docker-compose.yml \
+#     -f deploy/product/docker-compose.product.yml \
+#     -f deploy/product/edge/docker-compose.edge.yml \
+#     --env-file rendered/env up -d caddy oauth2-proxy
+#
+# Required rendered/env keys:
+#   OI_EDGE_HOSTNAME          app.officeinference.com
+#   OI_EDGE_SECRET            shared secret between Caddy and the API
+#   OI_EDGE_EMAIL             ACME account email
+#   OI_OIDC_ISSUER            https://cognito-idp.us-east-1.amazonaws.com/<pool id>
+#   OI_OIDC_CLIENT_ID
+#   OI_OIDC_CLIENT_SECRET
+#   OI_OAUTH2_COOKIE_SECRET   random 32 bytes, base64 or URL-safe
+#   OI_OIDC_REDIRECT_URL      https://<hostname>/oauth2/callback
+#
+# Security group: inbound 80 and 443 from the internet. 80 is used by the ACME HTTP challenge and redirected.
+# The app and API stay unpublished; only 80 and 443 are opened.
+
+services:
+  caddy:
+    image: caddy:2.9.1-alpine
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      OI_EDGE_HOSTNAME: ${OI_EDGE_HOSTNAME:?set OI_EDGE_HOSTNAME in rendered/env}
+      OI_EDGE_SECRET: ${OI_EDGE_SECRET:?set OI_EDGE_SECRET in rendered/env}
+      OI_EDGE_EMAIL: ${OI_EDGE_EMAIL:-admin@officeinference.com}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - ai-net
+    depends_on:
+      - app
+      - oauth2-proxy
+
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.6.0
+    container_name: oauth2-proxy
+    restart: unless-stopped
+    command:
+      - --provider=oidc
+      - --oidc-issuer-url=${OI_OIDC_ISSUER:?set OI_OIDC_ISSUER in rendered/env}
+      - --client-id=${OI_OIDC_CLIENT_ID:?set OI_OIDC_CLIENT_ID in rendered/env}
+      - --client-secret=${OI_OIDC_CLIENT_SECRET:?set OI_OIDC_CLIENT_SECRET in rendered/env}
+      - --cookie-secret=${OI_OAUTH2_COOKIE_SECRET:?set OI_OAUTH2_COOKIE_SECRET in rendered/env}
+      - --cookie-secure=true
+      - --cookie-samesite=lax
+      - --email-domain=*
+      - --http-address=0.0.0.0:4180
+      - --redirect-url=${OI_OIDC_REDIRECT_URL:?set OI_OIDC_REDIRECT_URL in rendered/env}
+      - --reverse-proxy=true
+      - --set-xauthrequest=true
+      - --skip-provider-button=true
+      - --upstream=static://200
+    networks:
+      - ai-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:4180/ping || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  caddy_data:
+  caddy_config:
