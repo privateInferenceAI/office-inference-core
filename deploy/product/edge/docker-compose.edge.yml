@@ -62,12 +62,12 @@ services:
       - --upstream=static://200
     networks:
       - ai-net
+    # **No healthcheck: this is a distroless image.** The previous check used a shell and wget, neither of
+    # which exists in the image, so the container reported unhealthy forever while serving normally. An exec
+    # check against the binary would only prove the binary exists. Edge health is checked from outside: Caddy
+    # answers on 80/443, and the customer-path acceptance run signs in through the login.
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:4180/ping || exit 1"]
-      interval: 20s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
+      disable: true
 
 volumes:
   caddy_data:
