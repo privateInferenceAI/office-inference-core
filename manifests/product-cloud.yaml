@@ -60,6 +60,12 @@ access:
     name: Adam Hale
     groups:
     - exec
+  # The owner of the pilot deployment. Executive because the owner of the business is entitled to the executive
+  # root; the Cognito login maps this email to this registry subject, and access comes from the group.
+  - subject: anthony@officeinference.com
+    name: Anthony Stachowitz
+    groups:
+    - exec
   - subject: probe-exec@officeinference.com
     name: Executive probe
     groups:
