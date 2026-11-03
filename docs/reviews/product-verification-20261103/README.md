@@ -54,6 +54,17 @@ What the checks actually saw:
 - B5 verified the chain intact; the B6 run in run 5 verified against 500+ events and no broken links.
 - B6 started a governed job from the invoice webhook and confirmed a person could open the resulting gate.
 
+## Re-runs after the customer path changes, 2026-11-03
+
+The API provider session exchange, the UI provider login and the edge environment changes were deployed to the
+product box while the public edge stayed closed. Two more Phase B runs checked that the operator path was
+unaffected. Both passed every step: run 6 in 74 seconds, run 7 in 72 seconds. The invoice gates left by the
+runs were denied with the reason "phase B re-run cleanup", leaving zero pending. The evidence files are
+`evidence/run6-summary.txt` and `evidence/run7-summary.txt`.
+
+The five smoke probes also passed after the change. No public port is open: from the operator machine, only 22
+answers; 80, 443, 8443, 8080, 8088 and 5678 are closed. The staging edge containers are stopped.
+
 ## Findings and fixes
 
 | Finding | Fix | Verification |
