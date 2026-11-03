@@ -88,6 +88,7 @@ import streaming  # noqa: E402
 import tool_loop  # noqa: E402
 import answer_profile  # noqa: E402
 import answer_params  # noqa: E402
+import n8n_integrations as n8n_integrations_module  # noqa: E402
 
 # **What a client is promised, declared rather than described.** These are attached with
 # `responses={...}` so they reach `/openapi.json`, which is the artifact the client app is built from.
@@ -345,6 +346,11 @@ async def lifespan(app: FastAPI):
     definitions_path = os.environ.get("OI_AGENT_DEFINITIONS",
                                       "/app/rendered/agent_definitions.json")
     STATE["agent_definitions"] = definitions_module.load(definitions_path)
+    # **The n8n integration registry is rendered configuration, not a hidden default.** A missing file
+    # means no integrations; an invalid file refuses startup, because a permissive fallback would silently
+    # turn a signed per-workflow identity into an unsigned one.
+    integrations_path = os.environ.get("OI_N8N_INTEGRATIONS", "/app/rendered/n8n_integrations.json")
+    STATE["n8n_integrations"] = n8n_integrations_module.load(integrations_path)
     STATE["services"] = ingest.Services()
     STATE["store"] = session_module.open_store()
     # What the shared answer pipeline needs, gathered once. `answer.py` takes this rather than reading the
@@ -687,6 +693,23 @@ def _agent_lock(job_id: str) -> threading.Lock:
         return _AGENT_LOCKS.setdefault(job_id, threading.Lock())
 
 
+def _job_session(job):
+    """The session a job runs under.
+
+    **A user job resolves the session it was created under.** A job holds the hash, not the credential, and
+    an expired or revoked session is still a refusal. **An automation job has no stored credential.** Its
+    identity is the job row: the per-workflow integration was validated against its owner at provisioning,
+    and the row carries the snapshot. Building the session from the row keeps one execution path for both,
+    without turning a job row into a working credential.
+    """
+    if job.credential_sha256:
+        return session_module.resolve_credential_hash(STATE["store"], job.credential_sha256)
+    return session_module.service_session(
+        subject=job.subject, role=job.actor_role, roots=job.roots,
+        session_id=f"job-{job.job_id}", deployment_id=job.deployment_id,
+        actor_name="n8n automation")
+
+
 def _run_agent_job(job):
     """Serialise the runtime for one job, then run it."""
     with _agent_lock(job.job_id):
@@ -705,7 +728,7 @@ def _run_agent_job_locked(job):
         _fail_agent_job(job, "no_definition", f"no definition for task {job.task!r}")
         return
     try:
-        session = session_module.resolve_credential_hash(STATE["store"], job.credential_sha256)
+        session = _job_session(job)
     except session_module.SessionError as exc:
         _fail_agent_job(job, "no_session", str(exc))
         return
@@ -1026,7 +1049,7 @@ def _step_once(job, attempt):
     machine, the event log, the budgets and the interface do not change.
     """
     try:
-        session = session_module.resolve_credential_hash(STATE["store"], job.credential_sha256)
+        session = _job_session(job)
     except session_module.SessionError as exc:
         # The session the job was created under has expired or been revoked. Terminal rather than
         # retryable: waiting does not bring a credential back.
@@ -1350,6 +1373,169 @@ async def create_job(request: Request):
     # response contradicting the record, which is the one thing this interface must never do. The store is
     # the truth and the response is read back from it.
     return JSONResponse((store.get(job.job_id) or job).to_dict(include_result=True), status_code=200)
+
+
+# --------------------------------------------------------------------------- client-owned n8n integration
+# Decision 0011: n8n is the client-owned automation layer, and every workflow that starts governed work
+# does it through a per-workflow signed identity. The signature is HMAC over "<timestamp>.<raw body>", the
+# timestamp is inside the signed material so a captured request cannot be replayed later, and the identity
+# comes from the rendered registry rather than from anything the caller supplies.
+
+
+def _n8n_integration(integration_id: str):
+    integrations = STATE.get("n8n_integrations") or {}
+    return integrations.get(integration_id)
+
+
+def _n8n_signed_headers(request: Request):
+    return (request.headers.get("X-OI-Timestamp", ""),
+            request.headers.get("X-OI-Signature", ""))
+
+
+def _n8n_verify(integration, request: Request, raw: bytes) -> None:
+    """Authenticate an integration request: HMAC headers when provided, otherwise the shared-secret bearer."""
+    if request.headers.get("X-OI-Signature") or request.headers.get("X-OI-Timestamp"):
+        timestamp, signature = _n8n_signed_headers(request)
+        n8n_integrations_module.verify_request(integration, timestamp=timestamp,
+                                               signature=signature, body=raw)
+        return
+    n8n_integrations_module.verify_bearer(integration, request.headers.get("Authorization", ""))
+
+
+def _n8n_refusal(integration_id: str, reason: str, endpoint: str, request_id: str) -> JSONResponse:
+    """A refused integration request is an event, like every other refusal on this API."""
+    try:
+        audit("access", f"n8n:{integration_id}", "unknown", "denied",
+              {"stage": "n8n_integration", "reason": reason, "endpoint": endpoint},
+              request_id=request_id)
+    except Exception as exc:  # noqa: BLE001 - the refusal still has to reach the caller
+        print(f"n8n refusal audit failed: {exc!r}", flush=True)
+    return JSONResponse({"error": "invalid integration request", "kind": reason}, status_code=401)
+
+
+@app.post("/integrations/n8n/jobs/{integration_id}", responses={
+    200: {"model": contract.Job, "description": "the job the workflow started"},
+    400: {"model": contract.Refusal, "description": "the body is not JSON or has no input"},
+    401: {"model": contract.Refusal, "description": "missing, stale or wrong signature"},
+    403: {"model": contract.Refusal, "description": "the task is not one this deployment declares"},
+    404: {"model": contract.Refusal, "description": "no such enabled integration"},
+    413: {"model": contract.Refusal, "description": "the body is larger than an integration request should be"},
+})
+async def n8n_create_job(integration_id: str, request: Request):
+    """Start a governed job from a signed n8n workflow request.
+
+    The integration's task, role, roots and owner come from the rendered registry. The caller supplies only
+    the input; it cannot choose its task, role, roots or identity. That is the per-workflow privilege bound.
+    """
+    request_id = uuid.uuid4().hex
+    integration = _n8n_integration(integration_id)
+    if integration is None or not integration.enabled:
+        return _n8n_refusal(integration_id, "no_such_integration", request.url.path, request_id)
+    raw = await request.body()
+    if len(raw) > n8n_integrations_module.MAX_BODY_BYTES:
+        return JSONResponse({"error": "the integration request is too large", "kind": "too_large"},
+                            status_code=413)
+    try:
+        _n8n_verify(integration, request, raw)
+    except n8n_integrations_module.IntegrationRefused as refused:
+        return _n8n_refusal(integration_id, str(refused), request.url.path, request_id)
+    try:
+        body = json.loads(raw.decode() or "{}")
+    except Exception:  # noqa: BLE001 - the message is the response
+        return JSONResponse({"error": "the request body is not JSON", "kind": "bad_request"},
+                            status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "the request body must be a JSON object", "kind": "bad_request"},
+                            status_code=400)
+    text = str(body.get("input") or "").strip()
+    if not text:
+        return JSONResponse({"error": "an integration job needs an input", "kind": "bad_request"},
+                            status_code=400)
+    task = integration.task
+    definition = definitions_module.find(STATE.get("agent_definitions") or [], task)
+    declared = {t["id"] for t in _tasks_this_deployment_declares()}
+    if task not in declared:
+        try:
+            audit("access", f"n8n:{integration.id}", "unknown", "denied",
+                  {"stage": "n8n_integration", "reason": "task_not_declared", "task": task,
+                   "declared": sorted(declared), "endpoint": request.url.path}, request_id=request_id)
+        except Exception:  # noqa: BLE001
+            pass
+        return JSONResponse({"error": f"This deployment does not declare a task called '{task}'.",
+                             "kind": "no_such_task", "declared": sorted(declared)}, status_code=403)
+
+    subject = integration.automation_subject(DEPLOYMENT_ID)
+    service = session_module.service_session(
+        subject=subject, role=integration.role, roots=integration.roots,
+        session_id=f"n8n-{integration.id}", deployment_id=DEPLOYMENT_ID,
+        actor_name=f"n8n workflow {integration.id}")
+    data_class = answer_module.data_class_for(body, STATE.get("manifest") or {})
+    model = model_for(integration.role)
+    try:
+        answer_module.check_boundary(
+            manifest=STATE.get("manifest") or {}, data_class=data_class, task=task,
+            model_name=model, default_lane=role_lane(integration.role),
+            frontier_model=frontier_model_for(integration.role), session=service, audit=audit,
+            endpoint=request.url.path, request_id=request_id)
+    except answer_module.Refused as refused:
+        return JSONResponse(refused.payload, status_code=refused.status)
+
+    plan = workflow_module.plan_for(task)
+    if definition:
+        budgets = definitions_module.budgets(definition)
+    else:
+        budgets = workflow_module.budgets_for(task) if plan else {}
+    job = jobs_module.new_job(
+        deployment_id=DEPLOYMENT_ID, subject=subject, actor_role=integration.role,
+        roots=integration.roots,
+        # **No credential hash.** A scheduled workflow has no user credential, so its identity is the job
+        # row. The execution path builds the session from that snapshot (see `_job_session`).
+        credential_sha256="", task=task, input=text, data_class=data_class,
+        **budgets)
+    store = STATE["jobs"]
+    try:
+        audit("access", subject, integration.role, "ok",
+              {"stage": "n8n_integration", "integration": integration.id,
+               "owner_subject": integration.owner_subject, "task": task,
+               "roots": sorted(integration.roots), "job_id": job.job_id,
+               "endpoint": request.url.path}, request_id=request_id)
+    except Exception:  # noqa: BLE001 - the refusal path above explains the same policy
+        pass
+    if definition:
+        store.put(job)
+        payload = (store.get(job.job_id) or job).to_dict(include_result=True)
+    else:
+        _run_or_resume(job, store)
+        payload = (store.get(job.job_id) or job).to_dict(include_result=True)
+    payload["integration"] = {"id": integration.id, "owner_subject": integration.owner_subject,
+                              "task": task, "roots": sorted(integration.roots)}
+    return JSONResponse(payload, status_code=200)
+
+
+@app.get("/integrations/n8n/jobs/{integration_id}/{job_id}", responses={
+    200: {"model": contract.Job, "description": "the integration job, for the workflow to poll"},
+    401: {"model": contract.Refusal, "description": "missing, stale or wrong signature"},
+    404: {"model": contract.Refusal, "description": "no such integration or job for that integration"},
+})
+async def n8n_get_job(integration_id: str, job_id: str, request: Request):
+    """Poll one job that belongs to this integration. Signed, so no token is stored in n8n."""
+    request_id = uuid.uuid4().hex
+    integration = _n8n_integration(integration_id)
+    if integration is None or not integration.enabled:
+        return _n8n_refusal(integration_id, "no_such_integration", request.url.path, request_id)
+    raw = await request.body()
+    try:
+        _n8n_verify(integration, request, raw)
+    except n8n_integrations_module.IntegrationRefused as refused:
+        return _n8n_refusal(integration_id, str(refused), request.url.path, request_id)
+    job = STATE["jobs"].get(job_id)
+    expected_subject = integration.automation_subject(DEPLOYMENT_ID)
+    if job is None or job.deployment_id != DEPLOYMENT_ID or job.subject != expected_subject:
+        return JSONResponse({"error": "no such job for this integration", "kind": "not_found"},
+                            status_code=404)
+    payload = _job_payload(job)
+    payload["integration"] = {"id": integration.id, "owner_subject": integration.owner_subject}
+    return JSONResponse(payload, status_code=200)
 
 
 @app.get("/approvals", responses={

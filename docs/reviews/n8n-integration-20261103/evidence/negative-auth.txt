@@ -1,0 +1,3 @@
+=== negative authentication evidence ===
+wrong signature: 401 {'error': 'invalid integration request', 'kind': 'the signature does not match'}
+stale timestamp: 401 {'error': 'invalid integration request', 'kind': 'the timestamp is outside the allowed window'}

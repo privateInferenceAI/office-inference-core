@@ -1,0 +1,10 @@
+              job_id              |      task      |       state       |                       subject                       
+----------------------------------+----------------+-------------------+-----------------------------------------------------
+ 75f34e8e7d4447ad9877e3721bf4e737 | invoice_intake | awaiting_approval | automation+invoice_trigger@oi-core-product-20261103
+(1 row)
+
+                        actor                        |   integration   |            owner            |               job                
+-----------------------------------------------------+-----------------+-----------------------------+----------------------------------
+ automation+invoice_trigger@oi-core-product-20261103 | invoice_trigger | zoe.reyes@northwind.example | 75f34e8e7d4447ad9877e3721bf4e737
+(1 row)
+

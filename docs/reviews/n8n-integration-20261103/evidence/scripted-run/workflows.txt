@@ -1,0 +1,7 @@
+Postgres 16 is outside the supported range and receives compatibility support only. Upgrade to Postgres 17 or newer.
+Acquiring database migration lock...
+19p1l1AARc69coQF|Invoice intake trigger
+x8McPagiutlQ1Cus|Invoice intake trigger
+09VSEYMoPBLMDtW8|Scheduled governed report
+xss54AxjDh0FZs8X|Acceptance: LiteLLM credential check
+yId7HurH3FsdNX0W|Scheduled governed report

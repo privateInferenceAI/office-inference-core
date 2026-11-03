@@ -1,0 +1,24 @@
+{
+  "integrations": [
+    {
+      "id": "scheduled_report",
+      "secret": "<set>",
+      "task": "summarise_across_documents",
+      "role": "viewer",
+      "roots": [
+        "company"
+      ],
+      "owner_subject": "zoe.reyes@northwind.example"
+    },
+    {
+      "id": "invoice_trigger",
+      "secret": "<set>",
+      "task": "invoice_intake",
+      "role": "viewer",
+      "roots": [
+        "company"
+      ],
+      "owner_subject": "zoe.reyes@northwind.example"
+    }
+  ]
+}

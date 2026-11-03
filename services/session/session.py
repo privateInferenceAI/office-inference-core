@@ -350,6 +350,33 @@ def mint(registry: access.Registry, store, subject: str, role: str, *, ttl_hours
     return replace(session, credential=credential)
 
 
+def service_session(*, subject: str, role: str, roots, session_id: str, deployment_id: str = "",
+                    actor_name: str = "", source: str = "service") -> Session:
+    """A session for work whose identity is the job row, not a stored credential.
+
+    **Why this exists.** A client-owned n8n workflow runs on a schedule, when nobody is logged in, so there
+    is no user credential to resolve and a 24-hour development session would break the second day. The job
+    carries the permission snapshot it was created with, and this builds the session object the answer
+    pipeline needs from that snapshot. It is never stored and never presented; `expires_at` exists because
+    the type requires it, and nothing consults it for a service session.
+    """
+    if not subject or not role:
+        raise SessionError("a service session needs a subject and a role")
+    if not roots:
+        raise SessionError("a service session needs at least one document root")
+    return Session(
+        session_id=session_id,
+        subject=subject,
+        actor_name=actor_name or subject,
+        role=role,
+        roots=frozenset(roots),
+        groups=(),
+        deployment_id=deployment_id or "unknown",
+        expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+        source=source,
+    )
+
+
 def resolve_credential_hash(store, credential_sha256: str) -> Session:
     """The session a stored hash belongs to, or a refusal.
 

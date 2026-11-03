@@ -61,6 +61,58 @@ services:
     environment:
       MCP_SESSION_SECRET: ${OI_MCP_SESSION_SECRET:-}
 
+
+  # **The client-owned automation layer.** Decision 0011: the client runs their own n8n instance under the
+  # Sustainable Use Licence. It is not white-labelled, not resold, and its access is never gated on payment.
+  # Loopback only in this build; C7 brings ingress, TLS and identity. The image is an explicit pinned digest
+  # set by the prepare script so an upgrade is a reviewable change, not a moving tag.
+  n8n:
+    image: ${N8N_IMAGE:?set N8N_IMAGE to a pinned n8n image digest in rendered/env}
+    container_name: n8n
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5678:5678"
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: "5432"
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: ${POSTGRES_USER}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY in rendered/env}
+      # Per-workflow signing secrets are read by the Code node through $env, not stored in the workflow JSON.
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      N8N_INTEGRATION_SCHEDULED_REPORT_SECRET: ${N8N_INTEGRATION_SCHEDULED_REPORT_SECRET:-}
+      N8N_INTEGRATION_INVOICE_TRIGGER_SECRET: ${N8N_INTEGRATION_INVOICE_TRIGGER_SECRET:-}
+      N8N_HOST: 127.0.0.1
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: http
+      N8N_WEBHOOK_URL: http://127.0.0.1:5678/
+      N8N_EDITOR_BASE_URL: http://127.0.0.1:5678/
+      GENERIC_TIMEZONE: America/New_York
+      TZ: America/New_York
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+      N8N_SECURE_COOKIE: "false"
+      N8N_DEFAULT_BINARY_DATA_MODE: database
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: "336"
+    volumes:
+      - ${OI_ROOT}/data/n8n:/home/node/.n8n
+    networks:
+      - ai-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:5678/healthz || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
   # LiteLLM uses Prisma and refuses a database whose schema it did not create. Give the gateway its
   # own database so each migration system owns its schema.
   litellm:
