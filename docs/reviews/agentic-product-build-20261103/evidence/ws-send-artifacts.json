@@ -1,0 +1,26 @@
+{
+  "job_id": "852b8060c7634f5cab065374abef2232",
+  "artifacts": [
+    {
+      "key": "artifacts/852b8060c7634f5cab065374abef2232/15bc3c58108aede7182fbd4daea3221c0779cb30ad6ee68940258351a7509c13",
+      "path": "brief.md",
+      "bytes": 577,
+      "store": "s3",
+      "sha256": "15bc3c58108aede7182fbd4daea3221c0779cb30ad6ee68940258351a7509c13"
+    },
+    {
+      "key": "artifacts/852b8060c7634f5cab065374abef2232/b87e3bcec33854aa5e8220396a5720edfdb055876877609b18a7ad431672b4bc",
+      "path": "note.txt",
+      "bytes": 15,
+      "store": "s3",
+      "sha256": "b87e3bcec33854aa5e8220396a5720edfdb055876877609b18a7ad431672b4bc"
+    },
+    {
+      "key": "artifacts/852b8060c7634f5cab065374abef2232/162b81548a8db0ab220f7137405fb003019c266883d4181869662ad7eafdbc4d",
+      "path": "title.txt",
+      "bytes": 14,
+      "store": "s3",
+      "sha256": "162b81548a8db0ab220f7137405fb003019c266883d4181869662ad7eafdbc4d"
+    }
+  ]
+}

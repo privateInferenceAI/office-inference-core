@@ -1,5 +1,9 @@
 # C9 rehearsal, 2026-10-23
 
+**2026-10-30 build:** the clean rebuild and its 2026-11-03 walkthrough are recorded in
+[clean-run-2026-10-30/README.md](clean-run-2026-10-30/README.md). This page remains the
+2026-10-23 rehearsal history.
+
 **Status:** the eight scenes were run end to end on a clean demo deployment. Every scene produced its
 expected output. Two limits are recorded rather than smoothed over: the run used the fallback model
 because the account's daily Sonnet allotment was exhausted, and the timing is operation time inside

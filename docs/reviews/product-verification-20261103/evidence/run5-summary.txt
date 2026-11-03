@@ -1,0 +1,19 @@
+phase B run 5 (post review fix)
+start: 2026-11-03T22:21:41Z
+end: 2026-11-03T22:22:56Z
+deployment: oi-core-product-20261103
+
+b1-questions rc=0 secs=14
+b2-invoice rc=0 secs=0
+b3-b4-b7-acceptance rc=0 secs=57
+b5-audit rc=0 secs=0
+b6-n8n rc=0 secs=4
+
+gates left by design:
+5389b2d620024cf7987b4ac5ee54df7f invoice_intake awaiting_approval automation+invoice_trigger@oi-core-product-20261103
+a34155474a5444aabf896598d042efe4 invoice_intake awaiting_approval probe-staff@officeinference.com
+
+reviewer decision rows (last 3):
+917 probe-staff@officeinference.com approve 8aa10c3afa5449d98d4a93e5cb6f2616
+886 probe-staff@officeinference.com approve 22589b25910c4b719be0ccc66c48cba0
+826 probe-staff@officeinference.com deny 7bb01f8499fe49d1846116cbb9802aa2

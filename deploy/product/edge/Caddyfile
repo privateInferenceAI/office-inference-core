@@ -1,0 +1,47 @@
+# The customer edge for the product deployment. Decision 0012.
+#
+# One hostname, TLS from Let's Encrypt by HTTP challenge, a Cognito login through oauth2-proxy, then the app.
+# The section that passed the staged login validation on 2026-11-03 is preserved here; the only differences in
+# the staging variant are the port suffix, tls internal, and the test note.
+{
+	email {$OI_EDGE_EMAIL:admin@officeinference.com}
+	admin off
+}
+
+{$OI_EDGE_HOSTNAME} {
+	encode zstd gzip
+	log {
+		output stdout
+		format console
+	}
+
+	@auth path /oauth2/*
+	handle @auth {
+		reverse_proxy oauth2-proxy:4180
+	}
+
+	handle {
+		# Strip every header the API trusts before the proxy sees it. Caddy's header_up removal and
+		# addition did not survive as one list in the deployed order, so the stripping is a separate
+		# request_header directive here and the reverse_proxy block only sets values.
+		request_header -X-OI-Edge-Secret
+		request_header -X-OI-Provider-Email
+		request_header -X-OI-Provider-Subject
+		forward_auth oauth2-proxy:4180 {
+			uri /oauth2/auth
+			copy_headers X-Auth-Request-Email X-Auth-Request-User
+			# **A browser is redirected to the login, not answered with a 401.** forward_auth returns the auth
+			# response by default; a customer opening the URL should be sent to the provider, not shown plain text.
+			@unauthenticated status 401
+			handle_response @unauthenticated {
+				redir * /oauth2/start?rd={uri} 302
+			}
+		}
+		reverse_proxy app:8080 {
+			header_up X-OI-Edge-Secret {$OI_EDGE_SECRET}
+			header_up X-OI-Provider-Email {http.request.header.X-Auth-Request-Email}
+			header_up X-OI-Provider-Subject {http.request.header.X-Auth-Request-User}
+			header_up X-Forwarded-Proto https
+		}
+	}
+}

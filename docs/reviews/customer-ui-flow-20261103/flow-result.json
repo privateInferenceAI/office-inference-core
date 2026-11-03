@@ -1,0 +1,10 @@
+{
+  "url": "https://app.officeinference.com",
+  "login": true,
+  "invoice_task": "Prepare a supplier invoice",
+  "task_started": true,
+  "gate_visible": true,
+  "approved": true,
+  "activity_has_provider_actor": true,
+  "activity_has_approval": true
+}

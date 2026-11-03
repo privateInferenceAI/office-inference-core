@@ -198,3 +198,30 @@ def test_a_body_role_is_refused_even_with_a_valid_assertion(tmp_path):
     token = _assertion("assertion-secret")
     status, payload = call(service, {"tool": "send_email", "session_assertion": token, "role": "admin"})
     assert status == 403 and payload["error"] == "refused_authority_claim"
+
+def test_connector_refusal_is_recorded_in_the_audit_chain(tmp_path):
+    """A message blocked at the connector must still appear in the chain.
+
+    **The connector is the last boundary before a message leaves.** When it refuses a recipient, the caller
+    gets an error; if the gateway does not record that error, the chain cannot show that a send was attempted
+    and stopped. This is the allowlist case from the Phase E email checks.
+    """
+    service, recorder, _ = make_gateway(tmp_path)
+
+    def refuse(tool, arguments, credential):
+        raise gateway.GatewayError(
+            "connector returned 403: recipient 'outside@example.com' is not on the connector allowlist")
+
+    service._transport = refuse
+    status, body = call(service, {
+        "tool": "send_email", "session": "dana",
+        "arguments": {"to": "outside@example.com", "subject": "test", "body": "blocked"},
+        "data_class": "internal", "egress_approved": True,
+    })
+    assert status == 502
+    assert body["error"] == "connector"
+    refusals = [event for event in recorder.events
+                if event["outcome"] == "denied" and (event["payload"] or {}).get("refusal") == "connector"]
+    assert refusals, recorder.events
+    assert "outside@example.com" in str(refusals[-1]["payload"]["detail"])
+

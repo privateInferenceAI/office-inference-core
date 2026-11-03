@@ -1,0 +1,10 @@
+# Staging override used to validate the login chain before the public DNS record exists. It serves the edge on
+# 8443 with Caddy's internal certificate and the staging Caddyfile. Not for the public path.
+services:
+  caddy:
+    ports:
+      - "8443:8443"
+    volumes:
+      - /opt/oi-product/deploy/product/edge/Caddyfile.staging:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config

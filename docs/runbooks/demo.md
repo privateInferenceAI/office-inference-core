@@ -1,245 +1,269 @@
-# The eight-scene demo
+# The eight-scene demo: clean canonical v2 build, 2026-10-30
 
-**Status:** the C9 runbook, written 2026-10-23. Rehearsal evidence lands in `docs/reviews/c9/`.
-The build plan calls C9 "demo rehearsal, twelve minutes, eight scenes"; this is the script and the
-deployment that runs it.
+**Status:** C9 runbook for the clean demo deployment on the new machine. It replaces the 2026-10-23
+script, which used the old 24,296-chunk corpus and the fallback model. Evidence lands in
+`docs/reviews/c9/`.
 
-**What it is.** A twelve-minute demonstration on a deployment built for it, not on the development
-box. A cited answer, the source page, a permission boundary, the denial in the record, the same
-question with permission, the export handed over, and a tampered copy that fails verification. The
-record is the thing the audience takes away, so every scene that touches it runs late enough to
-land.
+**What it is.** Twelve minutes on a deployment built for it. A cited answer, the source page, a permission
+boundary, the denial in the record, the same question with permission, the export handed over, and a tampered
+copy that fails verification. The record is the thing the audience takes away, so every scene that touches
+it runs late enough to land.
 
 ## The deployment
 
 | | |
 |---|---|
-| Account | 878451098165, us-east-1b |
-| Instance | On-Demand `m7i.4xlarge`, 200 GB gp3, no Elastic IP |
-| Deployment root | `/opt/oi-core` |
-| Deployment id | `oi-core-demo-2026-10-23` (change it in the manifest for a rebuild) |
-| Manifest | [`manifests/demo-cloud.yaml`](../manifests/demo-cloud.yaml) |
-| Corpus | `second-corpus-2026-10-22`, 80 documents, 24,296 chunks |
-| App | `oic-ui` main after the boundary-disclosure merge |
+| Deployment id | `oi-core-c9-demo-20261030` |
+| Machine | `i-071698b48469162a4`, m7i.4xlarge, us-east-1b, Elastic IP 18.208.119.4 |
+| Deployment root | `/opt/oi-core-clean` |
+| Compose project | `oi-clean` |
+| Manifest | `manifests/c9-demo-clean-20261030.yaml` under the root |
+| Base compose | `deploy/office/compose/docker-compose.yml` |
+| Overlay | `deploy/docker-compose.canonical.yml` |
+| Port override | `app-ports-override.yml` (publishes the app on 127.0.0.1:8080 only) |
+| Corpus | `bundle-table-units-v2-20261028`, 80 documents, 10,576 chunks, `chunker-canonical-v1` |
+| Collection | `documents-mixed-v2-20261028` |
+| Serving code | product tree from release `16ed3d3` with the pin applied |
+| Analyst | `bedrock/converse/us.moonshotai.kimi-k3`, no fallback chain |
 | Answer profile | `OI_ANSWER_PROFILE=accuracy` |
-| Analyst | `bedrock/us.anthropic.claude-sonnet-4-6`, fallback Haiku 4.5 then Nova Pro |
+| App | `oic-ui` main `b04ca0a`, the C9 v2 one-Ask UI |
+| Running services | eight: `api`, `app`, `embeddings`, `litellm`, `mcp-gateway`, `parser`, `postgres`, `vector` |
 
-The install is [`fresh-install-agent.md`](fresh-install-agent.md) with four deltas: the tracked
-demo manifest instead of a copy, the app built from a current `oic-ui` archive, the accuracy answer
-profile, and the acceptance below before any rehearsal. The startup order and the four known
-defects are in that runbook; do not re-derive them.
+The corpus arrives by import, not by a worker. The one-shot `importer` service reads
+`bundles/bundle-table-units-v2-20261028` and writes Postgres and Qdrant, then exits. The native ingestion
+worker is profiled off and must not run against this database; it can reconcile an empty manifest and
+delete canonical chunks.
 
-## Build it
+**The analyst has no fallback.** `litellm_settings.fallbacks` is empty, matching the pinned v2 measurement.
+A Bedrock throttle produces a degraded answer with passages, not a quieter answer from another model. If
+the model stops answering, stop and reschedule.
 
-1. Archive the demo commit and the current `oic-ui` main, upload both to
-   `officeinference-corpus-878451098165`, and record the sha256 of each.
-2. Launch the box per the fresh-install runbook. Record the instance id, public IP and launch time.
-3. Extract the code and the UI archive. The code archive contains the tracked demo manifest.
-4. Render it, set the profile, validate:
+### Command prefix
 
-       cd /opt/oi-core
-       python3 scripts/render_manifest.py --manifest manifests/demo-cloud.yaml --root /opt/oi-core
-       grep -q '^OI_ANSWER_PROFILE=' rendered/env \
-         && sed -i 's/^OI_ANSWER_PROFILE=.*/OI_ANSWER_PROFILE=accuracy/' rendered/env \
-         || echo 'OI_ANSWER_PROFILE=accuracy' >> rendered/env
-       python3 scripts/validate_manifests.py manifests/demo-cloud.yaml
-       python3 scripts/check_model_lifecycle.py manifests/demo-cloud.yaml
+```
+cd /opt/oi-core-clean
+alias oi='docker compose -p oi-clean \
+  -f deploy/office/compose/docker-compose.yml \
+  -f deploy/docker-compose.canonical.yml \
+  -f app-ports-override.yml \
+  --env-file rendered/env'
+```
 
-   Expected: `declared: 2 group(s), 4 user(s)`, `1/1 manifests valid`, `1/1 manifests clean`.
+Every `oi ...` below means that alias. Omitting the overlay or the port override is a different deployment.
 
-5. Create the network and build the API image first. The MCP gateway's Dockerfile is
-   `FROM oi-core/api:local`, and a single parallel build can try to pull that image from a registry
-   before it exists locally, which fails with `pull access denied`. Build the API, then everything:
+## How it was built
 
-       docker network create ai-net
-       docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env build api
-       docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env \
-         --profile tools build
+The deployment scripts are tracked in `oi-canonical-stack/scripts/`, run in order. Each writes a
+timestamped log under `/opt/oi-core-clean/logs/`.
 
-   Start the gateway before the API on a blank database. Then start the eight services this
-   deployment uses, named explicitly. The MCP gateway is left out: the scenes do not touch the agent
-   runtime, and without a connector token it exits with `MCP_GATEWAY_TOKEN is required` and
-   restart-loops.
+| Script | What it does |
+|---|---|
+| `c9-clean-prepare.sh` | Verifies the four release tarballs and the bundle checksums, extracts the product tree and UI, applies the pin (`tool_loop.py`, `retriever.py`) after diffing it, renders the Kimi manifest with fresh secrets, creates the data directories, builds every image |
+| `c9-clean-start.sh` | Starts Postgres and creates the gateway database, starts LiteLLM, vector, embeddings and the API, provisions the gateway teams before the first answer, starts the parser and the MCP gateway, starts the app on 127.0.0.1:8080 |
+| `c9-clean-import.sh` | Imports the v2 bundle with CPU embeddings, restarts the API, verifies the stores |
+| `c9-clean-tests.sh` | Runs the section suite and the 38-role five-run |
+| `c9-clean-verify.sh` | Stores, health, the one-Ask path, the model row, the boundary, demo session tokens |
 
-       docker compose -f ... up -d postgres litellm
-       # wait for /health/liveliness, then
-       docker compose -f ... up -d postgres litellm embeddings parser vector api app ingestion
+The pin's two file hashes are the tested ones:
 
-6. Provision teams, then ingest the corpus and wait for the counts:
+```
+fd2a0afe6c3acd149509e4e4d0e3b58157e8ceca314150ef0948891bdd9971b2  tool_loop.py
+34ac0c33ca97b8b7c67918dcb9e5ece8e6b942f7f00d926d78e1c09c3d81f4e2  retriever.py
+```
 
-       docker compose -f ... --profile tools run -T --rm keys --provision-teams
-       docker exec postgres psql -U oicore -d oicore -tAc "select count(distinct doc_id), count(*) from chunk_index;"
+The product test suite is not run with the pin applied. The pin is older than the current tests; failures
+there belong to the pin, not to the product branch.
 
-   Expected: `80|24296`. If the counts differ, stop and investigate; the baseline is not adjusted.
-
-7. Build the app and put it behind a loopback relay, because neither the API nor the app publishes
-   a port:
-
-       export OI_UI_ROOT=/opt/oic-ui
-       docker compose -f ... build app && docker compose -f ... up -d app
-       docker run -d --name app-relay --network ai-net -p 127.0.0.1:8090:8090 alpine/socat \
-         -d -d TCP-LISTEN:8090,fork,reuseaddr TCP:app:8080
-       docker run --rm --network ai-net curlimages/curl -sS -o /dev/null -w '%{http_code}\n' http://app:8080/
-       docker run --rm --network ai-net curlimages/curl -sS http://app:8080/api/health
-
-   Expected: `200` and a health document. Then tunnel from the workstation:
-
-       ssh -i ~/ai-stack/ai-stack-key.pem -N -L 18080:127.0.0.1:8090 ubuntu@<public-ip>
-
-   The browser address is `http://127.0.0.1:18080`. The relay is review scaffolding; remove it
-   with `docker rm -f app-relay` afterwards.
-
-## Acceptance before the first rehearsal
-
-Run all of this on the demo deployment and save the transcripts.
-
-1. **Four probes**, exactly as `fresh-install-agent.md` section 9. Stop LiteLLM for one question
-   first so `interface_probe`'s DEGRADED right has a row to read, then start it again. Expect four
-   `PASSED: N right(s) held` lines.
-2. **Five known answers** through `data_suite_run.py`: `PUB_N01`, `PUB_P01`, `PUB_L01`,
-   `SYN_A01` for staff and executive. Expect 5 of 5. `SYN_A01` is the boundary question: staff
-   refused, executive 385,000.
-3. **One smoke answer** through `ask_client.py`, then read the audit row: `resolved_model` is
-   `bedrock/us.anthropic.claude-sonnet-4-6` and `fallback_used` is false.
-4. **The app**: `200` from `/`, a health document from `/api/health`, and
-   `bash scripts/check-contract.sh --live http://app:8080/api` reports the contract matches.
-5. **The boundary, end to end.** Mint a session for `zoe.reyes@northwind.example`, ask the CEO salary
-   question through `POST /ask`, and check three things: the answer does not contain 385,000, the
-   response has `denied: true` and a disclosure, and exactly one `access`/`denied` row was written
-   with `reason=boundary` and a `restricted_matched` count. Then ask as `adam.hale@northwind.example`
-   and expect 385,000 with the executive compensation document cited.
-6. **Export, verify, tamper**: export today, verify it clean, tamper a copy, and confirm the verifier
-   fails with both the row hash and the file hash. Do this before the rehearsal so a failure is a
-   fix rather than a surprise on stage.
-
-## The eight scenes
-
-Target 10:30, hard stop 12:00. Two browser tabs are open before the clock starts, one with the
-staff token and one with the executive token. Tokens are minted the same morning with a 12-hour TTL.
-
-| # | Scene | At | Action | Expected |
-|---|---|---|---|---|
-| 1 | The deployment | 0:00 | `docker compose ps --status running`; API health | Eight running services, Postgres and parser healthy, health names the deployment and the analyst |
-| 2 | A policy answer | 0:45 | Staff asks "What is the mileage rate for reimbursement?" | 0.67 per mile, cited to the handbook and the travel policy, receipt with document count and seconds |
-| 3 | The cited page | 1:45 | Staff asks "According to the 2025 inspection schedule, by what date must the annual backflow preventer test be completed?" then opens the source showing p.1 | "Before 30 June"; the inspection schedule opens with the cited row marked |
-| 4 | Across the boundary | 3:15 | Staff asks "What is Northwind's Chief Executive Officer's base salary?" | No 385,000; a disclosure under the answer that documents exist the role cannot read |
-| 5 | The denial in the record | 4:30 | Staff Activity, outcome denied, open the row; then `audit list --type access` | One access row, outcome denied, reason boundary, roots company, restricted count, disclosure, endpoint `/ask/stream`; the CLI shows the same row |
-| 6 | The same question, permitted | 5:45 | Executive tab asks the same question, then Activity as executive | 385,000 with the executive compensation citation in about 8 to 10 seconds; the scope line names the people the page covers; the staff denial and the executive answer both appear |
-| 7 | Export and hand over | 7:00 | `audit backfill`, `audit export`, `audit verify`, `sha256sum`, copy the directory to the laptop | Exported N events, verification ok with the no-anchor completeness note, the file and its manifest on the laptop |
-| 8 | Tamper and fail | 8:45 | Copy the export to `/tmp/tamper`, change one actor with `sed`, verify the copy | FAIL with two independent reasons: the row hash and the file hash against the manifest. Close on what the exported file proves and what it does not |
-
-**One Ask action, and progress on screen.** The accuracy answer profile runs the tool-assisted loop, so the screen shows a sentence while it searches and reads, then the answer. A simple question answers in two to five seconds and the salary question in eight to ten. There is no transport choice and no second button.
-
-**Scene 5, the commands.** The row is the point of the demo, so it is read twice, once as a person
-and once as an operator:
-
-    docker compose -f ... --profile tools run -T --rm audit list --type access --limit 5
-
-The Activity screen shows the same row first; the CLI is the proof that the screen is not the
-record.
-
-**Scene 7, the commands.**
-
-    cd /opt/oi-core
-    alias oi='docker compose -f deploy/office/compose/docker-compose.yml --env-file rendered/env'
-    oi --profile tools run -T --rm audit backfill
-    oi --profile tools run -T --rm audit export
-    DAY=$(date -u +%F)
-    oi --profile tools run -T --rm audit verify /app/exports/$DAY/audit-events.jsonl
-    sha256sum exports/$DAY/audit-events.jsonl
-
-Copy `exports/$DAY` to the laptop and show the file and its manifest. The verifier prints the
-honest limit: with no anchor it can show the chain is intact and cannot show that rows were not cut
-from the end. Say that sentence out loud in the close.
-
-**Scene 8, the commands.** Edit one row, not every row. A global `sed` on the actor changes every
-row that actor appears in, which reports five failures where the demo is about one edit.
-
-    cp -r exports/$DAY /tmp/tamper
-    python3 - <<'PY'
-    import json
-    path = '/tmp/tamper/audit-events.jsonl'
-    rows = [json.loads(line) for line in open(path) if line.strip()]
-    rows[0]['actor'] = 'someone.else@northwind.example'
-    with open(path, 'w') as f:
-        for r in rows:
-            f.write(json.dumps(r, sort_keys=True) + '\n')
-    print('changed row', rows[0].get('id'))
-    PY
-    oi --profile tools run -T --rm -v /tmp/tamper:/app/exports \
-      audit verify /app/exports/audit-events.jsonl
-
-Expected: `FAIL`, one `row_hash does not match the row contents` line for the edited row, and `the
-file hash does not match the manifest`. The clean copy on the laptop is untouched; its hash still
-matches the manifest. If the narration is about the denial row, edit that row instead by finding the
-one whose payload carries `"reason": "boundary"`.
-
-**Cut order if it runs long.** Scene 6 first, then scene 2. Never cut 3, 4, 5, 7 or 8. If a scene
-overruns, cut rather than skip the audit proof.
-
-## Before the demo
-
-Run this thirty minutes before the clock starts. Save the output beside the evidence.
+## Pre-demo setup, thirty minutes before the clock
 
 | Check | Command | Expected |
 |---|---|---|
-| Health | `docker compose ps --status running` | Eight running services; Postgres and parser healthy. The MCP gateway is stopped and is not part of this deployment |
-| API | `docker exec api python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8088/health').read().decode())"` | The deployment id and `analyst` |
-| App | `200` from `http://app:8080/` and a health document from `/api/health` | Both answer |
-| Chain | export and verify today | `chain intact` |
-| Model | last `model_call` row in `audit_events` | `bedrock/us.anthropic.claude-sonnet-4-6`, `fallback_used false` |
-| Corpus | `select count(distinct doc_id), count(*) from chunk_index;` | `80|24296`, dead-letter count 0 |
-| Tokens | mint staff and executive, 12-hour TTL | Both print a token and an expiry |
-| Tunnel | load the app, paste the staff token | The Ask screen answers |
-| Alarms | the five `oi-core-*` alarms | OK. The demo box does not publish `OI/Health` metrics and is not covered by them |
-| Tenant | `i-0b6aa00095ae40e54` | Stopped. Do not thaw it for a demo |
-| Email | none | SES is in the sandbox; the demo does not use it |
+| Services | `oi ps --status running` | **Eight**, all up: api, app, embeddings, litellm, mcp-gateway, parser, postgres, vector |
+| API health | `docker exec api python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8088/health').read().decode())"` | `{"status":"ok","deployment_id":"oi-core-c9-demo-20261030",...}` |
+| Parser | `docker inspect -f '{{.State.Health.Status}}' parser` | `healthy` |
+| MCP gateway | `docker inspect -f '{{.State.Running}}' mcp-gateway` | `true` |
+| App | `curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/` | `200` |
+| App contract | `curl -s http://127.0.0.1:8080/api/health` | a health document naming the deployment |
+| Corpus | `docker exec postgres psql -U oicore -d oicore -tAc "select count(distinct doc_id), count(*) from chunk_index;"` | `80|10576` |
+| Vector store | `docker exec api python -c "import json,urllib.request;print(json.load(urllib.request.urlopen('http://vector:6333/collections/documents-mixed-v2-20261028'))['result']['points_count'])"` | `10576` |
+| Model | last `model_call` row in `audit_events` | `bedrock/converse/us.moonshotai.kimi-k3`, `fallback_used false` |
+| Chain | `oi --profile tools run -T --rm audit export` then `audit verify` | `chain intact` plus the no-anchor note |
+| Tokens | mint the two demo sessions, 12-hour TTL | both print a token and an expiry |
+| Tunnel | load the app, paste the staff token | the Ask screen answers |
 
-The demo box has no backup timer, no alarm publisher and no SSO. Say so if asked rather than
-implying coverage that is not there. The full product shape is the client deployment, not this box.
+The two sessions:
 
-## Rehearse
+```
+oi --profile tools run --rm session mint --dev \
+  --subject zoe.reyes@northwind.example --role viewer --ttl 12
+oi --profile tools run --rm session mint --dev \
+  --subject adam.hale@northwind.example --role viewer --ttl 12
+```
 
-Run the eight scenes twice, start to finish, with a clock. Record the start and end of each scene
-in a small table; a scene that runs long is cut, not narrated faster. If the first run exceeds
-twelve minutes, cut something before the second run. The second run is the one whose timings and
-artifacts are preserved.
+Two browser windows, not two tabs of one profile. `sessionStorage` is copied by duplication, so a
+duplicated tab carries the staff token into the executive window.
 
-**Fallbacks.** If the tunnel drops, reload the page; the token is in sessionStorage and survives.
-If the model falls back to Haiku, the answer may still be right but say so rather than claim the
-primary. If an answer degrades, stop the run and reschedule; a degraded answer is not the demo. If
-the export is from the same UTC day as acceptance, the file contains the acceptance rows; the note
-says so, and the artifact is still this deployment's record.
+Tunnel from the workstation:
+
+```
+ssh -i ~/ai-stack/ai-stack-key.pem -N -L 18080:127.0.0.1:8080 ubuntu@18.208.119.4
+```
+
+Browser address `http://127.0.0.1:18080`. The app is published only on the box's loopback.
+
+## The eight scenes
+
+Target 10:30, hard stop 12:00. Boxes are the narration budget from the 2026-10-23 script. Kimi timings in
+brackets are measured on the v2 bundle.
+
+### Scene 1, the deployment. Box 0:45. [0.2 s]
+
+Terminal:
+
+```
+oi ps --status running
+docker exec api python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8088/health').read().decode())"
+```
+
+Expected: eight running services, Postgres and parser healthy, the health document names
+`oi-core-c9-demo-20261030` and `analyst`.
+
+### Scene 2, a policy answer. Box 1:00. [3 to 9 s on Kimi]
+
+Staff asks: "What is the mileage rate for reimbursement?"
+
+Expected: **0.67 USD per mile**, cited to the travel and expense policy and the employee handbook. A
+receipt line under the answer naming the document count and the seconds.
+
+### Scene 3, the cited page. Box 1:30. [2 to 6 s]
+
+Staff asks: "According to the 2025 inspection schedule, by what date must the annual backflow preventer test
+be completed?"
+
+Expected: "before 30 June". The inspection schedule PDF is cited. On the v2 bundle its chips appear at
+positions 3, 6 and 9, not first; open one of those and the panel should scroll the cited page into view.
+
+### Scene 4, across the boundary. Box 1:15. [6.5 to 18.8 s]
+
+Staff asks: "What is Northwind's Chief Executive Officer's base salary?"
+
+Expected: no 385,000. The answer is a refusal, and the disclosure under it says documents that answer this
+more directly exist and are not available to the viewer role. With the deployment's `denied` mode the
+sentence does not include a count; the count is in the record for scene 5.
+
+### Scene 5, the denial in the record. Box 1:15. [2 s]
+
+Staff Activity screen: open the row, outcome denied. Then the terminal, which is the proof the screen is not
+the record:
+
+```
+oi --profile tools run -T --rm audit list --type access --limit 5
+docker exec postgres psql -U oicore -d oicore -c "select id, event_type, outcome, actor, payload->>'reason' as reason, payload->>'restricted_matched' as restricted_matched, payload->>'endpoint' as endpoint from audit_events where event_type='access' order by id desc limit 3;"
+```
+
+Expected: one access row, outcome denied, reason `boundary`, endpoint `/ask/stream`, the restricted count
+that was matched, and the same row id in the CLI and the screen.
+
+### Scene 6, the same question, permitted. Box 1:15. [8 to 13 s]
+
+Executive window asks the same question.
+
+Expected: **385,000** with the executive compensation citation, in about eight to thirteen seconds. The
+staff denial and the executive answer both appear in the executive Activity screen.
+
+### Scene 7, export and hand over. Box 1:45. [4 s]
+
+```
+oi --profile tools run -T --rm audit export
+DAY=$(date -u +%F)
+oi --profile tools run -T --rm audit verify /app/exports/$DAY/audit-events.jsonl
+sha256sum exports/$DAY/audit-events.jsonl
+```
+
+Expected: the exported count, `chain intact`, the no-anchor completeness note, and the file hash in the
+manifest. Copy `exports/$DAY` to the workstation and show it.
+
+`audit backfill` is deliberately not in this scene. It copies the gateway's spend-log rows into the chain to
+recover calls that bypassed the API, and it reads them over the `oicore` connection. This deployment keeps the
+gateway in its own `litellm` database, so the command exits with `UndefinedTable: relation
+"LiteLLM_SpendLogs" does not exist`. Every model call on this box goes through the API and is already in the
+chain, so nothing is missing; export and verify are the proof. The failure is recorded in the run record and
+the tool needs a separate spend-log connection before the command is usable here.
+
+### Scene 8, tamper and fail. Box 1:45. [1.3 s]
+
+Edit one row, not every row:
+
+```
+cp -r exports/$DAY /tmp/tamper
+python3 - <<'PY'
+import json
+path = '/tmp/tamper/audit-events.jsonl'
+rows = [json.loads(line) for line in open(path) if line.strip()]
+rows[0]['actor'] = 'someone.else@northwind.example'
+with open(path, 'w') as f:
+    for row in rows:
+        f.write(json.dumps(row, sort_keys=True) + '\n')
+print('edited row', rows[0].get('id'))
+PY
+oi --profile tools run -T --rm -v /tmp/tamper:/app/exports \
+  audit verify /app/exports/audit-events.jsonl
+```
+
+Expected: `FAIL`, one row-hash failure for the edited row, and the file hash does not match the manifest.
+
+**Cut order if it runs long.** Scene 6 first, then scene 2. Never cut 3, 4, 5, 7 or 8.
+
+## If the stream is slow
+
+Kimi is slower than the version 1 models. Measured on the v2 bundle: backflow 1.6 to 2.1 s, executive
+salary 8.1 to 13.2 s, staff salary 6.5 to 18.8 s, section 4 p50 9447 ms and p95 23290 ms.
+
+The env allows `OI_FIRST_TOKEN_SECONDS=60`, `OI_STALL_SECONDS=60`, `OI_TOTAL_SECONDS=180`, so the screen can
+sit on progress lines for a long time before it calls anything stalled. That is the configuration working.
+
+- Keep talking through the progress lines. They advance per step or named tool.
+- Do not press Ask again. Each press is another model call and another audit row.
+- After about 45 seconds with no new progress line, reload the page. The token survives in `sessionStorage`.
+- If the answer arrives as `kind: degraded`, stop the run and reschedule.
+
+## Two passes
+
+**Pass 1, error-finding.** Not timed. Walk all eight scenes, note every defect, wrong string, slow step or
+layout problem. Nothing is claimed from this pass.
+
+**Pass 2, timed.** Clock from scene 1 to the end of scene 8, with narration. Record per scene:
+
+| Scene | Start | End | Operation time | Notes |
+|---|---|---|---|---|
+
+A scene that overruns is cut, not narrated faster. If the first timed run exceeds twelve minutes, cut
+something before the second.
 
 ## Evidence
 
-Keep under `docs/reviews/c9/`:
+Keep under `docs/reviews/c9/` and on the laptop:
 
-- the target, instance id, commit hashes, archive sha256, corpus counts and probe transcripts;
-- the timings table and the total;
-- the clean export and its manifest with the export's sha256;
-- the tampered copy and the verifier's failure output;
-- the scene notes: exact answers, the page the citation opened, the counts and the seconds;
-- the limits, including the checks this deployment does not run.
+- the target table, image list, commit and pin hashes, bundle checksums;
+- the eight-scene timings table and the total;
+- the scene notes: exact answers, the page the citation opened, the counts, the seconds;
+- the clean export and its manifest with the sha256, and the tampered copy with the verifier's failure;
+- the section suite and five-run results with their measurement summaries;
+- the backup and restore rehearsal timings;
+- the limits below.
 
 ## Limits
 
-- The demo deployment is the cloud build. Model calls go to Bedrock in account 878. The in-office
-  build with local models is a different deployment and is not this demo.
-- No alarm publisher, backup timer, SES or SSO on the box. The pre-demo table says what is checked
-  where.
-- No MCP gateway and no agent runtime. The scenes use the retrieval tools inside the API, not the
-  agent runtime. The compose file declares the gateway and this deployment stops it on purpose; started
-  without a connector token it crash-loops with `MCP_GATEWAY_TOKEN is required`.
-- **The tool-assisted path can produce a garbled answer on a long public report.** On 2026-10-24 the GAO
-question lost a phrase in the middle of its answer while the same question answered cleanly before the path
-change. Scene 3 uses the inspection schedule instead. Recorded as a bug; do not use the GAO question until it
-is fixed.
-- **The Ask screen has one action.** The accuracy profile runs the tool loop, so every answer shows progress
-first. A simple question answers in two to five seconds; the salary question takes eight to ten. The boxes
-allow for it, and the presenter should not fill the pause with an apology.
-- The four acceptance probes do not touch the app. The UI checks above are the only acceptance the
-  screen gets, so run them.
-- The export is one UTC day. Without an anchor the verifier cannot prove the tail is complete; the
-  hourly anchor and the Object Lock bucket are the production shape, not the demo box.
-- A model fallback names a different model in the record. The record is right; do not paper over it.
+- The single EC2 is the C9 demo deployment. The C7 client-tenant TLS edge, identity, connectors, alarms and
+  backups are separate operational deployments. Say so if asked.
+- No model fallback is configured. A throttle produces a degraded answer, not another model's answer.
+- The product test suite is not run with the pin; the pin predates the current tests.
+- The export is one UTC day and, on a build day, includes acceptance rows.
+- No anchor is configured on this box. The verifier says plainly that completeness of the tail cannot be
+  shown without one.
+- `audit backfill` does not run on this deployment. The gateway keeps its spend logs in a separate `litellm`
+  database and the tool reads them over the `oicore` connection, so it fails with `UndefinedTable`. Its
+  recovery function is not needed here because the API writes every model call into the chain; export and
+  verify are unaffected.
+- The demo corpus is the 80-document v2 bundle. The old 24,296-chunk and 10,607-chunk collections are not
+  part of this deployment.

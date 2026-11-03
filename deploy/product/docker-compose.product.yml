@@ -1,0 +1,150 @@
+# Product deployment overlay: the full stack, document chat plus agentic desk and workspace.
+#
+# Used with the product compose file and the product render:
+#   docker compose -p oi-product \
+#     -f /opt/oi-product/deploy/office/compose/docker-compose.yml \
+#     -f /opt/oi-product/deploy/product/docker-compose.product.yml \
+#     -f /opt/oi-product/app-ports-override.yml \
+#     --env-file /opt/oi-product/rendered/env ...
+#
+# It keeps the parser (document-chat) and disables the long-running ingestion worker, because the
+# canonical v2 bundle is imported by the one-shot importer instead. It also passes the serving and
+# integration settings the base compose does not forward from rendered/env.
+
+services:
+  api:
+    environment:
+      # The customer edge secret. Empty means no provider edge is configured and the provider session
+      # route answers 503; set in rendered/env by the Cognito provisioning script.
+      OI_EDGE_SECRET: ${OI_EDGE_SECRET:-}
+      OI_PROVIDER_ROLE: ${OI_PROVIDER_ROLE:-viewer}
+      OI_PROVIDER_SESSION_TTL_HOURS: ${OI_PROVIDER_SESSION_TTL_HOURS:-8}
+      # Serving contract for the canonical v2 collection.
+      OI_SERVING_CHUNKER_VERSION: ${OI_SERVING_CHUNKER_VERSION:-}
+      COLLECTION: ${COLLECTION:-documents}
+      OI_TEMPERATURE: ${OI_TEMPERATURE-0}
+      OI_MAX_TOKENS: ${OI_MAX_TOKENS:-2000}
+      OI_TOTAL_SECONDS: ${OI_TOTAL_SECONDS:-180}
+      OI_FIRST_TOKEN_SECONDS: ${OI_FIRST_TOKEN_SECONDS:-60}
+      OI_STALL_SECONDS: ${OI_STALL_SECONDS:-60}
+      OI_TOOL_LOOP_SECONDS: ${OI_TOOL_LOOP_SECONDS:-120}
+      OI_TOOL_READ_PASSAGES: ${OI_TOOL_READ_PASSAGES:-1}
+      OI_TOOL_MAX_STEPS: ${OI_TOOL_MAX_STEPS:-6}
+      OI_TOOL_MAX_CALLS: ${OI_TOOL_MAX_CALLS:-10}
+      OI_LEXICAL_ARM: ${OI_LEXICAL_ARM:-0}
+      OI_PROMPT_VARIANT: ${OI_PROMPT_VARIANT:-lean}
+      OI_CANONICAL_SERVING: ${OI_CANONICAL_SERVING:-0}
+      ACCESS_DENIAL_MODE: ${ACCESS_DENIAL_MODE:-denied}
+      OI_DOCUMENTS_ROOT: ${OI_DOCUMENTS_ROOT:-/documents}
+      # The product integration points. The API reaches the workspace service on the workspace host,
+      # the egress proxy and the connector on this box through the Docker bridge gateway, and the
+      # MCP gateway by service name.
+      OI_WORKSPACE_URL: ${OI_WORKSPACE_URL:-}
+      OI_WORKSPACE_TOKEN: ${OI_WORKSPACE_TOKEN:-}
+      OI_EGRESS_URL: ${OI_EGRESS_URL:-}
+      OI_EGRESS_TOKEN: ${OI_EGRESS_TOKEN:-}
+      OI_MCP_URL: ${OI_MCP_URL:-}
+      OI_MCP_TOKEN: ${OI_MCP_TOKEN:-}
+      OI_MCP_SESSION_SECRET: ${OI_MCP_SESSION_SECRET:-}
+    volumes:
+      - ${OI_ROOT}/documents:/documents:ro
+
+  # The document-chat parser stays on. This is the product deployment.
+  parser:
+    restart: unless-stopped
+
+  # The canonical v2 bundle is imported once; the native worker would reconcile against an empty
+  # manifest and is deliberately not part of this deployment.
+  ingestion:
+    profiles: ["ingestion-disabled"]
+
+  # **The gateway verifies the API's short-lived session assertion with a shared secret.** The base
+  # compose passes the API `OI_MCP_SESSION_SECRET` but gives the gateway nothing, so without this the
+  # gateway falls back to a database session lookup and refuses every tool call with
+  # `401 invalid_session`. Found on the product deployment on 2026-11-03.
+  mcp-gateway:
+    environment:
+      MCP_SESSION_SECRET: ${OI_MCP_SESSION_SECRET:-}
+
+
+  # **The client-owned automation layer.** Decision 0011: the client runs their own n8n instance under the
+  # Sustainable Use Licence. It is not white-labelled, not resold, and its access is never gated on payment.
+  # Loopback only in this build; C7 brings ingress, TLS and identity. The image is an explicit pinned digest
+  # set by the prepare script so an upgrade is a reviewable change, not a moving tag.
+  n8n:
+    image: ${N8N_IMAGE:?set N8N_IMAGE to a pinned n8n image digest in rendered/env}
+    container_name: n8n
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5678:5678"
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: "5432"
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: ${POSTGRES_USER}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY in rendered/env}
+      # Per-workflow signing secrets are read by the Code node through $env, not stored in the workflow JSON.
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      N8N_INTEGRATION_SCHEDULED_REPORT_SECRET: ${N8N_INTEGRATION_SCHEDULED_REPORT_SECRET:-}
+      N8N_INTEGRATION_INVOICE_TRIGGER_SECRET: ${N8N_INTEGRATION_INVOICE_TRIGGER_SECRET:-}
+      N8N_HOST: 127.0.0.1
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: http
+      N8N_WEBHOOK_URL: http://127.0.0.1:5678/
+      N8N_EDITOR_BASE_URL: http://127.0.0.1:5678/
+      GENERIC_TIMEZONE: America/New_York
+      TZ: America/New_York
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+      N8N_SECURE_COOKIE: "false"
+      N8N_DEFAULT_BINARY_DATA_MODE: database
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: "336"
+    volumes:
+      - ${OI_ROOT}/data/n8n:/home/node/.n8n
+    networks:
+      - ai-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:5678/healthz || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  # LiteLLM uses Prisma and refuses a database whose schema it did not create. Give the gateway its
+  # own database so each migration system owns its schema.
+  litellm:
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/litellm
+
+  importer:
+    build:
+      context: ${OI_ROOT}/services/ingestion
+      dockerfile: Dockerfile
+    image: oi-core/ingestion:local
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      EMBED_URL: http://embeddings:80
+      VECTOR_URL: http://vector:6333
+      COLLECTION: documents
+    volumes:
+      - ${OI_ROOT}/bundles:/bundles:ro
+      - ${OI_ROOT}/documents:/documents:ro
+    networks:
+      - ai-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      embeddings:
+        condition: service_healthy
+      vector:
+        condition: service_started
+    entrypoint: ["python3", "/app/bundle_import.py"]

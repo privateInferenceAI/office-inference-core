@@ -1,0 +1,480 @@
+{
+  "checks": [
+    {
+      "index": 1,
+      "question": "What is the mileage reimbursement rate for personal vehicles?",
+      "status": 200,
+      "answer": "The mileage reimbursement rate for personal vehicles is 0.67 USD per mile [1]. The travel and expense policy notes this is the 2025 standard rate and that mileage covers fuel, wear and insurance, so fuel cannot be claimed separately for the same trip [1]; the employee handbook confirms the same rate of 0.67 USD per mile for approved business travel [2].",
+      "citations": [
+        {
+          "index": 1,
+          "doc_id": "company/second-synthetic/travel-and-expense-policy.md",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 2,
+          "doc_id": "company/second-synthetic/employee-handbook.md",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 3,
+          "doc_id": "company/second-public/company/union-pacific-corp/10-K_2026-02-06_annual-report.htm",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 4,
+          "doc_id": "company/second-public/company/c-h-robinson-worldwide-inc/10-Q_2026-07-31_quarterly-report.htm",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 5,
+          "doc_id": "company/second-public/company/c-h-robinson-worldwide-inc/10-Q_2026-07-31_quarterly-report.htm",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 6,
+          "doc_id": "company/second-synthetic/travel-and-expense-policy.md",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 7,
+          "doc_id": "company/second-public/company/duke-energy-corp/10-K_2026-02-26_annual-report.htm",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 8,
+          "doc_id": "company/second-public/company/union-pacific-corp/10-K_2026-02-06_annual-report.htm",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 9,
+          "doc_id": "company/second-public/company/c-h-robinson-worldwide-inc/10-Q_2026-07-31_quarterly-report.htm",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 10,
+          "doc_id": "company/second-public/company/union-pacific-corp/10-K_2026-02-06_annual-report.htm",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 11,
+          "doc_id": "company/second-public/company/union-pacific-corp/10-K_2026-02-06_annual-report.htm",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 12,
+          "doc_id": "company/second-public/company/hca-healthcare-inc/10-K_2026-02-10_annual-report.htm",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        }
+      ],
+      "denied": false,
+      "expected_terms": true,
+      "ok": true
+    },
+    {
+      "index": 2,
+      "question": "What is the receipt threshold for expense reimbursement?",
+      "status": 200,
+      "answer": "The receipt threshold for expense reimbursement is 25 USD \u2014 a receipt is required for every expense of 25 USD or more, while below that amount the expense still needs a description and a date [1]. The employee handbook confirms the same threshold, adding that below 25 USD the expense needs a date, a description and the business purpose [2].",
+      "citations": [
+        {
+          "index": 1,
+          "doc_id": "company/second-synthetic/travel-and-expense-policy.md",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 2,
+          "doc_id": "company/second-synthetic/employee-handbook.md",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 3,
+          "doc_id": "company/second-public/company/kroger-co/DEF14A_2026-05-13_proxy-statement.htm",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 4,
+          "doc_id": "company/second-public/company/kroger-co/EX-10_2026-09-18_severance-plan.htm",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 5,
+          "doc_id": "company/second-synthetic/travel-and-expense-policy.md",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 6,
+          "doc_id": "company/second-synthetic/travel-and-expense-policy.md",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 7,
+          "doc_id": "company/second-public/company/kroger-co/EX-10_2026-09-18_severance-plan.htm",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 8,
+          "doc_id": "company/second-public/company/duke-energy-corp/DEF14A_2026-03-20_proxy-statement.htm",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 9,
+          "doc_id": "company/second-synthetic/travel-and-expense-policy.md",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 10,
+          "doc_id": "company/second-public/company/target-corp/DEF14A_2026-04-27_proxy-statement.htm",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 11,
+          "doc_id": "company/second-public/government/dol/fr-2026-20447-transparency-in-coverage.pdf",
+          "acl": "company",
+          "page_start": 28,
+          "page_end": 28
+        },
+        {
+          "index": 12,
+          "doc_id": "company/second-synthetic/travel-and-expense-policy.md",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        }
+      ],
+      "denied": false,
+      "expected_terms": true,
+      "ok": true
+    },
+    {
+      "index": 3,
+      "question": "How long are accounts payable invoices retained?",
+      "status": 200,
+      "answer": "Accounts payable invoices are retained for **7 years** \u2014 the retention schedule lists \"Accounts payable invoices and purchase orders\" (vendor invoices, purchase orders, receiving records), owned by Finance, with a retention period of 7 years and disposition \"Destroy\" [1]. Per the policy's retention rules, the clock starts at the end of the calendar year in which the record was created [6].",
+      "citations": [
+        {
+          "index": 1,
+          "doc_id": "company/second-synthetic/records-retention-policy.md",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 2,
+          "doc_id": "company/second-public/company/caterpillar-inc/10-K_2026-02-13_annual-report.htm",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 3,
+          "doc_id": "company/second-public/company/caterpillar-inc/10-K_2026-02-13_annual-report.htm",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 4,
+          "doc_id": "company/second-public/company/c-h-robinson-worldwide-inc/10-Q_2026-07-31_quarterly-report.htm",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 5,
+          "doc_id": "company/second-public/company/deere-co/10-Q_2026-08-27_quarterly-report.htm",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 6,
+          "doc_id": "company/second-synthetic/records-retention-policy.md",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 7,
+          "doc_id": "company/second-public/company/autodesk-inc/10-Q_2026-08-28_quarterly-report.htm",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 8,
+          "doc_id": "company/second-synthetic/vendor-management-policy.md",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 9,
+          "doc_id": "company/second-public/company/deere-co/10-Q_2026-08-27_quarterly-report.htm",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 10,
+          "doc_id": "company/second-public/company/deere-co/10-Q_2026-08-27_quarterly-report.htm",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 11,
+          "doc_id": "company/second-public/company/deere-co/10-Q_2026-08-27_quarterly-report.htm",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 12,
+          "doc_id": "company/second-public/company/hca-healthcare-inc/10-K_2026-02-10_annual-report.htm",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        }
+      ],
+      "denied": false,
+      "expected_terms": true,
+      "ok": true
+    },
+    {
+      "index": 4,
+      "question": "What insurance must a vendor carry to be onboarded?",
+      "status": 200,
+      "answer": "To be onboarded, a vendor must carry commercial general liability insurance of at least 1,000,000 USD per occurrence and 2,000,000 USD aggregate \u2014 with life-safety and roofing vendors required to show 2,000,000 USD per occurrence \u2014 plus workers compensation coverage as required by the vendor's state, or a valid exemption [1]. The certificate of insurance must be provided before a purchase order is issued, and it is re-verified 30 days before it expires, with an expired certificate suspending the vendor from new work [1].",
+      "citations": [
+        {
+          "index": 1,
+          "doc_id": "company/second-synthetic/vendor-management-policy.md",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 2,
+          "doc_id": "company/second-synthetic/purchase-order-template.md",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 3,
+          "doc_id": "company/second-synthetic/vendor-management-policy.md",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 4,
+          "doc_id": "company/second-synthetic/facilities-and-safety-manual.md",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 5,
+          "doc_id": "company/second-synthetic/employee-handbook.md",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 6,
+          "doc_id": "company/second-public/company/target-corp/10-K_2026-03-11_annual-report.htm",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 7,
+          "doc_id": "company/second-synthetic/vendor-list.csv",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 8,
+          "doc_id": "company/second-public/company/c-h-robinson-worldwide-inc/10-Q_2026-07-31_quarterly-report.htm",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 9,
+          "doc_id": "company/second-public/company/duke-energy-corp/DEF14A_2026-03-20_proxy-statement.htm",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 10,
+          "doc_id": "company/second-synthetic/contractor-uniform-requirements.md",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 11,
+          "doc_id": "company/second-public/company/caterpillar-inc/10-K_2026-02-13_annual-report.htm",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 12,
+          "doc_id": "company/second-public/company/duke-energy-corp/10-K_2026-02-26_annual-report.htm",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        }
+      ],
+      "denied": false,
+      "expected_terms": true,
+      "ok": true
+    },
+    {
+      "index": 5,
+      "question": "Cross-document: what is the personal vehicle mileage rate, and how long are expense reports retained?",
+      "status": 200,
+      "answer": "Personal vehicle mileage is reimbursed at 0.67 USD per mile for approved business travel [3], and expense reports (including submitted reports, receipts and approvals, owned by Finance) are retained for 7 years and then destroyed [5].",
+      "citations": [
+        {
+          "index": 1,
+          "doc_id": "company/second-synthetic/expense-report-form.csv",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 2,
+          "doc_id": "company/second-synthetic/expense-report-form.csv",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 3,
+          "doc_id": "company/second-synthetic/employee-handbook.md",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 4,
+          "doc_id": "company/second-synthetic/travel-and-expense-policy.md",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 5,
+          "doc_id": "company/second-synthetic/records-retention-policy.md",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 6,
+          "doc_id": "company/second-synthetic/records-retention-policy.md",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 7,
+          "doc_id": "company/second-synthetic/travel-and-expense-policy.md",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 8,
+          "doc_id": "company/second-synthetic/facilities-and-safety-manual.md",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 9,
+          "doc_id": "company/second-synthetic/records-retention-policy.md",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 10,
+          "doc_id": "company/second-public/company/c-h-robinson-worldwide-inc/10-Q_2026-07-31_quarterly-report.htm",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 11,
+          "doc_id": "company/second-public/company/c-h-robinson-worldwide-inc/10-Q_2026-07-31_quarterly-report.htm",
+          "acl": "company",
+          "page_start": 1,
+          "page_end": 1
+        },
+        {
+          "index": 12,
+          "doc_id": "company/second-public/government/dol/fr-2026-20447-transparency-in-coverage.pdf",
+          "acl": "company",
+          "page_start": 99,
+          "page_end": 100
+        }
+      ],
+      "denied": false,
+      "expected_terms": true,
+      "ok": true
+    }
+  ],
+  "ok": true
+}

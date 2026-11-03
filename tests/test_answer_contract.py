@@ -65,3 +65,16 @@ def test_an_empty_answer_is_a_violation():
 def test_the_corrective_message_names_the_defect():
     assert "figure that does not appear" in answer_contract.corrective_message("unsupported_number")
     assert "only a citation" in answer_contract.corrective_message("citation_only")
+
+
+def test_corrupted_wrong_script_output_is_detected():
+    """Kimi K3 intermittently returns fluent text in the wrong script for table questions.
+
+    A wrong figure is an answer-contract failure. Unreadable output is a different failure and must not be
+    presented as an answer.
+    """
+    clean = "The 921.82 line names Copperfield Waste & Recycling and Camille Duval [1]."
+    assert not answer_contract.looks_corrupted(clean)
+    corrupted = "the of1 conveyed 承担责任 金秋 emotions of using the of  alcohol storage 寂静 损伤"
+    assert answer_contract.looks_corrupted(corrupted)
+    assert answer_contract.corrective_message("corrupted").startswith("Your previous reply was corrupted")

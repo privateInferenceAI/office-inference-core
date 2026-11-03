@@ -1,0 +1,28 @@
+{
+  "job_id": "f399a647081447de89e2415cb89b01d0",
+  "task": "research_brief",
+  "state": "succeeded",
+  "terminal": true,
+  "steps": [
+    [
+      "turn-1",
+      "succeeded"
+    ],
+    [
+      "turn-2",
+      "succeeded"
+    ],
+    [
+      "turn-3",
+      "succeeded"
+    ],
+    [
+      "finish",
+      "succeeded"
+    ]
+  ],
+  "pending_action_digest": null,
+  "pending_action": null,
+  "result": null,
+  "artifacts": null
+}

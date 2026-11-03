@@ -1,0 +1,32 @@
+== create scratch database from the backup ==
+scratch chunk_index rows: 10576
+== copy three synthetic documents as a stand-in company corpus ==
+== run the ingestion worker into a scratch collection ==
+ingest exit=1 seconds=13
+  "new": 2,
+  "changed": 0,
+  "skipped": 0,
+  "failed": 1,
+  "chunks_written": 63,
+  "chunks_removed": 0,
+  "documents_removed": 0,
+  "timings_ms": {
+    "parse": 2207,
+    "chunk": 368,
+    "embed": 13517,
+    "write": 89
+  },
+  "timed_documents": 2,
+  "unreadable": 0,
+  "unreadable_files": [],
+  "failures": [
+    "records-retention-policy.md: RuntimeError: the embedding service refused a single chunk. With truncation off that means the chunk is past the model's input limit, which is the invariant the measured post-condition exists to hold (RET-CHUNK-001)."
+  ]
+}
+== verify the writes ==
+ingest_manifest rows: 83
+chunk_index rows: 10639
+documents with chunks: 82
+qdrant points: 63 status: green
+== cleanup ==
+scratch database and collection removed; main collection untouched: {"result":{"collections":[{"name":"documents-mixed-v2-20261028"}]},"status":"ok","time":5.84e-6}

@@ -1,0 +1,11 @@
+{
+  "url": "https://app.officeinference.com",
+  "owner_login": true,
+  "app_shell_reached": true,
+  "token_in_session_storage": true,
+  "provider_flag": true,
+  "token_gate_visible": false,
+  "deployment_visible": true,
+  "cited_answer_visible": true,
+  "console_errors": []
+}

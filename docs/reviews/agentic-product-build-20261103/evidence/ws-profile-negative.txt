@@ -1,0 +1,5 @@
+FAIL office-workspace.yaml
+  - the workspace pack is cloud and hosted only, not 'office'
+  - frontier lane enabled on the office profile: requires the hybrid cloud leg
+
+0/1 manifests valid; 9 packs known

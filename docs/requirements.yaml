@@ -1225,6 +1225,16 @@ items:
     verify: a restore from backup produces a working system, and the elapsed time is recorded as the RTO
     status: verified
     evidence: docs/reviews/ops-backup/README.md
+    note: >-
+      The product deployment had its own drill on 2026-11-03: eleven checks passed, the three databases and the
+      n8n data directory restored into scratch copies, a scratch API answered the known question with citations,
+      and the audit chain verified. Total 24 seconds. Evidence: docs/reviews/restore-drill-20261103/README.md.
+      A daily timer now runs at 03:00 Eastern and copies the backup to s3://oi-core-backups-878451098165 under a
+      deployment-specific prefix. The local drill passed twelve checks in 27 seconds with the documents archive,
+      and a second drill restored the copy downloaded from S3: eleven checks in 21 seconds, counts compared with
+      the backup manifest. Evidence: docs/reviews/product-backup-20261103/ and
+      docs/reviews/restore-drill-20261103/. The bucket is in the same account and writable by the product box
+      role; Object Lock and a client-owned target remain open.
   - id: OPS-RTO-001
     title: Recovery objectives are measured, not asserted
     tier: [cloud, hosted, office]
@@ -1232,6 +1242,11 @@ items:
     verify: the RTO and RPO in the contract match the last drill's recorded numbers
     status: verified
     evidence: docs/reviews/ops-backup/README.md
+    note: >-
+      Product deployment drill measured 27 seconds for backup, restore of three databases and documents,
+      verification and cleanup, with database restore alone at about 10 seconds. The off-box restore drill passed
+      in 21 seconds from the S3 copy. RPO is 24 hours through the daily backup timer, now with both the local and
+      the off-box copy exercised.
   - id: OPS-UPDATE-001
     title: Releases are signed and a bad one rolls back
     tier: [cloud, office]
@@ -2601,6 +2616,60 @@ items:
     evidence: docs/reviews/ws-profile/README.md
     note: >-
       The office build is a different product. A profile check is how that stays true when a manifest is copied.
+
+  - id: N8N-DEPLOY-001
+    title: Client-owned n8n instance with its own database and a pinned image
+    tier: [cloud, office]
+    phase: C6
+    verify: >-
+      the product deployment starts n8n from a pinned digest, with its own database, its own data directory
+      and an encryption key in rendered/env, loopback only by default, and a healthcheck the start script
+      waits on.
+    status: verified
+    note: >-
+      n8n 2.46.4, digest sha256:4384b9ff20a78bc1708c35ce7864f84f724611de7801fb36d715998db7c000f1, running on
+      the product box 2026-11-03. Evidence in docs/reviews/n8n-integration-20261103/.
+  - id: N8N-GATEWAY-001
+    title: Per-workflow n8n integrations bounded by the owner's roots
+    tier: [cloud, office]
+    phase: C6
+    verify: >-
+      each workflow is an entry in rendered/n8n_integrations.json with its own secret, task, role, roots and
+      owner; the API accepts HMAC over timestamp plus body or the per-workflow bearer and creates a job with
+      the integration's snapshot only; provisioning refuses declared roots the owner does not hold; a wrong
+      signature, stale timestamp or wrong secret creates no job.
+    status: verified
+    note: >-
+      Signed and bearer routes live on the product API. Acceptance shows the invoice webhook job at the gate
+      with the integration and owner in the chain, both negative authentication cases at 401, and an executive
+      workflow refused for a staff owner. HMAC and bearer share one secret; the bearer exists because n8n's
+      task runner disallows the Node crypto module.
+  - id: N8N-JOB-001
+    title: n8n workflows start governed jobs, not ungoverned actions
+    tier: [cloud, office]
+    phase: C6
+    verify: >-
+      the scheduled template starts a governed report job that succeeds with a cited answer, the invoice
+      template stops at the approval gate, both jobs carry the automation principal and the owner, and the
+      n8n executions are successful.
+    status: verified
+    note: >-
+      Scheduled execution 6 on 2026-11-03 produced job 7c824c93 with a two-citation answer; the invoice webhook
+      produced job ff2feac1 at the gate. Job results are persisted so a polled job keeps its answer (migration
+      028). A direct n8n-to-LiteLLM check was removed because the gateway requires an API-signed assertion.
+  - id: N8N-BACKUP-001
+    title: n8n database and encryption material are in the deployment backup
+    tier: [cloud, office]
+    phase: C8
+    verify: >-
+      the backup script dumps the n8n database and captures data/n8n and rendered/ in one output directory with
+      checksums, and the runbook says a database restore without data/n8n leaves stored credentials unreadable.
+    status: verified
+    note: >-
+      scripts/agentic-n8n-backup.sh. The product restore drill on 2026-11-03 restored the n8n database and
+      data/n8n into scratch copies, confirmed the encryption config survived with mode 600, and listed both
+      templates through the n8n CLI against the restored database. Evidence:
+      docs/reviews/restore-drill-20261103/README.md. Scheduled backups remain an onboarding item.
 
   - id: NEVER-KB-001
     title: No managed knowledge base

@@ -1,0 +1,109 @@
+{
+  "id": "yId7HurH3FsdNX0W",
+  "name": "Scheduled governed report",
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -320,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "set-body",
+      "name": "Build request body",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -80,
+        0
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "body",
+              "name": "body",
+              "type": "string",
+              "value": "={{ JSON.stringify({input: \"Summarise for staff: what is the mileage reimbursement rate, and what receipt rules apply? Cite the policy.\"}) }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "call",
+      "name": "Start governed job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8088/integrations/n8n/jobs/scheduled_report",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.N8N_INTEGRATION_SCHEDULED_REPORT_SECRET }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Trigger": {
+      "main": [
+        [
+          {
+            "node": "Build request body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build request body": {
+      "main": [
+        [
+          {
+            "node": "Start governed job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": true,
+  "pinData": {}
+}

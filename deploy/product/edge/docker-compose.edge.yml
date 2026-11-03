@@ -1,0 +1,74 @@
+# Customer edge for the product deployment. Decision 0012.
+#
+# Apply on top of the base and product compose files:
+#   docker compose -p oi-product \
+#     -f deploy/office/compose/docker-compose.yml \
+#     -f deploy/product/docker-compose.product.yml \
+#     -f deploy/product/edge/docker-compose.edge.yml \
+#     --env-file rendered/env up -d caddy oauth2-proxy
+#
+# Required rendered/env keys (written by scripts/cognito-provision.py):
+#   OI_EDGE_HOSTNAME, OI_EDGE_SECRET, OI_EDGE_EMAIL, OI_OIDC_ISSUER, OI_OIDC_CLIENT_ID,
+#   OI_OIDC_CLIENT_SECRET, OI_OAUTH2_COOKIE_SECRET, OI_OIDC_REDIRECT_URL
+#
+# Security group: inbound 80 and 443 from the internet. The app and API stay unpublished; only the edge is
+# reachable. The staging file `docker-compose.edge-staging.yml` adds a loopback-validated path on 8443.
+
+services:
+  caddy:
+    # Pinned digest for caddy:2.9.1-alpine, resolved on the product box 2026-11-03.
+    image: caddy@sha256:b4e3952384eb9524a887633ce65c752dd7c71314d2c2acf98cd5c715aaa534f0
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      OI_EDGE_HOSTNAME: ${OI_EDGE_HOSTNAME:?set OI_EDGE_HOSTNAME in rendered/env}
+      OI_EDGE_SECRET: ${OI_EDGE_SECRET:?set OI_EDGE_SECRET in rendered/env}
+      OI_EDGE_EMAIL: ${OI_EDGE_EMAIL:-admin@officeinference.com}
+    volumes:
+      # Absolute, because compose resolves relative volume paths against the first compose file's directory,
+      # which is the base overlay here. A relative path mounted the wrong file and Caddy failed to start.
+      - ${OI_ROOT}/deploy/product/edge/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - ai-net
+    depends_on:
+      - app
+      - oauth2-proxy
+
+  oauth2-proxy:
+    # Pinned digest for quay.io/oauth2-proxy/oauth2-proxy:v7.6.0, resolved on the product box 2026-11-03.
+    image: quay.io/oauth2-proxy/oauth2-proxy@sha256:dcb6ff8dd21bf3058f6a22c6fa385fa5b897a9cd3914c88a2cc2bb0a85f8065d
+    container_name: oauth2-proxy
+    restart: unless-stopped
+    command:
+      - --provider=oidc
+      - --oidc-issuer-url=${OI_OIDC_ISSUER:?set OI_OIDC_ISSUER in rendered/env}
+      - --client-id=${OI_OIDC_CLIENT_ID:?set OI_OIDC_CLIENT_ID in rendered/env}
+      - --client-secret=${OI_OIDC_CLIENT_SECRET:?set OI_OIDC_CLIENT_SECRET in rendered/env}
+      - --cookie-secret=${OI_OAUTH2_COOKIE_SECRET:?set OI_OAUTH2_COOKIE_SECRET in rendered/env}
+      - --cookie-secure=true
+      - --cookie-samesite=lax
+      - --email-domain=*
+      - --http-address=0.0.0.0:4180
+      - --redirect-url=${OI_OIDC_REDIRECT_URL:?set OI_OIDC_REDIRECT_URL in rendered/env}
+      - --reverse-proxy=true
+      - --set-xauthrequest=true
+      - --skip-provider-button=true
+      - --upstream=static://200
+    networks:
+      - ai-net
+    # **No healthcheck: this is a distroless image.** The previous check used a shell and wget, neither of
+    # which exists in the image, so the container reported unhealthy forever while serving normally. An exec
+    # check against the binary would only prove the binary exists. Edge health is checked from outside: Caddy
+    # answers on 80/443, and the customer-path acceptance run signs in through the login.
+    healthcheck:
+      disable: true
+
+volumes:
+  caddy_data:
+  caddy_config:

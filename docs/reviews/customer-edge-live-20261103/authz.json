@@ -1,0 +1,19 @@
+{
+  "wrong_password_refused": true,
+  "wrong_password_final_url": "https://oi-office-inference.auth.us-east-1.amazoncognito.com/login",
+  "staff_login": true,
+  "staff_provider": {
+    "status": 200,
+    "roots": [
+      "company"
+    ],
+    "groups": [
+      "staff"
+    ],
+    "subject": "staff-test@officeinference.com"
+  },
+  "staff_boundary": {
+    "denied": true,
+    "disclosure": "Documents that answer this more directly exist and are not available to the 'viewer' role. The answer below is drawn from what you can see and may be incomplete."
+  }
+}

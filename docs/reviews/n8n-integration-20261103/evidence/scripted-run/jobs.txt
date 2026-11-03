@@ -1,0 +1,11 @@
+              job_id              |            task            |       state       |                       subject                        
+----------------------------------+----------------------------+-------------------+------------------------------------------------------
+ 75f34e8e7d4447ad9877e3721bf4e737 | invoice_intake             | awaiting_approval | automation+invoice_trigger@oi-core-product-20261103
+ 7c824c931cb84fb39f31696081bf162c | summarise_across_documents | succeeded         | automation+scheduled_report@oi-core-product-20261103
+ ff2feac14be841d88b255049b4711611 | invoice_intake             | awaiting_approval | automation+invoice_trigger@oi-core-product-20261103
+ 9568c185a478495ab4c20a12a2a8020f | invoice_intake             | awaiting_approval | automation+invoice_trigger@oi-core-product-20261103
+ 91718e3c48774481b5e64da58ebb0a5e | summarise_across_documents | succeeded         | automation+scheduled_report@oi-core-product-20261103
+ 3c181597772f4d3792a527246bb36818 | invoice_intake             | awaiting_approval | automation+invoice_trigger@oi-core-product-20261103
+ 3e74a8022f4d422d9c2d42b58bdf5653 | summarise_across_documents | succeeded         | automation+scheduled_report@oi-core-product-20261103
+(7 rows)
+
