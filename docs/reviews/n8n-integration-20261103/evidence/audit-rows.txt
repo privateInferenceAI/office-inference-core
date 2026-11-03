@@ -1,0 +1,44 @@
+ id  | event_type | outcome |                        actor                         |      stage      |   integration    |            owner            |               job                |            tool            
+-----+------------+---------+------------------------------------------------------+-----------------+------------------+-----------------------------+----------------------------------+----------------------------
+ 283 | tool_call  | ok      | automation+scheduled_report@oi-core-product-20261103 | job             |                  |                             | 7c824c931cb84fb39f31696081bf162c | summarise_across_documents
+ 282 | tool_call  | ok      | automation+scheduled_report@oi-core-product-20261103 | job             |                  |                             | 7c824c931cb84fb39f31696081bf162c | summarise_across_documents
+ 281 | model_call | ok      | automation+scheduled_report@oi-core-product-20261103 | ask             |                  |                             |                                  | 
+ 280 | tool_call  | ok      | automation+scheduled_report@oi-core-product-20261103 | job             |                  |                             | 7c824c931cb84fb39f31696081bf162c | summarise_across_documents
+ 279 | access     | ok      | automation+scheduled_report@oi-core-product-20261103 | n8n_integration | scheduled_report | zoe.reyes@northwind.example | 7c824c931cb84fb39f31696081bf162c | 
+ 278 | tool_call  | ok      | automation+invoice_trigger@oi-core-product-20261103  | workflow        |                  |                             | ff2feac14be841d88b255049b4711611 | approval
+ 277 | tool_call  | ok      | automation+invoice_trigger@oi-core-product-20261103  | workflow        |                  |                             | ff2feac14be841d88b255049b4711611 | draft_action
+ 276 | tool_call  | ok      | automation+invoice_trigger@oi-core-product-20261103  | workflow        |                  |                             | ff2feac14be841d88b255049b4711611 | draft_action
+ 275 | tool_call  | ok      | automation+invoice_trigger@oi-core-product-20261103  | workflow        |                  |                             | ff2feac14be841d88b255049b4711611 | extract_fields
+ 274 | tool_call  | ok      | automation+invoice_trigger@oi-core-product-20261103  | workflow        |                  |                             | ff2feac14be841d88b255049b4711611 | extract_fields
+ 273 | tool_call  | ok      | automation+invoice_trigger@oi-core-product-20261103  | workflow        |                  |                             | ff2feac14be841d88b255049b4711611 | read_message
+ 272 | tool_call  | ok      | automation+invoice_trigger@oi-core-product-20261103  | workflow        |                  |                             | ff2feac14be841d88b255049b4711611 | read_message
+ 271 | tool_call  | ok      | automation+invoice_trigger@oi-core-product-20261103  | workflow        |                  |                             | ff2feac14be841d88b255049b4711611 | invoice_intake
+ 270 | access     | ok      | automation+invoice_trigger@oi-core-product-20261103  | n8n_integration | invoice_trigger  | zoe.reyes@northwind.example | ff2feac14be841d88b255049b4711611 | 
+ 269 | tool_call  | ok      | automation+invoice_trigger@oi-core-product-20261103  | workflow        |                  |                             | 9568c185a478495ab4c20a12a2a8020f | approval
+ 268 | tool_call  | ok      | automation+invoice_trigger@oi-core-product-20261103  | workflow        |                  |                             | 9568c185a478495ab4c20a12a2a8020f | draft_action
+ 267 | tool_call  | ok      | automation+invoice_trigger@oi-core-product-20261103  | workflow        |                  |                             | 9568c185a478495ab4c20a12a2a8020f | draft_action
+ 266 | tool_call  | ok      | automation+invoice_trigger@oi-core-product-20261103  | workflow        |                  |                             | 9568c185a478495ab4c20a12a2a8020f | extract_fields
+ 265 | tool_call  | ok      | automation+invoice_trigger@oi-core-product-20261103  | workflow        |                  |                             | 9568c185a478495ab4c20a12a2a8020f | extract_fields
+ 264 | tool_call  | ok      | automation+invoice_trigger@oi-core-product-20261103  | workflow        |                  |                             | 9568c185a478495ab4c20a12a2a8020f | read_message
+ 263 | tool_call  | ok      | automation+invoice_trigger@oi-core-product-20261103  | workflow        |                  |                             | 9568c185a478495ab4c20a12a2a8020f | read_message
+ 262 | tool_call  | ok      | automation+invoice_trigger@oi-core-product-20261103  | workflow        |                  |                             | 9568c185a478495ab4c20a12a2a8020f | invoice_intake
+ 261 | access     | ok      | automation+invoice_trigger@oi-core-product-20261103  | n8n_integration | invoice_trigger  | zoe.reyes@northwind.example | 9568c185a478495ab4c20a12a2a8020f | 
+ 258 | tool_call  | ok      | automation+scheduled_report@oi-core-product-20261103 | job             |                  |                             | 91718e3c48774481b5e64da58ebb0a5e | summarise_across_documents
+ 257 | tool_call  | ok      | automation+scheduled_report@oi-core-product-20261103 | job             |                  |                             | 91718e3c48774481b5e64da58ebb0a5e | summarise_across_documents
+ 256 | model_call | ok      | automation+scheduled_report@oi-core-product-20261103 | ask             |                  |                             |                                  | 
+ 255 | tool_call  | ok      | automation+scheduled_report@oi-core-product-20261103 | job             |                  |                             | 91718e3c48774481b5e64da58ebb0a5e | summarise_across_documents
+ 254 | access     | ok      | automation+scheduled_report@oi-core-product-20261103 | n8n_integration | scheduled_report | zoe.reyes@northwind.example | 91718e3c48774481b5e64da58ebb0a5e | 
+ 253 | tool_call  | ok      | automation+invoice_trigger@oi-core-product-20261103  | workflow        |                  |                             | 3c181597772f4d3792a527246bb36818 | approval
+ 252 | tool_call  | ok      | automation+invoice_trigger@oi-core-product-20261103  | workflow        |                  |                             | 3c181597772f4d3792a527246bb36818 | draft_action
+ 251 | tool_call  | ok      | automation+invoice_trigger@oi-core-product-20261103  | workflow        |                  |                             | 3c181597772f4d3792a527246bb36818 | draft_action
+ 250 | tool_call  | ok      | automation+invoice_trigger@oi-core-product-20261103  | workflow        |                  |                             | 3c181597772f4d3792a527246bb36818 | extract_fields
+ 249 | tool_call  | ok      | automation+invoice_trigger@oi-core-product-20261103  | workflow        |                  |                             | 3c181597772f4d3792a527246bb36818 | extract_fields
+ 248 | tool_call  | ok      | automation+invoice_trigger@oi-core-product-20261103  | workflow        |                  |                             | 3c181597772f4d3792a527246bb36818 | read_message
+ 247 | tool_call  | ok      | automation+invoice_trigger@oi-core-product-20261103  | workflow        |                  |                             | 3c181597772f4d3792a527246bb36818 | read_message
+ 246 | tool_call  | ok      | automation+invoice_trigger@oi-core-product-20261103  | workflow        |                  |                             | 3c181597772f4d3792a527246bb36818 | invoice_intake
+ 245 | access     | ok      | automation+invoice_trigger@oi-core-product-20261103  | n8n_integration | invoice_trigger  | zoe.reyes@northwind.example | 3c181597772f4d3792a527246bb36818 | 
+ 242 | tool_call  | ok      | automation+scheduled_report@oi-core-product-20261103 | job             |                  |                             | 3e74a8022f4d422d9c2d42b58bdf5653 | summarise_across_documents
+ 241 | tool_call  | ok      | automation+scheduled_report@oi-core-product-20261103 | job             |                  |                             | 3e74a8022f4d422d9c2d42b58bdf5653 | summarise_across_documents
+ 240 | model_call | ok      | automation+scheduled_report@oi-core-product-20261103 | ask             |                  |                             |                                  | 
+(40 rows)
+

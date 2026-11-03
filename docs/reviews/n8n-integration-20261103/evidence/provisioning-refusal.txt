@@ -1,0 +1,5 @@
+=== provisioning refusal evidence ===
+owner zoe.reyes@northwind.example holds: ['company']
+workflow requests: ['company', 'executive']
+provisioning problems: ["owner 'zoe.reyes@northwind.example' does not hold root(s) ['executive']"]
+provisioning refused: True

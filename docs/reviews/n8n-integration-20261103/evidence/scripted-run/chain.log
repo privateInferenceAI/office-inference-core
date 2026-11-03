@@ -1,0 +1,2 @@
+ok   /tmp/n8n-acceptance-chain/audit-events.jsonl: 296 event(s), chain intact
+     note: no external anchor was supplied, so completeness cannot be shown: deleting rows from the end and re-exporting would still verify. Pass --anchor with the file written by the anchor job

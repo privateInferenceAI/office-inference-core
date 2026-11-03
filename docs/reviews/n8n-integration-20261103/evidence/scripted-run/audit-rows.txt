@@ -1,0 +1,11 @@
+ id  | event_type |                        actor                         |      stage      |   integration    |            owner            |               job                
+-----+------------+------------------------------------------------------+-----------------+------------------+-----------------------------+----------------------------------
+ 288 | access     | automation+invoice_trigger@oi-core-product-20261103  | n8n_integration | invoice_trigger  | zoe.reyes@northwind.example | 75f34e8e7d4447ad9877e3721bf4e737
+ 279 | access     | automation+scheduled_report@oi-core-product-20261103 | n8n_integration | scheduled_report | zoe.reyes@northwind.example | 7c824c931cb84fb39f31696081bf162c
+ 270 | access     | automation+invoice_trigger@oi-core-product-20261103  | n8n_integration | invoice_trigger  | zoe.reyes@northwind.example | ff2feac14be841d88b255049b4711611
+ 261 | access     | automation+invoice_trigger@oi-core-product-20261103  | n8n_integration | invoice_trigger  | zoe.reyes@northwind.example | 9568c185a478495ab4c20a12a2a8020f
+ 254 | access     | automation+scheduled_report@oi-core-product-20261103 | n8n_integration | scheduled_report | zoe.reyes@northwind.example | 91718e3c48774481b5e64da58ebb0a5e
+ 245 | access     | automation+invoice_trigger@oi-core-product-20261103  | n8n_integration | invoice_trigger  | zoe.reyes@northwind.example | 3c181597772f4d3792a527246bb36818
+ 238 | access     | automation+scheduled_report@oi-core-product-20261103 | n8n_integration | scheduled_report | zoe.reyes@northwind.example | 3e74a8022f4d422d9c2d42b58bdf5653
+(7 rows)
+

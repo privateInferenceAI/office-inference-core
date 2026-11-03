@@ -1,0 +1,15 @@
+=== scheduled job audit rows and result ===
+ id  | event_type | outcome |                        actor                         |      stage      |   integration    |               job                | answer 
+-----+------------+---------+------------------------------------------------------+-----------------+------------------+----------------------------------+--------
+ 279 | access     | ok      | automation+scheduled_report@oi-core-product-20261103 | n8n_integration | scheduled_report | 7c824c931cb84fb39f31696081bf162c | 
+ 280 | tool_call  | ok      | automation+scheduled_report@oi-core-product-20261103 | job             |                  | 7c824c931cb84fb39f31696081bf162c | 
+ 281 | model_call | ok      | automation+scheduled_report@oi-core-product-20261103 | ask             |                  |                                  | 
+ 282 | tool_call  | ok      | automation+scheduled_report@oi-core-product-20261103 | job             |                  | 7c824c931cb84fb39f31696081bf162c | 
+ 283 | tool_call  | ok      | automation+scheduled_report@oi-core-product-20261103 | job             |                  | 7c824c931cb84fb39f31696081bf162c | 
+(5 rows)
+
+              job_id              |            task            |   state   |                                                                                                                                                                                                                                               answer                                                                                                                                                                                                                                               
+----------------------------------+----------------------------+-----------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 7c824c931cb84fb39f31696081bf162c | summarise_across_documents | succeeded | Mileage is reimbursed at 0.67 USD per mile, and a receipt is required for every expense of 25 USD or more; below that, the expense still needs a description and a date.[1][6] Each receipt must show the merchant, date, amount and what was purchased—a credit card slip alone is not a receipt—and missing receipts require a missing receipt statement signed by the department head, with more than three missing receipts in a rolling twelve months triggering review by the Controller.[6]
+(1 row)
+

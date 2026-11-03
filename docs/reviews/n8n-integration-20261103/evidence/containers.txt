@@ -1,0 +1,4 @@
+api Up 5 minutes
+n8n Up 5 minutes (healthy)
+litellm Up 4 hours
+postgres Up 4 hours (healthy)

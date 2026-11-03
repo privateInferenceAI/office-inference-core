@@ -1,0 +1,10 @@
+== n8n acceptance Tue Nov  3 20:45:04 UTC 2026 ==
+PASS n8n-image
+PASS registry
+PASS negative-auth
+PASS invoice-webhook
+PASS scheduled-report
+PASS provisioning-refusal
+PASS chain
+== evidence: /opt/oi-product/eval-out/n8n-acceptance-20261103T204504Z ==
+== result: 7 passed, 0 failed ==
