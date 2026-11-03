@@ -34,8 +34,9 @@ tests.
 
 ## 2. Documents
 
-- [ ] Put the company documents under `documents/` in the deployment, in one top-level folder per access
-      group. Nothing else should be mixed into the synthetic folders.
+- [ ] Follow `docs/runbooks/company-corpus-onboarding.md`. Put the company documents in one folder per
+      access group, build or ingest them as a separate corpus, and verify before switching the served
+      collection. Nothing else should be mixed into the synthetic folders.
 - [ ] Choose a collection name for the company corpus and render the manifest against it. Do not reuse the
       synthetic collection name for real documents.
 - [ ] Run the import and record the document and chunk counts.
