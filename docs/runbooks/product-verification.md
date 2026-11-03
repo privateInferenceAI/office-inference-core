@@ -67,14 +67,18 @@ between the two runs unless the first run found a failure.
 
 | Step | Mode | Do this | Expect |
 |---|---|---|---|
-| B1 | CUSTOMER PATH | Ask five questions across the corpus, including one cross-document question | each answer has citations; no answer is empty |
-| B2 | CUSTOMER PATH | Start the invoice intake task with a synthetic invoice | job stops at the gate; the drafted posting matches the invoice |
-| B3 | CUSTOMER PATH | Start the research brief task and approve it | job succeeds after approval; email arrives |
-| B4 | CUSTOMER PATH | Start the workspace task with a file, a calculation, a fetch and an artifact | artifact exists and downloads; steps are visible |
+| B1 | CUSTOMER PATH after C7, ADMIN ONLY today | Run `scripts/verify/step-b1-questions.sh` | five answers, citations on each, the cross-document question cites both documents |
+| B2 | CUSTOMER PATH after C7, ADMIN ONLY today | Run `scripts/verify/step-b2-invoice.sh` | job stops at the gate; the drafted posting matches the invoice |
+| B3 | CUSTOMER PATH after C7, ADMIN ONLY today | Run `product-acceptance.py` on the box and read its research brief section | job succeeds after approval; email arrives |
+| B4 | CUSTOMER PATH after C7, ADMIN ONLY today | Same script, workspace section | artifacts exist and download; steps are visible |
 | B5 | ADMIN ONLY | Run `scripts/verify/step-03-audit.sh` | chain intact; count is higher than the previous run |
-| B6 | ADMIN ONLY | Run `scripts/verify/step-04-n8n.sh` | both templates active; webhook job at the gate |
-| B7 | ADMIN ONLY | Confirm the boundary: a staff session asking for executive content is denied | denied with a disclosure, not a silent answer |
+| B6 | ADMIN ONLY | Run `scripts/verify/step-04-n8n.sh` | both templates active; webhook job at the gate; a person can open that gate |
+| B7 | ADMIN ONLY | The staff boundary denial inside `product-acceptance.py` | denied with a disclosure, not a silent answer |
 | B8 | ADMIN ONLY | Save the evidence directory and the run header off the box | evidence archived before the box is stopped or upgraded |
+
+The first baseline is `docs/reviews/product-verification-20261103/README.md`: runs 3 and 4 passed every step,
+run 5 confirmed after the second fix, and the two product defects it found are fixed with tests. Compare later
+runs against that record, not against a memory of the last run.
 
 Record both runs side by side with timings. A slower answer or a missing citation between run one and run two is
 a finding even when every step says PASS.
