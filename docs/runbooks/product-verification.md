@@ -130,6 +130,9 @@ these steps pass, because a tunnel and a minted session are operator tools.
 
 After D8, the admin-only shortcuts in this runbook stay for support and diagnostics. They are not the product.
 
+Phase D was accepted on 2026-11-03 on `https://app.officeinference.com`: DNS, real TLS, Cognito login, provider session, browser walkthrough, wrong-password refusal, staff boundary and closed operator ports. Record:
+`docs/reviews/customer-edge-live-20261103/README.md`. The operator path in the steps above stays admin-only.
+
 ## Phase E: company onboarding, after Phase D
 
 | Step | Mode | Do this | Expect |
