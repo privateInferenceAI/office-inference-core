@@ -1,0 +1,41 @@
+{
+  "base_url": "https://100-60-208-224.sslip.io",
+  "user": "public-accept@officeinference.com",
+  "checks": [
+    {
+      "check": "public URL redirects to the login",
+      "ok": true,
+      "detail": "status=302 location=/oauth2/start?rd=/"
+    },
+    {
+      "check": "credentials accepted",
+      "ok": true,
+      "detail": "status=200 final=https://100-60-208-224.sslip.io/"
+    },
+    {
+      "check": "oauth2-proxy accepts the session",
+      "ok": true,
+      "detail": "status=202"
+    },
+    {
+      "check": "app loads for the signed-in user",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "check": "provider session exchange",
+      "ok": true,
+      "detail": "status=200 subject=public-accept@officeinference.com source=provider"
+    },
+    {
+      "check": "cited answer through the customer path",
+      "ok": true,
+      "detail": "status=200 citations=12"
+    },
+    {
+      "check": "sign-out ends the session",
+      "ok": true,
+      "detail": "sign_out=302 after=302"
+    }
+  ]
+}
