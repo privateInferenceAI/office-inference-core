@@ -1,8 +1,4 @@
-# Customer edge for the product deployment
-#
-# This is the pilot shape in decision 0012: Caddy terminates TLS, an OIDC proxy authenticates the browser with
-# Cognito, and only an authenticated request reaches the app. The API session exchange trusts two headers only
-# when they arrive with the shared edge secret, and Caddy strips any client-supplied copies before setting them.
+# Customer edge for the product deployment. Decision 0012.
 #
 # Apply on top of the base and product compose files:
 #   docker compose -p oi-product \
@@ -11,22 +7,16 @@
 #     -f deploy/product/edge/docker-compose.edge.yml \
 #     --env-file rendered/env up -d caddy oauth2-proxy
 #
-# Required rendered/env keys:
-#   OI_EDGE_HOSTNAME          app.officeinference.com
-#   OI_EDGE_SECRET            shared secret between Caddy and the API
-#   OI_EDGE_EMAIL             ACME account email
-#   OI_OIDC_ISSUER            https://cognito-idp.us-east-1.amazonaws.com/<pool id>
-#   OI_OIDC_CLIENT_ID
-#   OI_OIDC_CLIENT_SECRET
-#   OI_OAUTH2_COOKIE_SECRET   random 32 bytes, base64 or URL-safe
-#   OI_OIDC_REDIRECT_URL      https://<hostname>/oauth2/callback
+# Required rendered/env keys (written by scripts/cognito-provision.py):
+#   OI_EDGE_HOSTNAME, OI_EDGE_SECRET, OI_EDGE_EMAIL, OI_OIDC_ISSUER, OI_OIDC_CLIENT_ID,
+#   OI_OIDC_CLIENT_SECRET, OI_OAUTH2_COOKIE_SECRET, OI_OIDC_REDIRECT_URL
 #
-# Security group: inbound 80 and 443 from the internet. 80 is used by the ACME HTTP challenge and redirected.
-# The app and API stay unpublished; only 80 and 443 are opened.
+# Security group: inbound 80 and 443 from the internet. The app and API stay unpublished; only the edge is
+# reachable. The staging file `docker-compose.edge-staging.yml` adds a loopback-validated path on 8443.
 
 services:
   caddy:
-    # Pinned digest for caddy:2.9.1-alpine, resolved 2026-11-03.
+    # Pinned digest for caddy:2.9.1-alpine, resolved on the product box 2026-11-03.
     image: caddy@sha256:b4e3952384eb9524a887633ce65c752dd7c71314d2c2acf98cd5c715aaa534f0
     container_name: caddy
     restart: unless-stopped
@@ -39,7 +29,9 @@ services:
       OI_EDGE_SECRET: ${OI_EDGE_SECRET:?set OI_EDGE_SECRET in rendered/env}
       OI_EDGE_EMAIL: ${OI_EDGE_EMAIL:-admin@officeinference.com}
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Absolute, because compose resolves relative volume paths against the first compose file's directory,
+      # which is the base overlay here. A relative path mounted the wrong file and Caddy failed to start.
+      - ${OI_ROOT}/deploy/product/edge/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
     networks:
@@ -49,7 +41,7 @@ services:
       - oauth2-proxy
 
   oauth2-proxy:
-    # Pinned digest for quay.io/oauth2-proxy/oauth2-proxy:v7.6.0, resolved 2026-11-03.
+    # Pinned digest for quay.io/oauth2-proxy/oauth2-proxy:v7.6.0, resolved on the product box 2026-11-03.
     image: quay.io/oauth2-proxy/oauth2-proxy@sha256:dcb6ff8dd21bf3058f6a22c6fa385fa5b897a9cd3914c88a2cc2bb0a85f8065d
     container_name: oauth2-proxy
     restart: unless-stopped
