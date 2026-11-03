@@ -1,0 +1,38 @@
+created collection company-rehearsal at 1024 dimensions, cosine distance
+embedding contract recorded at generation 1: BAAI/bge-m3, cls pooling, 1024 dimensions
+  ** not removing anything: this run walks /company-documents, and a reconciliation would remove every document the manifest holds whose file is not under it. That is right for the deployment's own folder and wrong for a subset, so documents outside this root are left alone.
+  ingesting it-acceptable-use-policy.md  (new, 9641 bytes)
+  ingesting records-retention-policy.md  (new, 8538 bytes)
+  ingesting travel-and-expense-policy.md  (new, 9029 bytes)
+  embed was shed by the embedding service; waiting 1.0s (attempt 1 of 4)
+  embed was shed by the embedding service; waiting 1.0s (attempt 1 of 4)
+  embed was shed by the embedding service; waiting 2.0s (attempt 2 of 4)
+  embed was shed by the embedding service; waiting 2.0s (attempt 2 of 4)
+  embed was shed by the embedding service; waiting 4.0s (attempt 3 of 4)
+  embed was shed by the embedding service; waiting 4.0s (attempt 3 of 4)
+    19 chunks, ? pages
+    timing: parse 1096ms, chunk 72ms, embed 3446ms, write 40ms  -> total 4653ms for 19 chunk(s)
+    44 chunks, ? pages
+    timing: parse 1111ms, chunk 296ms, embed 10071ms, write 49ms  -> total 11528ms for 44 chunk(s)
+{
+  "seen": 3,
+  "new": 2,
+  "changed": 0,
+  "skipped": 0,
+  "failed": 1,
+  "chunks_written": 63,
+  "chunks_removed": 0,
+  "documents_removed": 0,
+  "timings_ms": {
+    "parse": 2207,
+    "chunk": 368,
+    "embed": 13517,
+    "write": 89
+  },
+  "timed_documents": 2,
+  "unreadable": 0,
+  "unreadable_files": [],
+  "failures": [
+    "records-retention-policy.md: RuntimeError: the embedding service refused a single chunk. With truncation off that means the chunk is past the model's input limit, which is the invariant the measured post-condition exists to hold (RET-CHUNK-001)."
+  ]
+}
