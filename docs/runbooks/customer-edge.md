@@ -61,6 +61,17 @@ docker logs -f caddy
 curl -sS -o /dev/null -w '%{http_code}\n' https://app.officeinference.com/
 ```
 
+## Staging validation before DNS
+
+The chain was validated on 2026-11-03 without the public DNS record. The record is
+`docs/reviews/customer-edge-staging-20261103/README.md`. In short: Caddy internal TLS on 8443, the real Cognito
+login, the provider session exchange through the edge headers, and a cited answer through the customer path.
+
+The staging files are `deploy/product/edge/Caddyfile.staging` and
+`deploy/product/edge/docker-compose.edge-staging.yml`. They are test artifacts, not the public configuration.
+The edge containers are stopped after a staging run; the test account is deleted and the staging callback is
+removed from the app client.
+
 ## How the trust boundary works
 
 - Caddy terminates TLS and runs the OIDC login through oauth2-proxy.

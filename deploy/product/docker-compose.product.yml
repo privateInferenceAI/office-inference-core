@@ -14,6 +14,11 @@
 services:
   api:
     environment:
+      # The customer edge secret. Empty means no provider edge is configured and the provider session
+      # route answers 503; set in rendered/env by the Cognito provisioning script.
+      OI_EDGE_SECRET: ${OI_EDGE_SECRET:-}
+      OI_PROVIDER_ROLE: ${OI_PROVIDER_ROLE:-viewer}
+      OI_PROVIDER_SESSION_TTL_HOURS: ${OI_PROVIDER_SESSION_TTL_HOURS:-8}
       # Serving contract for the canonical v2 collection.
       OI_SERVING_CHUNKER_VERSION: ${OI_SERVING_CHUNKER_VERSION:-}
       COLLECTION: ${COLLECTION:-documents}

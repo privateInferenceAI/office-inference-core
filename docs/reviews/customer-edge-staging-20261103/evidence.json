@@ -1,0 +1,31 @@
+{
+  "login_page": "reached Cognito hosted UI login form",
+  "login_post": {
+    "status": 200,
+    "final_url": "https://app.officeinference.com:8443/"
+  },
+  "oauth2_auth_status": 202,
+  "app_status": 200,
+  "app_has_shell": true,
+  "provider_status": 200,
+  "provider": {
+    "subject": "staging-test@officeinference.com",
+    "role": "viewer",
+    "roots": [
+      "company",
+      "executive"
+    ],
+    "source": "provider"
+  },
+  "ask_status": 200,
+  "ask_denied": false,
+  "ask_citations": 12,
+  "ask_answer": "The mileage reimbursement rate in the travel and expense policy is **0.67 USD per mile** for personal vehicle use on approved business travel; the policy notes that mileage covers fuel, wear and insurance, so fuel cannot be claimed separately for the same trip [3].",
+  "cookie_names": [
+    "_oauth2_proxy_0",
+    "_oauth2_proxy_1",
+    "cognito",
+    "csrf-state",
+    "csrf-state-legacy"
+  ]
+}
