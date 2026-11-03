@@ -85,6 +85,13 @@ The local drill proved the archive; it did not prove the copy in the bucket. The
   `evidence/offbox-summary.txt`, `offbox-counts.txt`, `offbox-timings.txt`, `offbox-chain-verify.txt` and
   `offbox-scratch-api-answer.txt`.
 
+## Post-launch run, 2026-11-03 23:47Z
+
+A fresh backup was taken after the customer edge, gateway audit fix and healthcheck change, then the local drill
+ran against the new state: 12 checks passed in 26 seconds. The backup is 26 MB, nine objects in S3 under
+`backups/product-oi-core-product-20261103/20261103T234724Z/`, and the manifest carries the 11 table counts. This
+proves the current deployment, not only the pre-launch one.
+
 ## What this drill does not prove
 
 - This drill restores from the local backup directory on the box. An off-box copy now exists and is
