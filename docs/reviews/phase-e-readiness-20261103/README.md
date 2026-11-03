@@ -14,8 +14,8 @@ finished.
 | Rendered access registry | Five identities: owner, two demo identities (`adam.hale@`, `zoe.reyes@`) and two probes (`probe-exec@`, `probe-staff@`). The demo and probe identities have no Cognito login, so they cannot sign in, but they should be removed before the business uses the deployment |
 | Email sending | SES sending enabled; `anthony@officeinference.com` verified; connector recipient allowlist configured. A non-allowlisted recipient is refused, and since the gateway fix (PR #367) the refusal is recorded in the chain; an allowed governed send is recorded as ok. Record: `docs/reviews/email-path-verification-20261103/` |
 | SES sandbox | Account is in the sandbox: 200 messages per 24 hours, 1 per second, 9 sent in the last 24 hours. A new recipient must be verified first, or SES production access requested |
-| Backups | `oi-product-backup.timer` active; next run 2026-11-04 08:00 UTC; latest local and S3 backup 2026-11-03T22:55Z, 9 objects, 26,227,904 bytes, 11 table counts in the manifest |
-| Restore drills | Local drill 12 checks in 27 seconds; off-box S3 drill 11 checks in 21 seconds |
+| Backups | `oi-product-backup.timer` active; next scheduled run 2026-11-04 08:00 UTC; latest backup 2026-11-03T23:47Z, 9 objects, 26,350,049 bytes, 11 table counts in the manifest |
+| Restore drills | Local drill 12 checks in 27 seconds, and 12 checks in 26 seconds on the post-launch backup; off-box S3 drill 11 checks in 21 seconds |
 | Corpus | Synthetic only: 80 documents, 10,576 chunks, one Qdrant collection. Company corpus not loaded |
 | Ingestion rehearsal | Three sample documents in, two ingested with 63 chunks, one refused for an oversized chunk. The canonical bundle path is the recommended serving route |
 | Health | Five smoke probes pass; API, app and n8n healthy; host connector and egress services active |

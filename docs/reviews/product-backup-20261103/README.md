@@ -57,6 +57,12 @@ because the live one has moved on. The restore drill downloaded the nine objects
 passed 11 checks in 21 seconds with the counts matching the manifest. The downloaded copies were removed from
 the box afterwards. Full numbers are in `docs/reviews/restore-drill-20261103/README.md`.
 
+## Post-launch backup, 2026-11-03 23:47Z
+
+A fresh backup ran after the live edge and gateway changes: 26,350,049 bytes in nine S3 objects under
+`backups/product-oi-core-product-20261103/20261103T234724Z/`, local copy kept, 11 table counts in the manifest.
+The local restore drill against it passed 12 checks in 26 seconds.
+
 ## Findings and gaps
 
 1. **The product box still uses the development instance role.** `oi-core-dev-instance` carries the release

@@ -1,0 +1,12 @@
+backup rc=0 ms=4663
+verify_backup rc=0 ms=23
+create_scratch rc=0 ms=398
+restore_databases rc=0 ms=9549
+compare_counts rc=0 ms=1168
+known_answer rc=0 ms=55
+chain_verify rc=0 ms=540
+restore_n8n_data_dir rc=0 ms=11
+restore_documents rc=0 ms=510
+n8n_scratch_list rc=0 ms=3317
+scratch_api_check rc=0 ms=5295
+cleanup_scratch rc=0 ms=424
