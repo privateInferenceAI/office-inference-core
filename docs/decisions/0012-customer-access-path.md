@@ -99,6 +99,20 @@ The delivery note that matters: Caddy chose the TLS-ALPN-01 challenge, so both 8
 before the first certificate. The remaining work is the Namecheap record for `app.officeinference.com`, the
 permanent rules, and the owner's browser walkthrough.
 
+### Live, 2026-11-03
+
+`https://app.officeinference.com` is live with a real Let's Encrypt certificate, the Cognito login, the provider
+session exchange and the edge. The owner signed in through the real hosted login in a headless browser, the app
+rendered with the operator token gate hidden, and a question asked through the UI returned a cited answer with
+zero console errors.
+
+Seven of seven acceptance checks passed against the real hostname. A wrong password is refused, and a staff
+account received company roots only and was denied executive content. Ports 80 and 443 are the only public
+ones; 22 stays restricted to the operator; the API, database and n8n are not reachable from the internet.
+
+DNS, TLS, login and the customer path are therefore done. The remaining work is Phase E: company accounts,
+documents, email and support. Record: `docs/reviews/customer-edge-live-20261103/README.md`.
+
 ## Open decisions
 
 1. Hostname: `app.officeinference.com` suggested. Confirm or choose another subdomain.
