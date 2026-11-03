@@ -1320,7 +1320,9 @@ items:
     title: Every component's licence permits what we sell
     tier: [cloud, office, hosted]
     phase: BIZ
-    verify: a written answer from n8n, or the component replaced
+    verify: >-
+      counsel confirms the client-owned isolated n8n model, the install-time image pull and the
+      architecture-and-support billing language; other component licences checked the same way
     status: open
   - id: BIZ-BAA-001
     title: Anthropic models on Bedrock are covered by the AWS BAA for PHI, or they are not used for PHI

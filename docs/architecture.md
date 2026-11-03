@@ -140,7 +140,8 @@ The shell leaves these open on purpose, because they are base-system decisions:
 
 1. Chat surface: Open WebUI (already in use) or LibreChat (MIT, richer agent and ACL features).
 2. Orchestration on the office box: Docker Compose, or k3s.
-3. Workflow engine: n8n, given its licence only covers internal business use for a paid service.
+3. Workflow automation: resolved 2026-11-03 by decision 0011. Our engine governs actions with approvals and
+   chain rows; n8n returns as the client-owned layer for triggers, schedules and integrations.
 4. Identity and roles: local accounts, the client's IdP, or both.
 5. How the frontier gate is enforced: redaction service, allowlist, per-request approval, or all.
 6. Backup targets and the recovery promises per build.

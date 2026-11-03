@@ -37,20 +37,25 @@ packs:
   - id: workflow-automation
     name: Workflow Automation
     sold: true
-    description: Multi-step work with triggers, schedules, and approval gates. Deterministic, so it behaves the same on any model.
+    description: >-
+      Two layers. A client-owned n8n instance for triggers, schedules and integrations, and our workflow
+      engine for governed multi-step work with approvals, chain rows and budgets.
     services:
       - workflow
+      - n8n
     requires: [core]
-    # Read 2026-10-13 at https://github.com/n8n-io/n8n/blob/master/LICENSE.md (Sustainable Use
-    # Licence). The clause, verbatim: "You may use or modify the software only for your own internal
-    # business purposes or for non-commercial or personal use. You may distribute the software or
-    # provide it to others only if you do so free of charge for non-commercial purposes."
+    # Closed by owner decision on 2026-11-03, recorded in docs/decisions/0011-n8n-client-owned-automation.md.
+    # The Sustainable Use Licence text read 2026-10-13: "You may use or modify the software only for your
+    # own internal business purposes or for non-commercial or personal use. You may distribute the software
+    # or provide it to others only if you do so free of charge for non-commercial purposes."
     #
-    # That is not a terms question that Enterprise resolves by default: it restricts the paid client
-    # build this pack is sold as. The question is open with a named owner rather than assumed
-    # answered, because the answers are a commercial decision (buy Enterprise, ship a different
-    # workflow engine, or stop selling this pack) and none of them is an edit to this file.
-    open_question: "n8n Sustainable Use Licence: does it permit deploying n8n into a client's building as part of a paid build? On its face it does not - 'provide it to others only if you do so free of charge for non-commercial purposes'. Needs a decision, not a reading."
+    # The deployment model that fits that text: one isolated instance per client, on the client's own
+    # environment, under the client's own ownership and credentials. We sell architecture, deployment and
+    # workflow templates, never an n8n licence. The official image is pulled from the source at install.
+    # n8n is not white-labelled or wrapped in our UI, and access is never gated on payment.
+    #
+    # The remaining open item is not the product decision but the paperwork: counsel confirming the
+    # contract language for a paid deployment where the client owns the instance (BIZ-LICENSE-001).
 
   - id: agentic-desk
     name: Agentic Desk

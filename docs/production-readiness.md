@@ -231,7 +231,7 @@ this list and is not built.
 
 | # | Item | Status | What it means |
 |---|---|---|---|
-| 7.1 | Model and component licensing | partial | n8n's licence likely needs Enterprise for a paid hosted service. Model licences vary, and Kimi K3's is revenue-tiered. Recheck before shipping any new model |
+| 7.1 | Model and component licensing | partial | n8n is deployed as a client-owned instance under its own free licence and our fees cover architecture, deployment, templates and support (decision 0011); counsel confirmation of that contract language is outstanding. Model licences vary, and Kimi K3's is revenue-tiered. Recheck before shipping any new model |
 | 7.2 | Client agreements | missing | Service agreement with the data and suitability clauses, plus a BAA template for regulated work |
 | 7.3 | Support terms | missing | Hours, response window, what counts as a change versus operations |
 | 7.4 | Onboarding checklist | missing | Exactly what we need from a client: documents, accounts, network access, a named contact |
