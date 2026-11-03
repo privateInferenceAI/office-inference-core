@@ -1,5 +1,9 @@
 # Customer edge: apply the login and TLS path
 
+**Status 2026-11-03: live at `https://app.officeinference.com`.** DNS, certificate, edge, Cognito,
+owner login and browser walkthrough are done. The apply steps below remain as the procedure for another
+deployment. Acceptance record: `docs/reviews/customer-edge-live-20261103/README.md`.
+
 This is the operator procedure for Phase D of `docs/runbooks/product-verification.md`. It puts the customer
 path in front of the product deployment: a hostname over TLS, a Cognito login, a provider session, and the app
 behind it. The shape is decision 0012.
