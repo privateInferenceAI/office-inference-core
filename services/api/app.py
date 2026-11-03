@@ -1392,6 +1392,16 @@ def _n8n_signed_headers(request: Request):
             request.headers.get("X-OI-Signature", ""))
 
 
+def _n8n_verify(integration, request: Request, raw: bytes) -> None:
+    """Authenticate an integration request: HMAC headers when provided, otherwise the shared-secret bearer."""
+    if request.headers.get("X-OI-Signature") or request.headers.get("X-OI-Timestamp"):
+        timestamp, signature = _n8n_signed_headers(request)
+        n8n_integrations_module.verify_request(integration, timestamp=timestamp,
+                                               signature=signature, body=raw)
+        return
+    n8n_integrations_module.verify_bearer(integration, request.headers.get("Authorization", ""))
+
+
 def _n8n_refusal(integration_id: str, reason: str, endpoint: str, request_id: str) -> JSONResponse:
     """A refused integration request is an event, like every other refusal on this API."""
     try:
@@ -1425,10 +1435,8 @@ async def n8n_create_job(integration_id: str, request: Request):
     if len(raw) > n8n_integrations_module.MAX_BODY_BYTES:
         return JSONResponse({"error": "the integration request is too large", "kind": "too_large"},
                             status_code=413)
-    timestamp, signature = _n8n_signed_headers(request)
     try:
-        n8n_integrations_module.verify_request(integration, timestamp=timestamp,
-                                               signature=signature, body=raw)
+        _n8n_verify(integration, request, raw)
     except n8n_integrations_module.IntegrationRefused as refused:
         return _n8n_refusal(integration_id, str(refused), request.url.path, request_id)
     try:
@@ -1516,10 +1524,8 @@ async def n8n_get_job(integration_id: str, job_id: str, request: Request):
     if integration is None or not integration.enabled:
         return _n8n_refusal(integration_id, "no_such_integration", request.url.path, request_id)
     raw = await request.body()
-    timestamp, signature = _n8n_signed_headers(request)
     try:
-        n8n_integrations_module.verify_request(integration, timestamp=timestamp,
-                                               signature=signature, body=raw)
+        _n8n_verify(integration, request, raw)
     except n8n_integrations_module.IntegrationRefused as refused:
         return _n8n_refusal(integration_id, str(refused), request.url.path, request_id)
     job = STATE["jobs"].get(job_id)

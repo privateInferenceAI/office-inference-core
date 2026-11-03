@@ -103,6 +103,21 @@ def test_wrong_signature_is_refused():
     assert "does not match" in str(refused.value)
 
 
+def test_bearer_credential_is_accepted():
+    ni.verify_bearer(integration(), "Bearer " + integration().secret)
+
+
+def test_wrong_bearer_is_refused():
+    with pytest.raises(ni.IntegrationRefused) as refused:
+        ni.verify_bearer(integration(), "Bearer " + "0" * 48)
+    assert "does not match" in str(refused.value)
+
+
+def test_missing_bearer_is_refused():
+    with pytest.raises(ni.IntegrationRefused):
+        ni.verify_bearer(integration(), "")
+
+
 def test_missing_headers_are_refused():
     with pytest.raises(ni.IntegrationRefused):
         ni.verify_request(integration(), timestamp="", signature="", body=b"{}", now=1760000000)

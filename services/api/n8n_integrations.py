@@ -105,6 +105,22 @@ def recompute_signature(secret: str, timestamp: str, body: bytes) -> str:
     return hmac.new(secret.encode(), str(timestamp).encode() + b"." + body, hashlib.sha256).hexdigest()
 
 
+def verify_bearer(integration: Integration, authorization: str) -> None:
+    """Verify the shared-secret bearer alternative, for callers that cannot compute an HMAC.
+
+    **Why this exists.** n8n's task runner disallows the Node crypto module, so a workflow cannot build the
+    signed payload without extra credentials plumbing. The integration endpoint is on the internal network and
+    the secret never leaves the deployment; the bearer is the same secret as the HMAC key. The HMAC path stays
+    for callers that can sign, and the request path prefers it when the signature headers are present.
+    """
+    value = str(authorization or "").strip()
+    if not value.startswith("Bearer "):
+        raise IntegrationRefused("missing bearer credential")
+    supplied = value[len("Bearer "):].strip()
+    if not hmac.compare_digest(supplied, integration.secret):
+        raise IntegrationRefused("the bearer credential does not match")
+
+
 def verify_request(integration: Integration, *, timestamp: str, signature: str, body: bytes,
                    now: float | None = None, max_skew: int = MAX_SKEW_SECONDS) -> None:
     """Verify a signed request, or raise IntegrationRefused with the reason.

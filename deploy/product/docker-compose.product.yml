@@ -80,6 +80,12 @@ services:
       DB_POSTGRESDB_USER: ${POSTGRES_USER}
       DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY in rendered/env}
+      # Per-workflow signing secrets are read by the Code node through $env, not stored in the workflow JSON.
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      N8N_INTEGRATION_SCHEDULED_REPORT_SECRET: ${N8N_INTEGRATION_SCHEDULED_REPORT_SECRET:-}
+      N8N_INTEGRATION_INVOICE_TRIGGER_SECRET: ${N8N_INTEGRATION_INVOICE_TRIGGER_SECRET:-}
+      # A deployment-scoped LiteLLM virtual key for n8n's own model calls; budgets live in the gateway.
+      N8N_LITELLM_KEY: ${N8N_LITELLM_KEY:-}
       N8N_HOST: 127.0.0.1
       N8N_PORT: "5678"
       N8N_PROTOCOL: http
