@@ -87,15 +87,24 @@ a finding even when every step says PASS.
 
 This proves the backup is real. It is not a smoke test and it is not run on the live deployment in place.
 
+The whole phase is one script, `scripts/restore-drill.sh` in `oi-canonical-stack`. It runs the steps below in
+order, records each timing, and deletes every scratch copy at the end. Read the output step by step rather than
+trusting the final line.
+
 | Step | Mode | Do this | Expect |
 |---|---|---|---|
-| C1 | ADMIN ONLY | Run `scripts/agentic-n8n-backup.sh` to a fresh directory | dumps for `oicore`, `litellm`, `n8n`; `rendered.tar.gz`; `data/n8n`; checksums |
-| C2 | ADMIN ONLY | Restore the three dumps into scratch databases with different names | restore finishes without errors |
-| C3 | ADMIN ONLY | Restore `rendered/` and `data/n8n` into a scratch directory, not over production | files present, modes preserved |
-| C4 | ADMIN ONLY | Point a scratch API at the scratch database and ask the known question | answer matches the live answer |
-| C5 | ADMIN ONLY | Open the n8n scratch copy and confirm the templates and owner exist | both templates present; login works |
-| C6 | ADMIN ONLY | Record restore duration against the stated recovery time | duration recorded; gap named if it is over |
-| C7 | ADMIN ONLY | Delete the scratch copies | nothing scratch remains; production untouched |
+| C1 | ADMIN ONLY | Fresh backup and checksum verification | dumps for `oicore`, `litellm`, `n8n`; `rendered.tar.gz`; `data/n8n`; checksums pass |
+| C2 | ADMIN ONLY | Restore the three dumps into scratch databases | restore finishes without errors |
+| C3 | ADMIN ONLY | Compare row counts in eleven tables between live and restored | all counts equal |
+| C4 | ADMIN ONLY | Start a scratch API against the restored database, mint a session, ask the known question | cited answer, same facts as live |
+| C5 | ADMIN ONLY | Export and verify the audit chain from the restored database | chain intact, event count matches |
+| C6 | ADMIN ONLY | Restore `data/n8n` to a scratch path and run the n8n CLI against the restored database | both templates present; config with encryption key present, mode 600 |
+| C7 | ADMIN ONLY | Record the measured restore duration | numbers recorded in the review record |
+| C8 | ADMIN ONLY | Cleanup | no scratch databases or containers; production healthy |
+
+The 2026-11-03 drill passed all eleven checks in 24 seconds. Record:
+`docs/reviews/restore-drill-20261103/README.md`. Its limits are stated there and matter: same-host restore, no
+off-box copy, no scheduled backup yet, and no Qdrant rebuild measurement.
 
 ## Phase D: customer access path
 

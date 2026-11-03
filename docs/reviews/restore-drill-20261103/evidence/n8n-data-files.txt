@@ -1,0 +1,2 @@
+7
+600 /tmp/n8n-drill-data/data/n8n/config

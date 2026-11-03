@@ -1,0 +1,20 @@
+== restore drill Tue Nov  3 22:26:11 UTC 2026 ==
+backup: /home/ubuntu/backups/oi-product-drill-20261103T222611Z
+evidence: /opt/oi-product/eval-out/restore-drill-20261103T222611Z
+PASS backup
+PASS verify_backup
+backup size: 4.4M	/home/ubuntu/backups/oi-product-drill-20261103T222611Z
+PASS create_scratch
+PASS restore_databases
+PASS compare_counts
+PASS known_answer
+PASS chain_verify
+PASS restore_n8n_data_dir
+PASS n8n_scratch_list
+PASS scratch_api_check
+PASS cleanup_scratch
+started: 2026-11-03T22:26:11Z
+duration_seconds: 24
+passed: 11
+failed: 0
+RESULT: PASS

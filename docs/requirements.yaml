@@ -1225,6 +1225,12 @@ items:
     verify: a restore from backup produces a working system, and the elapsed time is recorded as the RTO
     status: verified
     evidence: docs/reviews/ops-backup/README.md
+    note: >-
+      The product deployment had its own drill on 2026-11-03: eleven checks passed, the three databases and the
+      n8n data directory restored into scratch copies, a scratch API answered the known question with citations,
+      and the audit chain verified. Total 24 seconds. Evidence: docs/reviews/restore-drill-20261103/README.md.
+      That drill is same-host and the backup is on the same box, so off-box copy and scheduled backups remain
+      onboarding items before real company data.
   - id: OPS-RTO-001
     title: Recovery objectives are measured, not asserted
     tier: [cloud, hosted, office]
@@ -1232,6 +1238,10 @@ items:
     verify: the RTO and RPO in the contract match the last drill's recorded numbers
     status: verified
     evidence: docs/reviews/ops-backup/README.md
+    note: >-
+      Product deployment drill measured 24 seconds for backup, restore of three databases, verification and
+      cleanup, with database restore alone at about 10 seconds. The practical RPO is currently the time since the
+      last manual backup because no timer exists; that is an onboarding blocker, not a number to quote yet.
   - id: OPS-UPDATE-001
     title: Releases are signed and a bad one rolls back
     tier: [cloud, office]
@@ -2647,10 +2657,12 @@ items:
     verify: >-
       the backup script dumps the n8n database and captures data/n8n and rendered/ in one output directory with
       checksums, and the runbook says a database restore without data/n8n leaves stored credentials unreadable.
-    status: implemented
+    status: verified
     note: >-
-      scripts/agentic-n8n-backup.sh. Implemented and run on the product box; restore has not been drilled, and
-      the deployment-wide backup and restore drill remains a C8 item.
+      scripts/agentic-n8n-backup.sh. The product restore drill on 2026-11-03 restored the n8n database and
+      data/n8n into scratch copies, confirmed the encryption config survived with mode 600, and listed both
+      templates through the n8n CLI against the restored database. Evidence:
+      docs/reviews/restore-drill-20261103/README.md. Scheduled backups remain an onboarding item.
 
   - id: NEVER-KB-001
     title: No managed knowledge base
