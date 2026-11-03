@@ -13,8 +13,9 @@ operator path (SSH tunnel and a minted development session), and the runbook lab
    Namecheap (the domain uses Namecheap BasicDNS; there is no Route 53 hosted zone in the deployment account).
    This is the owner's step; it cannot be automated from the box.
 2. **Security group ingress.** On `sg-05485a648e8baa4b8`, allow inbound 80 and 443 from the internet to the
-   product box. Port 80 is used by the Let's Encrypt HTTP challenge and then redirects to 443. The SSH rule
-   stays as it is.
+   product box before the first certificate request. **Both are needed at issuance**, because Caddy selected
+   the TLS-ALPN-01 challenge in the public validation on 2026-11-03, not HTTP-01. Port 80 also redirects to
+   443. The SSH rule stays as it is. Once the certificate is stored, 443 is the customer path.
 3. **Cognito resources: already created on 2026-11-03.** The pool `us-east-1_F21GZAkHU`, app client
    `oi-product-app`, hosted domain `oi-officeinference.auth.us-east-1.amazoncognito.com` and owner account
    exist, and the OIDC and edge keys are in `rendered/env` mode 600. Verify them rather than re-running
@@ -70,6 +71,13 @@ The staging files are `deploy/product/edge/Caddyfile.staging` and
 `deploy/product/edge/docker-compose.edge-staging.yml`. They are test artifacts, not the public configuration.
 The edge containers are stopped after a staging run; the test account is deleted and the staging callback is
 removed from the app client.
+
+## Public validation on a temporary hostname
+
+On 2026-11-03 the whole path was validated on the public internet with a real Let's Encrypt certificate, using
+the temporary hostname `100-60-208-224.sslip.io` and temporary security-group rules. The acceptance script
+passed all seven checks, including the provider session and a cited answer. The rules, test account and
+callback were removed afterwards. Record: `docs/reviews/customer-edge-public-20261103/README.md`.
 
 ## How the trust boundary works
 
