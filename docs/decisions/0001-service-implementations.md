@@ -20,7 +20,7 @@ accident, and so a future swap knows what it is replacing and why.
 | `embeddings` | **TEI with bge-m3** | Apache-2.0 | Already in use, multilingual, runs on modest GPUs |
 | `reranker` | **TEI with bge-reranker-v2-m3** | Apache-2.0 | Already in use, big quality gain for citation accuracy |
 | `ingestion` | **Docling** for parsing, custom pipeline around it | MIT | Handles scanned documents and complex layouts better than the current extractors. Keeps our manifest, chunking, and deletion reconciliation |
-| `workflow` | **n8n** | Sustainable Use Licence | Fastest path to approvals, schedules, and triggers. **Open risk:** the licence covers internal business use, so a paid hosted tier likely needs Enterprise. Get it in writing before the hosted tier ships |
+| `workflow` | **Our workflow engine (C5)**, plus a client-owned n8n instance | n/a, Sustainable Use Licence for n8n | Governed steps need the state change and the chain row in one transaction, so the engine is ours. n8n returns as the client-owned automation layer for triggers, schedules and integrations. **Superseded by 0011, 2026-11-03** |
 | `agent-runtime` | **OpenAI Agents SDK** | MIT | Ships a sandbox, MCP on multiple transports, sessions, guardrails, human-in-the-loop, and a LiteLLM provider, so it drives local models through our existing gateway. Replaces nothing because we have nothing yet |
 | `mcp-gateway` | **IBM ContextForge** | Apache-2.0 | Central auth, per-key tool filtering, and audit, which are two of the worst gaps in the open-source stack. Alternative: Docker MCP Gateway |
 | `audit-sink` | **Ours**, Postgres plus signed daily export | n/a | No off-the-shelf component produces one append-only record across models, tools, and workflows. This is also a differentiator, so it is worth owning |
@@ -37,7 +37,8 @@ accident, and so a future swap knows what it is replacing and why.
 
 - The office build carries more services than a cloud build, because it does the work a cloud
   provider otherwise does: backups, updates, monitoring, and recovery.
-- Two of the decisions carry licence risk that must be resolved before a hosted tier exists
-  (n8n) or before shipping at scale (Langfuse self-hosting terms).
+- The n8n licence risk is handled by decision 0011: client-owned isolated instances, install-time pull of
+  the official image, no resale and no white-labelling. Counsel confirmation is tracked as BIZ-LICENSE-001.
+  Langfuse self-hosting terms still need verification before shipping at scale.
 - Every choice above can be revisited through a seam, and the parity suite is what makes the
   revisit cheap.

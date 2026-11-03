@@ -87,7 +87,7 @@ say so out loud rather than surprising anyone.
                    workspace         per-task sandbox: files, shell, code
                    egress-proxy      allowlisted web and API egress
                    mcp               MCP gateway, vetted connectors
-                   n8n or replacement workflows
+                   n8n               client-owned triggers, schedules, integrations
                    audit             audit sink, the CLI
         |                |
     RDS Postgres     Bedrock (in this account)     S3 (documents, exports, backups)
@@ -103,7 +103,7 @@ say so out loud rather than surprising anyone.
 | Embeddings and reranking | Text Embeddings Inference | bge-m3 and bge-reranker-v2-m3. On the office build the same images run with a CUDA tag |
 | Ingestion | Docling plus our pipeline | OCR, tables, and layout. See section 4 |
 | Agent runtime | our dynamic plan on the C5 engine | Decision 0009: one audit path, per-iteration step rows, the existing gate and chain. The SDK was considered and rejected for the runtime |
-| Workflows | our workflow engine (C5) | The state change and the chain row are one transaction. n8n was rejected on the licence and the transaction |
+| Workflows | our workflow engine (C5) for governed work, a client-owned n8n instance for integration and triggers | The state change and the chain row are one transaction in our engine. n8n covers schedules, webhooks and connectors in the client's own environment under its own licence (decision 0011) |
 | Workspace sandbox | per-task container or microVM | Files, shell and code for the task, isolated from the host, destroyed after |
 | Egress proxy | allowlisted HTTP(S) proxy | The client's policy decides what leaves the VPC; every request is recorded |
 | Artifacts | S3 in the client account | Outputs belong in the client's estate; content-addressed and retained by policy |
@@ -427,7 +427,7 @@ The 5,000 USD of Activate credits covers the demo box for years. Do not optimise
 
 | # | Blocker | Why it stops things |
 |---|---|---|
-| ~~1~~ | ~~**n8n's Sustainable Use License**~~ | **Closed 2026-10-16: not a blocker.** Anthony's call, and it is his to make. C5 is not gated on it. Worth knowing what was decided rather than only that it was: the licence question is settled by the business owner deciding it does not stop the build, not by anything having been obtained in writing. If a client ever asks for the grant, it does not exist yet. |
+| ~~1~~ | ~~**n8n's Sustainable Use License**~~ | **Closed, and then decided.** Closed 2026-10-16 as not gating C5. Reopened as a product decision and accepted 2026-11-03 in decision 0011: n8n returns as a client-owned automation layer, one isolated instance per client, installed from the official image, never resold or white-labelled. Counsel's written confirmation of the contract language remains open as BIZ-LICENSE-001. |
 | 2 | **Anthropic models and the AWS BAA** | Whether Bedrock's Anthropic access sits inside the AWS BAA for PHI or needs a separate agreement. Ask AWS in writing before the first medical proposal. If the answer is no, the medical lineup becomes Nova plus DeepSeek |
 | 3 | **Legal citations need counsel** | The HIPAA, SEC 17a-4, FERPA, and CMMC references came from secondary sources because the primary sites block automated reads. Do not put them in a client document unread by a lawyer |
 | 4 | **Compliant Cloud pricing is soft** | 22 percent year-one margin at 35,000. Go to 45,000, or narrow to one compliance framework for the first client |
