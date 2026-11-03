@@ -34,9 +34,9 @@ tests.
 
 ## 2. Documents
 
-- [ ] Follow `docs/runbooks/company-corpus-onboarding.md`. Put the company documents in one folder per
-      access group, build or ingest them as a separate corpus, and verify before switching the served
-      collection. Nothing else should be mixed into the synthetic folders.
+- [ ] Follow `docs/runbooks/company-documents-intake.md` for transport, layout and provenance, then
+      `docs/runbooks/company-corpus-onboarding.md` to build and verify the corpus. Nothing else should be mixed
+      into the synthetic folders.
 - [ ] Choose a collection name for the company corpus and render the manifest against it. Do not reuse the
       synthetic collection name for real documents.
 - [ ] Run the import and record the document and chunk counts.
@@ -49,8 +49,8 @@ tests.
 
 - [ ] Confirm the SES identity and the connector recipient allowlist in `rendered/host-services.env`.
 - [ ] Decide the SES path: stay in the sandbox and verify each recipient address, or request production access
-      for the sending domain. On 2026-11-03 the account was in the sandbox: 200 messages per 24 hours, one per
-      second, one verified identity.
+      for the sending domain. The request text and steps are in `docs/runbooks/ses-production-access.md`. On
+      2026-11-03 the account was in the sandbox: 200 messages per 24 hours, one per second, one verified identity.
 - [ ] Send a test message from an approved job to the approved recipient and confirm delivery.
 - [ ] Confirm a recipient outside the allowlist is refused, and that the refusal is in the chain. Verified
       2026-11-03 after the gateway fix: the chain records the refused recipient. See
