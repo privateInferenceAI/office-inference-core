@@ -108,8 +108,6 @@ delete it only on purpose.
 
 ## Known gaps at apply time
 
-- oauth2-proxy and Caddy images are version-tagged, not digest-pinned yet. Pin the digests in the edge compose
-  file and record them before the customer path is called done.
 - The product box still uses the development instance role (`oi-core-dev-instance`). Replacing it with a
   scoped role is recommended before the first client, tracked in decision 0012.
 - The session cookie and the edge secret rotate by re-running provisioning and recreating the edge containers.
