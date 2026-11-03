@@ -3,11 +3,10 @@
 This is the guide for the first hour with the product deployment. It is written for the person who will use the
 system, not for the operator. Operator checks live in `docs/runbooks/product-verification.md`.
 
-**Today the deployment has no customer login.** Until C7 is deployed on it, the only way in is the operator
-tunnel: `ssh -L 8080:127.0.0.1:8080 ...` then open `http://127.0.0.1:8080`. That is an admin-only shortcut, not
-the product. A customer signs in at a real URL with a real account after Phase D of the verification runbook.
-When something in this guide says "customer path" and the deployment has no login yet, you are using the
-operator path on the customer's behalf, and that should be written down as a temporary gap.
+**The customer sign-in is live: https://app.officeinference.com.** Sign in with your account in the browser;
+the app gains a verified session from the edge and never asks for a token. The operator tunnel and minted
+sessions still exist for support and are admin-only: do not use them for customer work or hand them to a
+customer. Everything in this guide is written for the customer path.
 
 ## What you are looking at
 
@@ -18,17 +17,19 @@ The application has four working areas:
 - **Review** is where a person approves or denies an action before it happens.
 - **Activity** is the record of what happened: who asked, what ran, what was approved, what was sent.
 
-The n8n automation layer runs workflows that start governed jobs. It has its own login and is reached through
-the tunnel until C7 puts it behind the customer edge.
+The n8n automation layer runs workflows that start governed jobs. Its own login stays admin-only behind the
+tunnel; customers do not sign in to n8n.
 
 ## 1. Get in
 
-Customer path after C7: open the deployment URL, sign in with your account.
+Open `https://app.officeinference.com` and sign in with your account. The first sign-in changes the temporary
+password.
 
-Today, admin only: open the tunnel and the app at `http://127.0.0.1:8080`. Sign-in is a minted session. Note
-the time and what you did, because this step is a known gap.
+What to check: the page loads, the deployment id is visible, and you can reach Ask, Do, Review and Activity.
+There is no token prompt; if you see one, that is a defect, not a normal step.
 
-What to check: the page loads, your identity is visible, and you can reach Ask, Do, Review and Activity.
+Admin only: the operator tunnel (`ssh -L 8080:127.0.0.1:8080 ...`), minted sessions and the n8n login are for
+support, not customer work.
 
 ## 2. Ask a question and read the citation
 
