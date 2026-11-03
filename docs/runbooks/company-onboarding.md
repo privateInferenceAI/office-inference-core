@@ -48,6 +48,9 @@ tests.
 ## 3. Email
 
 - [ ] Confirm the SES identity and the connector recipient allowlist in `rendered/host-services.env`.
+- [ ] Decide the SES path: stay in the sandbox and verify each recipient address, or request production access
+      for the sending domain. On 2026-11-03 the account was in the sandbox: 200 messages per 24 hours, one per
+      second, one verified identity.
 - [ ] Send a test message from an approved job to the approved recipient and confirm delivery.
 - [ ] Confirm a recipient outside the allowlist is refused, and that the refusal is in the chain.
 - [ ] Decide who may approve an email send. Approval is a person, and the record names them.
@@ -65,8 +68,8 @@ tests.
 
 ## 5. Support and incident path
 
-- [ ] Fill in the deployment section of `docs/runbooks/incident-response.md`: who is called, how, and what
-      evidence is collected.
+- [ ] Fill in the deployment section of `docs/runbooks/incident-response.md` and the contact and hours table
+      in `docs/runbooks/pilot-support.md`: who is called, how, and what evidence is collected.
 - [ ] Confirm the audit export and chain verification commands are known and have been run once.
 - [ ] Decide the support cadence and response expectation for the pilot. A one-person business can be honest
       about this in writing.
@@ -76,7 +79,9 @@ tests.
 
 ## 6. Acceptance through the customer path
 
-- [ ] Run Phase V of the product verification runbook using only the browser and the customer URL.
+- [ ] Run Phase V of the product verification runbook using only the browser and the customer URL. The
+      customer UI path (login, Do, Review, Activity) has been exercised once; the owner repeats it for their
+      own accounts.
 - [ ] Run Phase B twice, with the company corpus and the company accounts. Record the baseline.
 - [ ] Run the restore drill once more after the corpus is final.
 - [ ] Save the evidence off the box before it is stopped, upgraded or resized.
