@@ -1,0 +1,15 @@
+Workspace host smoke test, 2026-11-03, product deployment oi-core-product-20261103.
+First attempt failed: /artifacts returned ArtifactStoreError: artifact upload failed: ModuleNotFoundError.
+Cause: the containerized workspace service image (services/workspace/service.Dockerfile) lacked boto3 for the
+S3 artifact store; the October host-process run had it from the system interpreter.
+Fix: RUN pip install --no-cache-dir boto3 in the service image, commit a318867, image rebuilt on the workspace host.
+Re-run:
+  write note.txt -> bytes 23, sha256 33f14f73c1e2...
+  run argv cat note.txt -> returncode 0, stdout "product workspace smoke"
+  artifacts -> {"store":"s3","key":"artifacts/smoke-1793727372/33f14f...","bytes":23}
+  artifact fetch by sha -> content base64 "cHJvZHVjdCB3b3Jrc3BhY2Ugc21va2U=", 23 bytes
+  cleanup -> {"cleaned":true}
+S3 verification: object list shows artifacts/smoke-1793727372/33f14f... (23 bytes); bucket versioning Enabled,
+default encryption AES256.
+This proves the containerized workspace service, the Docker sandbox on the workspace host, the artifact-only
+IAM role and the S3 bucket write and read path end to end, before the full agent job.
