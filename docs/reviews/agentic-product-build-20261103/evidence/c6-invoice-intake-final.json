@@ -1,0 +1,36 @@
+{
+  "job_id": "b1f4a05bebbb4265a4ce36edc44a0168",
+  "task": "invoice_intake",
+  "state": "succeeded",
+  "terminal": true,
+  "steps": [
+    [
+      "read_message",
+      "succeeded"
+    ],
+    [
+      "extract_fields",
+      "succeeded"
+    ],
+    [
+      "draft_action",
+      "succeeded"
+    ],
+    [
+      "approval",
+      "succeeded"
+    ],
+    [
+      "post_entry",
+      "succeeded"
+    ],
+    [
+      "close_out",
+      "succeeded"
+    ]
+  ],
+  "pending_action_digest": null,
+  "pending_action": null,
+  "result": null,
+  "artifacts": null
+}

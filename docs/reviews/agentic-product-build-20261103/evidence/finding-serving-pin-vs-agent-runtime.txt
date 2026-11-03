@@ -1,0 +1,21 @@
+Finding, 2026-11-03: the canonical serving pin and the release-branch agent runtime are incompatible.
+
+Symptom: every agent job failed with state failed, attempts 0, steps [], duration 5 ms.
+job_events seq 1:
+  {"detail": "the runtime raised TypeError: ToolBox.__init__() got an unexpected keyword argument 'strict_audit'",
+   "reason": "runtime_error"}
+
+Cause: the product deployment applied deploy/canonical/serving-canonical-v2/tool_loop.py (the C9 serving pin)
+over the release tree. That pin predates the agent runtime's ToolBox use and its constructor signature is
+  def __init__(self, services, permit, role: str, audit=None, search_limit: int = 8, ...)
+while the release tree's tool_loop.py is
+  def __init__(self, services, permit, role: str, audit=None, search_limit: int = 8, ... [strict_audit])
+The runtime calls ToolBox(..., strict_audit=True) for child helper spans.
+
+Fix in the deployment: restore services/api/tool_loop.py and services/retrieval/retriever.py from the release
+tarball for the product deployment, rebuild api and mcp-gateway, restart. The prepare script now skips the pin by
+default (APPLY_SERVING_PIN=1 restores the old behavior). The C9 demo deployment is unaffected: it does not run
+the agent runtime.
+
+Follow-up: before one deployment carries both the pin and the agentic packs, the pin must be forward-ported to
+carry the runtime's ToolBox API. Recorded as a product follow-up, not hidden in the deployment.

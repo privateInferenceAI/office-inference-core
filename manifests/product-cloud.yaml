@@ -1,0 +1,156 @@
+# Agentic product deployment, 2026-11-03.
+#
+# The full product deployment: document chat plus the agentic desk and cloud workspace packs.
+# Derived from the C9 demo manifest so the retrieval and serving behaviour is the same configuration
+# that was measured, with the two agentic packs enabled and the MCP tool table added.
+#
+manifest_version: 1
+client:
+  name: Northwind Office Services (agentic product demo)
+  deployment_id: oi-core-product-20261103
+profile: cloud
+packs:
+- core
+- document-chat
+- agentic-desk
+- workspace
+models:
+  front_desk:
+    local: ''
+    frontier: bedrock/amazon.nova-micro-v1:0
+  analyst:
+    local: ''
+    frontier: bedrock/converse/us.moonshotai.kimi-k3
+  reader:
+    local: ''
+    frontier: bedrock/amazon.nova-pro-v1:0
+  coder:
+    local: ''
+    frontier: bedrock/deepseek.v3.2
+lanes:
+  frontier:
+    enabled: true
+    provider: bedrock
+    account_owner: office_inference
+    data_classes_allowed:
+    - public
+    - internal
+    requires_approval: false
+    redaction: true
+content:
+  default: hash
+  classes:
+    public: full
+    internal: redacted
+access:
+  data_class: internal
+  roots:
+  - company
+  - executive
+  groups:
+    staff:
+      roots:
+      - company
+    exec:
+      roots:
+      - company
+      - executive
+  users:
+  - subject: adam.hale@northwind.example
+    name: Adam Hale
+    groups:
+    - exec
+  - subject: probe-exec@officeinference.com
+    name: Executive probe
+    groups:
+    - exec
+  - subject: probe-staff@officeinference.com
+    name: Staff probe
+    groups:
+    - staff
+  - subject: zoe.reyes@northwind.example
+    name: Zoe Reyes
+    groups:
+    - staff
+  denial: denied
+  egress:
+    frontier_classes:
+    - public
+    - internal
+    redaction: 'on'
+budgets:
+  period_days: 30
+  roles:
+    front_desk: 2
+    analyst: 200
+    reader: 10
+    coder: 5
+compliance:
+  profile: none
+  audit_retention_days: 90
+offsite:
+  provider: s3
+  account_owner: office_inference
+  bucket: oi-core-audit-dev
+  region: us-east-1
+  ship:
+  - anchors
+  - exports
+support:
+  response_window: business hours, 4 hours
+agentic:
+  tasks:
+  - id: draft
+    label: Draft a reply
+    description: Write a reply to a message, using your own documents as the source.
+    tier: front_desk
+    touches:
+    - documents
+    needs_approval: false
+  - id: compare
+    label: Compare two documents
+    description: Look for disagreements between documents and list them with their
+      sources.
+    tier: analyst
+    touches:
+    - documents
+    needs_approval: false
+  - id: summarise_across_documents
+    label: Summarise across documents
+    description: Read several documents and write one summary that cites each source
+      it used.
+    tier: reader
+    touches:
+    - documents
+    needs_approval: false
+  - id: extract_table
+    label: Pull the figures out
+    description: Find the numbers in a document and list them, with the page each
+      came from.
+    tier: analyst
+    touches:
+    - documents
+    needs_approval: false
+  - id: invoice_intake
+    label: Prepare a supplier invoice
+    description: Read an invoice, pull out the vendor and the amount, draft the entry
+      it would post, and stop for you to approve before anything is written.
+    tier: analyst
+    touches:
+    - documents
+    needs_approval: true
+mcp:
+  tools:
+  - name: send_email
+    path: /send
+    credential_file: /app/rendered/connector.token
+    allowed_roles:
+    - viewer
+    - analyst
+    - admin
+    data_classes:
+    - public
+    - internal
+    - confidential
+    - regulated
+    egress: true

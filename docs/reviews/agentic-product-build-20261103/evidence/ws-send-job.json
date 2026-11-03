@@ -1,0 +1,67 @@
+{
+  "job_id": "852b8060c7634f5cab065374abef2232",
+  "state": "succeeded",
+  "task": "workspace_brief",
+  "input": "Work in the workspace: write note.txt containing 'send path check', run a Python calculation of 19*23, fetch https://example.com and save the page title to title.txt, look up the mileage rate in the company documents with a citation, and write the result to brief.md. Then send exactly one email to anthony@officeinference.com with the brief and finish the job.",
+  "attempts": 8,
+  "steps": [
+    {
+      "step_id": "21deba3afdb94819b5c6c06a7d4e695d",
+      "attempt": 1,
+      "name": "turn-1",
+      "state": "succeeded"
+    },
+    {
+      "step_id": "42238e53d76f44df88e145eeb9d0ad59",
+      "attempt": 2,
+      "name": "turn-2",
+      "state": "succeeded"
+    },
+    {
+      "step_id": "c7be398713944179bcb1c07badfe01cf",
+      "attempt": 3,
+      "name": "turn-3",
+      "state": "succeeded"
+    },
+    {
+      "step_id": "3b71f6398f4447a297a236955494b2d5",
+      "attempt": 4,
+      "name": "turn-4",
+      "state": "succeeded"
+    },
+    {
+      "step_id": "d372d31678fd495e8160ae177073471e",
+      "attempt": 5,
+      "name": "approval-4",
+      "state": "succeeded"
+    },
+    {
+      "step_id": "189479087e3e49409ec2e193bd89fe32",
+      "attempt": 6,
+      "name": "act-4",
+      "state": "succeeded"
+    },
+    {
+      "step_id": "ea303f95c8f24d3f86fbf7df9786a337",
+      "attempt": 7,
+      "name": "turn-5",
+      "state": "succeeded"
+    },
+    {
+      "step_id": "3af4888078e9478f84a2a6e4f104862a",
+      "attempt": 8,
+      "name": "finish",
+      "state": "succeeded"
+    }
+  ],
+  "terminal": true,
+  "time_budget_s": 600,
+  "attempt_budget": 14,
+  "submitted_by": "probe-staff@officeinference.com",
+  "role": "viewer",
+  "data_class": "internal",
+  "started_at": "2026-11-03T18:13:52.849236+00:00",
+  "finished_at": "2026-11-03T18:14:09.581351+00:00",
+  "duration_ms": 16732,
+  "events_through": 20
+}

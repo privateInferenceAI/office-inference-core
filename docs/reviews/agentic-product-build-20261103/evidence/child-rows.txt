@@ -1,0 +1,8 @@
+ id  | event_type | outcome |       tool       |  step  |  span   | role  
+-----+------------+---------+------------------+--------+---------+-------
+ 215 | model_call | ok      |                  | turn-1 | child-1 | child
+ 216 | tool_call  | ok      | search_documents | turn-1 | child-1 | child
+ 217 | tool_call  | ok      | search_documents | turn-1 | child-1 | child
+ 218 | model_call | ok      |                  | turn-1 | child-1 | child
+(4 rows)
+
