@@ -571,6 +571,48 @@ def _find_job(job_id: str, session):
     return job
 
 
+def _session_roots(session) -> set[str]:
+    """The document roots a session holds, from a real session or a test double.
+
+    The real `Session.permit()` returns a permit object; the HTTP tests use a small stand-in whose permit is
+    the root set itself. This is the one place that difference is absorbed, so the review rule has one shape.
+    """
+    roots = getattr(session, "roots", None)
+    if roots is not None:
+        return set(roots)
+    permit = session.permit()
+    if isinstance(permit, (set, frozenset, list, tuple)):
+        return set(permit)
+    if isinstance(permit, dict):
+        return set(permit.get("roots") or ())
+    return set(getattr(permit, "roots", ()))
+
+
+def _find_job_for_review(job_id: str, session):
+    """A job this session may read and, when it is at a gate, decide.
+
+    **The queue and the detail route have to agree about who may review.** `GET /approvals` scopes the queue
+    by document roots, on the stated rule that an approval exists for the reviewer rather than for the person
+    who asked. The detail and decision routes used a subject-only lookup, so a job started by an automation
+    principal appeared in Review and then answered 404 when somebody opened it. The invoice trigger and the
+    scheduled report both start work under `automation+...`, so no person could ever have approved them. That
+    was found on the live deployment while clearing the acceptance gates.
+
+    The rule here is the queue's rule, and it is deliberately narrow: the owner can always read their own
+    job, and a session may read a job that is waiting for a decision only when the job's roots are a subset
+    of the roots the session holds. It does not widen history, because a finished job is not waiting.
+    """
+    job = STATE["jobs"].get(job_id)
+    if job is None or job.deployment_id != DEPLOYMENT_ID:
+        return None
+    if job.subject == session.subject:
+        return job
+    if job.state == jobs_module.AWAITING_APPROVAL:
+        if set(job.roots or ()) <= _session_roots(session):
+            return job
+    return None
+
+
 def _session_for(request: Request, body: dict | None = None):
     """The session behind a request, or the refusal to return."""
     token = (body or {}).get("session") or request.headers.get("X-OI-Session", "") \
@@ -1596,7 +1638,7 @@ async def get_job(job_id: str, request: Request):
     session, refusal = _session_for(request)
     if refusal:
         return refusal
-    job = _find_job(job_id, session)
+    job = _find_job_for_review(job_id, session)
     if job is None:
         return JSONResponse({"error": "no such job", "kind": "not_found"}, status_code=404)
     return JSONResponse(_job_payload(job), status_code=200)
@@ -1727,7 +1769,7 @@ async def decide_job(job_id: str, request: Request):
     if refusal:
         _record_refused_approval(request, body, refusal)
         return refusal
-    job = _find_job(job_id, session)
+    job = _find_job_for_review(job_id, session)
     if job is None:
         return JSONResponse({"error": "no such job", "kind": "not_found"}, status_code=404)
 

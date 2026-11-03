@@ -178,3 +178,54 @@ def test_a_change_request_is_distinguishable_from_a_deny(route):
     assert response.status_code == 200
     assert response.json()["outcome_reason"] == "changes_requested_at_the_gate"
     assert calls[0]["payload"]["approval"]["decision"] == "request_changes"
+
+
+# --------------------------------------------------------------------------- automation-created gates
+# The n8n invoice trigger and the scheduled report start jobs under an automation principal, so a person
+# reviewing the queue is never the subject. The queue scopes by roots; the detail and decision routes must
+# use the same rule or Review shows an item that 404s when it is opened.
+
+
+def automation_at_gate(store, roots=("company",)):
+    job = jobs.new_job(deployment_id="unknown", subject="automation+invoice_trigger@unknown",
+                       actor_role="viewer", roots=set(roots), credential_sha256="a" * 64,
+                       task="test_task", input="Invoice INV-2025-002 from Acme Supply Co, 4250.00 USD")
+    store.put(job)
+    jobs.transition(job, jobs.RUNNING)
+    store.put(job)
+    jobs.request_approval(job, store, "Post USD 4,250.00 to accounts payable for Acme")
+    return job
+
+
+def test_a_reviewer_can_read_an_automation_job_in_their_roots(route):
+    _, client, store, _ = route
+    job = automation_at_gate(store)
+    response = client.get(f"/jobs/{job.job_id}", headers={"X-OI-Session": "good"})
+    assert response.status_code == 200, response.text
+    assert response.json()["job_id"] == job.job_id
+    assert response.json()["state"] == jobs.AWAITING_APPROVAL
+
+
+def test_a_reviewer_can_decide_an_automation_job_in_their_roots(route):
+    _, client, store, calls = route
+    job = automation_at_gate(store)
+    response = client.post(f"/jobs/{job.job_id}/approvals",
+                           json={"session": "good", "decision": "approve",
+                                 "action_digest": job.pending_action_digest})
+    assert response.status_code == 200, response.text
+    assert response.json()["state"] == jobs.RUNNING
+    assert calls and calls[0]["event"] == "approval"
+    assert calls[0]["actor"] == "dana"
+    assert calls[0]["role"] == "staff"
+
+
+def test_a_reviewer_without_the_roots_cannot_read_or_decide_an_automation_job(route):
+    _, client, store, _ = route
+    job = automation_at_gate(store, roots=("company", "executive"))
+    read = client.get(f"/jobs/{job.job_id}", headers={"X-OI-Session": "good"})
+    assert read.status_code == 404
+    decision = client.post(f"/jobs/{job.job_id}/approvals",
+                           json={"session": "good", "decision": "approve",
+                                 "action_digest": job.pending_action_digest})
+    assert decision.status_code == 404
+    assert store.get(job.job_id).state == jobs.AWAITING_APPROVAL
