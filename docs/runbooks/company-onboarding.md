@@ -52,7 +52,9 @@ tests.
       for the sending domain. On 2026-11-03 the account was in the sandbox: 200 messages per 24 hours, one per
       second, one verified identity.
 - [ ] Send a test message from an approved job to the approved recipient and confirm delivery.
-- [ ] Confirm a recipient outside the allowlist is refused, and that the refusal is in the chain.
+- [ ] Confirm a recipient outside the allowlist is refused, and that the refusal is in the chain. Verified
+      2026-11-03 after the gateway fix: the chain records the refused recipient. See
+      `docs/reviews/email-path-verification-20261103/`.
 - [ ] Decide who may approve an email send. Approval is a person, and the record names them.
 
 ## 4. Backups

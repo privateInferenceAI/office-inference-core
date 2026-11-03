@@ -1,0 +1,9 @@
+{
+  "first_login_forced_password_change": true,
+  "app_shell_after_change": true,
+  "token_gate_visible": false,
+  "token_present": true,
+  "executive_question_denied": true,
+  "body_excerpt": "rence | oi-core-product-20261103 | WORK | Ask | Do | 7 | Review | Activity | Y | this session | tap to sign out | Switch to dark | Deployment oi-core-product-20261103 | All systems ready | 7 tasks | OP | What is Northwind's Chief Executive Officer's base salary? | I could not find that in the available documents. | ! | Documents that answer this more directly exist and are not available to the 'viewer' role. The answer below is drawn from what you can see and may be incomplete. | 32 passages were read, and none was cited | · | 8.6 seconds | Just answer | Draft a reply | Compare two documents | Summarise across documents | Pull the figures out | Prepare a supplier invoice | Research and brief | Workspace brief | ↑ | Enter | to ask | Shift | Enter | for a new line",
+  "console_errors": 0
+}
