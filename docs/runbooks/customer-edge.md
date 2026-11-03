@@ -66,6 +66,9 @@ curl -sS -o /dev/null -w '%{http_code}\n' https://app.officeinference.com/
 The chain was validated on 2026-11-03 without the public DNS record. The record is
 `docs/reviews/customer-edge-staging-20261103/README.md`. In short: Caddy internal TLS on 8443, the real Cognito
 login, the provider session exchange through the edge headers, and a cited answer through the customer path.
+The real app was also exercised in a headless browser: it completed the Cognito login, gained the provider
+session automatically, hid the operator token gate, and answered a question through the UI. Record:
+`docs/reviews/customer-edge-browser-20261103/README.md`.
 
 The staging files are `deploy/product/edge/Caddyfile.staging` and
 `deploy/product/edge/docker-compose.edge-staging.yml`. They are test artifacts, not the public configuration.
