@@ -91,6 +91,15 @@ It does not get a LiteLLM virtual key. The gateway authenticates model calls wit
 API, so there is no long-lived model credential to hand a workflow. Model work happens inside governed jobs.
 An earlier draft passed a virtual key to n8n; that check was removed and the key revoked.
 
+## Verification and first use
+
+- `docs/runbooks/product-verification.md` is the process for checking the whole deployment: verification
+  walkthrough, full acceptance run twice, restore drill, customer access path, company onboarding. The n8n
+  acceptance below is one step inside it, not the whole check.
+- `docs/runbooks/product-walkthrough.md` is the first-use guide for the person using the system: Ask, Do,
+  Review, Activity, workspace artifacts and the automation layer, with operator-only steps labelled.
+- `oi-canonical-stack/scripts/verify/` holds the per-step probes.
+
 ## Evidence
 
 `docs/reviews/n8n-integration-20261103/` holds the acceptance record and raw outputs: the invoice webhook job
