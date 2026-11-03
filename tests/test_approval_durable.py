@@ -258,3 +258,28 @@ def test_the_decision_record_is_in_the_chain_and_chains_to_the_previous_row(stor
     assert prior is not None
     assert prev_hash == prior[0], "the approval row must be linked into the same chain"
     assert row_hash and row_hash != prev_hash
+
+
+def test_the_decision_row_names_the_person_not_the_job_principal(store, key):
+    """An automation-created gate is decided by a person; the chain row must name that person.
+
+    The queue scopes by roots, so the reviewer is routinely not the job subject. The payload always carried the
+    session identity, but the row actor was minted from the job's actor, which put the automation principal in
+    the Activity view as if it had made the decision.
+    """
+    job = jobs.new_job(deployment_id=DEPLOYMENT, subject="automation+invoice_trigger@test",
+                       actor_role="viewer", roots={"company"}, credential_sha256="a" * 64,
+                       task="test_task", input="invoice INV-2025-002", data_class="public")
+    store.put(job)
+    jobs.transition(job, jobs.RUNNING)
+    store.put(job)
+    jobs.request_approval(job, store, "post the invoice")
+    decide(store, key, job, "deny", reason="wrong vendor")
+    with store.conn.cursor() as cur:
+        cur.execute("""select actor, payload->'approval'->>'job_id'
+                         from audit_events
+                        where event_type = 'approval'
+                          and payload->'approval'->>'job_id' = %s""", (job.job_id,))
+        rows = cur.fetchall()
+    assert len(rows) == 1, rows
+    assert rows[0][0] == "dana", "the decision row must name the person, not the automation principal"

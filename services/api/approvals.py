@@ -228,7 +228,11 @@ def decide_and_record(*, store, job, decision: str, action_digest_quoted: str, s
         with unit:
             jobs_module.decide(job, unit, decision, action_digest_quoted)
             unit.record(
-                statement=unit.mint(job.subject, job.actor_role),
+                # **The row names the person who decided, not the job's principal.** The statement used to
+                # be minted for the job's actor. On an automation-created gate that wrote the automation identity
+                # as the decider, while the payload beside it named the person; the Activity view reads the row
+                # actor, so the record contradicted itself. The decision is the session's act.
+                statement=unit.mint(session.subject, session.role),
                 event_type="approval",
                 outcome="ok",
                 data_class=job.data_class,
