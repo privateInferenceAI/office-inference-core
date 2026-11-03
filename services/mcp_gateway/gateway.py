@@ -118,7 +118,17 @@ class MCPGateway:
         credential = self._credential_loader(tool)
         if credential is None:
             return 503, {"error": "credential_unavailable"}
-        result = self._transport(tool, arguments, credential)
+        try:
+            result = self._transport(tool, arguments, credential)
+        except GatewayError as exc:
+            # **A refusal at the connector is still a refusal by this system.** The connector is where the
+            # recipient allowlist and the send policy live, so a message it refuses never leaves the box.
+            # Before this, that refusal reached the caller as an error and left no access row: the chain could
+            # not show a message that was blocked at the last boundary. Record it before re-raising.
+            self._record("denied", session["role"], session["subject"],
+                         {"tool": name, "data_class": data_class,
+                          "refusal": "connector", "detail": str(exc)[:300]})
+            raise
         self._record("ok", session["role"], session["subject"],
                      {"tool": name, "data_class": data_class})
         return 200, {"ok": True, "tool": name, "result": result}
