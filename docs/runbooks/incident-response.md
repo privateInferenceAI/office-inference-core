@@ -3,6 +3,19 @@
 **Scope:** this deployment. A incident is any event that could expose client content, lose audit evidence, or
 take the service down. The on-call person is the deployment owner until a client names someone else.
 
+## Deployment contacts
+
+Fill these before daily business use. Until they are filled, the deployment owner is the only contact.
+
+| Role | Name | How to reach |
+|---|---|---|
+| Customer business owner |  |  |
+| Technical operator |  |  |
+| After-hours escalation |  |  |
+| Second responder |  |  |
+
+The support procedure, severity levels and routine checks are in `docs/runbooks/pilot-support.md`.
+
 ## Clocks
 
 - Client notification of a confirmed or suspected data exposure: within **72 hours** of the team becoming
