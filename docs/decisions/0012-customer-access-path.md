@@ -100,3 +100,38 @@ the provider subject with `source: provider`, and the whole Phase V walkthrough 
 Caddy is Apache-2.0 and stays in the client's deployment. Cognito is an AWS service in the account. Nothing in
 this path changes the n8n licence conditions recorded in decision 0011: one isolated client instance, no
 white-labelling, no resale, no payment-gated access.
+
+## Implementation status, 2026-11-03
+
+The pilot shape is built and has been validated in staging. The public path is waiting on the DNS record and the
+security-group rules.
+
+Created in account `878451098165`, region us-east-1:
+
+| Resource | Value |
+|---|---|
+| Cognito user pool | `us-east-1_F21GZAkHU`, name `oi-office-inference` |
+| App client | `oi-product-app`, generated secret, code flow, openid/email/profile, callback `https://app.officeinference.com/oauth2/callback` |
+| Hosted domain | `oi-office-inference.auth.us-east-1.amazoncognito.com` |
+| Owner account | `anthony@officeinference.com`, temporary password, first sign-in changes it |
+| Edge keys | in `/opt/oi-product/rendered/env`, mode 600, written by the provisioning script |
+
+Built and merged: API provider session exchange (PR #349), UI provider login (oic-ui PR #8), edge configuration
+and runbook (PRs #350, #351, #353), Cognito provisioning script (oi-canonical-stack PRs #52, #53).
+
+Staging validation on 2026-11-03 passed end to end against the real Cognito pool: login, oauth2-proxy auth 202,
+app 200, provider session with `source=provider`, and a cited answer through the customer path. Evidence:
+`docs/reviews/customer-edge-staging-20261103/README.md`. The staging account was deleted, the staging callback
+removed, the owner temporary password rotated, and the staging edge containers stopped.
+
+Remaining before the public path is live:
+
+1. An `A` record for `app.officeinference.com` at Namecheap pointing to `100.60.208.224`.
+2. Inbound 80 and 443 on `sg-05485a648e8baa4b8`.
+3. Start `deploy/product/edge/docker-compose.edge.yml`; Caddy obtains the real certificate.
+4. Sign in as the owner in a browser and walk Phase D and Phase V through the customer URL.
+5. Confirm the app image carries the merged UI before step 3.
+
+The staging validation also found and fixed three edge defects: the unauthenticated response is a redirect now,
+header stripping is a separate directive, and the Caddyfile mount is absolute. The API container needed the edge
+secret in its environment, which is now in the product overlay.
