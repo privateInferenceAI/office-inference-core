@@ -39,7 +39,7 @@ ASSURANCE_VALUES = (ASSURANCE_UNVERIFIED, ASSURANCE_PROVIDER_VERIFIED, ASSURANCE
                     ASSURANCE_RE_ATTESTED)
 
 #: What this build can actually establish. One value, and the shortness of this tuple is the point.
-REACHABLE_ASSURANCE = frozenset({ASSURANCE_UNVERIFIED})
+REACHABLE_ASSURANCE = frozenset({ASSURANCE_UNVERIFIED, ASSURANCE_PROVIDER_VERIFIED})
 
 #: How the system came to know the name it is about to write down. A role is not a person, and a bearer token
 #: is not a signature, so the basis is recorded beside the claim rather than assumed from it.
@@ -89,9 +89,14 @@ def identity_for(session) -> dict:
     that assumed.
     """
     claimed = getattr(session, "assurance", None)
+    source = getattr(session, "source", "development")
+    if not claimed and source == "provider":
+        # A session established through the edge's OIDC login is verified by the identity provider. The
+        # source is stored with the session, so a later reader does not have to trust this process's memory.
+        claimed = ASSURANCE_PROVIDER_VERIFIED
     return {
         "assurance": resolve_assurance(claimed),
-        "basis": BASIS_SESSION_TOKEN,
+        "basis": BASIS_PROVIDER if source == "provider" else BASIS_SESSION_TOKEN,
         # **The session id is not a person and it is not a secret.** It is the handle the record needs to
         # answer "which session made this decision" without claiming who was holding it.
         "session_id": getattr(session, "session_id", "") or "",
@@ -100,7 +105,8 @@ def identity_for(session) -> dict:
     }
 
 
-def part11_manifestation(decision: str, action_digest: str, signed_at: str) -> dict:
+def part11_manifestation(decision: str, action_digest: str, signed_at: str,
+                         identity: Optional[dict] = None) -> dict:
     """Section 11.50 wants three things, and this states which of them it can supply.
 
     `printed_name` is **null with the reason beside it** rather than absent. An absent field invites the
@@ -110,6 +116,17 @@ def part11_manifestation(decision: str, action_digest: str, signed_at: str) -> d
     This is also the field C7 flips. A re-attestation appends a new record rather than editing this one, so
     the manifestation is a statement about what was true when the approval was made and stays true.
     """
+    if identity and resolve_assurance(identity.get("assurance")) == ASSURANCE_PROVIDER_VERIFIED:
+        # The identity provider asserted this person, so the manifestation carries the asserted name and does
+        # not repeat the no-sign-in reason. The record still says what the name rests on, because a claimed
+        # subject from a provider is not identity proofing.
+        return {
+            "printed_name": identity.get("claimed_subject") or None,
+            "name_absent_reason": None,
+            "signed_at": signed_at,
+            "meaning": f"{decision} the action described by action_digest",
+            "name_basis": BASIS_PROVIDER,
+        }
     return {
         "printed_name": None,
         "name_absent_reason": UNVERIFIED_REASON,
@@ -153,7 +170,8 @@ def build_payload(session, job, decision: str, reason: str, note: str, action_di
             "task": job.task,
             "state_before": job.state,
             "identity": identity_for(session),
-            "part11_11_50_manifestation": part11_manifestation(decision, action_digest, signed_at),
+            "part11_11_50_manifestation": part11_manifestation(
+                decision, action_digest, signed_at, identity=identity_for(session)),
         },
         "stage": "approval",
         "job_id": job.job_id,
