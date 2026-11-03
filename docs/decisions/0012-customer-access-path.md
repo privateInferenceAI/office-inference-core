@@ -85,6 +85,20 @@ Acceptance is Phase D, steps D2 to D8: fresh browser login, logout, wrong passwo
 denied executive content for a lower role, no operator routes reachable from the internet, audit rows naming
 the provider subject with `source: provider`, and the whole Phase V walkthrough done without a tunnel.
 
+### Public validation on a temporary hostname
+
+On 2026-11-03 the whole customer path ran on the public internet with a real Let's Encrypt certificate, using
+the temporary hostname `100-60-208-224.sslip.io` and temporary security-group rules. The acceptance script
+passed all seven checks: login redirect, Cognito credentials, oauth2-proxy auth 202, app 200, provider session
+with `source=provider`, a cited answer, and sign-out ending the session.
+
+The temporary rules were revoked, the edge stopped, the test account deleted and the sslip callback removed.
+Port check afterwards: only 22 open. Record: `docs/reviews/customer-edge-public-20261103/README.md`.
+
+The delivery note that matters: Caddy chose the TLS-ALPN-01 challenge, so both 80 and 443 must be reachable
+before the first certificate. The remaining work is the Namecheap record for `app.officeinference.com`, the
+permanent rules, and the owner's browser walkthrough.
+
 ## Open decisions
 
 1. Hostname: `app.officeinference.com` suggested. Confirm or choose another subdomain.
