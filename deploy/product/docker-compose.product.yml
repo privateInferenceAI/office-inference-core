@@ -53,6 +53,14 @@ services:
   ingestion:
     profiles: ["ingestion-disabled"]
 
+  # **The gateway verifies the API's short-lived session assertion with a shared secret.** The base
+  # compose passes the API `OI_MCP_SESSION_SECRET` but gives the gateway nothing, so without this the
+  # gateway falls back to a database session lookup and refuses every tool call with
+  # `401 invalid_session`. Found on the product deployment on 2026-11-03.
+  mcp-gateway:
+    environment:
+      MCP_SESSION_SECRET: ${OI_MCP_SESSION_SECRET:-}
+
   # LiteLLM uses Prisma and refuses a database whose schema it did not create. Give the gateway its
   # own database so each migration system owns its schema.
   litellm:
