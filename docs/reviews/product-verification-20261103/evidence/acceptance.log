@@ -1,0 +1,40 @@
+health: 200 {'status': 'ok', 'deployment_id': 'oi-core-product-20261103', 'registry_declared': True, 'default_model_role': 'analyst'}
+tasks: 200 True ['draft', 'compare', 'summarise_across_documents', 'extract_table', 'invoice_intake', 'research_brief', 'workspace_brief']
+
+research_brief create: 200 4dfce4b7b19a4db3b0b3d841bed33b38 queued
+
+== c6-research-brief-gate ==
+id: 4dfce4b7b19a4db3b0b3d841bed33b38 state: succeeded terminal: True
+steps: [('turn-1', 'succeeded'), ('turn-2', 'succeeded'), ('turn-3', 'succeeded'), ('turn-4', 'succeeded'), ('finish', 'succeeded')]
+result: {"turns": 4, "answer": "I have all the information needed. I've verified the rate directly from the policy document and confirmed consistency with the employee handbook via the helper. Here is my brief.\n\n---\n\n**Brief: Mileage Reimbursement Rate \u2014 Travel and Expense Policy**\n\n**Rate: 0.67 USD per mile**\n\nThe Travel and Expense Policy (Policy NW-FI-006, v4.0, effective 1 January 2025) states in Section 6.3 (Ground transportation):\n\n> \"Personal vehicle mileage is reimbursed at **0.67 USD per mile**... Mileage covers fuel, wear and insurance. Do not claim mileage and fuel for the same trip.\" [2]\n\nThe policy identifies this as the 2025 standard rate used by the company. [2]\n\n**Consistency check:** The Employee Handbook (Section 8.5.1) states the identical rate \u2014 0.67 U
+
+workspace_brief create: 200 22589b25910c4b719be0ccc66c48cba0 queued
+
+== ws-workspace-brief-gate ==
+id: 22589b25910c4b719be0ccc66c48cba0 state: awaiting_approval terminal: False
+steps: [('turn-1', 'succeeded'), ('turn-2', 'succeeded'), ('turn-3', 'succeeded'), ('turn-4', 'succeeded'), ('approval-4', 'running')]
+pending: {"body": "{\"to\": \"anthony@officeinference.com\", \"subject\": \"Task Brief: workspace checks, example.com title, and mileage rate\", \"body\": \"Hi Anthony,\\n\\nHere is the brief from the sandbox task (also saved as brief.md in the workspace):\\n\\nWorkspace checks\\n- note.txt written and read back: contents verified as \\\"product workspace live\\\".\\n- Python calculation: 19 * 23 = 437.\\n\\nFetched page\\n- https://example.com fetched successfully (HTTP 200); page title is \\\"Example D
+approve: 200 state: succeeded terminal: True
+
+== ws-workspace-brief-final ==
+id: 22589b25910c4b719be0ccc66c48cba0 state: succeeded terminal: True
+steps: [('turn-1', 'succeeded'), ('turn-2', 'succeeded'), ('turn-3', 'succeeded'), ('turn-4', 'succeeded'), ('approval-4', 'succeeded'), ('act-4', 'succeeded'), ('turn-5', 'succeeded'), ('finish', 'succeeded')]
+result: {"turns": 1, "answer": "All tasks completed successfully. Here's the summary:\n\n**Brief**\n\n- **note.txt**: Written with \"product workspace live\" and read back to confirm the contents match exactly.\n- **Python calculation**: 19 \u00d7 23 = **437**.\n- **Fetched page**: https://example.com returned HTTP 200; its title, **\"Example Domain\"**, was saved to `example_title.txt`.\n- **Mileage rate**: Personal vehicle mileage is reimbursed at **0.67 USD per mile**. The travel and expense policy says this is the 2025 standard rate, covers fuel, wear and insurance, and prohibits claiming mileage and fuel for the same trip [4]. The employee handbook confirms the same rate for approved business travel [5].\n- **brief.md**: Written to the workspace with all of the above.\n- **Email**: The brief 
+
+artifacts: 200 {"job_id": "22589b25910c4b719be0ccc66c48cba0", "artifacts": [{"key": "artifacts/22589b25910c4b719be0ccc66c48cba0/ba922cf2b0597bae6db72b86dca1ca1c41f9520c3463bfa88315d95f7ec054b9", "path": "brief.md", "bytes": 673, "store": "s3", "sha256": "ba922cf2b0597bae6db72b86dca1ca1c41f9520c3463bfa88315d95f7ec054b9"}, {"key": "artifacts/22589b25910c4b719be0ccc66c48cba0/162b81548a8db0ab220f7137405fb003019c266883d4181869662ad7eafdbc4d", "path": "example_title.txt", "bytes": 14, "store": "s3", "sha256": "162b81548a8db0ab220f7137405fb003019c266883d4181869662ad7eafdbc4d"}, {"key": "artifacts/22589b25910c4b719b
+artifact download: ba922cf2b0597bae6db72b86dca1ca1c41f9520c3463bfa88315d95f7ec054b9 bytes: 673
+
+boundary staff: 200 denied: True disclosure: Documents that answer this more directly exist and are not available to the 'viewer' role. The answer below is drawn fro
+
+== c6-invoice-intake-gate ==
+id: 8aa10c3afa5449d98d4a93e5cb6f2616 state: awaiting_approval terminal: False
+steps: [('read_message', 'succeeded'), ('extract_fields', 'succeeded'), ('draft_action', 'succeeded'), ('approval', 'running')]
+pending: {"body": "{\"account\": \"accounts_payable\", \"amount_minor\": 425000, \"currency\": \"USD\", \"due\": \"\", \"reference\": \"INV-2025-002\", \"vendor\": \"Acme\"}", "kind": "ledger.post", "reason": "an entry that moves money is posted by a person, not by the thing that read the invoice", "target": "Acme", "subject": "invoice INV-2025-002", "summary": "Post USD 4,250.00 to accounts payable for Acme", "consequence": "the entry is written to the ledger and the vendor is notified on the next run"}
+approve: 200 state: succeeded terminal: True
+
+== c6-invoice-intake-final ==
+id: 8aa10c3afa5449d98d4a93e5cb6f2616 state: succeeded terminal: True
+steps: [('read_message', 'succeeded'), ('extract_fields', 'succeeded'), ('draft_action', 'succeeded'), ('approval', 'succeeded'), ('post_entry', 'succeeded'), ('close_out', 'succeeded')]
+result: {"steps": ["read_message", "extract_fields", "draft_action", "post_entry"], "posted": {"due": "", "posted": true, "vendor": "Acme", "account": "accounts_payable", "currency": "USD", "reference": "INV-2025-002", "amount_minor": 425000}, "vendor": "Acme", "summary": "posted INV-2025-002", "amount_minor": 425000}
+
+written: /tmp/acceptance-out-R5

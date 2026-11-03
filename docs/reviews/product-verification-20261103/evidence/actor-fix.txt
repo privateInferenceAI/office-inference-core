@@ -1,0 +1,12 @@
+=== automation gate decided by a person: actor column ===
+gate: 7bb01f8499fe49d1846116cbb9802aa2
+reviewer GET: 200 state: awaiting_approval
+reviewer deny: 200 state: failed
+ id  | event_type |              actor              | decision |               job                
+-----+------------+---------------------------------+----------+----------------------------------
+ 826 | approval   | probe-staff@officeinference.com | deny     | 7bb01f8499fe49d1846116cbb9802aa2
+(1 row)
+
+=== clear remaining gates ===
+remaining gates: 0
+remaining gates: 0
